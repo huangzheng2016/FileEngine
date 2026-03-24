@@ -1,0 +1,191 @@
+nav:
+  files: Files
+  filesystems: Filesystems
+  tasks: Tasks
+  logs: Agent Logs
+  config: Config
+
+common:
+  save: Save
+  cancel: Cancel
+  delete: Delete
+  edit: Edit
+  confirm: Confirm
+  search: Search
+  actions: Actions
+  success: Success
+  error: Error
+  loading: Loading
+  name: Name
+  path: Path
+  type: Type
+  size: Size
+  status: Status
+  description: Description
+  yes: "Yes"
+  no: "No"
+  deleted: Deleted
+  saved: Saved
+  created: Created
+
+files:
+  title: File Browser
+  selectFs: Select Filesystem
+  noFs: No filesystems yet, please add one first
+  addFsNow: Add Now
+  noSession: No scan sessions for this filesystem, create one in Tasks first
+  categoryManagement: Categories
+  noCategories: No categories yet
+  categoryFilter: Category
+  categorized: Categorized
+  uncategorized: Uncategorized
+  directoryTree: Directory Tree
+  session: Session
+  searchPlaceholder: Search files...
+  typeFilter: Type
+  taggedFilter: Tagged
+  file: File
+  directory: Directory
+  tagged: Tagged
+  untagged: Untagged
+  fileName: Name
+  fileType: Type
+  fileSize: Size
+  fileDescription: Description
+  taggedStatus: Tagged
+  plannedPath: Planned Path
+  detail: File Detail
+  saveChanges: Save Changes
+  originalPath: Path
+  modTime: Modified
+  permissions: Permissions
+  depth: Depth
+  descriptionPlaceholder: Enter description...
+  newPathPlaceholder: New path
+  versionPlaceholder: Version
+  preview: Preview
+  previewTitle: File Preview
+  previewNotSupported: Preview not supported for this file type
+  previewTooLarge: File too large for preview (max 1MB)
+  previewLoading: Loading...
+
+categories:
+  title: Category Management
+  addCategory: Add Category
+  editCategory: Edit Category
+  structure: Structure
+  pathPlaceholder: "/organized/software"
+  structurePlaceholder: "e.g., By vendor/product name"
+  descriptionPlaceholder: What files should go here
+  deleteConfirm: Delete this category?
+
+filesystems:
+  title: Filesystem Management
+  addFs: Add Filesystem
+  editFs: Edit Filesystem
+  protocol: Protocol
+  basePath: Base Path
+  host: Host
+  port: Port
+  username: Username
+  password: Password
+  keyPath: Key Path
+  keepPassword: Leave empty to keep current
+  deleteConfirm: Delete this filesystem?
+  testConn: Test Connection
+  connOk: Connection OK
+  connFail: "Connection failed: {error}"
+
+tasks:
+  title: Scan Sessions
+  newScan: New Scan
+  filesystem: Filesystem
+  selectFs: Select a filesystem
+  selectFsRequired: Please select a filesystem
+  scanPath: Scan Subdirectory
+  scanPathHint: Leave empty to scan entire filesystem
+  rootPath: Root Path
+  protocol: Protocol
+  progress: Progress
+  totalFiles: Files
+  taggedFiles: Tagged
+  plannedOps: Planned
+  executedOps: Executed
+  tag: Tag
+  stopTag: Stop Tag
+  plans: Plans
+  execute: Execute
+  stop: Stop
+  taggingStarted: Tagging started
+  executionStarted: Execution started
+  stopping: Stopping...
+  executeConfirm: "Execute {count} planned operations?"
+  deleteConfirm: Delete this session and all its data?
+  scanStarted: Scan started
+  rescan: Rescan
+  rescanConfirm: Rescan this session? Existing file data will be cleared
+  rescanStarted: Rescan started
+  rootPathRequired: Root path is required
+  executionPlans: Execution Plans
+  planName: Name
+  planOp: Op
+  planFrom: From
+  planTo: To
+  move: Move
+  copy: Copy
+
+config:
+  title: Configuration
+  saveConfig: Save Configuration
+  configSaved: Configuration saved
+  saveFailed: Save failed
+  tabs:
+    model: Model
+    database: Database
+    agent: Agent
+    prompt: Prompt
+  model:
+    provider: Provider
+    apiKey: API Key
+    modelName: Model
+    baseUrl: Base URL
+    temperature: Temperature
+    maxTokens: Max Tokens
+    testModel: Test Model
+    testOk: Model connection OK
+    testFail: "Model test failed: {error}"
+  database:
+    driver: Driver
+    dsn: DSN
+  agent:
+    batchSize: Batch Size
+    concurrency: Concurrency
+    maxFileReadSize: Max File Read Size
+    maxRetries: Max Retries
+  prompt:
+    customLabel: Custom
+    defaultLabel: Default
+    resetDefault: Reset to Default
+    placeholder: Enter Agent system prompt...
+    savePrompt: Save Prompt
+    promptSaved: Prompt saved
+
+logs:
+  title: Agent Logs
+  session: Session
+  roleFilter: Role
+  live: Live
+  history: History
+  totalTokens: "Total tokens: {count}"
+  system: System
+  user: User
+  assistant: Assistant
+  tool: Tool
+  batch: "Batch #{index}"
+  tokens: "{count} tokens"
+  input: Input
+  output: Output
+
+language:
+  zh: 中文
+  en: English
