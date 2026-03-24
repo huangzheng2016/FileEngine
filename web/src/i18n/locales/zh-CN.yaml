@@ -1,0 +1,192 @@
+nav:
+  files: 文件浏览
+  filesystems: 文件系统
+  tasks: 任务监控
+  logs: Agent 日志
+  config: 系统配置
+
+common:
+  save: 保存
+  cancel: 取消
+  delete: 删除
+  edit: 编辑
+  confirm: 确认
+  search: 搜索
+  actions: 操作
+  success: 成功
+  error: 错误
+  loading: 加载中
+  name: 名称
+  path: 路径
+  type: 类型
+  size: 大小
+  status: 状态
+  description: 描述
+  yes: 是
+  no: 否
+  deleted: 已删除
+  saved: 已保存
+  created: 已创建
+
+files:
+  title: 文件浏览器
+  selectFs: 选择文件系统
+  noFs: 还没有文件系统，请先添加一个
+  addFsNow: 去添加
+  noSession: 该文件系统还没有扫描会话，请先在任务监控中创建扫描
+  categoryManagement: 分类管理
+  noCategories: 暂无分类
+  categoryFilter: 分类筛选
+  categorized: 已分类
+  uncategorized: 未分类
+  directoryTree: 目录树
+  session: 会话
+  searchPlaceholder: 搜索文件...
+  typeFilter: 类型筛选
+  taggedFilter: 标记状态
+  file: 文件
+  directory: 文件夹
+  tagged: 已标记
+  untagged: 未标记
+  fileName: 文件名
+  fileType: 类型
+  fileSize: 大小
+  fileDescription: AI 描述
+  taggedStatus: 标记
+  plannedPath: 规划路径
+  detail: 文件详情
+  saveChanges: 保存修改
+  originalPath: 原始路径
+  modTime: 修改时间
+  permissions: 权限
+  depth: 层级
+  descriptionPlaceholder: 输入描述...
+  newPathPlaceholder: 新路径
+  versionPlaceholder: 版本号
+  preview: 预览
+  previewTitle: 文件预览
+  previewNotSupported: 该文件类型不支持预览
+  previewTooLarge: 文件过大，不支持预览（最大 1MB）
+  previewLoading: 加载中...
+
+categories:
+  title: 分类管理
+  addCategory: 添加分类
+  editCategory: 编辑分类
+  structure: 组织结构
+  pathPlaceholder: "/organized/software"
+  structurePlaceholder: "例如: 按厂商/产品名称组织"
+  descriptionPlaceholder: 该目录应存放什么类型的文件
+  deleteConfirm: 确定删除该分类？
+
+filesystems:
+  title: 文件系统管理
+  addFs: 添加文件系统
+  editFs: 编辑文件系统
+  protocol: 协议
+  basePath: 基础路径
+  host: 主机
+  port: 端口
+  username: 用户名
+  password: 密码
+  keyPath: 密钥路径
+  keepPassword: 留空保持原密码
+  deleteConfirm: 确定删除该文件系统？
+  testConn: 测试连接
+  connOk: 连接成功
+  connFail: "连接失败: {error}"
+
+tasks:
+  title: 扫描会话
+  newScan: 新建扫描
+  filesystem: 文件系统
+  selectFs: 选择一个文件系统
+  selectFsRequired: 请选择文件系统
+  scanPath: 扫描子目录
+  scanPathHint: 留空扫描整个文件系统
+  rootPath: 扫描根路径
+  protocol: 协议
+  progress: 进度
+  totalFiles: 文件总数
+  taggedFiles: 已标记
+  plannedOps: 已规划
+  executedOps: 已执行
+  tag: 打标
+  stopTag: 停止打标
+  plans: 查看计划
+  execute: 执行
+  stop: 停止
+  taggingStarted: 打标已启动
+  executionStarted: 执行已启动
+  stopping: 正在停止...
+  executeConfirm: "确定执行 {count} 个计划操作？"
+  deleteConfirm: 删除该会话及所有数据？
+  scanStarted: 扫描已启动
+  rescan: 重新扫描
+  rescanConfirm: 确定重新扫描？这将清除现有文件数据
+  rescanStarted: 重新扫描已启动
+  rootPathRequired: 请填写扫描根路径
+  executionPlans: 执行计划
+  planName: 名称
+  planOp: 操作
+  planFrom: 来源路径
+  planTo: 目标路径
+  move: 移动
+  copy: 复制
+
+config:
+  title: 系统配置
+  saveConfig: 保存配置
+  configSaved: 配置已保存
+  saveFailed: 保存失败
+  tabs:
+    model: 模型配置
+    database: 数据库
+    agent: Agent 设置
+    prompt: 提示词
+  model:
+    provider: 模型提供商
+    apiKey: API 密钥
+    modelName: 模型名称
+    baseUrl: API 地址
+    temperature: 温度
+    maxTokens: 最大 Token 数
+    testModel: 测试模型
+    testOk: 模型连接成功
+    testFail: "模型测试失败: {error}"
+  database:
+    driver: 数据库驱动
+    dsn: 连接字符串
+
+  agent:
+    batchSize: 批处理大小
+    concurrency: 并发数
+    maxFileReadSize: 最大文件读取大小
+    maxRetries: 最大重试次数
+  prompt:
+    customLabel: 自定义
+    defaultLabel: 默认
+    resetDefault: 恢复默认
+    placeholder: 在此输入 Agent 系统提示词...
+    savePrompt: 保存提示词
+    promptSaved: 提示词已保存
+
+logs:
+  title: Agent 日志
+  session: 会话
+  roleFilter: 角色筛选
+  live: 实时
+  history: 历史
+  totalTokens: "Token 总计: {count}"
+  system: 系统
+  user: 用户
+  assistant: 助手
+  tool: 工具
+  batch: "批次 #{index}"
+  tokens: "{count} tokens"
+  input: 输入
+  output: 输出
+
+language:
+  zh: 中文
+  en: English
