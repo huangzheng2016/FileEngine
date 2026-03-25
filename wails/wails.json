@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "FileEngine Desktop",
+  "outputfilename": "fileengine-desktop",
+  "frontend": {
+    "dir": "",
+    "install": "",
+    "build": "",
+    "dev": ""
+  },
+  "author": {
+    "name": "huangzheng2016",
+    "email": ""
+  },
+  "info": {
+    "productName": "FileEngine Desktop",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2025",
+    "comments": "AI-powered file organization engine"
+  }
+}

@@ -29,5 +29,9 @@ Thumbs.db
 *.test
 *.out
 
+# Wails build output
+wails/build/
+wails/bin/backend.bin
+
 # Claude Code
 .claude/
