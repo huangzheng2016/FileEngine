@@ -151,6 +151,14 @@ type UpdateCategoryOutput struct {
 	Path    string `json:"path"`
 }
 
+type DeleteCategoryInput struct {
+	Name string `json:"name" jsonschema_description:"Name of the category to delete"`
+}
+
+type DeleteCategoryOutput struct {
+	Success bool `json:"success"`
+}
+
 // ============ Tool Builder ============
 
 type ToolBuilder struct {
@@ -225,6 +233,12 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	}
 	allTools = append(allTools, updateCat)
 
+	deleteCat, err := utils.InferTool("delete_category", "删除一个分类。合并分类时先将文件迁移到目标分类再删除旧分类", tb.deleteCategory)
+	if err != nil {
+		return nil, fmt.Errorf("build delete_category: %w", err)
+	}
+	allTools = append(allTools, deleteCat)
+
 	if tb.session.AllowReadFile {
 		allTools = append(allTools, readFile)
 	}
@@ -265,6 +279,12 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 		return nil, err
 	}
 	allTools = append(allTools, updateCat)
+
+	deleteCat, err := utils.InferTool("delete_category", "删除一个分类。合并分类时先将文件迁移到目标分类再删除旧分类", tb.deleteCategory)
+	if err != nil {
+		return nil, err
+	}
+	allTools = append(allTools, deleteCat)
 
 	if tb.session.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
@@ -575,6 +595,33 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 	out := &UpdateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
 	tb.logger.LogToolCall("update_category", input, out)
+	return out, nil
+}
+
+func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
+	tb.logger.LogToolCall("delete_category", input, nil)
+
+	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	var cat *db.Category
+	for i := range cats {
+		if cats[i].Name == input.Name {
+			cat = &cats[i]
+			break
+		}
+	}
+	if cat == nil {
+		return nil, fmt.Errorf("category not found: %s", input.Name)
+	}
+
+	if err := tb.repo.DeleteCategory(cat.ID); err != nil {
+		return nil, fmt.Errorf("delete category: %w", err)
+	}
+
+	out := &DeleteCategoryOutput{Success: true}
+	tb.logger.LogToolCall("delete_category", input, out)
 	return out, nil
 }
 

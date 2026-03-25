@@ -221,13 +221,27 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 		sb.WriteString("\n")
 	}
 	sb.WriteString(fmt.Sprintf("\n用户指令: %s\n", userPrompt))
-	sb.WriteString("\n请使用工具执行用户的指令。可以修改描述(update_description)、设置目标路径(set_target)、查看分类(list_categories)、创建分类(create_category)。")
+	sb.WriteString("\n请使用工具执行用户的指令。")
 
 	a.logger.SetBatch(-1)
 	userMsg := sb.String()
 	a.logger.LogMessage("user", userMsg, 0, 0, 0)
 
-	systemPrompt := "你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。"
+	systemPrompt := `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
+
+可用操作：
+- update_description: 修改文件/目录描述
+- set_target: 设置整理目标路径
+- list_categories: 查看所有分类
+- list_category_files: 查看分类下已规划的文件
+- update_category: 修改分类（名称、路径、描述），路径变更会级联更新已规划文件
+- delete_category: 删除分类（合并分类时先用 update_category 或 set_target 迁移文件，再删除旧分类）
+- create_category: 创建新分类（如果可用）
+
+合并分类示例：将"旅行照片"和"家庭照片"合并为"照片"：
+1. list_category_files 查看旧分类下的文件
+2. update_category 将旧分类的文件路径改为新分类路径，或用 set_target 逐个迁移
+3. delete_category 删除旧分类`
 
 	messages := []*schema.Message{
 		{Role: schema.System, Content: systemPrompt},
