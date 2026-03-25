@@ -194,7 +194,10 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build plan_copy: %w", err)
 	}
 
-	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, planMove, planCopy}
+	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, planMove}
+
+	// plan_copy is hidden by default — only registered when explicitly needed
+	_ = planCopy
 
 	if tb.cfg.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "Create a new category folder when no existing category fits the files. Use sparingly — only when files truly don't match any existing category.", tb.createCategory)
