@@ -156,13 +156,13 @@ func (s *Server) instructAgent(c *gin.Context) {
 	cfg := config.Get()
 	a := agent.New(s.repo, fsCfg, cfg, sessionID, modelProvider, session)
 
-	response, err := a.RunInstruct(c.Request.Context(), files, req.Prompt)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	go func() {
+		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil {
+			log.Printf("instruct session %d failed: %v", sessionID, err)
+		}
+	}()
 
-	c.JSON(http.StatusOK, gin.H{"response": response})
+	c.JSON(http.StatusOK, gin.H{"message": "instruct started"})
 }
 
 func (s *Server) stopTagging(c *gin.Context) {

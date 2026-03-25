@@ -215,8 +215,8 @@
       <el-input v-model="instructPrompt" type="textarea" :rows="4" :placeholder="$t('files.instructPrompt')" />
       <template #footer>
         <el-button @click="instructDialogVisible = false">{{ $t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleInstruct" :loading="instructing">
-          {{ instructing ? $t('files.instructRunning') : $t('files.instruct') }}
+        <el-button type="primary" @click="handleInstruct">
+          {{ $t('files.instruct') }}
         </el-button>
       </template>
     </el-dialog>
@@ -351,7 +351,6 @@ async function saveEditFile() {
 const selectedFiles = ref<FileEntry[]>([])
 const instructDialogVisible = ref(false)
 const instructPrompt = ref('')
-const instructing = ref(false)
 
 function onSelectionChange(rows: FileEntry[]) {
   selectedFiles.value = rows
@@ -359,17 +358,14 @@ function onSelectionChange(rows: FileEntry[]) {
 
 async function handleInstruct() {
   if (!sessionId.value || selectedFiles.value.length === 0 || !instructPrompt.value.trim()) return
-  instructing.value = true
   try {
     await instructAgent(sessionId.value, selectedFiles.value.map(f => f.id), instructPrompt.value)
-    ElMessage.success(t('files.instructDone'))
+    ElMessage.success(t('files.instructStarted'))
     instructDialogVisible.value = false
     instructPrompt.value = ''
-    loadFiles()
+    setTimeout(loadFiles, 3000)
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Instruct failed')
-  } finally {
-    instructing.value = false
   }
 }
 
