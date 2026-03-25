@@ -176,6 +176,9 @@ config:
 logs:
   title: Agent 日志
   session: 会话
+  allBatches: 全部轮次
+  orderAsc: 正序
+  orderDesc: 倒序
   roleFilter: 角色筛选
   live: 实时
   history: 历史
