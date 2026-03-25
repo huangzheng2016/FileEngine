@@ -17,7 +17,7 @@
         </el-table-column>
         <el-table-column :label="$t('common.status')" width="140">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="$t('tasks.progress')" min-width="200">
@@ -104,14 +104,14 @@
 
     <!-- Session settings dialog -->
     <el-dialog v-model="settingsVisible" :title="$t('tasks.settings')" width="420px">
-      <el-form label-width="160px">
+      <el-form label-position="top">
         <el-form-item :label="$t('tasks.allowReadFile')">
           <el-switch v-model="sessionSettings.allow_read_file" />
-          <div style="font-size: 12px; color: #909399; margin-top: 4px">{{ $t('tasks.allowReadFileHint') }}</div>
+          <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.allowReadFileHint') }}</p>
         </el-form-item>
         <el-form-item :label="$t('tasks.allowAutoCategory')">
           <el-switch v-model="sessionSettings.allow_auto_category" />
-          <div style="font-size: 12px; color: #909399; margin-top: 4px">{{ $t('tasks.allowAutoCategoryHint') }}</div>
+          <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.allowAutoCategoryHint') }}</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -168,6 +168,11 @@ function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' 
     local: 'info', sftp: 'success', ftp: '', smb: 'warning', nfs: 'danger'
   }
   return map[protocol] || 'info'
+}
+
+function statusLabel(status: string): string {
+  if (status.startsWith('error')) return t('tasks.statusError')
+  return t('tasks.status_' + status) || status
 }
 
 function openNewScanDialog() {

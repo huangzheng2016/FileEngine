@@ -131,6 +131,13 @@ tasks:
   allowAutoCategory: 允许自动创建分类
   allowAutoCategoryHint: Agent 遇到无法归类的文件时可自动新建分类
   settingsSaved: 会话设置已保存
+  status_scanning: 扫描中
+  status_scanned: 已扫描
+  status_tagging: 打标中
+  status_tagged: 已标记
+  status_executing: 执行中
+  status_done: 已完成
+  statusError: 错误
   rootPathRequired: 请填写扫描根路径
   executionPlans: 执行计划
   planName: 名称
