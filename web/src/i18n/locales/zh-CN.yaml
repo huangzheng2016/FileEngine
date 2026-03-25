@@ -105,6 +105,7 @@ tasks:
   selectFsRequired: 请选择文件系统
   scanPath: 扫描子目录
   scanPathHint: 留空扫描整个文件系统
+  allDirectories: 全部目录
   rootPath: 扫描根路径
   protocol: 协议
   progress: 进度
