@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -85,6 +86,7 @@ func (s *Server) startTagging(c *gin.Context) {
 
 	go func() {
 		if err := a.RunTagging(context.Background()); err != nil {
+			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "tagging" {
 				session.Status = "error: " + err.Error()
@@ -190,6 +192,7 @@ func (s *Server) startExecute(c *gin.Context) {
 	go func() {
 		defer fs.Close()
 		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
+			log.Printf("execution session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "executing" {
 				session.Status = "error: " + err.Error()
