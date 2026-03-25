@@ -373,7 +373,7 @@ function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' 
 
 function formatSessionLabel(s: ScanSession): string {
   const date = new Date(s.created_at).toLocaleDateString()
-  const path = s.scan_path || '/'
+  const path = s.scan_path || t('tasks.allDirectories')
   return `${path} · ${s.total_files} ${t('files.file')} · ${date}`
 }
 

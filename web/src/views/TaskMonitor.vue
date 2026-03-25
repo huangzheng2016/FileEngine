@@ -9,7 +9,9 @@
       </template>
       <el-table :data="sessions" style="width: 100%">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="root_path" :label="$t('tasks.rootPath')" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="root_path" :label="$t('tasks.rootPath')" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.root_path === '.' ? $t('tasks.allDirectories') : row.root_path }}</template>
+        </el-table-column>
         <el-table-column prop="protocol" :label="$t('tasks.protocol')" width="100">
           <template #default="{ row }">
             <el-tag :type="protocolTagType(row.protocol)" size="small" effect="dark">{{ row.protocol.toUpperCase() }}</el-tag>

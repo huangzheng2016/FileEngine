@@ -105,6 +105,7 @@ tasks:
   selectFsRequired: Please select a filesystem
   scanPath: Scan Subdirectory
   scanPathHint: Leave empty to scan entire filesystem
+  allDirectories: All Directories
   rootPath: Root Path
   protocol: Protocol
   progress: Progress

@@ -83,8 +83,11 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { listSessions, listLogs, listBatches } from '../api'
 import type { ScanSession, AgentLog } from '../types'
+
+const { t } = useI18n()
 
 const sessions = ref<ScanSession[]>([])
 const sessionId = ref<number>(0)
@@ -234,7 +237,8 @@ function startPolling() {
 function formatSessionLabel(s: ScanSession): string {
   const date = new Date(s.created_at).toLocaleDateString()
   const status = s.status === 'tagging' ? ' [tagging]' : ''
-  return `${s.scan_path || '/'} · ${s.total_files} files · ${date}${status}`
+  const path = s.scan_path || t('tasks.allDirectories')
+  return `${path} · ${s.total_files} files · ${date}${status}`
 }
 
 function roleColor(role: string) {
