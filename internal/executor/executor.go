@@ -134,7 +134,13 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 		var opErr error
 		op := mode
 		if op == "" {
-			op = f.Operation
+			// Legacy: "move"/"copy" from old plan_move/plan_copy
+			// New: "planned" from set_target — defaults to copy
+			if f.Operation == "planned" {
+				op = "copy"
+			} else {
+				op = f.Operation
+			}
 		}
 		switch op {
 		case "move":

@@ -101,21 +101,12 @@ type CategoryItem struct {
 	Description string `json:"description"`
 }
 
-type PlanMoveInput struct {
+type SetTargetInput struct {
 	Path    string `json:"path" jsonschema_description:"Original path of the file/directory"`
 	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder"`
 }
 
-type PlanMoveOutput struct {
-	Success bool `json:"success"`
-}
-
-type PlanCopyInput struct {
-	Path    string `json:"path" jsonschema_description:"Original path of the file/directory"`
-	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder"`
-}
-
-type PlanCopyOutput struct {
+type SetTargetOutput struct {
 	Success bool `json:"success"`
 }
 
@@ -148,59 +139,51 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 		fs:           fs,
 		sessionID:    sessionID,
 		filesystemID: filesystemID,
-		logger:    logger,
-		cfg:       cfg,
+		logger:       logger,
+		cfg:          cfg,
 	}
 }
 
 func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "List files in a directory from the database. Supports filtering by parent_path, file_type, and tagged status.", tb.listFiles)
+	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持按父路径、类型、标记状态筛选", tb.listFiles)
 	if err != nil {
 		return nil, fmt.Errorf("build list_files: %w", err)
 	}
 
-	getFileInfo, err := utils.InferTool("get_file_info", "Get detailed metadata for a single file or directory.", tb.getFileInfo)
+	getFileInfo, err := utils.InferTool("get_file_info", "获取单个文件或目录的详细元数据", tb.getFileInfo)
 	if err != nil {
 		return nil, fmt.Errorf("build get_file_info: %w", err)
 	}
 
-	readFile, err := utils.InferTool("read_file", "Read file content from the remote filesystem. Limited to text files under the configured size limit.", tb.readFile)
+	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
 	if err != nil {
 		return nil, fmt.Errorf("build read_file: %w", err)
 	}
 
-	updateDesc, err := utils.InferTool("update_description", "Set AI-generated description for a file or directory.", tb.updateDescription)
+	updateDesc, err := utils.InferTool("update_description", "为文件或目录设置 AI 生成的描述", tb.updateDescription)
 	if err != nil {
 		return nil, fmt.Errorf("build update_description: %w", err)
 	}
 
-	markTagged, err := utils.InferTool("mark_tagged", "Mark a directory as fully processed. All children are also marked as tagged.", tb.markTagged)
+	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
 	if err != nil {
 		return nil, fmt.Errorf("build mark_tagged: %w", err)
 	}
 
-	listCats, err := utils.InferTool("list_categories", "List all user-defined category folders where files can be organized into.", tb.listCategories)
+	listCats, err := utils.InferTool("list_categories", "列出所有用户定义的分类目录", tb.listCategories)
 	if err != nil {
 		return nil, fmt.Errorf("build list_categories: %w", err)
 	}
 
-	planMove, err := utils.InferTool("plan_move", "Plan to move a file/directory to a new path under a category folder. Only modifies the database, not the actual filesystem.", tb.planMove)
+	setTarget, err := utils.InferTool("set_target", "为文件/目录设置整理目标路径（仅修改数据库，不操作实际文件）", tb.setTarget)
 	if err != nil {
-		return nil, fmt.Errorf("build plan_move: %w", err)
+		return nil, fmt.Errorf("build set_target: %w", err)
 	}
 
-	planCopy, err := utils.InferTool("plan_copy", "Plan to copy a file/directory to a new path under a category folder. Only modifies the database, not the actual filesystem.", tb.planCopy)
-	if err != nil {
-		return nil, fmt.Errorf("build plan_copy: %w", err)
-	}
-
-	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, planMove}
-
-	// plan_copy is hidden by default — only registered when explicitly needed
-	_ = planCopy
+	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, setTarget}
 
 	if tb.cfg.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "Create a new category folder when no existing category fits the files. Use sparingly — only when files truly don't match any existing category.", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用", tb.createCategory)
 		if err != nil {
 			return nil, fmt.Errorf("build create_category: %w", err)
 		}
@@ -353,7 +336,6 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 		return nil, err
 	}
 
-	// Also mark all children as tagged
 	if err := tb.repo.MarkChildrenTagged(tb.sessionID, input.Path); err != nil {
 		return nil, err
 	}
@@ -386,8 +368,10 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 	return out, nil
 }
 
-func (tb *ToolBuilder) planMove(ctx context.Context, input *PlanMoveInput) (*PlanMoveOutput, error) {
-	tb.logger.LogToolCall("plan_move", input, nil)
+// PLACEHOLDER_SETTARGET
+
+func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
+	tb.logger.LogToolCall("set_target", input, nil)
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
 	if err != nil {
@@ -395,32 +379,13 @@ func (tb *ToolBuilder) planMove(ctx context.Context, input *PlanMoveInput) (*Pla
 	}
 
 	f.NewPath = input.NewPath
-	f.Operation = "move"
+	f.Operation = "planned"
 	if err := tb.repo.UpdateFile(f); err != nil {
 		return nil, err
 	}
 
-	out := &PlanMoveOutput{Success: true}
-	tb.logger.LogToolCall("plan_move", input, out)
-	return out, nil
-}
-
-func (tb *ToolBuilder) planCopy(ctx context.Context, input *PlanCopyInput) (*PlanCopyOutput, error) {
-	tb.logger.LogToolCall("plan_copy", input, nil)
-
-	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
-	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
-	}
-
-	f.NewPath = input.NewPath
-	f.Operation = "copy"
-	if err := tb.repo.UpdateFile(f); err != nil {
-		return nil, err
-	}
-
-	out := &PlanCopyOutput{Success: true}
-	tb.logger.LogToolCall("plan_copy", input, out)
+	out := &SetTargetOutput{Success: true}
+	tb.logger.LogToolCall("set_target", input, out)
 	return out, nil
 }
 
@@ -447,7 +412,6 @@ func isTextContent(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	// Check for null bytes as a binary indicator
 	for i := 0; i < len(s) && i < 512; i++ {
 		if s[i] == 0 {
 			return false
