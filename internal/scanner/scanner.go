@@ -12,21 +12,24 @@ import (
 )
 
 type Scanner struct {
-	fs           remotefs.RemoteFS
-	repo         *db.Repository
-	excludePaths []string
+	fs         remotefs.RemoteFS
+	repo       *db.Repository
+	filterMode string
+	filterDirs []string
 }
 
-func New(fs remotefs.RemoteFS, repo *db.Repository, excludePaths []string) *Scanner {
-	// Normalize exclude paths: ensure they have clean trailing format
-	normalized := make([]string, 0, len(excludePaths))
-	for _, p := range excludePaths {
+func New(fs remotefs.RemoteFS, repo *db.Repository, filterMode string, filterDirs []string) *Scanner {
+	normalized := make([]string, 0, len(filterDirs))
+	for _, p := range filterDirs {
 		p = path.Clean(p)
 		if p != "" && p != "." {
 			normalized = append(normalized, p)
 		}
 	}
-	return &Scanner{fs: fs, repo: repo, excludePaths: normalized}
+	if filterMode == "" {
+		filterMode = "blacklist"
+	}
+	return &Scanner{fs: fs, repo: repo, filterMode: filterMode, filterDirs: normalized}
 }
 
 func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
@@ -79,7 +82,7 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 		}
 
 		// Skip excluded category directories and all their contents
-		if entry.IsDir && s.isExcluded(entryPath) {
+		if entry.IsDir && s.shouldSkip(entryPath) {
 			continue
 		}
 
@@ -142,13 +145,32 @@ func (s *Scanner) updateChildCounts(sessionID uint, files []db.FileEntry) {
 	}
 }
 
-// isExcluded checks if a path matches any excluded category path.
-func (s *Scanner) isExcluded(entryPath string) bool {
+// shouldSkip checks if a directory should be skipped based on filter mode.
+func (s *Scanner) shouldSkip(entryPath string) bool {
+	if len(s.filterDirs) == 0 {
+		return false
+	}
 	cleaned := path.Clean(entryPath)
-	for _, ep := range s.excludePaths {
-		if cleaned == ep || strings.HasPrefix(cleaned, ep+"/") {
-			return true
+	matched := false
+	for _, fp := range s.filterDirs {
+		if cleaned == fp || strings.HasPrefix(cleaned, fp+"/") {
+			matched = true
+			break
 		}
 	}
-	return false
+	switch s.filterMode {
+	case "whitelist":
+		if matched {
+			return false
+		}
+		// Keep ancestor directories so we can recurse into them
+		for _, fp := range s.filterDirs {
+			if strings.HasPrefix(fp, cleaned+"/") {
+				return false
+			}
+		}
+		return true
+	default: // blacklist
+		return matched
+	}
 }

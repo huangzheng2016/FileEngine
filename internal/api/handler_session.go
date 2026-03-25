@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"FileEngine/internal/config"
@@ -32,13 +33,25 @@ func scanRootPath(scanPath string) string {
 // startScan launches a background goroutine that connects to the filesystem and scans.
 // This is the single place where scan logic lives — used by both createSession and rescanSession.
 func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig) {
-	// Collect category paths to exclude if enabled
-	var excludePaths []string
-	if session.ExcludeCategoryDirs {
+	// Parse filter dirs from newline-separated string
+	filterMode := session.FilterMode
+	if filterMode == "" {
+		filterMode = "blacklist"
+	}
+	var filterDirs []string
+	for _, line := range strings.Split(session.FilterDirs, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			filterDirs = append(filterDirs, line)
+		}
+	}
+
+	// Append category paths to blacklist if enabled
+	if session.ExcludeCategoryDirs && filterMode == "blacklist" {
 		if cats, err := s.repo.ListCategories(session.FilesystemID); err == nil {
 			for _, c := range cats {
 				if c.Path != "" {
-					excludePaths = append(excludePaths, c.Path)
+					filterDirs = append(filterDirs, c.Path)
 				}
 			}
 		}
@@ -64,7 +77,7 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 			return
 		}
 		defer fs.Close()
-		sc := scanner.New(fs, s.repo, excludePaths)
+		sc := scanner.New(fs, s.repo, filterMode, filterDirs)
 		if err := sc.Scan(ctx, session); err != nil {
 			log.Printf("scan session %d failed: %v", session.ID, err)
 			session.Status = "error: " + err.Error()
@@ -87,6 +100,8 @@ type CreateSessionRequest struct {
 	ScanPath            string `json:"scan_path"`
 	ModelProviderID     uint   `json:"model_provider_id"`
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
+	FilterMode          string `json:"filter_mode"`
+	FilterDirs          string `json:"filter_dirs"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -102,6 +117,11 @@ func (s *Server) createSession(c *gin.Context) {
 		return
 	}
 
+	filterMode := req.FilterMode
+	if filterMode == "" {
+		filterMode = "blacklist"
+	}
+
 	session := &db.ScanSession{
 		FilesystemID:        filesystem.ID,
 		ScanPath:            req.ScanPath,
@@ -111,6 +131,8 @@ func (s *Server) createSession(c *gin.Context) {
 		AllowReadFile:       true,
 		AllowAutoCategory:   false,
 		ExcludeCategoryDirs: req.ExcludeCategoryDirs,
+		FilterMode:          filterMode,
+		FilterDirs:          req.FilterDirs,
 		ModelProviderID:     req.ModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
@@ -177,10 +199,12 @@ func (s *Server) deleteSession(c *gin.Context) {
 }
 
 type UpdateSessionRequest struct {
-	AllowReadFile       *bool `json:"allow_read_file"`
-	AllowAutoCategory   *bool `json:"allow_auto_category"`
-	ExcludeCategoryDirs *bool `json:"exclude_category_dirs"`
-	ModelProviderID     *uint `json:"model_provider_id"`
+	AllowReadFile       *bool   `json:"allow_read_file"`
+	AllowAutoCategory   *bool   `json:"allow_auto_category"`
+	ExcludeCategoryDirs *bool   `json:"exclude_category_dirs"`
+	FilterMode          *string `json:"filter_mode"`
+	FilterDirs          *string `json:"filter_dirs"`
+	ModelProviderID     *uint   `json:"model_provider_id"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -207,6 +231,12 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.ExcludeCategoryDirs != nil {
 		session.ExcludeCategoryDirs = *req.ExcludeCategoryDirs
+	}
+	if req.FilterMode != nil {
+		session.FilterMode = *req.FilterMode
+	}
+	if req.FilterDirs != nil {
+		session.FilterDirs = *req.FilterDirs
 	}
 	if req.ModelProviderID != nil {
 		session.ModelProviderID = *req.ModelProviderID

@@ -139,6 +139,12 @@ tasks:
   allowAutoCategoryHint: Agent 遇到无法归类的文件时可自动新建分类
   excludeCategoryDirs: 排除分类目录
   excludeCategoryDirsHint: 扫描时跳过已有分类的目标目录，避免重复处理已整理的文件
+  filterMode: 目录过滤模式
+  filterBlacklist: 黑名单
+  filterWhitelist: 白名单
+  filterDirs: 过滤目录列表
+  filterDirsHint: 一行一个目录路径，黑名单模式跳过这些目录，白名单模式仅扫描这些目录
+  filterDirsPlaceholder: "/backup\n/temp\n/archive"
   settingsSaved: 会话设置已保存
   status_scanning: 扫描中
   status_scanned: 已扫描
