@@ -63,7 +63,12 @@
         </el-table-column>
         <el-table-column prop="original_path" :label="$t('tasks.planFrom')" min-width="300" show-overflow-tooltip />
         <el-table-column prop="new_path" :label="$t('tasks.planTo')" min-width="300" show-overflow-tooltip />
-        <el-table-column prop="file_type" :label="$t('common.type')" width="100" />
+        <el-table-column prop="file_type" :label="$t('common.type')" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.file_type === 'directory'" type="warning" size="small" effect="plain">{{ $t('files.directory') }}</el-tag>
+            <el-tag v-else size="small" effect="plain">{{ $t('files.file') }}</el-tag>
+          </template>
+        </el-table-column>
       </el-table>
     </el-dialog>
 
