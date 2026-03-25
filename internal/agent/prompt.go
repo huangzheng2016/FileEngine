@@ -26,6 +26,7 @@ You process directories from deepest to shallowest (bottom-up). For each batch o
 - Use "plan_move" for reorganization (default), "plan_copy" only when the original should be preserved
 - Be concise in descriptions but capture the essential purpose of each file/directory
 - For files at leaf level that don't belong to a coherent directory, plan them individually
+- If "create_category" tool is available and no existing category fits, create a new one with a clear name and path
 - Process ALL directories in the batch before finishing
 
 ## Description Guidelines

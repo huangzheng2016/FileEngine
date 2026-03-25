@@ -119,6 +119,18 @@ type PlanCopyOutput struct {
 	Success bool `json:"success"`
 }
 
+type CreateCategoryInput struct {
+	Name        string `json:"name" jsonschema_description:"Category name, e.g. 'Photos', 'Software'"`
+	Path        string `json:"path" jsonschema_description:"Target path for this category, e.g. '/organized/photos'"`
+	Description string `json:"description" jsonschema_description:"What kind of files belong in this category"`
+}
+
+type CreateCategoryOutput struct {
+	Success bool   `json:"success"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+}
+
 // ============ Tool Builder ============
 
 type ToolBuilder struct {
@@ -182,7 +194,17 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build plan_copy: %w", err)
 	}
 
-	return []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, planMove, planCopy}, nil
+	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, planMove, planCopy}
+
+	if tb.cfg.AllowAutoCategory {
+		createCat, err := utils.InferTool("create_category", "Create a new category folder when no existing category fits the files. Use sparingly — only when files truly don't match any existing category.", tb.createCategory)
+		if err != nil {
+			return nil, fmt.Errorf("build create_category: %w", err)
+		}
+		allTools = append(allTools, createCat)
+	}
+
+	return allTools, nil
 }
 
 // ============ Tool Implementations ============
@@ -396,6 +418,24 @@ func (tb *ToolBuilder) planCopy(ctx context.Context, input *PlanCopyInput) (*Pla
 
 	out := &PlanCopyOutput{Success: true}
 	tb.logger.LogToolCall("plan_copy", input, out)
+	return out, nil
+}
+
+func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
+	tb.logger.LogToolCall("create_category", input, nil)
+
+	cat := &db.Category{
+		FilesystemID: tb.filesystemID,
+		Name:         input.Name,
+		Path:         input.Path,
+		Description:  input.Description,
+	}
+	if err := tb.repo.CreateCategory(cat); err != nil {
+		return nil, fmt.Errorf("create category: %w", err)
+	}
+
+	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
+	tb.logger.LogToolCall("create_category", input, out)
 	return out, nil
 }
 

@@ -107,6 +107,7 @@ export interface Config {
     concurrency: number
     max_file_read_size: number
     max_retries: number
+    allow_auto_category: boolean
   }
 }
 

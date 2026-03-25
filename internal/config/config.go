@@ -46,11 +46,12 @@ type ModelConfig struct {
 }
 
 type AgentConfig struct {
-	BatchSize       int    `yaml:"batch_size" json:"batch_size"`
-	Concurrency     int    `yaml:"concurrency" json:"concurrency"`
-	MaxFileReadSize int    `yaml:"max_file_read_size" json:"max_file_read_size"`
-	MaxRetries      int    `yaml:"max_retries" json:"max_retries"`
-	SystemPrompt    string `yaml:"system_prompt" json:"system_prompt"`
+	BatchSize         int    `yaml:"batch_size" json:"batch_size"`
+	Concurrency       int    `yaml:"concurrency" json:"concurrency"`
+	MaxFileReadSize   int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`
+	AllowAutoCategory bool   `yaml:"allow_auto_category" json:"allow_auto_category"`
+	SystemPrompt      string `yaml:"system_prompt" json:"system_prompt"`
 }
 
 var (

@@ -162,6 +162,8 @@ config:
     concurrency: Concurrency
     maxFileReadSize: Max File Read Size
     maxRetries: Max Retries
+    allowAutoCategory: Allow Auto-Create Categories
+    allowAutoCategoryHint: When enabled, Agent can create new categories for files that don't fit existing ones
   prompt:
     customLabel: Custom
     defaultLabel: Default
