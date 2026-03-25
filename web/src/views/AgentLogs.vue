@@ -9,20 +9,14 @@
       </el-card>
       <el-card style="flex: 1; overflow: auto; display: flex; flex-direction: column">
         <template #header>
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span style="font-size: 13px; font-weight: 500">{{ $t('logs.batch', { index: '' }).replace('#', '') }}</span>
-            <el-button size="small" text @click="toggleOrder">
-              {{ orderDesc ? $t('logs.orderDesc') : $t('logs.orderAsc') }}
-              <el-icon style="margin-left: 2px"><Sort /></el-icon>
-            </el-button>
-          </div>
+          <span style="font-size: 13px; font-weight: 500">{{ $t('logs.batch', { index: '' }).replace('#', '') }}</span>
         </template>
         <div style="flex: 1; overflow: auto">
           <div
             style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
             :style="{ background: selectedBatch === null ? '#ecf5ff' : '', color: selectedBatch === null ? '#409eff' : '' }"
             @click="selectBatch(null)">
-            {{ $t('logs.allBatches') }}
+            {{ $t('logs.live') }}
           </div>
           <div v-for="b in displayBatches" :key="b"
             style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
@@ -40,14 +34,20 @@
 
     <!-- Right: log content -->
     <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; overflow: hidden">
-      <el-card>
-        <div style="display: flex; gap: 12px; align-items: center">
-          <el-tag v-if="totalTokens > 0">{{ $t('logs.totalTokens', { count: totalTokens }) }}</el-tag>
-          <el-tag v-if="isLive" type="success" size="small" effect="dark" style="animation: pulse 1.5s infinite">LIVE</el-tag>
-        </div>
-      </el-card>
       <el-card style="flex: 1; overflow: hidden">
-        <div ref="logContainer" style="height: 100%; overflow: auto; padding: 8px">
+        <template #header>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <div style="display: flex; gap: 8px; align-items: center">
+              <el-tag v-if="totalTokens > 0" size="small">{{ $t('logs.totalTokens', { count: totalTokens }) }}</el-tag>
+              <el-tag v-if="isLive" type="success" size="small" effect="dark" style="animation: pulse 1.5s infinite">LIVE</el-tag>
+            </div>
+            <el-button size="small" text @click="toggleOrder">
+              {{ orderDesc ? $t('logs.orderDesc') : $t('logs.orderAsc') }}
+              <el-icon style="margin-left: 2px"><Sort /></el-icon>
+            </el-button>
+          </div>
+        </template>
+        <div ref="logContainer" style="height: 100%; overflow: auto">
           <div v-for="log in logs" :key="log.id" style="margin-bottom: 10px; border-left: 3px solid; padding-left: 10px"
             :style="{ borderColor: roleColor(log.role) }">
             <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 3px">
@@ -56,7 +56,6 @@
               <span style="font-size: 12px; color: #999">{{ $t('logs.batch', { index: log.batch_index }) }} | {{ formatTime(log.created_at) }}</span>
               <span v-if="log.tokens_used" style="font-size: 12px; color: #999">{{ $t('logs.tokens', { count: log.tokens_used }) }}</span>
             </div>
-            <!-- Content with truncation -->
             <div v-if="log.content">
               <div style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; overflow: hidden"
                 :style="{ maxHeight: expanded[log.id + '_content'] ? 'none' : '100px' }">{{ log.content }}</div>
@@ -64,7 +63,6 @@
                 {{ expanded[log.id + '_content'] ? $t('logs.collapse') : $t('logs.expand') }}
               </el-button>
             </div>
-            <!-- Tool I/O -->
             <template v-if="log.tool_input || log.tool_output">
               <div style="margin-top: 4px; display: flex; gap: 6px">
                 <el-button v-if="log.tool_input" size="small" text type="info" @click="toggleExpand(log.id, 'input')">{{ $t('logs.input') }} {{ expanded[log.id + '_input'] ? '▾' : '▸' }}</el-button>
@@ -109,7 +107,8 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LIVE_LOGS = 200
 
 const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.tokens_used || 0), 0))
-const displayBatches = computed(() => orderDesc.value ? [...batches.value].reverse() : batches.value)
+// Batches always show newest first (descending)
+const displayBatches = computed(() => [...batches.value].reverse())
 
 function cachedJSON(id: number, type: string, raw: string): string {
   const key = `${id}_${type}`
