@@ -32,8 +32,8 @@ export const stopTagging = (id: number) =>
 export const getTagStatus = (id: number) =>
   api.get(`/sessions/${id}/tag/status`)
 
-export const startExecute = (id: number) =>
-  api.post(`/sessions/${id}/execute`)
+export const startExecute = (id: number, mode: string = 'copy') =>
+  api.post(`/sessions/${id}/execute`, null, { params: { mode } })
 
 export const stopExecute = (id: number) =>
   api.post(`/sessions/${id}/execute/stop`)

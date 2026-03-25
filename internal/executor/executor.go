@@ -80,7 +80,7 @@ func (e *Executor) DryRun(sessionID uint) ([]PlanItem, error) {
 	return items, nil
 }
 
-func (e *Executor) Execute(ctx context.Context, sessionID uint) error {
+func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) error {
 	e.mu.Lock()
 	if e.running {
 		e.mu.Unlock()
@@ -132,7 +132,11 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint) error {
 		}
 
 		var opErr error
-		switch f.Operation {
+		op := mode
+		if op == "" {
+			op = f.Operation
+		}
+		switch op {
 		case "move":
 			if err := e.fs.MkdirAll(ctx, parentDir(f.NewPath)); err != nil {
 				log.Printf("mkdir error for %s: %v", f.NewPath, err)
@@ -151,7 +155,7 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint) error {
 		}
 
 		if opErr != nil {
-			log.Printf("execute %s %s -> %s: %v", f.Operation, f.OriginalPath, f.NewPath, opErr)
+			log.Printf("execute %s %s -> %s: %v", op, f.OriginalPath, f.NewPath, opErr)
 			e.mu.Lock()
 			e.progress.Failed++
 			e.mu.Unlock()

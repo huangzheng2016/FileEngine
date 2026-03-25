@@ -78,6 +78,23 @@
         <el-button type="primary" @click="handleNewScan">{{ $t('tasks.newScan') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- Execute mode dialog -->
+    <el-dialog v-model="execDialogVisible" :title="$t('tasks.execute')" width="400px">
+      <p style="margin-bottom: 16px">{{ $t('tasks.executeConfirm', { count: execSession?.planned_ops || 0 }) }}</p>
+      <el-form label-width="100px">
+        <el-form-item :label="$t('tasks.execMode')">
+          <el-radio-group v-model="execMode">
+            <el-radio value="copy">{{ $t('tasks.copy') }} {{ $t('tasks.execCopyHint') }}</el-radio>
+            <el-radio value="move">{{ $t('tasks.move') }} {{ $t('tasks.execMoveHint') }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="execDialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="warning" @click="confirmExecute">{{ $t('tasks.execute') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -95,6 +112,9 @@ const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
 const newScan = ref({ filesystemId: 0, scanPath: '' })
+const execDialogVisible = ref(false)
+const execMode = ref('copy')
+const execSession = ref<ScanSession | null>(null)
 
 let timer: ReturnType<typeof setInterval>
 
@@ -157,11 +177,19 @@ async function handleExecute(s: ScanSession) {
   if (s.status === 'executing') {
     await stopExecute(s.id)
     ElMessage.info(t('tasks.stopping'))
+    setTimeout(load, 1000)
   } else {
-    await ElMessageBox.confirm(t('tasks.executeConfirm', { count: s.planned_ops }), t('common.confirm'))
-    await startExecute(s.id)
-    ElMessage.success(t('tasks.executionStarted'))
+    execSession.value = s
+    execMode.value = 'copy'
+    execDialogVisible.value = true
   }
+}
+
+async function confirmExecute() {
+  if (!execSession.value) return
+  execDialogVisible.value = false
+  await startExecute(execSession.value.id, execMode.value)
+  ElMessage.success(t('tasks.executionStarted'))
   setTimeout(load, 1000)
 }
 
