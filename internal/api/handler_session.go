@@ -68,8 +68,9 @@ func cancelScan(sessionID uint) {
 }
 
 type CreateSessionRequest struct {
-	FilesystemID uint   `json:"filesystem_id" binding:"required"`
-	ScanPath     string `json:"scan_path"`
+	FilesystemID    uint   `json:"filesystem_id" binding:"required"`
+	ScanPath        string `json:"scan_path"`
+	ModelProviderID uint   `json:"model_provider_id"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -93,6 +94,7 @@ func (s *Server) createSession(c *gin.Context) {
 		Status:            "scanning",
 		AllowReadFile:     true,
 		AllowAutoCategory: config.Get().Agent.AllowAutoCategory,
+		ModelProviderID:   req.ModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -160,6 +162,7 @@ func (s *Server) deleteSession(c *gin.Context) {
 type UpdateSessionRequest struct {
 	AllowReadFile     *bool `json:"allow_read_file"`
 	AllowAutoCategory *bool `json:"allow_auto_category"`
+	ModelProviderID   *uint `json:"model_provider_id"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -183,6 +186,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.AllowAutoCategory != nil {
 		session.AllowAutoCategory = *req.AllowAutoCategory
+	}
+	if req.ModelProviderID != nil {
+		session.ModelProviderID = *req.ModelProviderID
 	}
 	if err := s.repo.UpdateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

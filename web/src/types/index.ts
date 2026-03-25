@@ -56,6 +56,20 @@ export interface ScanSession {
   executed_ops: number
   allow_read_file: boolean
   allow_auto_category: boolean
+  model_provider_id: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ModelProvider {
+  id: number
+  name: string
+  provider: string
+  api_key: string
+  model: string
+  base_url: string
+  temperature: number
+  max_tokens: number
   created_at: string
   updated_at: string
 }

@@ -4,6 +4,7 @@ nav:
   tasks: Tasks
   logs: Agent Logs
   config: Config
+  models: Models
 
 common:
   save: Save
@@ -213,3 +214,21 @@ logs:
 language:
   zh: 中文
   en: English
+
+models:
+  title: Model Providers
+  addModel: Add Model
+  editModel: Edit Model
+  provider: Provider
+  apiKey: API Key
+  modelName: Model
+  baseUrl: Base URL
+  temperature: Temperature
+  maxTokens: Max Tokens
+  keepApiKey: Leave empty to keep current
+  deleteConfirm: Delete this model provider?
+  testConn: Test Connection
+  connOk: Model connection OK
+  connFail: "Model test failed: {error}"
+  selectModel: Select Model
+  noModel: Use global config

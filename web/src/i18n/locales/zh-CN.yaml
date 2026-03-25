@@ -4,6 +4,7 @@ nav:
   tasks: 任务监控
   logs: Agent 日志
   config: 系统配置
+  models: 模型管理
 
 common:
   save: 保存
@@ -214,3 +215,21 @@ logs:
 language:
   zh: 中文
   en: English
+
+models:
+  title: 模型管理
+  addModel: 添加模型
+  editModel: 编辑模型
+  provider: 供应商
+  apiKey: API 密钥
+  modelName: 模型名称
+  baseUrl: API 地址
+  temperature: 温度
+  maxTokens: 最大 Token 数
+  keepApiKey: 留空保持原密钥
+  deleteConfirm: 确定删除该模型？
+  testConn: 测试连接
+  connOk: 模型连接成功
+  connFail: "模型测试失败: {error}"
+  selectModel: 选择模型
+  noModel: 使用全局配置
