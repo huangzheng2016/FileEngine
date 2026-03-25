@@ -246,11 +246,11 @@ function statusType(status: string): '' | 'success' | 'warning' | 'info' | 'dang
 }
 
 function canTag(s: ScanSession) {
-  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagging'
+  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagging' || s.status.startsWith('error')
 }
 
 function canExecute(s: ScanSession) {
-  return s.status === 'tagged' || s.status === 'executing' || s.planned_ops > 0
+  return s.status === 'tagged' || s.status === 'executing' || s.status.startsWith('error') || s.planned_ops > 0
 }
 
 async function handleTag(s: ScanSession) {
