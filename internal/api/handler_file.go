@@ -69,7 +69,6 @@ func (s *Server) getFile(c *gin.Context) {
 type UpdateFileRequest struct {
 	Description *string `json:"description"`
 	NewPath     *string `json:"new_path"`
-	Version     *string `json:"version"`
 }
 
 func (s *Server) updateFile(c *gin.Context) {
@@ -97,13 +96,10 @@ func (s *Server) updateFile(c *gin.Context) {
 	if req.NewPath != nil {
 		file.NewPath = *req.NewPath
 		if *req.NewPath != "" {
-			file.Operation = "move"
+			file.Operation = "planned"
 		} else {
 			file.Operation = ""
 		}
-	}
-	if req.Version != nil {
-		file.Version = *req.Version
 	}
 
 	if err := s.repo.UpdateFile(file); err != nil {

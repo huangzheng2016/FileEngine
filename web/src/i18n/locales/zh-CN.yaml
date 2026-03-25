@@ -63,7 +63,6 @@ files:
   depth: 层级
   descriptionPlaceholder: 输入描述...
   newPathPlaceholder: 新路径
-  versionPlaceholder: 版本号
   preview: 预览
   previewTitle: 文件预览
   previewNotSupported: 该文件类型不支持预览

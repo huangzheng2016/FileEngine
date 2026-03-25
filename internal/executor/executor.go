@@ -109,6 +109,9 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 		return err
 	}
 
+	// Deduplicate target paths — add (1), (2) suffix for conflicts
+	deduplicatePaths(files, e.repo)
+
 	e.mu.Lock()
 	e.progress.Total = len(files)
 	e.mu.Unlock()
@@ -245,4 +248,45 @@ func parentDir(p string) string {
 		}
 	}
 	return "."
+}
+
+// deduplicatePaths detects duplicate NewPath values and adds (1), (2) suffixes.
+// Updates both the slice and the DB records.
+func deduplicatePaths(files []db.FileEntry, repo *db.Repository) {
+	seen := map[string]int{}
+	for i, f := range files {
+		if f.NewPath == "" || f.Executed {
+			continue
+		}
+		count := seen[f.NewPath]
+		seen[f.NewPath]++
+		if count > 0 {
+			newPath := addSuffix(f.NewPath, count)
+			log.Printf("deduplicate: %s -> %s", f.NewPath, newPath)
+			files[i].NewPath = newPath
+			repo.UpdateFile(&files[i])
+		}
+	}
+}
+
+// addSuffix adds a numeric suffix to a path: /a/b.txt → /a/b(1).txt, /a/dir → /a/dir(1)
+func addSuffix(p string, n int) string {
+	suffix := fmt.Sprintf("(%d)", n)
+	dot := -1
+	slash := -1
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '.' && dot == -1 && slash == -1 {
+			dot = i
+		}
+		if p[i] == '/' {
+			slash = i
+			break
+		}
+	}
+	if dot > 0 && dot > slash {
+		// Has extension: /a/b.txt → /a/b(1).txt
+		return p[:dot] + suffix + p[dot:]
+	}
+	// No extension (directory or extensionless file)
+	return p + suffix
 }
