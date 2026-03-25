@@ -228,6 +228,7 @@ function startPolling() {
       loadBatches()
     } else {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      isLive.value = false
       loadLogs()
       loadBatches()
     }
