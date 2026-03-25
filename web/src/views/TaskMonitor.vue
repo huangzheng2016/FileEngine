@@ -105,6 +105,10 @@
             </el-option>
           </el-select>
         </el-form-item>
+        <el-form-item :label="$t('tasks.excludeCategoryDirs')">
+          <el-switch v-model="newScan.excludeCategoryDirs" />
+          <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showNewDialog = false">{{ $t('common.cancel') }}</el-button>
@@ -150,6 +154,10 @@
           <el-switch v-model="sessionSettings.allow_auto_category" />
           <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.allowAutoCategoryHint') }}</p>
         </el-form-item>
+        <el-form-item :label="$t('tasks.excludeCategoryDirs')">
+          <el-switch v-model="sessionSettings.exclude_category_dirs" />
+          <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="settingsVisible = false">{{ $t('common.cancel') }}</el-button>
@@ -173,13 +181,13 @@ const modelProviders = ref<ModelProvider[]>([])
 const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
-const newScan = ref({ filesystemId: 0, scanPath: '', modelProviderId: 0 })
+const newScan = ref({ filesystemId: 0, scanPath: '', modelProviderId: 0, excludeCategoryDirs: false })
 const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
 const settingsSessionId = ref(0)
-const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, model_provider_id: 0 })
+const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, exclude_category_dirs: false, model_provider_id: 0 })
 
 let timer: ReturnType<typeof setInterval>
 
@@ -239,6 +247,7 @@ function openNewScanDialog() {
     filesystemId: defaultId,
     scanPath: '',
     modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : 0,
+    excludeCategoryDirs: false,
   }
   showNewDialog.value = true
 }
@@ -333,6 +342,7 @@ function openSettings(s: ScanSession) {
   sessionSettings.value = {
     allow_read_file: s.allow_read_file,
     allow_auto_category: s.allow_auto_category,
+    exclude_category_dirs: s.exclude_category_dirs,
     model_provider_id: s.model_provider_id || 0,
   }
   settingsVisible.value = true
@@ -347,7 +357,7 @@ async function saveSettings() {
 
 async function handleNewScan() {
   if (!newScan.value.filesystemId) { ElMessage.warning(t('tasks.selectFsRequired')); return }
-  await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath, model_provider_id: newScan.value.modelProviderId })
+  await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath, model_provider_id: newScan.value.modelProviderId, exclude_category_dirs: newScan.value.excludeCategoryDirs })
   ElMessage.success(t('tasks.scanStarted'))
   showNewDialog.value = false
   load()

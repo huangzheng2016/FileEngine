@@ -32,6 +32,18 @@ func scanRootPath(scanPath string) string {
 // startScan launches a background goroutine that connects to the filesystem and scans.
 // This is the single place where scan logic lives — used by both createSession and rescanSession.
 func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig) {
+	// Collect category paths to exclude if enabled
+	var excludePaths []string
+	if session.ExcludeCategoryDirs {
+		if cats, err := s.repo.ListCategories(session.FilesystemID); err == nil {
+			for _, c := range cats {
+				if c.Path != "" {
+					excludePaths = append(excludePaths, c.Path)
+				}
+			}
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	scanMu.Lock()
 	scanners[session.ID] = cancel
@@ -52,7 +64,7 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 			return
 		}
 		defer fs.Close()
-		sc := scanner.New(fs, s.repo)
+		sc := scanner.New(fs, s.repo, excludePaths)
 		if err := sc.Scan(ctx, session); err != nil {
 			log.Printf("scan session %d failed: %v", session.ID, err)
 			session.Status = "error: " + err.Error()
@@ -71,9 +83,10 @@ func cancelScan(sessionID uint) {
 }
 
 type CreateSessionRequest struct {
-	FilesystemID    uint   `json:"filesystem_id" binding:"required"`
-	ScanPath        string `json:"scan_path"`
-	ModelProviderID uint   `json:"model_provider_id"`
+	FilesystemID        uint   `json:"filesystem_id" binding:"required"`
+	ScanPath            string `json:"scan_path"`
+	ModelProviderID     uint   `json:"model_provider_id"`
+	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -90,14 +103,15 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
-		FilesystemID:      filesystem.ID,
-		ScanPath:          req.ScanPath,
-		RootPath:          scanRootPath(req.ScanPath),
-		Protocol:          filesystem.Protocol,
-		Status:            "scanning",
-		AllowReadFile:     true,
-		AllowAutoCategory: false,
-		ModelProviderID:   req.ModelProviderID,
+		FilesystemID:        filesystem.ID,
+		ScanPath:            req.ScanPath,
+		RootPath:            scanRootPath(req.ScanPath),
+		Protocol:            filesystem.Protocol,
+		Status:              "scanning",
+		AllowReadFile:       true,
+		AllowAutoCategory:   false,
+		ExcludeCategoryDirs: req.ExcludeCategoryDirs,
+		ModelProviderID:     req.ModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -163,9 +177,10 @@ func (s *Server) deleteSession(c *gin.Context) {
 }
 
 type UpdateSessionRequest struct {
-	AllowReadFile     *bool `json:"allow_read_file"`
-	AllowAutoCategory *bool `json:"allow_auto_category"`
-	ModelProviderID   *uint `json:"model_provider_id"`
+	AllowReadFile       *bool `json:"allow_read_file"`
+	AllowAutoCategory   *bool `json:"allow_auto_category"`
+	ExcludeCategoryDirs *bool `json:"exclude_category_dirs"`
+	ModelProviderID     *uint `json:"model_provider_id"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -189,6 +204,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.AllowAutoCategory != nil {
 		session.AllowAutoCategory = *req.AllowAutoCategory
+	}
+	if req.ExcludeCategoryDirs != nil {
+		session.ExcludeCategoryDirs = *req.ExcludeCategoryDirs
 	}
 	if req.ModelProviderID != nil {
 		session.ModelProviderID = *req.ModelProviderID
