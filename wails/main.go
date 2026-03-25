@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,8 +34,6 @@ func main() {
 		log.Fatalf("后端启动超时")
 	}
 
-	backendURL := fmt.Sprintf("http://127.0.0.1:%d", app.backendPort)
-
 	if err := wails.Run(&options.App{
 		Title:     "FileEngine",
 		Width:     1400,
@@ -44,13 +41,7 @@ func main() {
 		MinWidth:  1200,
 		MinHeight: 720,
 		AssetServer: &assetserver.Options{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/" {
-					http.Redirect(w, r, backendURL, http.StatusTemporaryRedirect)
-					return
-				}
-				app.handleRequest(w, r)
-			}),
+			Handler: http.HandlerFunc(app.handleRequest),
 		},
 		OnStartup:  app.onStartup,
 		OnShutdown: app.onShutdown,
