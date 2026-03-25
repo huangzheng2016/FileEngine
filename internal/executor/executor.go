@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"sync"
 
 	"FileEngine/internal/db"
@@ -65,16 +66,11 @@ func (e *Executor) DryRun(sessionID uint) ([]PlanItem, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	items := make([]PlanItem, len(files))
 	for i, f := range files {
 		items[i] = PlanItem{
-			FileID:       f.ID,
-			OriginalPath: f.OriginalPath,
-			NewPath:      f.NewPath,
-			Operation:    f.Operation,
-			Name:         f.Name,
-			FileType:     f.FileType,
+			FileID: f.ID, OriginalPath: f.OriginalPath, NewPath: f.NewPath,
+			Operation: f.Operation, Name: f.Name, FileType: f.FileType,
 		}
 	}
 	return items, nil
@@ -131,33 +127,20 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 			continue
 		}
 
-		var opErr error
 		op := mode
 		if op == "" {
-			// Legacy: "move"/"copy" from old plan_move/plan_copy
-			// New: "planned" from set_target — defaults to copy
 			if f.Operation == "planned" {
 				op = "copy"
 			} else {
 				op = f.Operation
 			}
 		}
-		switch op {
-		case "move":
-			if err := e.fs.MkdirAll(ctx, parentDir(f.NewPath)); err != nil {
-				log.Printf("mkdir error for %s: %v", f.NewPath, err)
-			}
-			opErr = e.fs.MoveFile(ctx, f.OriginalPath, f.NewPath)
-		case "copy":
-			if err := e.fs.MkdirAll(ctx, parentDir(f.NewPath)); err != nil {
-				log.Printf("mkdir error for %s: %v", f.NewPath, err)
-			}
-			opErr = e.fs.CopyFile(ctx, f.OriginalPath, f.NewPath)
-		default:
-			e.mu.Lock()
-			e.progress.Skipped++
-			e.mu.Unlock()
-			continue
+
+		var opErr error
+		if f.FileType == "directory" {
+			opErr = e.executeDir(ctx, f.OriginalPath, f.NewPath, op)
+		} else {
+			opErr = e.executeFile(ctx, f.OriginalPath, f.NewPath, op)
 		}
 
 		if opErr != nil {
@@ -179,10 +162,80 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 	}
 
 	_ = e.repo.RefreshSessionCounts(sessionID)
-
 	session, _ = e.repo.GetSession(sessionID)
 	session.Status = "done"
 	return e.repo.UpdateSession(session)
+}
+
+// executeFile handles a single file copy or move.
+func (e *Executor) executeFile(ctx context.Context, src, dst, op string) error {
+	if err := e.fs.MkdirAll(ctx, parentDir(dst)); err != nil {
+		log.Printf("mkdir error for %s: %v", dst, err)
+	}
+	switch op {
+	case "move":
+		return e.fs.MoveFile(ctx, src, dst)
+	case "copy":
+		return e.fs.CopyFile(ctx, src, dst)
+	default:
+		return fmt.Errorf("unknown operation: %s", op)
+	}
+}
+
+// executeDir handles directory copy or move.
+// Move: try rename first (fast, atomic). If rename fails, fall back to recursive copy + delete.
+// Copy: always recursive.
+func (e *Executor) executeDir(ctx context.Context, src, dst, op string) error {
+	if err := e.fs.MkdirAll(ctx, parentDir(dst)); err != nil {
+		log.Printf("mkdir error for %s: %v", dst, err)
+	}
+
+	if op == "move" {
+		// Try direct rename first (works on same filesystem/share)
+		if err := e.fs.MoveFile(ctx, src, dst); err == nil {
+			return nil
+		}
+		// Rename failed — fall back to recursive copy then we'd need delete
+		// For safety, just do recursive copy (user chose "move" but cross-share move isn't atomic)
+		log.Printf("directory rename failed for %s, falling back to recursive copy", src)
+	}
+
+	// Recursive copy
+	return e.recursiveCopy(ctx, src, dst)
+}
+
+func (e *Executor) recursiveCopy(ctx context.Context, src, dst string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	if err := e.fs.MkdirAll(ctx, dst); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dst, err)
+	}
+
+	entries, err := e.fs.List(ctx, src)
+	if err != nil {
+		return fmt.Errorf("list %s: %w", src, err)
+	}
+
+	for _, entry := range entries {
+		srcPath := path.Join(src, entry.Name)
+		dstPath := path.Join(dst, entry.Name)
+
+		if entry.IsDir {
+			if err := e.recursiveCopy(ctx, srcPath, dstPath); err != nil {
+				log.Printf("recursive copy %s: %v", srcPath, err)
+				// Continue with other entries
+			}
+		} else {
+			if err := e.fs.CopyFile(ctx, srcPath, dstPath); err != nil {
+				log.Printf("copy file %s -> %s: %v", srcPath, dstPath, err)
+			}
+		}
+	}
+	return nil
 }
 
 func parentDir(p string) string {
