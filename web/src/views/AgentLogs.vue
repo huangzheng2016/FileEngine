@@ -145,10 +145,15 @@ async function onSessionChange() {
   stopLive()
   selectedBatch.value = null
   page.value = 1
-  batchPage.value = 1
   Object.keys(expanded).forEach(k => delete expanded[k])
   jsonCache.clear()
-  await Promise.all([loadLogs(), loadBatches()])
+  // Load batches first to know total, then jump to last page
+  await loadBatches()
+  if (batchTotal.value > batchPageSize) {
+    batchPage.value = Math.ceil(batchTotal.value / batchPageSize)
+    await loadBatches()
+  }
+  await loadLogs()
   const session = sessions.value.find(s => s.id === sessionId.value)
   if (session && session.status === 'tagging') startLive()
 }
