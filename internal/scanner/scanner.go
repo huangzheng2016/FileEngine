@@ -33,7 +33,7 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	if err := s.repo.CreateFiles(allFiles); err != nil {
+	if err := db.WithRetry(func() error { return s.repo.CreateFiles(allFiles) }); err != nil {
 		return fmt.Errorf("save files: %w", err)
 	}
 
