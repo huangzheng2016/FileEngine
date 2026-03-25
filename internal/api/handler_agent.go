@@ -98,6 +98,73 @@ func (s *Server) startTagging(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "tagging started", "session_id": sessionID})
 }
 
+type InstructRequest struct {
+	FileIDs []uint `json:"file_ids" binding:"required"`
+	Prompt  string `json:"prompt" binding:"required"`
+}
+
+func (s *Server) instructAgent(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req InstructRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	sessionID := uint(id)
+	session, err := s.repo.GetSession(sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	if session.ModelProviderID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no model provider configured"})
+		return
+	}
+	modelProvider, err := s.repo.GetModelProvider(session.ModelProviderID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model provider not found"})
+		return
+	}
+
+	// Fetch selected files
+	var files []db.FileEntry
+	for _, fid := range req.FileIDs {
+		f, err := s.repo.GetFile(fid)
+		if err != nil {
+			continue
+		}
+		files = append(files, *f)
+	}
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid files selected"})
+		return
+	}
+
+	fsCfg, err := s.resolveFSConfig(session)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	cfg := config.Get()
+	a := agent.New(s.repo, fsCfg, cfg, sessionID, modelProvider, session)
+
+	response, err := a.RunInstruct(c.Request.Context(), files, req.Prompt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"response": response})
+}
+
 func (s *Server) stopTagging(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {

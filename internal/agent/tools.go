@@ -201,6 +201,31 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	return allTools, nil
 }
 
+// BuildInstructTools returns tools for user-directed instruct mode (no list_files, read_file, mark_tagged).
+func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
+	updateDesc, err := utils.InferTool("update_description", "修改文件/目录的描述", tb.updateDescription)
+	if err != nil {
+		return nil, err
+	}
+	setTarget, err := utils.InferTool("set_target", "设置文件/目录的整理目标路径", tb.setTarget)
+	if err != nil {
+		return nil, err
+	}
+	listCats, err := utils.InferTool("list_categories", "列出所有分类目录", tb.listCategories)
+	if err != nil {
+		return nil, err
+	}
+	allTools := []tool.BaseTool{updateDesc, setTarget, listCats}
+	if tb.session.AllowAutoCategory {
+		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, createCat)
+	}
+	return allTools, nil
+}
+
 // ============ Tool Implementations ============
 
 func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {

@@ -65,6 +65,12 @@ files:
   newPathPlaceholder: New path
   preview: Preview
   previewTitle: File Preview
+  instruct: AI Instruct
+  instructTitle: AI Batch Operation
+  instructPrompt: Enter instruction (e.g., move these to software category, update descriptions...)
+  instructSelected: "{count} files selected"
+  instructRunning: Running...
+  instructDone: AI instruction completed
   previewNotSupported: Preview not supported for this file type
   previewTooLarge: File too large for preview (max 1MB)
   previewLoading: Loading...

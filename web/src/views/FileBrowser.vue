@@ -86,7 +86,8 @@
 
       <!-- File table -->
       <el-card style="flex: 1; overflow: auto">
-        <el-table :data="files" style="width: 100%" height="100%">
+        <el-table :data="files" style="width: 100%" height="100%" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="40" />
           <el-table-column prop="name" :label="$t('files.fileName')" min-width="200">
             <template #default="{ row }">
               <span style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px" @click.stop="openEditDrawer(row)">
@@ -125,6 +126,13 @@
       <el-pagination v-if="total > pageSize" style="justify-content: center; flex-shrink: 0"
         layout="total, prev, pager, next" :total="total" :page-size="pageSize"
         v-model:current-page="page" @current-change="loadFiles" />
+      <!-- Selection action bar -->
+      <div v-if="selectedFiles.length > 0" style="flex-shrink: 0; padding: 8px 16px; background: #ecf5ff; border-radius: 4px; display: flex; align-items: center; justify-content: space-between">
+        <span style="font-size: 13px; color: #409eff">{{ $t('files.instructSelected', { count: selectedFiles.length }) }}</span>
+        <el-button type="primary" size="small" @click="instructDialogVisible = true">
+          <el-icon style="margin-right: 4px"><MagicStick /></el-icon>{{ $t('files.instruct') }}
+        </el-button>
+      </div>
     </div>
 
     <!-- Category CRUD dialog -->
@@ -198,13 +206,27 @@
         </el-form>
       </template>
     </el-drawer>
+
+    <!-- Instruct dialog -->
+    <el-dialog v-model="instructDialogVisible" :title="$t('files.instructTitle')" width="600px">
+      <div style="margin-bottom: 12px; max-height: 150px; overflow: auto; font-size: 12px; color: #666; background: #f5f7fa; padding: 8px; border-radius: 4px">
+        <div v-for="f in selectedFiles" :key="f.id">{{ f.original_path }} ({{ f.file_type }})</div>
+      </div>
+      <el-input v-model="instructPrompt" type="textarea" :rows="4" :placeholder="$t('files.instructPrompt')" />
+      <template #footer>
+        <el-button @click="instructDialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleInstruct" :loading="instructing">
+          {{ instructing ? $t('files.instructRunning') : $t('files.instruct') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, getFileTree, listFiles as apiListFiles, updateFile, getFileContent } from '../api'
+import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
 import type { FileEntry, Filesystem, ScanSession, Category, TreeNode } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -323,6 +345,32 @@ async function saveEditFile() {
   ElMessage.success(t('common.saved'))
   editVisible.value = false
   loadFiles()
+}
+
+// Selection + Instruct
+const selectedFiles = ref<FileEntry[]>([])
+const instructDialogVisible = ref(false)
+const instructPrompt = ref('')
+const instructing = ref(false)
+
+function onSelectionChange(rows: FileEntry[]) {
+  selectedFiles.value = rows
+}
+
+async function handleInstruct() {
+  if (!sessionId.value || selectedFiles.value.length === 0 || !instructPrompt.value.trim()) return
+  instructing.value = true
+  try {
+    await instructAgent(sessionId.value, selectedFiles.value.map(f => f.id), instructPrompt.value)
+    ElMessage.success(t('files.instructDone'))
+    instructDialogVisible.value = false
+    instructPrompt.value = ''
+    loadFiles()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || 'Instruct failed')
+  } finally {
+    instructing.value = false
+  }
 }
 
 function openCatDialog(cat?: Category) {
