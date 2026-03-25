@@ -137,6 +137,20 @@ type CreateCategoryOutput struct {
 	Path    string `json:"path"`
 }
 
+type UpdateCategoryInput struct {
+	Name        string `json:"name" jsonschema_description:"Category name to update (used to find the category)"`
+	NewName     string `json:"new_name,omitempty" jsonschema_description:"New name for the category (optional)"`
+	NewPath     string `json:"new_path,omitempty" jsonschema_description:"New path for the category. Files under old path will be cascaded (optional)"`
+	Description string `json:"description,omitempty" jsonschema_description:"New description (optional)"`
+	Structure   string `json:"structure,omitempty" jsonschema_description:"New structure hint (optional)"`
+}
+
+type UpdateCategoryOutput struct {
+	Success bool   `json:"success"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+}
+
 // ============ Tool Builder ============
 
 type ToolBuilder struct {
@@ -204,6 +218,13 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 
 	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, listCatFiles, setTarget}
 
+	// update_category is always available
+	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述等。如果修改了路径，该分类下所有文件的目标路径会自动更新", tb.updateCategory)
+	if err != nil {
+		return nil, fmt.Errorf("build update_category: %w", err)
+	}
+	allTools = append(allTools, updateCat)
+
 	if tb.session.AllowReadFile {
 		allTools = append(allTools, readFile)
 	}
@@ -238,6 +259,13 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 		return nil, err
 	}
 	allTools := []tool.BaseTool{updateDesc, setTarget, listCats, listCatFiles}
+
+	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述。路径变更会级联更新文件", tb.updateCategory)
+	if err != nil {
+		return nil, err
+	}
+	allTools = append(allTools, updateCat)
+
 	if tb.session.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
 		if err != nil {
@@ -500,6 +528,48 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 
 	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
 	tb.logger.LogToolCall("create_category", input, out)
+	return out, nil
+}
+
+func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategoryInput) (*UpdateCategoryOutput, error) {
+	tb.logger.LogToolCall("update_category", input, nil)
+
+	// Find category by name
+	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	var cat *db.Category
+	for i := range cats {
+		if cats[i].Name == input.Name {
+			cat = &cats[i]
+			break
+		}
+	}
+	if cat == nil {
+		return nil, fmt.Errorf("category not found: %s", input.Name)
+	}
+
+	oldPath := cat.Path
+	if input.NewName != "" {
+		cat.Name = input.NewName
+	}
+	if input.NewPath != "" {
+		cat.Path = input.NewPath
+	}
+	if input.Description != "" {
+		cat.Description = input.Description
+	}
+	if input.Structure != "" {
+		cat.Structure = input.Structure
+	}
+
+	if err := tb.repo.UpdateCategoryPath(cat, oldPath); err != nil {
+		return nil, fmt.Errorf("update category: %w", err)
+	}
+
+	out := &UpdateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
+	tb.logger.LogToolCall("update_category", input, out)
 	return out, nil
 }
 

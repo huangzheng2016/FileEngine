@@ -71,13 +71,14 @@ func (s *Server) updateCategory(c *gin.Context) {
 		return
 	}
 
+	oldPath := cat.Path
 	cat.FilesystemID = req.FilesystemID
 	cat.Name = req.Name
 	cat.Path = req.Path
 	cat.Structure = req.Structure
 	cat.Description = req.Description
 
-	if err := s.repo.UpdateCategory(cat); err != nil {
+	if err := s.repo.UpdateCategoryPath(cat, oldPath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
