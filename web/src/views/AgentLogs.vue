@@ -40,32 +40,25 @@
           <el-tag v-if="isLive" type="success" size="small" effect="dark" style="animation: pulse 1.5s infinite">LIVE</el-tag>
         </div>
       </el-card>
-<!-- PLACEHOLDER_CONTINUE -->
-      <el-card style="flex: 1; overflow: auto">
+      <el-card style="flex: 1; overflow: hidden">
         <div ref="logContainer" style="height: 100%; overflow: auto; padding: 8px">
-          <div v-for="log in logs" :key="log.id" style="margin-bottom: 12px; border-left: 3px solid; padding-left: 12px"
+          <div v-for="log in logs" :key="log.id" style="margin-bottom: 10px; border-left: 3px solid; padding-left: 10px"
             :style="{ borderColor: roleColor(log.role) }">
-            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 4px">
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 3px">
               <el-tag :type="roleTagType(log.role)" size="small">{{ log.role }}</el-tag>
               <el-tag v-if="log.tool_name" size="small" type="warning">{{ log.tool_name }}</el-tag>
               <span style="font-size: 12px; color: #999">{{ $t('logs.batch', { index: log.batch_index }) }} | {{ formatTime(log.created_at) }}</span>
               <span v-if="log.tokens_used" style="font-size: 12px; color: #999">{{ $t('logs.tokens', { count: log.tokens_used }) }}</span>
             </div>
-            <div v-if="log.content" style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; max-height: 300px; overflow: auto">{{ log.content }}</div>
-            <div v-if="log.tool_input" style="margin-top: 4px">
-              <el-collapse>
-                <el-collapse-item :title="$t('logs.input')">
-                  <pre style="font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px; overflow: auto">{{ formatJSON(log.tool_input) }}</pre>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
-            <div v-if="log.tool_output" style="margin-top: 4px">
-              <el-collapse>
-                <el-collapse-item :title="$t('logs.output')">
-                  <pre style="font-size: 12px; background: #f0f9eb; padding: 8px; border-radius: 4px; overflow: auto; max-height: 300px">{{ formatJSON(log.tool_output) }}</pre>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
+            <div v-if="log.content" style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; max-height: 200px; overflow: auto">{{ log.content }}</div>
+            <template v-if="log.tool_input || log.tool_output">
+              <div style="margin-top: 4px; display: flex; gap: 6px">
+                <el-button v-if="log.tool_input" size="small" text type="info" @click="toggleExpand(log.id, 'input')">{{ $t('logs.input') }} {{ expanded[log.id + '_input'] ? '▾' : '▸' }}</el-button>
+                <el-button v-if="log.tool_output" size="small" text type="info" @click="toggleExpand(log.id, 'output')">{{ $t('logs.output') }} {{ expanded[log.id + '_output'] ? '▾' : '▸' }}</el-button>
+              </div>
+              <pre v-if="expanded[log.id + '_input']" style="font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px; overflow: auto; max-height: 250px; margin-top: 4px">{{ cachedJSON(log.id, 'input', log.tool_input) }}</pre>
+              <pre v-if="expanded[log.id + '_output']" style="font-size: 12px; background: #f0f9eb; padding: 8px; border-radius: 4px; overflow: auto; max-height: 250px; margin-top: 4px">{{ cachedJSON(log.id, 'output', log.tool_output) }}</pre>
+            </template>
           </div>
         </div>
       </el-card>
@@ -77,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { listSessions, listLogs, listBatches } from '../api'
 import type { ScanSession, AgentLog } from '../types'
 
@@ -88,15 +81,32 @@ const batches = ref<number[]>([])
 const selectedBatch = ref<number | null>(null)
 const total = ref(0)
 const page = ref(1)
-const pageSize = 100
+const pageSize = 50
 const logContainer = ref<HTMLElement>()
 const isLive = ref(false)
 const orderDesc = ref(localStorage.getItem('fe_log_order') !== 'asc')
+const expanded = reactive<Record<string, boolean>>({})
+const jsonCache = new Map<string, string>()
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+const MAX_LIVE_LOGS = 200
 
 const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.tokens_used || 0), 0))
 const sortedBatches = computed(() => orderDesc.value ? [...batches.value].reverse() : batches.value)
+
+function cachedJSON(id: number, type: string, raw: string): string {
+  const key = `${id}_${type}`
+  if (jsonCache.has(key)) return jsonCache.get(key)!
+  let result: string
+  try { result = JSON.stringify(JSON.parse(raw), null, 2) } catch { result = raw }
+  jsonCache.set(key, result)
+  return result
+}
+
+function toggleExpand(id: number, type: string) {
+  const key = `${id}_${type}`
+  expanded[key] = !expanded[key]
+}
 
 onMounted(async () => {
   const res = await listSessions()
@@ -116,6 +126,9 @@ async function onSessionChange() {
   stopLive()
   selectedBatch.value = null
   page.value = 1
+  // Clear caches
+  Object.keys(expanded).forEach(k => delete expanded[k])
+  jsonCache.clear()
   await Promise.all([loadLogs(), loadBatches()])
   const session = sessions.value.find(s => s.id === sessionId.value)
   if (session && session.status === 'tagging') startLive()
@@ -161,15 +174,17 @@ function startLive() {
   eventSource.onmessage = (e) => {
     const log: AgentLog = JSON.parse(e.data)
     if (selectedBatch.value !== null && log.batch_index !== selectedBatch.value) return
-    if (orderDesc.value) logs.value.unshift(log)
-    else logs.value.push(log)
-    // Add batch to list if new
+    if (orderDesc.value) {
+      logs.value.unshift(log)
+      if (logs.value.length > MAX_LIVE_LOGS) logs.value.length = MAX_LIVE_LOGS
+    } else {
+      logs.value.push(log)
+      if (logs.value.length > MAX_LIVE_LOGS) logs.value.splice(0, logs.value.length - MAX_LIVE_LOGS)
+      nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
+    }
     if (!batches.value.includes(log.batch_index)) {
       batches.value.push(log.batch_index)
       batches.value.sort((a, b) => a - b)
-    }
-    if (!orderDesc.value) {
-      nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
     }
   }
   eventSource.onerror = () => { stopLive(); startPolling() }
@@ -217,10 +232,6 @@ function roleTagType(role: string): '' | 'success' | 'warning' | 'info' | 'dange
 function formatTime(t: string) {
   if (!t) return ''
   return new Date(t).toLocaleTimeString()
-}
-
-function formatJSON(s: string) {
-  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
 }
 </script>
 
