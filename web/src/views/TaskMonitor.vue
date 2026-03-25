@@ -30,19 +30,23 @@
               :stroke-width="6" style="margin-top: 4px" />
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="420" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button-group size="small">
-              <el-button @click="handleRescan(row)" :disabled="row.status === 'scanning'">{{ $t('tasks.rescan') }}</el-button>
-              <el-button @click="handleTag(row)" :disabled="!canTag(row)">
-                {{ row.status === 'tagging' ? $t('tasks.stopTag') : $t('tasks.tag') }}
+            <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
+              <el-button size="small">
+                {{ $t('common.actions') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
-              <el-button @click="showPlans(row)" :disabled="row.planned_ops === 0">{{ $t('tasks.plans') }}</el-button>
-              <el-button @click="handleExecute(row)" :disabled="!canExecute(row)" type="warning">
-                {{ row.status === 'executing' ? $t('tasks.stop') : $t('tasks.execute') }}
-              </el-button>
-              <el-button @click="handleDelete(row)" type="danger">{{ $t('common.delete') }}</el-button>
-            </el-button-group>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="settings"><el-icon><Setting /></el-icon>{{ $t('tasks.settings') }}</el-dropdown-item>
+                  <el-dropdown-item command="rescan" :disabled="row.status === 'scanning'"><el-icon><Refresh /></el-icon>{{ $t('tasks.rescan') }}</el-dropdown-item>
+                  <el-dropdown-item command="tag" :disabled="!canTag(row)"><el-icon><PriceTag /></el-icon>{{ row.status === 'tagging' ? $t('tasks.stopTag') : $t('tasks.tag') }}</el-dropdown-item>
+                  <el-dropdown-item command="plans" :disabled="row.planned_ops === 0"><el-icon><Document /></el-icon>{{ $t('tasks.plans') }}</el-dropdown-item>
+                  <el-dropdown-item command="execute" :disabled="!canExecute(row)"><el-icon><VideoPlay /></el-icon>{{ row.status === 'executing' ? $t('tasks.stop') : $t('tasks.execute') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>{{ $t('common.delete') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -97,13 +101,31 @@
         <el-button type="warning" @click="confirmExecute">{{ $t('tasks.execute') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- Session settings dialog -->
+    <el-dialog v-model="settingsVisible" :title="$t('tasks.settings')" width="420px">
+      <el-form label-width="160px">
+        <el-form-item :label="$t('tasks.allowReadFile')">
+          <el-switch v-model="sessionSettings.allow_read_file" />
+          <div style="font-size: 12px; color: #909399; margin-top: 4px">{{ $t('tasks.allowReadFileHint') }}</div>
+        </el-form-item>
+        <el-form-item :label="$t('tasks.allowAutoCategory')">
+          <el-switch v-model="sessionSettings.allow_auto_category" />
+          <div style="font-size: 12px; color: #909399; margin-top: 4px">{{ $t('tasks.allowAutoCategoryHint') }}</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="settingsVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveSettings">{{ $t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listSessions, createSession, deleteSession, rescanSession, startTagging, stopTagging, startExecute, stopExecute, getPlans, listFilesystems } from '../api'
+import { listSessions, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, listFilesystems } from '../api'
 import type { ScanSession, PlanItem, Filesystem } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -117,6 +139,9 @@ const newScan = ref({ filesystemId: 0, scanPath: '' })
 const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
+const settingsVisible = ref(false)
+const settingsSessionId = ref(0)
+const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false })
 
 let timer: ReturnType<typeof setInterval>
 
@@ -220,6 +245,33 @@ async function handleRescan(s: ScanSession) {
   await rescanSession(s.id)
   ElMessage.success(t('tasks.rescanStarted'))
   setTimeout(load, 1000)
+}
+
+function handleCommand(cmd: string, row: ScanSession) {
+  switch (cmd) {
+    case 'rescan': handleRescan(row); break
+    case 'tag': handleTag(row); break
+    case 'plans': showPlans(row); break
+    case 'execute': handleExecute(row); break
+    case 'settings': openSettings(row); break
+    case 'delete': handleDelete(row); break
+  }
+}
+
+function openSettings(s: ScanSession) {
+  settingsSessionId.value = s.id
+  sessionSettings.value = {
+    allow_read_file: s.allow_read_file,
+    allow_auto_category: s.allow_auto_category,
+  }
+  settingsVisible.value = true
+}
+
+async function saveSettings() {
+  await updateSessionConfig(settingsSessionId.value, sessionSettings.value)
+  ElMessage.success(t('tasks.settingsSaved'))
+  settingsVisible.value = false
+  load()
 }
 
 async function handleNewScan() {

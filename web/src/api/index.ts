@@ -19,6 +19,9 @@ export const getSession = (id: number) =>
 export const deleteSession = (id: number) =>
   api.delete(`/sessions/${id}`)
 
+export const updateSessionConfig = (id: number, data: { allow_read_file?: boolean; allow_auto_category?: boolean }) =>
+  api.patch<ScanSession>(`/sessions/${id}`, data)
+
 export const rescanSession = (id: number) =>
   api.post(`/sessions/${id}/rescan`)
 

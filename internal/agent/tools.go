@@ -180,7 +180,11 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build set_target: %w", err)
 	}
 
-	allTools := []tool.BaseTool{listFiles, getFileInfo, readFile, updateDesc, markTagged, listCats, setTarget}
+	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, setTarget}
+
+	if tb.cfg.AllowReadFile {
+		allTools = append(allTools, readFile)
+	}
 
 	if tb.cfg.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用", tb.createCategory)

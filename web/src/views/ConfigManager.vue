@@ -145,7 +145,7 @@ const config = reactive<Config>({
   server: { port: 8080, host: '0.0.0.0' },
   database: { driver: 'sqlite', dsn: 'fileengine.db' },
   model: { provider: 'openai', api_key: '', model: 'gpt-4o', base_url: '', temperature: 0.1, max_tokens: 4096 },
-  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3, allow_auto_category: false },
+  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3, allow_auto_category: false, allow_read_file: true },
 })
 
 onMounted(async () => {

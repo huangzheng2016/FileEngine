@@ -64,8 +64,10 @@ func (s *Server) startTagging(c *gin.Context) {
 		return
 	}
 
-	cfg := config.Get()
-	a := agent.New(s.repo, fsCfg, cfg, sessionID)
+	cfg := *config.Get() // copy to avoid mutating global
+	cfg.Agent.AllowAutoCategory = session.AllowAutoCategory
+	cfg.Agent.AllowReadFile = session.AllowReadFile
+	a := agent.New(s.repo, fsCfg, &cfg, sessionID)
 	agents[sessionID] = a
 	agentMu.Unlock()
 

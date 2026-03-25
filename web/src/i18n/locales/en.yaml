@@ -125,6 +125,12 @@ tasks:
   rescan: Rescan
   rescanConfirm: Rescan this session? Existing file data will be cleared
   rescanStarted: Rescan started
+  settings: Session Settings
+  allowReadFile: Allow Read File
+  allowReadFileHint: Agent can read file contents for analysis
+  allowAutoCategory: Allow Auto-Create Categories
+  allowAutoCategoryHint: Agent can create new categories automatically
+  settingsSaved: Session settings saved
   rootPathRequired: Root path is required
   executionPlans: Execution Plans
   planName: Name

@@ -38,6 +38,7 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions", s.listSessions)
 		api.GET("/sessions/:id", s.getSession)
 		api.DELETE("/sessions/:id", s.deleteSession)
+		api.PATCH("/sessions/:id", s.updateSessionConfig)
 		api.POST("/sessions/:id/rescan", s.rescanSession)
 
 		// Agent tasks

@@ -77,9 +77,11 @@ type ScanSession struct {
 	TotalFiles   int       `json:"total_files"`
 	TaggedFiles  int       `json:"tagged_files"`
 	PlannedOps   int       `json:"planned_ops"`
-	ExecutedOps  int       `json:"executed_ops"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ExecutedOps       int       `json:"executed_ops"`
+	AllowReadFile     bool      `gorm:"default:true" json:"allow_read_file"`
+	AllowAutoCategory bool      `gorm:"default:false" json:"allow_auto_category"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type AgentLog struct {

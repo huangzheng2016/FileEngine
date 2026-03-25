@@ -125,6 +125,12 @@ tasks:
   rescan: 重新扫描
   rescanConfirm: 确定重新扫描？这将清除现有文件数据
   rescanStarted: 重新扫描已启动
+  settings: 会话设置
+  allowReadFile: 允许读取文件
+  allowReadFileHint: Agent 可以读取文件内容进行分析
+  allowAutoCategory: 允许自动创建分类
+  allowAutoCategoryHint: Agent 遇到无法归类的文件时可自动新建分类
+  settingsSaved: 会话设置已保存
   rootPathRequired: 请填写扫描根路径
   executionPlans: 执行计划
   planName: 名称
