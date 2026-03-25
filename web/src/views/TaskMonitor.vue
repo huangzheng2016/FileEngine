@@ -10,7 +10,11 @@
       <el-table :data="sessions" style="width: 100%">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="root_path" :label="$t('tasks.rootPath')" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="protocol" :label="$t('tasks.protocol')" width="100" />
+        <el-table-column prop="protocol" :label="$t('tasks.protocol')" width="100">
+          <template #default="{ row }">
+            <el-tag :type="protocolTagType(row.protocol)" size="small" effect="dark">{{ row.protocol.toUpperCase() }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('common.status')" width="140">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
@@ -51,7 +55,6 @@
         <el-table-column prop="operation" :label="$t('tasks.planOp')" width="80">
           <template #default>
             <el-tag type="info" size="small">{{ $t('tasks.planned') }}</el-tag>
-            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="original_path" :label="$t('tasks.planFrom')" min-width="300" show-overflow-tooltip />
@@ -133,6 +136,13 @@ async function load() {
 async function loadFilesystems() {
   const res = await listFilesystems()
   filesystems.value = res.data
+}
+
+function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
+    local: 'info', sftp: 'success', ftp: '', smb: 'warning', nfs: 'danger'
+  }
+  return map[protocol] || 'info'
 }
 
 function openNewScanDialog() {

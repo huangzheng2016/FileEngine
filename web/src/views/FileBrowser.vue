@@ -13,7 +13,12 @@
       <!-- Filesystem selector -->
       <el-card>
         <el-select v-model="selectedFsId" :placeholder="$t('files.selectFs')" style="width: 100%" @change="onFsChange">
-          <el-option v-for="fs in filesystems" :key="fs.id" :label="`${fs.name} (${fs.protocol})`" :value="fs.id" />
+          <el-option v-for="fs in filesystems" :key="fs.id" :label="fs.name" :value="fs.id">
+            <span style="display: flex; align-items: center; gap: 6px">
+              <el-tag :type="protocolTagType(fs.protocol)" size="small" effect="dark" style="width: 48px; text-align: center">{{ fs.protocol.toUpperCase() }}</el-tag>
+              {{ fs.name }}
+            </span>
+          </el-option>
         </el-select>
         <el-select v-if="sessions.length > 1" v-model="sessionId" :placeholder="$t('files.session')" style="width: 100%; margin-top: 8px" @change="onSessionChange">
           <el-option v-for="s in sessions" :key="s.id"
@@ -89,7 +94,12 @@
               {{ row.name }}
             </template>
           </el-table-column>
-          <el-table-column prop="file_type" :label="$t('files.fileType')" width="90" />
+          <el-table-column prop="file_type" :label="$t('files.fileType')" width="90">
+            <template #default="{ row }">
+              <el-tag v-if="row.file_type === 'directory'" type="warning" size="small" effect="plain">{{ $t('files.directory') }}</el-tag>
+              <el-tag v-else size="small" effect="plain">{{ $t('files.file') }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column :label="$t('files.fileSize')" width="90">
             <template #default="{ row }">{{ formatSize(row.size) }}</template>
           </el-table-column>
@@ -340,6 +350,13 @@ function formatSize(bytes: number): string {
   let i = 0; let size = bytes
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
   return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i]
+}
+
+function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
+    local: 'info', sftp: 'success', ftp: '', smb: 'warning', nfs: 'danger'
+  }
+  return map[protocol] || 'info'
 }
 
 function formatSessionLabel(s: ScanSession): string {

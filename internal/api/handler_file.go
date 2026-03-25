@@ -184,6 +184,28 @@ func (s *Server) getFileTree(c *gin.Context) {
 		return
 	}
 
+	// Count subdirectories for each node to determine leaf status
+	subDirCounts := make(map[string]int)
+	if len(files) > 0 {
+		paths := make([]string, len(files))
+		for i, f := range files {
+			paths[i] = f.OriginalPath
+		}
+		type countResult struct {
+			ParentPath string
+			Cnt        int
+		}
+		var results []countResult
+		s.repo.DB().Model(&db.FileEntry{}).
+			Select("parent_path, count(*) as cnt").
+			Where("scan_session_id = ? AND parent_path IN ? AND file_type = ?", sessionID, paths, "directory").
+			Group("parent_path").
+			Find(&results)
+		for _, r := range results {
+			subDirCounts[r.ParentPath] = r.Cnt
+		}
+	}
+
 	nodes := make([]TreeNode, len(files))
 	for i, f := range files {
 		nodes[i] = TreeNode{
@@ -193,7 +215,7 @@ func (s *Server) getFileTree(c *gin.Context) {
 			FileType:     f.FileType,
 			ChildCount:   f.ChildCount,
 			Tagged:       f.Tagged,
-			IsLeaf:       f.FileType != "directory",
+			IsLeaf:       subDirCounts[f.OriginalPath] == 0,
 		}
 	}
 	c.JSON(http.StatusOK, nodes)
