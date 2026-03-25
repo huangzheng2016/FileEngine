@@ -51,7 +51,7 @@ files:
   fileName: 文件名
   fileType: 类型
   fileSize: 大小
-  fileDescription: AI 描述
+  fileDescription: 描述
   taggedStatus: 标记
   plannedPath: 规划路径
   detail: 文件详情
