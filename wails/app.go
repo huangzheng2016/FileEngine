@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
