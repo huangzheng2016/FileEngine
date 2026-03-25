@@ -195,6 +195,8 @@ logs:
   tokens: "{count} tokens"
   input: 输入
   output: 输出
+  expand: 展开
+  collapse: 收起
 
 language:
   zh: 中文
