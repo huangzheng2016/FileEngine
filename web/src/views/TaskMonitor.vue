@@ -90,7 +90,7 @@
         </el-form-item>
         <el-form-item :label="$t('models.selectModel')">
           <el-select v-model="newScan.modelProviderId" style="width: 100%" clearable :placeholder="$t('models.noModel')">
-            <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
+            <el-option v-for="m in modelProviders" :key="m.id" :label="`[${providerLabel(m.provider)}] ${m.name}`" :value="m.id">
               <span style="display: flex; align-items: center; gap: 6px">
                 <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ providerLabel(m.provider) }}</el-tag>
                 {{ m.name }} ({{ m.model }})
@@ -127,7 +127,7 @@
       <el-form label-position="top">
         <el-form-item :label="$t('models.selectModel')">
           <el-select v-model="sessionSettings.model_provider_id" style="width: 100%" clearable :placeholder="$t('models.noModel')">
-            <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
+            <el-option v-for="m in modelProviders" :key="m.id" :label="`[${providerLabel(m.provider)}] ${m.name}`" :value="m.id">
               <span style="display: flex; align-items: center; gap: 6px">
                 <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ providerLabel(m.provider) }}</el-tag>
                 {{ m.name }} ({{ m.model }})
