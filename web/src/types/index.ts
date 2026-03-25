@@ -53,6 +53,10 @@ export interface ScanSession {
   tagged_files: number
   planned_ops: number
   executed_ops: number
+  total_size: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
   allow_read_file: boolean
   allow_auto_category: boolean
   model_provider_id: number
@@ -82,7 +86,9 @@ export interface AgentLog {
   tool_input: string
   tool_output: string
   content: string
-  tokens_used: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
   created_at: string
 }
 

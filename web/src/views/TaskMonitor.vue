@@ -22,10 +22,15 @@
             <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('tasks.progress')" min-width="200">
+        <el-table-column :label="$t('tasks.progress')" min-width="280">
           <template #default="{ row }">
             <div style="font-size: 12px; color: #666">
-              {{ $t('tasks.totalFiles') }}: {{ row.total_files }} | {{ $t('tasks.taggedFiles') }}: {{ row.tagged_files }} | {{ $t('tasks.plannedOps') }}: {{ row.planned_ops }} | {{ $t('tasks.executedOps') }}: {{ row.executed_ops }}
+              {{ $t('tasks.totalFiles') }}: {{ row.total_files }} ({{ formatSize(row.total_size) }}) | {{ $t('tasks.taggedFiles') }}: {{ row.tagged_files }} | {{ $t('tasks.plannedOps') }}: {{ row.planned_ops }} | {{ $t('tasks.executedOps') }}: {{ row.executed_ops }}
+            </div>
+            <div v-if="row.total_tokens > 0" style="font-size: 12px; color: #999; margin-top: 2px">
+              Token: {{ row.prompt_tokens.toLocaleString() }}↑ {{ row.completion_tokens.toLocaleString() }}↓ = {{ row.total_tokens.toLocaleString() }}
+              <span v-if="row.total_files > 0"> | {{ (row.total_tokens / row.total_files).toFixed(0) }}/{{ $t('files.file') }}</span>
+              <span v-if="row.total_size > 0"> | {{ (row.total_tokens / (row.total_size / 1048576)).toFixed(0) }}/MB</span>
             </div>
             <el-progress v-if="row.total_files > 0"
               :percentage="Math.round((row.tagged_files / row.total_files) * 100)"
@@ -236,6 +241,14 @@ function openNewScanDialog() {
     modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : 0,
   }
   showNewDialog.value = true
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes) return '0'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0; let size = bytes
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
+  return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i]
 }
 
 function statusType(status: string): '' | 'success' | 'warning' | 'info' | 'danger' {

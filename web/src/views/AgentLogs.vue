@@ -54,7 +54,7 @@
               <el-tag :type="roleTagType(log.role)" size="small">{{ log.role }}</el-tag>
               <el-tag v-if="log.tool_name" size="small" type="warning">{{ log.tool_name }}</el-tag>
               <span style="font-size: 12px; color: #999">{{ $t('logs.batch', { index: log.batch_index }) }} | {{ formatTime(log.created_at) }}</span>
-              <span v-if="log.tokens_used" style="font-size: 12px; color: #999">{{ $t('logs.tokens', { count: log.tokens_used }) }}</span>
+              <span v-if="log.total_tokens" style="font-size: 12px; color: #999">{{ log.prompt_tokens }}↑ {{ log.completion_tokens }}↓ = {{ log.total_tokens }}</span>
             </div>
             <div v-if="log.content">
               <div style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; overflow: hidden"
@@ -109,7 +109,7 @@ let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LIVE_LOGS = 200
 
-const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.tokens_used || 0), 0))
+const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.total_tokens || 0), 0))
 // Batches always show newest first (descending)
 const displayBatches = computed(() => [...batches.value].reverse())
 

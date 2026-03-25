@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+
 	"gorm.io/gorm"
 )
 
@@ -72,10 +74,25 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 	r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND operation != ''", id).Count(&planned)
 	r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND executed = ?", id, true).Count(&executed)
 
+	var totalSize sql.NullInt64
+	r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).Select("COALESCE(SUM(size), 0)").Scan(&totalSize)
+
+	var promptTokens, completionTokens, totalTokens sql.NullInt64
+	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
+		Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&promptTokens)
+	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
+		Select("COALESCE(SUM(completion_tokens), 0)").Scan(&completionTokens)
+	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
+		Select("COALESCE(SUM(total_tokens), 0)").Scan(&totalTokens)
+
 	session.TotalFiles = int(total)
 	session.TaggedFiles = int(tagged)
 	session.PlannedOps = int(planned)
 	session.ExecutedOps = int(executed)
+	session.TotalSize = totalSize.Int64
+	session.PromptTokens = int(promptTokens.Int64)
+	session.CompletionTokens = int(completionTokens.Int64)
+	session.TotalTokens = int(totalTokens.Int64)
 	return r.db.Save(&session).Error
 }
 

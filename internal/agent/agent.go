@@ -227,7 +227,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		workerLogger.SetBatch(int(batchIdx))
 
 		userMsg := buildDirectoryPrompt(dir)
-		workerLogger.LogMessage("user", userMsg, 0)
+		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
 			{Role: schema.System, Content: systemPrompt},
@@ -237,12 +237,13 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		result, err := agentInst.Generate(ctx, messages)
 		if err != nil {
 			log.Printf("worker %d batch %d error: %v", workerID, batchIdx, err)
-			workerLogger.LogMessage("system", fmt.Sprintf("Error: %v", err), 0)
+			workerLogger.LogMessage("system", fmt.Sprintf("Error: %v", err), 0, 0, 0)
 			continue
 		}
 
 		if result != nil {
-			workerLogger.LogMessage("assistant", result.Content, 0)
+			pt, ct, tt := extractTokenUsage(result)
+			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
 		}
 	}
 }
@@ -308,7 +309,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 		workerLogger.SetBatch(int(batchIdx))
 
 		userMsg := buildBatchPrompt(files)
-		workerLogger.LogMessage("user", userMsg, 0)
+		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
 			{Role: schema.System, Content: systemPrompt},
@@ -321,10 +322,20 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			continue
 		}
 		if result != nil {
-			workerLogger.LogMessage("assistant", result.Content, 0)
+			pt, ct, tt := extractTokenUsage(result)
+			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
 		}
 		_ = a.repo.RefreshSessionCounts(a.sessionID)
 	}
+}
+
+// extractTokenUsage extracts prompt/completion/total tokens from a message's ResponseMeta.
+func extractTokenUsage(msg *schema.Message) (prompt, completion, total int) {
+	if msg == nil || msg.ResponseMeta == nil || msg.ResponseMeta.Usage == nil {
+		return 0, 0, 0
+	}
+	u := msg.ResponseMeta.Usage
+	return u.PromptTokens, u.CompletionTokens, u.TotalTokens
 }
 
 func buildDirectoryPrompt(dir db.FileEntry) string {
