@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 
@@ -149,11 +148,11 @@ func (s *Server) testModelProvider(c *gin.Context) {
 			}
 		}
 	}
-	cfg := config.ModelConfig{
+	testProvider := &db.ModelProvider{
 		Provider: req.Provider, APIKey: apiKey, Model: req.Model,
 		BaseURL: req.BaseURL, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 	}
-	_, err := modelfactory.NewChatModel(context.Background(), cfg)
+	_, err := modelfactory.NewChatModelFromProvider(context.Background(), testProvider)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return

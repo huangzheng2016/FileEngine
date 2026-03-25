@@ -96,7 +96,7 @@ func (s *Server) createSession(c *gin.Context) {
 		Protocol:          filesystem.Protocol,
 		Status:            "scanning",
 		AllowReadFile:     true,
-		AllowAutoCategory: config.Get().Agent.AllowAutoCategory,
+		AllowAutoCategory: false,
 		ModelProviderID:   req.ModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {

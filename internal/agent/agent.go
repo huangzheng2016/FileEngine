@@ -24,6 +24,7 @@ type Agent struct {
 	fsCfg         config.RemoteFSConfig
 	cfg           *config.Config
 	modelProvider *db.ModelProvider
+	session       *db.ScanSession
 	logger        *Logger
 	sessionID     uint
 
@@ -32,12 +33,13 @@ type Agent struct {
 	cancelFn context.CancelFunc
 }
 
-func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint, modelProvider *db.ModelProvider) *Agent {
+func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint, modelProvider *db.ModelProvider, session *db.ScanSession) *Agent {
 	return &Agent{
 		repo:          repo,
 		fsCfg:         fsCfg,
 		cfg:           cfg,
 		modelProvider: modelProvider,
+		session:       session,
 		sessionID:     sessionID,
 		logger:        NewLogger(repo, sessionID),
 	}
@@ -92,11 +94,7 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 
 	// Build LLM model (shared across workers, thread-safe)
 	var chatModel einomodel.ChatModel
-	if a.modelProvider != nil {
-		chatModel, err = modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
-	} else {
-		chatModel, err = modelfactory.NewChatModel(ctx, a.cfg.Model)
-	}
+	chatModel, err = modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
 	if err != nil {
 		return fmt.Errorf("create model: %w", err)
 	}
@@ -190,7 +188,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 
 	// Each worker gets its own logger and agent
 	workerLogger := NewLogger(a.repo, a.sessionID)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		log.Printf("worker %d: failed to build tools: %v", workerID, err)
@@ -269,7 +267,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 	defer workerFS.Close()
 
 	workerLogger := NewLogger(a.repo, a.sessionID)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		return

@@ -4,18 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 
 	"github.com/cloudwego/eino/components/model"
 	claude "github.com/cloudwego/eino-ext/components/model/claude"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 )
-
-// NewChatModel creates a model from global config (for testing).
-func NewChatModel(ctx context.Context, cfg config.ModelConfig) (model.ChatModel, error) {
-	return newModel(ctx, cfg.Provider, cfg.APIKey, cfg.Model, cfg.BaseURL, cfg.Temperature, cfg.MaxTokens)
-}
 
 // NewChatModelFromProvider creates a model from a DB ModelProvider entity.
 func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
