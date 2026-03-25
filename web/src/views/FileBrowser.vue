@@ -192,9 +192,6 @@
           <el-form-item :label="$t('files.plannedPath')">
             <el-input v-model="editFile.new_path" :placeholder="$t('files.newPathPlaceholder')" />
           </el-form-item>
-          <el-form-item :label="$t('files.versionPlaceholder')">
-            <el-input v-model="editFile.version" :placeholder="$t('files.versionPlaceholder')" />
-          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="saveEditFile">{{ $t('files.saveChanges') }}</el-button>
           </el-form-item>
@@ -322,7 +319,6 @@ async function saveEditFile() {
   await updateFile(editFile.value.id, {
     description: editFile.value.description,
     new_path: editFile.value.new_path,
-    version: editFile.value.version,
   })
   ElMessage.success(t('common.saved'))
   editVisible.value = false

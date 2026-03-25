@@ -19,7 +19,6 @@ type FileEntry struct {
 	Permissions   string    `gorm:"size:16" json:"permissions"`
 	FileType      string    `gorm:"size:16;index:idx_session_type_tagged_depth,priority:2;index:idx_session_parent,priority:3" json:"file_type"` // "file" / "directory" / "symlink"
 	Description   string    `gorm:"type:text" json:"description"`
-	Version       string    `gorm:"size:128" json:"version"`
 	Tagged        bool      `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3;index:idx_session_parent,priority:4" json:"tagged"`
 	ParentPath    string    `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
 	Depth         int       `gorm:"index:idx_session_type_tagged_depth,priority:4" json:"depth"`

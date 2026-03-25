@@ -63,7 +63,6 @@ files:
   depth: Depth
   descriptionPlaceholder: Enter description...
   newPathPlaceholder: New path
-  versionPlaceholder: Version
   preview: Preview
   previewTitle: File Preview
   previewNotSupported: Preview not supported for this file type

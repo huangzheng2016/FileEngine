@@ -11,7 +11,6 @@ export interface FileEntry {
   permissions: string
   file_type: string
   description: string
-  version: string
   tagged: boolean
   parent_path: string
   depth: number
