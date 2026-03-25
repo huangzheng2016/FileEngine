@@ -121,10 +121,10 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-pagination v-if="total > pageSize" style="margin-top: 12px; justify-content: center"
-          layout="total, prev, pager, next" :total="total" :page-size="pageSize"
-          v-model:current-page="page" @current-change="loadFiles" />
       </el-card>
+      <el-pagination v-if="total > pageSize" style="justify-content: center; flex-shrink: 0"
+        layout="total, prev, pager, next" :total="total" :page-size="pageSize"
+        v-model:current-page="page" @current-change="loadFiles" />
     </div>
 
     <!-- Category CRUD dialog -->
