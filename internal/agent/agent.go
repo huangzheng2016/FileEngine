@@ -177,6 +177,80 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 	return a.repo.UpdateSession(session)
 }
 
+// RunInstruct executes a single agent call with user-selected files and a custom prompt.
+// Returns the assistant's response content.
+func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
+	chatModel, err := modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
+	if err != nil {
+		return "", fmt.Errorf("create model: %w", err)
+	}
+
+	workerFS, err := remotefs.NewFromConfig(a.fsCfg)
+	if err != nil {
+		return "", fmt.Errorf("connect fs: %w", err)
+	}
+	defer workerFS.Close()
+
+	filesystemID := a.session.FilesystemID
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, a.cfg.Agent, a.session)
+	tools, err := toolBuilder.BuildInstructTools()
+	if err != nil {
+		return "", fmt.Errorf("build tools: %w", err)
+	}
+
+	agentInst, err := react.NewAgent(ctx, &react.AgentConfig{
+		Model:       chatModel,
+		ToolsConfig: compose.ToolsNodeConfig{Tools: tools},
+		MaxStep:     30,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create agent: %w", err)
+	}
+
+	// Build message with file context
+	var sb strings.Builder
+	sb.WriteString("用户选择了以下文件/目录，请根据用户指令进行操作：\n\n")
+	for _, f := range files {
+		sb.WriteString(fmt.Sprintf("- %s (%s, %d bytes)", f.OriginalPath, f.FileType, f.Size))
+		if f.Description != "" {
+			sb.WriteString(fmt.Sprintf(" [描述: %s]", f.Description))
+		}
+		if f.NewPath != "" {
+			sb.WriteString(fmt.Sprintf(" [目标: %s]", f.NewPath))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("\n用户指令: %s\n", userPrompt))
+	sb.WriteString("\n请使用工具执行用户的指令。可以修改描述(update_description)、设置目标路径(set_target)、查看分类(list_categories)、创建分类(create_category)。")
+
+	a.logger.SetBatch(-1)
+	userMsg := sb.String()
+	a.logger.LogMessage("user", userMsg, 0, 0, 0)
+
+	systemPrompt := "你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。"
+
+	messages := []*schema.Message{
+		{Role: schema.System, Content: systemPrompt},
+		{Role: schema.User, Content: userMsg},
+	}
+
+	result, err := agentInst.Generate(ctx, messages)
+	if err != nil {
+		a.logger.LogMessage("system", fmt.Sprintf("Error: %v", err), 0, 0, 0)
+		return "", err
+	}
+
+	response := ""
+	if result != nil {
+		pt, ct, tt := extractTokenUsage(result)
+		a.logger.LogMessage("assistant", result.Content, pt, ct, tt)
+		response = result.Content
+	}
+
+	_ = a.repo.RefreshSessionCounts(a.sessionID)
+	return response, nil
+}
+
 func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.FileEntry, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
 	// Each worker gets its own FS connection
 	workerFS, err := remotefs.NewFromConfig(a.fsCfg)

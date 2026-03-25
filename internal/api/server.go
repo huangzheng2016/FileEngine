@@ -45,6 +45,7 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/tag", s.startTagging)
 		api.POST("/sessions/:id/tag/stop", s.stopTagging)
 		api.GET("/sessions/:id/tag/status", s.tagStatus)
+		api.POST("/sessions/:id/instruct", s.instructAgent)
 		api.POST("/sessions/:id/execute", s.startExecute)
 		api.POST("/sessions/:id/execute/stop", s.stopExecute)
 		api.GET("/sessions/:id/execute/status", s.executeStatus)

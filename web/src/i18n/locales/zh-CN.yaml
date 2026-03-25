@@ -65,6 +65,12 @@ files:
   newPathPlaceholder: 新路径
   preview: 预览
   previewTitle: 文件预览
+  instruct: AI 指令
+  instructTitle: AI 批量操作
+  instructPrompt: 输入指令（如：把这些文件移到软件分类、修改描述为...）
+  instructSelected: "已选择 {count} 个文件"
+  instructRunning: 执行中...
+  instructDone: AI 指令执行完成
   previewNotSupported: 该文件类型不支持预览
   previewTooLarge: 文件过大，不支持预览（最大 1MB）
   previewLoading: 加载中...

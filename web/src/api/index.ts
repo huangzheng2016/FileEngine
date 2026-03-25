@@ -29,6 +29,9 @@ export const rescanSession = (id: number) =>
 export const startTagging = (id: number) =>
   api.post(`/sessions/${id}/tag`)
 
+export const instructAgent = (id: number, fileIds: number[], prompt: string) =>
+  api.post(`/sessions/${id}/instruct`, { file_ids: fileIds, prompt })
+
 export const stopTagging = (id: number) =>
   api.post(`/sessions/${id}/tag/stop`)
 
