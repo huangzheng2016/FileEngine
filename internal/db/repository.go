@@ -269,6 +269,21 @@ func (r *Repository) UpdateCategory(c *Category) error {
 	return r.db.Save(c).Error
 }
 
+// UpdateCategoryPath updates the category and cascades the path change to all files
+// whose new_path starts with the old path prefix.
+func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
+	if err := r.db.Save(c).Error; err != nil {
+		return err
+	}
+	if oldPath != "" && oldPath != c.Path {
+		// Update all files whose new_path starts with oldPath
+		return r.db.Model(&FileEntry{}).
+			Where("new_path LIKE ?", oldPath+"%").
+			Update("new_path", gorm.Expr("REPLACE(new_path, ?, ?)", oldPath, c.Path)).Error
+	}
+	return nil
+}
+
 func (r *Repository) DeleteCategory(id uint) error {
 	return r.db.Delete(&Category{}, id).Error
 }
