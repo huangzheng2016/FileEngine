@@ -13,7 +13,7 @@
       <!-- Filesystem selector -->
       <el-card>
         <el-select v-model="selectedFsId" :placeholder="$t('files.selectFs')" style="width: 100%" @change="onFsChange">
-          <el-option v-for="fs in filesystems" :key="fs.id" :label="fs.name" :value="fs.id">
+          <el-option v-for="fs in filesystems" :key="fs.id" :label="`[${fs.protocol.toUpperCase()}] ${fs.name}`" :value="fs.id">
             <span style="display: flex; align-items: center; gap: 6px">
               <el-tag :type="protocolTagType(fs.protocol)" size="small" effect="dark" style="width: 48px; text-align: center">{{ fs.protocol.toUpperCase() }}</el-tag>
               {{ fs.name }}
