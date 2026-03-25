@@ -137,6 +137,8 @@ tasks:
   allowReadFileHint: Agent can read file contents for analysis
   allowAutoCategory: Allow Auto-Create Categories
   allowAutoCategoryHint: Agent can create new categories automatically
+  excludeCategoryDirs: Exclude Category Dirs
+  excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files
   settingsSaved: Session settings saved
   status_scanning: Scanning
   status_scanned: Scanned

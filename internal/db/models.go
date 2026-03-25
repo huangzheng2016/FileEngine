@@ -81,9 +81,10 @@ type ScanSession struct {
 	PromptTokens      int       `json:"prompt_tokens"`
 	CompletionTokens  int       `json:"completion_tokens"`
 	TotalTokens       int       `json:"total_tokens"`
-	AllowReadFile     bool      `gorm:"default:true" json:"allow_read_file"`
-	AllowAutoCategory bool      `gorm:"default:false" json:"allow_auto_category"`
-	ModelProviderID   uint      `gorm:"index" json:"model_provider_id"`
+	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
+	AllowAutoCategory   bool      `gorm:"default:false" json:"allow_auto_category"`
+	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
+	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }

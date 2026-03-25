@@ -59,6 +59,7 @@ export interface ScanSession {
   total_tokens: number
   allow_read_file: boolean
   allow_auto_category: boolean
+  exclude_category_dirs: boolean
   model_provider_id: number
   created_at: string
   updated_at: string

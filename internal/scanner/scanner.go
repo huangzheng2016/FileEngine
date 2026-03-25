@@ -12,12 +12,21 @@ import (
 )
 
 type Scanner struct {
-	fs   remotefs.RemoteFS
-	repo *db.Repository
+	fs           remotefs.RemoteFS
+	repo         *db.Repository
+	excludePaths []string
 }
 
-func New(fs remotefs.RemoteFS, repo *db.Repository) *Scanner {
-	return &Scanner{fs: fs, repo: repo}
+func New(fs remotefs.RemoteFS, repo *db.Repository, excludePaths []string) *Scanner {
+	// Normalize exclude paths: ensure they have clean trailing format
+	normalized := make([]string, 0, len(excludePaths))
+	for _, p := range excludePaths {
+		p = path.Clean(p)
+		if p != "" && p != "." {
+			normalized = append(normalized, p)
+		}
+	}
+	return &Scanner{fs: fs, repo: repo, excludePaths: normalized}
 }
 
 func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
@@ -67,6 +76,11 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 		entryPath := entry.Path
 		if !path.IsAbs(entryPath) {
 			entryPath = path.Join(currentPath, entry.Name)
+		}
+
+		// Skip excluded category directories and all their contents
+		if entry.IsDir && s.isExcluded(entryPath) {
+			continue
 		}
 
 		relDepth := depth
@@ -126,4 +140,15 @@ func (s *Scanner) updateChildCounts(sessionID uint, files []db.FileEntry) {
 			rootCount++
 		}
 	}
+}
+
+// isExcluded checks if a path matches any excluded category path.
+func (s *Scanner) isExcluded(entryPath string) bool {
+	cleaned := path.Clean(entryPath)
+	for _, ep := range s.excludePaths {
+		if cleaned == ep || strings.HasPrefix(cleaned, ep+"/") {
+			return true
+		}
+	}
+	return false
 }

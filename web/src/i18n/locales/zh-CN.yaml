@@ -137,6 +137,8 @@ tasks:
   allowReadFileHint: Agent 可以读取文件内容进行分析
   allowAutoCategory: 允许自动创建分类
   allowAutoCategoryHint: Agent 遇到无法归类的文件时可自动新建分类
+  excludeCategoryDirs: 排除分类目录
+  excludeCategoryDirsHint: 扫描时跳过已有分类的目标目录，避免重复处理已整理的文件
   settingsSaved: 会话设置已保存
   status_scanning: 扫描中
   status_scanned: 已扫描
