@@ -103,6 +103,19 @@ type CategoryItem struct {
 	Description string `json:"description"`
 }
 
+type ListCategoryFilesInput struct {
+	CategoryPath string `json:"category_path" jsonschema_description:"Category path to list files from (the new_path prefix)"`
+	Offset       int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
+	Limit        int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
+}
+
+type ListCategoryFilesOutput struct {
+	Files  []FileItem `json:"files"`
+	Total  int64      `json:"total"`
+	Offset int        `json:"offset"`
+	Limit  int        `json:"limit"`
+}
+
 type SetTargetInput struct {
 	Path    string `json:"path" jsonschema_description:"Original path of the file/directory"`
 	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder"`
@@ -184,7 +197,12 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build set_target: %w", err)
 	}
 
-	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, setTarget}
+	listCatFiles, err := utils.InferTool("list_category_files", "列出某个分类下已规划的文件，支持 offset+limit 分页。用于了解分类现状以做重构决策", tb.listCategoryFiles)
+	if err != nil {
+		return nil, fmt.Errorf("build list_category_files: %w", err)
+	}
+
+	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, listCatFiles, setTarget}
 
 	if tb.session.AllowReadFile {
 		allTools = append(allTools, readFile)
@@ -215,7 +233,11 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	allTools := []tool.BaseTool{updateDesc, setTarget, listCats}
+	listCatFiles, err := utils.InferTool("list_category_files", "列出某个分类下已规划的文件", tb.listCategoryFiles)
+	if err != nil {
+		return nil, err
+	}
+	allTools := []tool.BaseTool{updateDesc, setTarget, listCats, listCatFiles}
 	if tb.session.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
 		if err != nil {
@@ -399,6 +421,46 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 
 	out := &ListCategoriesOutput{Categories: items}
 	tb.logger.LogToolCall("list_categories", input, out)
+	return out, nil
+}
+
+func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategoryFilesInput) (*ListCategoryFilesOutput, error) {
+	tb.logger.LogToolCall("list_category_files", input, nil)
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 300
+	}
+	offset := input.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	page := (offset / limit) + 1
+	categoryPath := input.CategoryPath
+	q := db.FileQuery{
+		SessionID:    tb.sessionID,
+		CategoryPath: &categoryPath,
+		Page:         page,
+		PageSize:     limit,
+	}
+
+	files, total, err := tb.repo.ListFiles(q)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]FileItem, len(files))
+	for i, f := range files {
+		items[i] = FileItem{
+			ID: f.ID, OriginalPath: f.OriginalPath, Name: f.Name,
+			Size: f.Size, FileType: f.FileType, Description: f.Description,
+			Tagged: f.Tagged, NewPath: f.NewPath, ChildCount: f.ChildCount,
+		}
+	}
+
+	out := &ListCategoryFilesOutput{Files: items, Total: total, Offset: offset, Limit: limit}
+	tb.logger.LogToolCall("list_category_files", input, out)
 	return out, nil
 }
 
