@@ -84,6 +84,8 @@ type ScanSession struct {
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory   bool      `gorm:"default:false" json:"allow_auto_category"`
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
+	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
+	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`

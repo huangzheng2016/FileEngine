@@ -139,6 +139,12 @@ tasks:
   allowAutoCategoryHint: Agent can create new categories automatically
   excludeCategoryDirs: Exclude Category Dirs
   excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files
+  filterMode: Directory Filter Mode
+  filterBlacklist: Blacklist
+  filterWhitelist: Whitelist
+  filterDirs: Filter Directories
+  filterDirsHint: One directory per line. Blacklist skips these, whitelist scans only these
+  filterDirsPlaceholder: "/backup\n/temp\n/archive"
   settingsSaved: Session settings saved
   status_scanning: Scanning
   status_scanned: Scanned
