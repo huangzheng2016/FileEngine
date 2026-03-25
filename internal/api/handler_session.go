@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -45,6 +46,7 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 
 		fs, err := remotefs.NewFromConfig(fsCfg)
 		if err != nil {
+			log.Printf("scan session %d: connect fs failed: %v", session.ID, err)
 			session.Status = "error: " + err.Error()
 			s.repo.UpdateSession(session)
 			return
@@ -52,6 +54,7 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 		defer fs.Close()
 		sc := scanner.New(fs, s.repo)
 		if err := sc.Scan(ctx, session); err != nil {
+			log.Printf("scan session %d failed: %v", session.ID, err)
 			session.Status = "error: " + err.Error()
 			s.repo.UpdateSession(session)
 		}
