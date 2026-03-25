@@ -1,30 +1,16 @@
 package main
 
 import (
-	"context"
-	"crypto/rand"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"log"
-	"math/big"
-	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
-	"os/exec"
-	"path/filepath"
-	goRuntime "runtime"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed bin/backend.bin
