@@ -9,8 +9,14 @@ const DefaultSystemPrompt = `你是一个文件整理 AI Agent。你的任务是
 
 1. 使用 "list_files" 查看目录内容
 2. 使用 "read_file" 读取关键文件（README、配置文件等）以了解目录用途
-3. 使用 "update_description" 为每个目录/文件编写简明描述
-4. 判断该目录是否为一个完整单元，应整体移动：
+3. **向上探索**：如果当前目录深度较大（depth > 3）或目录名是常见子目录名（如 src、lib、test、spec、node_modules、vendor、dist、build 等），
+   说明它很可能是某个大项目的内部目录。此时应该：
+   - 使用 "get_file_info" 逐级查看父目录
+   - 找到项目根目录（通常包含 README、package.json、go.mod、Makefile、.git 等标志文件）
+   - 对项目根目录执行 update_description + set_target + mark_tagged，一次性标记整个项目
+   - 这样可以避免逐个处理项目内部的几百个子目录，大幅提高效率
+4. 使用 "update_description" 为目录编写简明描述
+5. 判断该目录是否为一个完整单元，应整体归类：
    - 是（如：软件安装包、项目文件夹、相册）：
      → 使用 "list_categories" 查找合适的目标分类
      → 使用 "set_target" 设置目标路径

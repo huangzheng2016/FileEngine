@@ -329,23 +329,27 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 
 func buildDirectoryPrompt(dir db.FileEntry) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Analyze the following directory:\n\n"))
-	sb.WriteString(fmt.Sprintf("Path: %s\n", dir.OriginalPath))
-	sb.WriteString(fmt.Sprintf("Type: %s | Size: %d | Children: %d | Depth: %d\n", dir.FileType, dir.Size, dir.ChildCount, dir.Depth))
+	sb.WriteString("分析以下目录：\n\n")
+	sb.WriteString(fmt.Sprintf("路径: %s\n", dir.OriginalPath))
+	sb.WriteString(fmt.Sprintf("类型: %s | 大小: %d | 子项数: %d | 深度: %d\n", dir.FileType, dir.Size, dir.ChildCount, dir.Depth))
 	if dir.Description != "" {
-		sb.WriteString(fmt.Sprintf("Current description: %s\n", dir.Description))
+		sb.WriteString(fmt.Sprintf("当前描述: %s\n", dir.Description))
 	}
-	sb.WriteString(fmt.Sprintf("\nSteps:\n"))
-	sb.WriteString(fmt.Sprintf("1. Use list_files(parent_path=\"%s\") to see its contents\n", dir.OriginalPath))
-	sb.WriteString("2. Read important files (README, config, etc.) to understand the purpose\n")
-	sb.WriteString("3. If unclear, use list_files with the PARENT directory to see sibling context\n")
-	sb.WriteString("4. You may continue exploring upward (grandparent, etc.) for more context\n")
-	sb.WriteString("5. Write a description using update_description\n")
-	sb.WriteString("6. If this is a coherent unit (project, installer, album, etc.):\n")
-	sb.WriteString("   -> Use list_categories to find the right target\n")
-	sb.WriteString("   -> Use plan_move to set the destination\n")
-	sb.WriteString("   -> Use mark_tagged to mark it (all children are automatically tagged)\n")
-	sb.WriteString("7. If it contains mixed content, describe it but do NOT mark_tagged\n")
+	if dir.ParentPath != "" {
+		sb.WriteString(fmt.Sprintf("父目录: %s\n", dir.ParentPath))
+	}
+	sb.WriteString("\n操作步骤：\n")
+	sb.WriteString(fmt.Sprintf("1. 使用 list_files(parent_path=\"%s\") 查看目录内容\n", dir.OriginalPath))
+	sb.WriteString("2. 读取关键文件（README、配置文件等）了解用途\n")
+	sb.WriteString("3. **重要**：如果路径很深或目录名看起来是某个大项目的子目录（如 node_modules、src、lib、spec、test 等），\n")
+	sb.WriteString("   请使用 get_file_info 向上逐级查看父目录，找到项目根目录（通常包含 README、package.json、go.mod 等）\n")
+	sb.WriteString("   然后对项目根目录执行 update_description + set_target + mark_tagged，一次性标记整个项目\n")
+	sb.WriteString("4. 使用 update_description 写描述\n")
+	sb.WriteString("5. 如果是完整单元（项目、安装包、相册等）：\n")
+	sb.WriteString("   → 使用 list_categories 查找目标分类\n")
+	sb.WriteString("   → 使用 set_target 设置目标路径\n")
+	sb.WriteString("   → 使用 mark_tagged 标记（所有子项自动标记）\n")
+	sb.WriteString("6. 如果内容混杂，仅描述，不要 mark_tagged\n")
 	return sb.String()
 }
 
