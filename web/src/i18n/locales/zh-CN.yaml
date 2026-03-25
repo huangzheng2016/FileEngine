@@ -163,6 +163,8 @@ config:
     concurrency: 并发数
     maxFileReadSize: 最大文件读取大小
     maxRetries: 最大重试次数
+    allowAutoCategory: 允许自动创建分类
+    allowAutoCategoryHint: 开启后 Agent 遇到无法归类的文件时可自动新建分类
   prompt:
     customLabel: 自定义
     defaultLabel: 默认

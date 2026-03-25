@@ -28,6 +28,7 @@
           </el-form-item>
           <el-form-item>
             <el-button type="success" @click="handleTestModel" :loading="testingModel">{{ $t('config.model.testModel') }}</el-button>
+            <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -42,6 +43,9 @@
           </el-form-item>
           <el-form-item :label="$t('config.database.dsn')">
             <el-input v-model="config.database.dsn" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -60,6 +64,13 @@
           <el-form-item :label="$t('config.agent.maxRetries')">
             <el-input-number v-model="config.agent.max_retries" :min="0" :max="10" />
           </el-form-item>
+          <el-form-item :label="$t('config.agent.allowAutoCategory')">
+            <el-switch v-model="config.agent.allow_auto_category" />
+            <span style="margin-left: 8px; font-size: 12px; color: #909399">{{ $t('config.agent.allowAutoCategoryHint') }}</span>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
+          </el-form-item>
         </el-form>
       </el-tab-pane>
 
@@ -74,13 +85,7 @@
               {{ $t('config.prompt.resetDefault') }}
             </el-button>
           </div>
-          <el-input
-            v-model="promptText"
-            type="textarea"
-            :rows="20"
-            :placeholder="$t('config.prompt.placeholder')"
-            style="font-family: monospace; font-size: 13px"
-          />
+          <div ref="editorContainer" style="border: 1px solid #dcdfe6; border-radius: 4px; overflow: hidden; min-height: 400px"></div>
           <div style="margin-top: 12px; text-align: right">
             <el-button type="primary" @click="handleSavePrompt" :loading="savingPrompt">
               {{ $t('config.prompt.savePrompt') }}
@@ -89,19 +94,19 @@
         </div>
       </el-tab-pane>
     </el-tabs>
-
-    <div style="margin-top: 20px; text-align: right">
-      <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
-    </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getConfig, updateConfig, testModel, getPrompt, updatePrompt } from '../api'
 import type { Config } from '../types'
 import { ElMessage } from 'element-plus'
+import { EditorView, basicSetup } from 'codemirror'
+import { markdown } from '@codemirror/lang-markdown'
+import { oneDark } from '@codemirror/theme-one-dark'
+import { EditorState } from '@codemirror/state'
 
 const { t } = useI18n()
 const activeTab = ref('model')
@@ -111,12 +116,36 @@ const savingPrompt = ref(false)
 const promptText = ref('')
 const promptDefault = ref('')
 const promptCustom = ref(false)
+const editorContainer = ref<HTMLElement>()
+let editorView: EditorView | null = null
+
+function initEditor(content: string) {
+  if (editorView) editorView.destroy()
+  if (!editorContainer.value) return
+  editorView = new EditorView({
+    state: EditorState.create({
+      doc: content,
+      extensions: [
+        basicSetup,
+        markdown(),
+        oneDark,
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            promptText.value = update.state.doc.toString()
+          }
+        }),
+      ],
+    }),
+    parent: editorContainer.value,
+  })
+}
 
 const config = reactive<Config>({
   server: { port: 8080, host: '0.0.0.0' },
   database: { driver: 'sqlite', dsn: 'fileengine.db' },
   model: { provider: 'openai', api_key: '', model: 'gpt-4o', base_url: '', temperature: 0.1, max_tokens: 4096 },
-  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3 },
+  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3, allow_auto_category: false },
 })
 
 onMounted(async () => {
@@ -127,6 +156,8 @@ onMounted(async () => {
     promptText.value = pRes.data.prompt
     promptDefault.value = pRes.data.default_prompt
     promptCustom.value = pRes.data.is_custom
+    await nextTick()
+    initEditor(promptText.value)
   } catch { /* ignore */ }
 })
 
@@ -171,5 +202,6 @@ async function handleSavePrompt() {
 function handleResetPrompt() {
   promptText.value = promptDefault.value
   promptCustom.value = false
+  initEditor(promptDefault.value)
 }
 </script>
