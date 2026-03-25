@@ -135,6 +135,13 @@ func (s *Server) startExecute(c *gin.Context) {
 		return
 	}
 
+	// mode: "copy" (default) or "move"
+	mode := c.DefaultQuery("mode", "copy")
+	if mode != "copy" && mode != "move" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'copy' or 'move'"})
+		return
+	}
+
 	sessionID := uint(id)
 	session, err := s.repo.GetSession(sessionID)
 	if err != nil {
@@ -168,7 +175,7 @@ func (s *Server) startExecute(c *gin.Context) {
 
 	go func() {
 		defer fs.Close()
-		if err := e.Execute(context.Background(), sessionID); err != nil {
+		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "executing" {
 				session.Status = "error: " + err.Error()
