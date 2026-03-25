@@ -91,6 +91,15 @@ func (s *Server) createFilesystem(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Auto-create default "未分类" category
+	_ = s.repo.CreateCategory(&db.Category{
+		FilesystemID: fs.ID,
+		Name:         "未分类",
+		Path:         "/uncategorized",
+		Description:  "Files that don't fit any other category",
+	})
+
 	c.JSON(http.StatusCreated, toFilesystemResponse(fs))
 }
 
