@@ -12,6 +12,10 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
 // ============ ScanSession ============
 
 func (r *Repository) CreateSession(s *ScanSession) error {
@@ -220,8 +224,8 @@ func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
 
 func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]FileEntry, error) {
 	var files []FileEntry
-	err := r.db.Where("scan_session_id = ? AND parent_path = ?", sessionID, parentPath).
-		Order("file_type ASC, name ASC").
+	err := r.db.Where("scan_session_id = ? AND parent_path = ? AND file_type = ?", sessionID, parentPath, "directory").
+		Order("name ASC").
 		Find(&files).Error
 	return files, err
 }

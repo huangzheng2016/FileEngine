@@ -8,7 +8,11 @@
     </template>
     <el-table :data="filesystems" style="width: 100%">
       <el-table-column prop="name" :label="$t('common.name')" width="160" />
-      <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="100" />
+      <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="100">
+        <template #default="{ row }">
+          <el-tag :type="protocolTagType(row.protocol)" size="small" effect="dark">{{ row.protocol.toUpperCase() }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="base_path" :label="$t('filesystems.basePath')" width="250" show-overflow-tooltip />
       <el-table-column prop="host" :label="$t('filesystems.host')" width="160" />
       <el-table-column prop="description" :label="$t('common.description')" min-width="250" show-overflow-tooltip />
@@ -97,6 +101,13 @@ watch(() => form.value.protocol, (protocol, oldProtocol) => {
     form.value.port = defaultPorts[protocol] ?? 0
   }
 })
+
+function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
+    local: 'info', sftp: 'success', ftp: '', smb: 'warning', nfs: 'danger'
+  }
+  return map[protocol] || 'info'
+}
 
 async function load() {
   const res = await listFilesystems()
