@@ -183,8 +183,8 @@ config:
     dsn: 连接字符串
 
   agent:
-    batchSize: 批处理大小
-    concurrency: 并发数
+    batchSize: 散文件每批数量
+    concurrency: 目录并行工作线程
     maxFileReadSize: 最大文件读取大小
     maxRetries: 最大重试次数
     allowAutoCategory: 允许自动创建分类
