@@ -88,6 +88,16 @@
         <el-form-item :label="$t('tasks.scanPath')">
           <el-input v-model="newScan.scanPath" :placeholder="$t('tasks.scanPathHint')" />
         </el-form-item>
+        <el-form-item :label="$t('models.selectModel')">
+          <el-select v-model="newScan.modelProviderId" style="width: 100%" clearable :placeholder="$t('models.noModel')">
+            <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
+              <span style="display: flex; align-items: center; gap: 6px">
+                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ m.provider }}</el-tag>
+                {{ m.name }} ({{ m.model }})
+              </span>
+            </el-option>
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showNewDialog = false">{{ $t('common.cancel') }}</el-button>
@@ -115,6 +125,16 @@
     <!-- Session settings dialog -->
     <el-dialog v-model="settingsVisible" :title="$t('tasks.settings')" width="420px">
       <el-form label-position="top">
+        <el-form-item :label="$t('models.selectModel')">
+          <el-select v-model="sessionSettings.model_provider_id" style="width: 100%" clearable :placeholder="$t('models.noModel')">
+            <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
+              <span style="display: flex; align-items: center; gap: 6px">
+                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ m.provider }}</el-tag>
+                {{ m.name }} ({{ m.model }})
+              </span>
+            </el-option>
+          </el-select>
+        </el-form-item>
         <el-form-item :label="$t('tasks.allowReadFile')">
           <el-switch v-model="sessionSettings.allow_read_file" />
           <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('tasks.allowReadFileHint') }}</p>
@@ -135,29 +155,31 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listSessions, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, listFilesystems } from '../api'
-import type { ScanSession, PlanItem, Filesystem } from '../types'
+import { listSessions, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, listFilesystems, listModelProviders } from '../api'
+import type { ScanSession, PlanItem, Filesystem, ModelProvider } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
 const sessions = ref<ScanSession[]>([])
 const filesystems = ref<Filesystem[]>([])
+const modelProviders = ref<ModelProvider[]>([])
 const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
-const newScan = ref({ filesystemId: 0, scanPath: '' })
+const newScan = ref({ filesystemId: 0, scanPath: '', modelProviderId: 0 })
 const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
 const settingsSessionId = ref(0)
-const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false })
+const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, model_provider_id: 0 })
 
 let timer: ReturnType<typeof setInterval>
 
 onMounted(() => {
   load()
   loadFilesystems()
+  loadModelProviders()
   timer = setInterval(load, 5000)
 })
 
@@ -171,6 +193,18 @@ async function load() {
 async function loadFilesystems() {
   const res = await listFilesystems()
   filesystems.value = res.data
+}
+
+async function loadModelProviders() {
+  const res = await listModelProviders()
+  modelProviders.value = res.data
+}
+
+function providerTagType(p: string): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
+    openai: '', claude: 'warning', ollama: 'info'
+  }
+  return map[p] || 'info'
 }
 
 function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {
@@ -192,6 +226,7 @@ function openNewScanDialog() {
   newScan.value = {
     filesystemId: defaultId,
     scanPath: '',
+    modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : 0,
   }
   showNewDialog.value = true
 }
@@ -278,6 +313,7 @@ function openSettings(s: ScanSession) {
   sessionSettings.value = {
     allow_read_file: s.allow_read_file,
     allow_auto_category: s.allow_auto_category,
+    model_provider_id: s.model_provider_id || 0,
   }
   settingsVisible.value = true
 }
@@ -291,7 +327,7 @@ async function saveSettings() {
 
 async function handleNewScan() {
   if (!newScan.value.filesystemId) { ElMessage.warning(t('tasks.selectFsRequired')); return }
-  await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath })
+  await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath, model_provider_id: newScan.value.modelProviderId })
   ElMessage.success(t('tasks.scanStarted'))
   showNewDialog.value = false
   load()

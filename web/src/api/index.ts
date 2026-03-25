@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { FileEntry, Filesystem, Category, ScanSession, AgentLog, TreeNode, PlanItem, Config, PageResult } from '../types'
+import type { FileEntry, Filesystem, Category, ScanSession, AgentLog, TreeNode, PlanItem, Config, PageResult, ModelProvider } from '../types'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -7,7 +7,7 @@ const api = axios.create({
 })
 
 // Sessions
-export const createSession = (data: { filesystem_id: number; scan_path?: string }) =>
+export const createSession = (data: { filesystem_id: number; scan_path?: string; model_provider_id?: number }) =>
   api.post<ScanSession>('/sessions', data)
 
 export const listSessions = (filesystemId?: number) =>
@@ -94,6 +94,22 @@ export const deleteFilesystem = (id: number) =>
 
 export const testFilesystemConnection = (data: Partial<Filesystem>) =>
   api.post('/filesystems/test', data)
+
+// Model Providers
+export const listModelProviders = () =>
+  api.get<ModelProvider[]>('/models')
+
+export const createModelProvider = (data: Partial<ModelProvider>) =>
+  api.post<ModelProvider>('/models', data)
+
+export const updateModelProvider = (id: number, data: Partial<ModelProvider>) =>
+  api.put<ModelProvider>(`/models/${id}`, data)
+
+export const deleteModelProvider = (id: number) =>
+  api.delete(`/models/${id}`)
+
+export const testModelProviderConnection = (data: Partial<ModelProvider>) =>
+  api.post('/models/test', data)
 
 // Config
 export const getConfig = () =>

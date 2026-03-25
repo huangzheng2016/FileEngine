@@ -67,7 +67,19 @@ func (s *Server) startTagging(c *gin.Context) {
 	cfg := *config.Get() // copy to avoid mutating global
 	cfg.Agent.AllowAutoCategory = session.AllowAutoCategory
 	cfg.Agent.AllowReadFile = session.AllowReadFile
-	a := agent.New(s.repo, fsCfg, &cfg, sessionID)
+
+	// Resolve model provider from session or fall back to global config
+	var modelProvider *db.ModelProvider
+	if session.ModelProviderID > 0 {
+		modelProvider, err = s.repo.GetModelProvider(session.ModelProviderID)
+		if err != nil {
+			agentMu.Unlock()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model provider not found"})
+			return
+		}
+	}
+
+	a := agent.New(s.repo, fsCfg, &cfg, sessionID, modelProvider)
 	agents[sessionID] = a
 	agentMu.Unlock()
 

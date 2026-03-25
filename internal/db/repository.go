@@ -282,6 +282,32 @@ func (r *Repository) DeleteFilesystem(id uint) error {
 	return r.db.Delete(&Filesystem{}, id).Error
 }
 
+// ============ ModelProvider ============
+
+func (r *Repository) CreateModelProvider(m *ModelProvider) error {
+	return r.db.Create(m).Error
+}
+
+func (r *Repository) GetModelProvider(id uint) (*ModelProvider, error) {
+	var m ModelProvider
+	err := r.db.First(&m, id).Error
+	return &m, err
+}
+
+func (r *Repository) ListModelProviders() ([]ModelProvider, error) {
+	var providers []ModelProvider
+	err := r.db.Order("id ASC").Find(&providers).Error
+	return providers, err
+}
+
+func (r *Repository) UpdateModelProvider(m *ModelProvider) error {
+	return r.db.Save(m).Error
+}
+
+func (r *Repository) DeleteModelProvider(id uint) error {
+	return r.db.Delete(&ModelProvider{}, id).Error
+}
+
 // ============ AgentLog ============
 
 func (r *Repository) CreateAgentLog(log *AgentLog) error {

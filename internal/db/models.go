@@ -80,8 +80,22 @@ type ScanSession struct {
 	ExecutedOps       int       `json:"executed_ops"`
 	AllowReadFile     bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory bool      `gorm:"default:false" json:"allow_auto_category"`
+	ModelProviderID   uint      `gorm:"index" json:"model_provider_id"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type ModelProvider struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"uniqueIndex;size:256" json:"name"`
+	Provider    string    `gorm:"size:32" json:"provider"` // openai / claude / ollama
+	APIKey      string    `gorm:"size:512" json:"-"`
+	Model       string    `gorm:"size:256" json:"model"`
+	BaseURL     string    `gorm:"size:512" json:"base_url"`
+	Temperature float64   `json:"temperature"`
+	MaxTokens   int       `json:"max_tokens"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type AgentLog struct {

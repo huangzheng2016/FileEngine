@@ -20,24 +20,26 @@ import (
 )
 
 type Agent struct {
-	repo      *db.Repository
-	fsCfg     config.RemoteFSConfig
-	cfg       *config.Config
-	logger    *Logger
-	sessionID uint
+	repo          *db.Repository
+	fsCfg         config.RemoteFSConfig
+	cfg           *config.Config
+	modelProvider *db.ModelProvider
+	logger        *Logger
+	sessionID     uint
 
 	mu       sync.Mutex
 	running  bool
 	cancelFn context.CancelFunc
 }
 
-func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint) *Agent {
+func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint, modelProvider *db.ModelProvider) *Agent {
 	return &Agent{
-		repo:      repo,
-		fsCfg:     fsCfg,
-		cfg:       cfg,
-		sessionID: sessionID,
-		logger:    NewLogger(repo, sessionID),
+		repo:          repo,
+		fsCfg:         fsCfg,
+		cfg:           cfg,
+		modelProvider: modelProvider,
+		sessionID:     sessionID,
+		logger:        NewLogger(repo, sessionID),
 	}
 }
 
@@ -89,7 +91,12 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 	}
 
 	// Build LLM model (shared across workers, thread-safe)
-	chatModel, err := modelfactory.NewChatModel(ctx, a.cfg.Model)
+	var chatModel einomodel.ChatModel
+	if a.modelProvider != nil {
+		chatModel, err = modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
+	} else {
+		chatModel, err = modelfactory.NewChatModel(ctx, a.cfg.Model)
+	}
 	if err != nil {
 		return fmt.Errorf("create model: %w", err)
 	}

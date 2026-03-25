@@ -13,6 +13,10 @@
           <el-icon><Connection /></el-icon>
           <span>{{ $t('nav.filesystems') }}</span>
         </el-menu-item>
+        <el-menu-item index="/models">
+          <el-icon><Cpu /></el-icon>
+          <span>{{ $t('nav.models') }}</span>
+        </el-menu-item>
         <el-menu-item index="/tasks">
           <el-icon><Monitor /></el-icon>
           <span>{{ $t('nav.tasks') }}</span>

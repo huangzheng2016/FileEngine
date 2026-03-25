@@ -71,6 +71,14 @@ func (s *Server) setupRouter() {
 		api.DELETE("/filesystems/:id", s.deleteFilesystem)
 		api.POST("/filesystems/test", s.testFilesystemConnection)
 
+		// Model Providers
+		api.GET("/models", s.listModelProviders)
+		api.POST("/models", s.createModelProvider)
+		api.GET("/models/:id", s.getModelProvider)
+		api.PUT("/models/:id", s.updateModelProvider)
+		api.DELETE("/models/:id", s.deleteModelProvider)
+		api.POST("/models/test", s.testModelProvider)
+
 		// Config
 		api.GET("/config", s.getConfig)
 		api.PUT("/config", s.updateConfig)
