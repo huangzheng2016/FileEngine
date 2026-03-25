@@ -73,12 +73,14 @@ func (s *Server) listBatches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id required"})
 		return
 	}
-	batches, err := s.repo.ListBatches(uint(sessionID))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	batches, total, err := s.repo.ListBatches(uint(sessionID), page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, batches)
+	c.JSON(http.StatusOK, gin.H{"batches": batches, "total": total})
 }
 
 func (s *Server) streamLogs(c *gin.Context) {

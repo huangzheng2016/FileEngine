@@ -1,13 +1,13 @@
 <template>
   <div style="display: flex; gap: 16px; height: calc(100vh - 100px)">
     <!-- Left: batch list -->
-    <div style="width: 200px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px">
+    <div style="width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px">
       <el-card>
         <el-select v-model="sessionId" :placeholder="$t('logs.session')" size="small" style="width: 100%" @change="onSessionChange">
           <el-option v-for="s in sessions" :key="s.id" :label="formatSessionLabel(s)" :value="s.id" />
         </el-select>
       </el-card>
-      <el-card style="flex: 1; overflow: auto">
+      <el-card style="flex: 1; overflow: auto; display: flex; flex-direction: column">
         <template #header>
           <div style="display: flex; justify-content: space-between; align-items: center">
             <span style="font-size: 13px; font-weight: 500">{{ $t('logs.batch', { index: '' }).replace('#', '') }}</span>
@@ -17,18 +17,24 @@
             </el-button>
           </div>
         </template>
-        <div
-          style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
-          :style="{ background: selectedBatch === null ? '#ecf5ff' : '', color: selectedBatch === null ? '#409eff' : '' }"
-          @click="selectBatch(null)">
-          {{ $t('logs.allBatches') }}
+        <div style="flex: 1; overflow: auto">
+          <div
+            style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
+            :style="{ background: selectedBatch === null ? '#ecf5ff' : '', color: selectedBatch === null ? '#409eff' : '' }"
+            @click="selectBatch(null)">
+            {{ $t('logs.allBatches') }}
+          </div>
+          <div v-for="b in displayBatches" :key="b"
+            style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
+            :style="{ background: selectedBatch === b ? '#ecf5ff' : '', color: selectedBatch === b ? '#409eff' : '' }"
+            @click="selectBatch(b)">
+            {{ $t('logs.batch', { index: b }) }}
+          </div>
         </div>
-        <div v-for="b in sortedBatches" :key="b"
-          style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
-          :style="{ background: selectedBatch === b ? '#ecf5ff' : '', color: selectedBatch === b ? '#409eff' : '' }"
-          @click="selectBatch(b)">
-          {{ $t('logs.batch', { index: b }) }}
-        </div>
+        <el-pagination v-if="batchTotal > batchPageSize" size="small" layout="prev, next"
+          :total="batchTotal" :page-size="batchPageSize"
+          v-model:current-page="batchPage" @current-change="loadBatches"
+          style="margin-top: 8px; justify-content: center" />
       </el-card>
     </div>
 
@@ -50,7 +56,15 @@
               <span style="font-size: 12px; color: #999">{{ $t('logs.batch', { index: log.batch_index }) }} | {{ formatTime(log.created_at) }}</span>
               <span v-if="log.tokens_used" style="font-size: 12px; color: #999">{{ $t('logs.tokens', { count: log.tokens_used }) }}</span>
             </div>
-            <div v-if="log.content" style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; max-height: 200px; overflow: auto">{{ log.content }}</div>
+            <!-- Content with truncation -->
+            <div v-if="log.content">
+              <div style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; overflow: hidden"
+                :style="{ maxHeight: expanded[log.id + '_content'] ? 'none' : '100px' }">{{ log.content }}</div>
+              <el-button v-if="log.content.length > 300" size="small" text type="primary" @click="toggleExpand(log.id, 'content')">
+                {{ expanded[log.id + '_content'] ? $t('logs.collapse') : $t('logs.expand') }}
+              </el-button>
+            </div>
+            <!-- Tool I/O -->
             <template v-if="log.tool_input || log.tool_output">
               <div style="margin-top: 4px; display: flex; gap: 6px">
                 <el-button v-if="log.tool_input" size="small" text type="info" @click="toggleExpand(log.id, 'input')">{{ $t('logs.input') }} {{ expanded[log.id + '_input'] ? '▾' : '▸' }}</el-button>
@@ -78,6 +92,9 @@ const sessions = ref<ScanSession[]>([])
 const sessionId = ref<number>(0)
 const logs = ref<AgentLog[]>([])
 const batches = ref<number[]>([])
+const batchTotal = ref(0)
+const batchPage = ref(1)
+const batchPageSize = 50
 const selectedBatch = ref<number | null>(null)
 const total = ref(0)
 const page = ref(1)
@@ -92,7 +109,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LIVE_LOGS = 200
 
 const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.tokens_used || 0), 0))
-const sortedBatches = computed(() => orderDesc.value ? [...batches.value].reverse() : batches.value)
+const displayBatches = computed(() => orderDesc.value ? [...batches.value].reverse() : batches.value)
 
 function cachedJSON(id: number, type: string, raw: string): string {
   const key = `${id}_${type}`
@@ -126,7 +143,7 @@ async function onSessionChange() {
   stopLive()
   selectedBatch.value = null
   page.value = 1
-  // Clear caches
+  batchPage.value = 1
   Object.keys(expanded).forEach(k => delete expanded[k])
   jsonCache.clear()
   await Promise.all([loadLogs(), loadBatches()])
@@ -136,8 +153,9 @@ async function onSessionChange() {
 
 async function loadBatches() {
   if (!sessionId.value) return
-  const res = await listBatches(sessionId.value)
-  batches.value = res.data || []
+  const res = await listBatches(sessionId.value, batchPage.value, batchPageSize)
+  batches.value = res.data.batches || []
+  batchTotal.value = res.data.total
 }
 
 async function loadLogs() {
@@ -185,6 +203,7 @@ function startLive() {
     if (!batches.value.includes(log.batch_index)) {
       batches.value.push(log.batch_index)
       batches.value.sort((a, b) => a - b)
+      batchTotal.value++
     }
   }
   eventSource.onerror = () => { stopLive(); startPolling() }

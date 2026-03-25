@@ -332,12 +332,28 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	return logs, total, err
 }
 
-func (r *Repository) ListBatches(sessionID uint) ([]int, error) {
+func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]int, int64, error) {
+	base := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", sessionID)
+
+	var total int64
+	if err := base.Distinct("batch_index").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+
 	var batches []int
 	err := r.db.Model(&AgentLog{}).
 		Where("scan_session_id = ?", sessionID).
 		Distinct("batch_index").
 		Order("batch_index ASC").
+		Offset(offset).Limit(pageSize).
 		Pluck("batch_index", &batches).Error
-	return batches, err
+	return batches, total, err
 }
