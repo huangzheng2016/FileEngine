@@ -49,9 +49,8 @@
       <el-table :data="plans" style="width: 100%" max-height="500">
         <el-table-column prop="name" :label="$t('tasks.planName')" width="200" />
         <el-table-column prop="operation" :label="$t('tasks.planOp')" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.operation === 'move' ? 'warning' : 'info'" size="small">
-              {{ row.operation === 'move' ? $t('tasks.move') : $t('tasks.copy') }}
+          <template #default>
+            <el-tag type="info" size="small">{{ $t('tasks.planned') }}</el-tag>
             </el-tag>
           </template>
         </el-table-column>

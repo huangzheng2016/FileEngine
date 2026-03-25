@@ -133,6 +133,7 @@ tasks:
   planTo: 目标路径
   move: 移动
   copy: 复制
+  planned: 已规划
   execMode: 执行方式
   execCopyHint: （保留原文件）
   execMoveHint: （删除原文件）

@@ -133,6 +133,7 @@ tasks:
   planTo: To
   move: Move
   copy: Copy
+  planned: Planned
   execMode: Execute Mode
   execCopyHint: (keep original)
   execMoveHint: (delete original)
