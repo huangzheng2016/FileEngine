@@ -182,8 +182,8 @@ config:
     driver: Driver
     dsn: DSN
   agent:
-    batchSize: Batch Size
-    concurrency: Concurrency
+    batchSize: Loose Files per Batch
+    concurrency: Directory Worker Threads
     maxFileReadSize: Max File Read Size
     maxRetries: Max Retries
     allowAutoCategory: Allow Auto-Create Categories
