@@ -92,7 +92,7 @@
           <el-select v-model="newScan.modelProviderId" style="width: 100%" clearable :placeholder="$t('models.noModel')">
             <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
               <span style="display: flex; align-items: center; gap: 6px">
-                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ m.provider }}</el-tag>
+                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ providerLabel(m.provider) }}</el-tag>
                 {{ m.name }} ({{ m.model }})
               </span>
             </el-option>
@@ -129,7 +129,7 @@
           <el-select v-model="sessionSettings.model_provider_id" style="width: 100%" clearable :placeholder="$t('models.noModel')">
             <el-option v-for="m in modelProviders" :key="m.id" :value="m.id">
               <span style="display: flex; align-items: center; gap: 6px">
-                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ m.provider }}</el-tag>
+                <el-tag :type="providerTagType(m.provider)" size="small" effect="dark">{{ providerLabel(m.provider) }}</el-tag>
                 {{ m.name }} ({{ m.model }})
               </span>
             </el-option>
@@ -202,9 +202,14 @@ async function loadModelProviders() {
 
 function providerTagType(p: string): '' | 'success' | 'warning' | 'info' | 'danger' {
   const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
-    openai: '', claude: 'warning', ollama: 'info'
+    openai: 'success', claude: 'warning', ollama: 'info'
   }
   return map[p] || 'info'
+}
+
+function providerLabel(p: string): string {
+  const map: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', ollama: 'Ollama' }
+  return map[p] || p
 }
 
 function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {

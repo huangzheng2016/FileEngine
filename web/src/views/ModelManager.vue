@@ -10,7 +10,7 @@
       <el-table-column prop="name" :label="$t('common.name')" width="160" />
       <el-table-column prop="provider" :label="$t('models.provider')" width="100">
         <template #default="{ row }">
-          <el-tag :type="providerTagType(row.provider)" size="small" effect="dark">{{ row.provider }}</el-tag>
+          <el-tag :type="providerTagType(row.provider)" size="small" effect="dark">{{ providerLabel(row.provider) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="model" :label="$t('models.modelName')" width="250" show-overflow-tooltip />
@@ -86,9 +86,14 @@ async function load() {
 
 function providerTagType(p: string): '' | 'success' | 'warning' | 'info' | 'danger' {
   const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
-    openai: '', claude: 'warning', ollama: 'info'
+    openai: 'success', claude: 'warning', ollama: 'info'
   }
   return map[p] || 'info'
+}
+
+function providerLabel(p: string): string {
+  const map: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', ollama: 'Ollama' }
+  return map[p] || p
 }
 
 function openDialog(m?: ModelProvider) {
