@@ -89,9 +89,12 @@
         <el-table :data="files" style="width: 100%" height="100%">
           <el-table-column prop="name" :label="$t('files.fileName')" min-width="200">
             <template #default="{ row }">
-              <el-icon v-if="row.file_type === 'directory'" style="color: #e6a23c"><Folder /></el-icon>
-              <el-icon v-else style="color: #909399"><Document /></el-icon>
-              {{ row.name }}
+              <span style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px" @click.stop="openEditDrawer(row)">
+                <el-icon v-if="row.file_type === 'directory'" style="color: #e6a23c"><Folder /></el-icon>
+                <el-icon v-else style="color: #909399"><Document /></el-icon>
+                <span style="color: #409eff">{{ row.name }}</span>
+                <el-icon style="color: #c0c4cc; font-size: 12px"><Edit /></el-icon>
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="file_type" :label="$t('files.fileType')" width="90">
@@ -110,11 +113,8 @@
             </template>
           </el-table-column>
           <el-table-column prop="new_path" :label="$t('files.plannedPath')" min-width="180" show-overflow-tooltip />
-          <el-table-column :label="$t('common.actions')" width="100" align="center">
+          <el-table-column :label="$t('files.preview')" width="60" align="center">
             <template #default="{ row }">
-              <el-button size="small" text @click.stop="openEditDrawer(row)">
-                <el-icon><Edit /></el-icon>
-              </el-button>
               <el-button v-if="row.file_type === 'file'" size="small" text @click.stop="previewFile(row)">
                 <el-icon><View /></el-icon>
               </el-button>
