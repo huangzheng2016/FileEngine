@@ -86,7 +86,7 @@
 
       <!-- File table -->
       <el-card style="flex: 1; overflow: auto">
-        <el-table :data="files" style="width: 100%" highlight-current-row @row-click="selectFile" height="100%">
+        <el-table :data="files" style="width: 100%" height="100%">
           <el-table-column prop="name" :label="$t('files.fileName')" min-width="200">
             <template #default="{ row }">
               <el-icon v-if="row.file_type === 'directory'" style="color: #e6a23c"><Folder /></el-icon>
@@ -110,8 +110,11 @@
             </template>
           </el-table-column>
           <el-table-column prop="new_path" :label="$t('files.plannedPath')" min-width="180" show-overflow-tooltip />
-          <el-table-column :label="$t('files.preview')" width="80" align="center">
+          <el-table-column :label="$t('common.actions')" width="100" align="center">
             <template #default="{ row }">
+              <el-button size="small" text @click.stop="openEditDrawer(row)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
               <el-button v-if="row.file_type === 'file'" size="small" text @click.stop="previewFile(row)">
                 <el-icon><View /></el-icon>
               </el-button>
@@ -121,31 +124,6 @@
         <el-pagination v-if="total > pageSize" style="margin-top: 12px; justify-content: center"
           layout="total, prev, pager, next" :total="total" :page-size="pageSize"
           v-model:current-page="page" @current-change="loadFiles" />
-      </el-card>
-
-      <!-- Detail panel -->
-      <el-card v-if="selectedFile" style="flex-shrink: 0">
-        <template #header>
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span>{{ selectedFile.name }}</span>
-            <el-button size="small" type="primary" @click="saveFile">{{ $t('files.saveChanges') }}</el-button>
-          </div>
-        </template>
-        <el-descriptions :column="3" border size="small">
-          <el-descriptions-item :label="$t('files.originalPath')">{{ selectedFile.original_path }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('files.fileType')">{{ selectedFile.file_type }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('files.fileSize')">{{ formatSize(selectedFile.size) }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('files.modTime')">{{ selectedFile.mod_time }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('files.permissions')">{{ selectedFile.permissions }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('files.depth')">{{ selectedFile.depth }}</el-descriptions-item>
-        </el-descriptions>
-        <div style="margin-top: 12px; display: flex; gap: 12px">
-          <el-input v-model="selectedFile.description" :placeholder="$t('files.descriptionPlaceholder')" type="textarea" :rows="2" style="flex: 1" />
-          <div style="width: 300px">
-            <el-input v-model="selectedFile.new_path" :placeholder="$t('files.newPathPlaceholder')" size="small" style="margin-bottom: 8px" />
-            <el-input v-model="selectedFile.version" :placeholder="$t('files.versionPlaceholder')" size="small" />
-          </div>
-        </div>
       </el-card>
     </div>
 
@@ -194,6 +172,35 @@
         <p style="margin-top: 12px">{{ $t('files.previewNotSupported') }}</p>
       </div>
     </el-drawer>
+
+    <!-- File edit drawer -->
+    <el-drawer v-model="editVisible" :title="editFile?.name" size="400px" direction="rtl">
+      <template v-if="editFile">
+        <el-descriptions :column="1" border size="small" style="margin-bottom: 16px">
+          <el-descriptions-item :label="$t('files.originalPath')">{{ editFile.original_path }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('files.fileType')">
+            <el-tag v-if="editFile.file_type === 'directory'" type="warning" size="small" effect="plain">{{ $t('files.directory') }}</el-tag>
+            <el-tag v-else size="small" effect="plain">{{ $t('files.file') }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item :label="$t('files.fileSize')">{{ formatSize(editFile.size) }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('files.modTime')">{{ editFile.mod_time }}</el-descriptions-item>
+        </el-descriptions>
+        <el-form label-position="top">
+          <el-form-item :label="$t('files.fileDescription')">
+            <el-input v-model="editFile.description" type="textarea" :rows="3" :placeholder="$t('files.descriptionPlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="$t('files.plannedPath')">
+            <el-input v-model="editFile.new_path" :placeholder="$t('files.newPathPlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="$t('files.versionPlaceholder')">
+            <el-input v-model="editFile.version" :placeholder="$t('files.versionPlaceholder')" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="saveEditFile">{{ $t('files.saveChanges') }}</el-button>
+          </el-form-item>
+        </el-form>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -222,7 +229,6 @@ const typeFilter = ref('')
 const taggedFilter = ref('')
 const categoryFilter = ref('')
 const currentPath = ref('')
-const selectedFile = ref<FileEntry | null>(null)
 const treeData = ref<TreeNode[]>([])
 const sidebarTab = ref('categories')
 const catDialogVisible = ref(false)
@@ -245,7 +251,6 @@ async function onFsChange() {
   sessionId.value = 0
   treeData.value = []
   files.value = []
-  selectedFile.value = null
   categoryFilter.value = ''
   if (!selectedFsId.value) { sessions.value = []; categories.value = []; return }
   localStorage.setItem('fe_last_fs_id', String(selectedFsId.value))
@@ -264,7 +269,6 @@ async function onFsChange() {
 async function onSessionChange() {
   currentPath.value = ''
   page.value = 1
-  selectedFile.value = null
   if (!sessionId.value) { treeData.value = []; files.value = []; return }
   const res = await getFileTree(sessionId.value, '')
   treeData.value = res.data
@@ -304,16 +308,24 @@ async function loadFiles() {
   total.value = res.data.total
 }
 
-function selectFile(row: FileEntry) { selectedFile.value = { ...row } }
+// Edit drawer
+const editVisible = ref(false)
+const editFile = ref<FileEntry | null>(null)
 
-async function saveFile() {
-  if (!selectedFile.value) return
-  await updateFile(selectedFile.value.id, {
-    description: selectedFile.value.description,
-    new_path: selectedFile.value.new_path,
-    version: selectedFile.value.version,
+function openEditDrawer(file: FileEntry) {
+  editFile.value = { ...file }
+  editVisible.value = true
+}
+
+async function saveEditFile() {
+  if (!editFile.value) return
+  await updateFile(editFile.value.id, {
+    description: editFile.value.description,
+    new_path: editFile.value.new_path,
+    version: editFile.value.version,
   })
   ElMessage.success(t('common.saved'))
+  editVisible.value = false
   loadFiles()
 }
 
