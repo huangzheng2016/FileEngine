@@ -232,6 +232,12 @@ func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string) error
 		Update("tagged", true).Error
 }
 
+func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) error {
+	return r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND original_path LIKE ? AND operation != ''", sessionID, parentPath+"/%").
+		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
+}
+
 func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
 	var files []FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ?", sessionID, false).
