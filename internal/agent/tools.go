@@ -20,13 +20,15 @@ type ListFilesInput struct {
 	ParentPath string `json:"parent_path" jsonschema_description:"Parent directory path to list files from"`
 	FileType   string `json:"file_type,omitempty" jsonschema_description:"Filter by type: file, directory, symlink"`
 	Tagged     *bool  `json:"tagged,omitempty" jsonschema_description:"Filter by tagged status"`
-	Page       int    `json:"page,omitempty" jsonschema_description:"Page number (default 1)"`
-	PageSize   int    `json:"page_size,omitempty" jsonschema_description:"Items per page (default 20)"`
+	Offset     int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
+	Limit      int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
 }
 
 type ListFilesOutput struct {
-	Files []FileItem `json:"files"`
-	Total int64      `json:"total"`
+	Files  []FileItem `json:"files"`
+	Total  int64      `json:"total"`
+	Offset int        `json:"offset"`
+	Limit  int        `json:"limit"`
 }
 
 type FileItem struct {
@@ -147,7 +149,7 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 }
 
 func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持按父路径、类型、标记状态筛选", tb.listFiles)
+	listFiles, err := utils.InferTool("list_files", "列出目录中的文件。已打标的文件会包含描述和目标路径。支持 offset+limit 分页（默认 offset=0, limit=300），如果 total > limit 需要用 offset 翻页", tb.listFiles)
 	if err != nil {
 		return nil, fmt.Errorf("build list_files: %w", err)
 	}
@@ -204,22 +206,23 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {
 	tb.logger.LogToolCall("list_files", input, nil)
 
-	page := input.Page
-	if page <= 0 {
-		page = 1
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 300
 	}
-	pageSize := input.PageSize
-	if pageSize <= 0 {
-		pageSize = 20
+	offset := input.Offset
+	if offset < 0 {
+		offset = 0
 	}
-
+	// Convert offset+limit to page+pageSize for the repository
+	page := (offset / limit) + 1
 	q := db.FileQuery{
 		SessionID:  tb.sessionID,
 		ParentPath: &input.ParentPath,
 		FileType:   input.FileType,
 		Tagged:     input.Tagged,
 		Page:       page,
-		PageSize:   pageSize,
+		PageSize:   limit,
 	}
 
 	files, total, err := tb.repo.ListFiles(q)
@@ -242,7 +245,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		}
 	}
 
-	out := &ListFilesOutput{Files: items, Total: total}
+	out := &ListFilesOutput{Files: items, Total: total, Offset: offset, Limit: limit}
 	tb.logger.LogToolCall("list_files", input, out)
 	return out, nil
 }
