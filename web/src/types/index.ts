@@ -54,6 +54,8 @@ export interface ScanSession {
   tagged_files: number
   planned_ops: number
   executed_ops: number
+  allow_read_file: boolean
+  allow_auto_category: boolean
   created_at: string
   updated_at: string
 }
@@ -108,6 +110,7 @@ export interface Config {
     max_file_read_size: number
     max_retries: number
     allow_auto_category: boolean
+    allow_read_file: boolean
   }
 }
 

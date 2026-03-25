@@ -51,6 +51,7 @@ type AgentConfig struct {
 	MaxFileReadSize   int    `yaml:"max_file_read_size" json:"max_file_read_size"`
 	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`
 	AllowAutoCategory bool   `yaml:"allow_auto_category" json:"allow_auto_category"`
+	AllowReadFile     bool   `yaml:"allow_read_file" json:"allow_read_file"`
 	SystemPrompt      string `yaml:"system_prompt" json:"system_prompt"`
 }
 

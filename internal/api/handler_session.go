@@ -86,11 +86,13 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
-		FilesystemID: filesystem.ID,
-		ScanPath:     req.ScanPath,
-		RootPath:     scanRootPath(req.ScanPath),
-		Protocol:     filesystem.Protocol,
-		Status:       "scanning",
+		FilesystemID:      filesystem.ID,
+		ScanPath:          req.ScanPath,
+		RootPath:          scanRootPath(req.ScanPath),
+		Protocol:          filesystem.Protocol,
+		Status:            "scanning",
+		AllowReadFile:     true,
+		AllowAutoCategory: config.Get().Agent.AllowAutoCategory,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -153,6 +155,40 @@ func (s *Server) deleteSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+type UpdateSessionRequest struct {
+	AllowReadFile     *bool `json:"allow_read_file"`
+	AllowAutoCategory *bool `json:"allow_auto_category"`
+}
+
+func (s *Server) updateSessionConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	session, err := s.repo.GetSession(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	var req UpdateSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.AllowReadFile != nil {
+		session.AllowReadFile = *req.AllowReadFile
+	}
+	if req.AllowAutoCategory != nil {
+		session.AllowAutoCategory = *req.AllowAutoCategory
+	}
+	if err := s.repo.UpdateSession(session); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, session)
 }
 
 func (s *Server) rescanSession(c *gin.Context) {
