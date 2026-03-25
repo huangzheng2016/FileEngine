@@ -77,6 +77,10 @@ type ScanSession struct {
 	TaggedFiles  int       `json:"tagged_files"`
 	PlannedOps   int       `json:"planned_ops"`
 	ExecutedOps       int       `json:"executed_ops"`
+	TotalSize         int64     `json:"total_size"`
+	PromptTokens      int       `json:"prompt_tokens"`
+	CompletionTokens  int       `json:"completion_tokens"`
+	TotalTokens       int       `json:"total_tokens"`
 	AllowReadFile     bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory bool      `gorm:"default:false" json:"allow_auto_category"`
 	ModelProviderID   uint      `gorm:"index" json:"model_provider_id"`
@@ -105,7 +109,9 @@ type AgentLog struct {
 	ToolName      string    `gorm:"size:128" json:"tool_name"`
 	ToolInput     string    `gorm:"type:text" json:"tool_input"`
 	ToolOutput    string    `gorm:"type:text" json:"tool_output"`
-	Content       string    `gorm:"type:text" json:"content"`
-	TokensUsed    int       `json:"tokens_used"`
-	CreatedAt     time.Time `json:"created_at"`
+	Content          string    `gorm:"type:text" json:"content"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	TotalTokens      int       `json:"total_tokens"`
+	CreatedAt        time.Time `json:"created_at"`
 }

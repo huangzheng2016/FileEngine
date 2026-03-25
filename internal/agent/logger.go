@@ -49,18 +49,20 @@ func (l *Logger) Unsubscribe(ch chan *db.AgentLog) {
 	}
 }
 
-func (l *Logger) LogMessage(role, content string, tokensUsed int) {
+func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens, totalTokens int) {
 	l.mu.Lock()
 	batch := l.batch
 	l.mu.Unlock()
 
 	log := &db.AgentLog{
-		ScanSessionID: l.sessionID,
-		BatchIndex:    batch,
-		Role:          role,
-		Content:       content,
-		TokensUsed:    tokensUsed,
-		CreatedAt:     time.Now(),
+		ScanSessionID:    l.sessionID,
+		BatchIndex:       batch,
+		Role:             role,
+		Content:          content,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+		CreatedAt:        time.Now(),
 	}
 	l.save(log)
 }
