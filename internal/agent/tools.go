@@ -508,6 +508,11 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		return nil, err
 	}
 
+	// If target is a directory, clear children's targets (outer target overrides inner)
+	if f.FileType == "directory" {
+		_ = tb.repo.ClearChildrenTarget(tb.sessionID, input.Path)
+	}
+
 	out := &SetTargetOutput{Success: true}
 	tb.logger.LogToolCall("set_target", input, out)
 	return out, nil
