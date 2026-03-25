@@ -106,6 +106,9 @@ export const testModel = (data: Config['model']) =>
 export const listLogs = (params: Record<string, any>) =>
   api.get<PageResult<AgentLog>>('/logs', { params })
 
+export const listBatches = (sessionId: number) =>
+  api.get<number[]>('/logs/batches', { params: { session_id: sessionId } })
+
 // Prompt
 export const getPrompt = () =>
   api.get<{ prompt: string; default_prompt: string; is_custom: boolean }>('/prompt')

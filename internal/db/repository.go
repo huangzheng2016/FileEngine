@@ -289,6 +289,7 @@ type LogQuery struct {
 	Batch     *int
 	Role      string
 	ToolName  string
+	Order     string // "asc" or "desc"
 	Page      int
 	PageSize  int
 }
@@ -321,7 +322,22 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	}
 	offset := (q.Page - 1) * q.PageSize
 
+	order := "id ASC"
+	if q.Order == "desc" {
+		order = "id DESC"
+	}
+
 	var logs []AgentLog
-	err := tx.Order("id ASC").Offset(offset).Limit(q.PageSize).Find(&logs).Error
+	err := tx.Order(order).Offset(offset).Limit(q.PageSize).Find(&logs).Error
 	return logs, total, err
+}
+
+func (r *Repository) ListBatches(sessionID uint) ([]int, error) {
+	var batches []int
+	err := r.db.Model(&AgentLog{}).
+		Where("scan_session_id = ?", sessionID).
+		Distinct("batch_index").
+		Order("batch_index ASC").
+		Pluck("batch_index", &batches).Error
+	return batches, err
 }

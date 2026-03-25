@@ -175,6 +175,9 @@ config:
 logs:
   title: Agent Logs
   session: Session
+  allBatches: All Batches
+  orderAsc: Ascending
+  orderDesc: Descending
   roleFilter: Role
   live: Live
   history: History

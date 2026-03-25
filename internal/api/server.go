@@ -81,6 +81,7 @@ func (s *Server) setupRouter() {
 
 		// Logs
 		api.GET("/logs", s.listLogs)
+		api.GET("/logs/batches", s.listBatches)
 		api.GET("/logs/stream", s.streamLogs)
 	}
 

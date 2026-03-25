@@ -51,6 +51,7 @@ func (s *Server) listLogs(c *gin.Context) {
 	}
 	q.Role = c.Query("role")
 	q.ToolName = c.Query("tool_name")
+	q.Order = c.Query("order") // "asc" or "desc"
 	if page := c.Query("page"); page != "" {
 		q.Page, _ = strconv.Atoi(page)
 	}
@@ -64,6 +65,20 @@ func (s *Server) listLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total})
+}
+
+func (s *Server) listBatches(c *gin.Context) {
+	sessionID, _ := strconv.ParseUint(c.Query("session_id"), 10, 32)
+	if sessionID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id required"})
+		return
+	}
+	batches, err := s.repo.ListBatches(uint(sessionID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, batches)
 }
 
 func (s *Server) streamLogs(c *gin.Context) {
