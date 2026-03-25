@@ -1,0 +1,215 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Build frontend
+      run: cd web && npm ci --loglevel=error --fund=false && npm run build
+    - name: Build for Linux AMD64
+      run: CGO_ENABLED=1 go build -ldflags="-s -w" -o fileengine_linux_amd64 .
+    - name: Create archive
+      run: tar -czf fileengine_linux_amd64.tar.gz fileengine_linux_amd64
+    - uses: actions/upload-artifact@v4
+      with:
+        name: linux-amd64
+        path: fileengine_linux_amd64.tar.gz
+
+  build-darwin:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+          - goarch: arm64
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Build frontend
+      run: cd web && npm ci --loglevel=error --fund=false && npm run build
+    - name: Build for Darwin ${{ matrix.goarch }}
+      run: GOARCH=${{ matrix.goarch }} CGO_ENABLED=1 go build -ldflags="-s -w" -o fileengine_darwin_${{ matrix.goarch }} .
+    - name: Create archive
+      run: tar -czf fileengine_darwin_${{ matrix.goarch }}.tar.gz fileengine_darwin_${{ matrix.goarch }}
+    - uses: actions/upload-artifact@v4
+      with:
+        name: darwin-${{ matrix.goarch }}
+        path: fileengine_darwin_${{ matrix.goarch }}.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - name: Build frontend
+      run: cd web && npm ci --loglevel=error --fund=false && npm run build
+    - name: Build for Windows AMD64
+      shell: pwsh
+      run: |
+        $env:CGO_ENABLED = "1"
+        go build -ldflags="-s -w" -o fileengine_windows_amd64.exe .
+    - name: Create archive
+      shell: pwsh
+      run: Compress-Archive -Path "fileengine_windows_amd64.exe" -DestinationPath "fileengine_windows_amd64.zip"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-amd64
+        path: fileengine_windows_amd64.zip
+
+  wails-linux:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - uses: actions/download-artifact@v4
+      with:
+        name: linux-amd64
+        path: artifacts/
+    - name: Extract binary
+      run: tar -xzf artifacts/fileengine_linux_amd64.tar.gz
+    - name: Install Wails dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev
+    - name: Install Wails CLI
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    - name: Build Wails
+      run: |
+        chmod +x build-wails.sh fileengine_linux_amd64
+        ./build-wails.sh --platform linux --arch amd64 --skip-backend
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wails-linux-amd64
+        path: wails/build/bin/fileengine-desktop_linux_amd64.tar.gz
+
+  wails-mac:
+    needs: build-darwin
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            artifact_name: darwin-amd64
+          - goarch: arm64
+            artifact_name: darwin-arm64
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - uses: actions/download-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: artifacts/
+    - name: Extract binary
+      run: tar -xzf artifacts/fileengine_darwin_${{ matrix.goarch }}.tar.gz
+    - name: Install Wails CLI
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    - name: Build Wails
+      run: |
+        chmod +x build-wails.sh fileengine_darwin_${{ matrix.goarch }}
+        ./build-wails.sh --platform mac --arch ${{ matrix.goarch }} --skip-backend
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wails-mac-${{ matrix.goarch }}
+        path: wails/build/bin/fileengine-desktop_darwin_${{ matrix.goarch }}.tar.gz
+
+  wails-windows:
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - uses: actions/download-artifact@v4
+      with:
+        name: windows-amd64
+        path: artifacts/
+    - name: Extract binary
+      shell: pwsh
+      run: Expand-Archive -Path artifacts/fileengine_windows_amd64.zip -DestinationPath .
+    - name: Install Wails CLI
+      shell: bash
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    - name: Build Wails
+      shell: bash
+      run: |
+        chmod +x build-wails.sh
+        ./build-wails.sh --platform windows --arch amd64 --skip-backend
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wails-windows-amd64
+        path: wails/build/bin/fileengine-desktop_windows_amd64.zip
+
+  release:
+    needs: [build-linux, build-darwin, build-windows, wails-linux, wails-mac, wails-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - uses: actions/download-artifact@v4
+    - name: Prepare release files
+      run: |
+        mkdir -p release
+        find . -path ./release -prune -o \( -name "*.tar.gz" -o -name "*.zip" \) -type f -print | while read f; do cp "$f" release/; done
+        ls -la release/
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: FileEngine ${{ steps.version.outputs.version }}
+        files: release/*
+        body: |
+          ## FileEngine ${{ steps.version.outputs.version }}
+
+          ### CLI (单二进制，内嵌 Web UI)
+          - **Linux AMD64**: `fileengine_linux_amd64.tar.gz`
+          - **macOS AMD64**: `fileengine_darwin_amd64.tar.gz`
+          - **macOS ARM64**: `fileengine_darwin_arm64.tar.gz`
+          - **Windows AMD64**: `fileengine_windows_amd64.zip`
+
+          ### Desktop (Wails 桌面应用)
+          - **Linux AMD64**: `fileengine-desktop_linux_amd64.tar.gz`
+          - **macOS AMD64**: `fileengine-desktop_darwin_amd64.tar.gz`
+          - **macOS ARM64**: `fileengine-desktop_darwin_arm64.tar.gz`
+          - **Windows AMD64**: `fileengine-desktop_windows_amd64.zip`
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
