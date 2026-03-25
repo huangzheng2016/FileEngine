@@ -28,7 +28,7 @@
         <el-pagination v-if="batchTotal > batchPageSize" size="small" layout="prev, next"
           :total="batchTotal" :page-size="batchPageSize"
           v-model:current-page="batchPage" @current-change="loadBatches"
-          style="margin-top: 8px; justify-content: center" />
+          style="margin-top: 8px; justify-content: center; flex-shrink: 0" />
       </el-card>
     </div>
 
@@ -74,7 +74,7 @@
           </div>
         </div>
       </el-card>
-      <el-pagination v-if="!isLive && total > pageSize" style="justify-content: center"
+      <el-pagination v-if="!isLive && total > pageSize" style="justify-content: center; flex-shrink: 0"
         layout="total, prev, pager, next" :total="total" :page-size="pageSize"
         v-model:current-page="page" @current-change="loadLogs" />
     </div>
