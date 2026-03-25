@@ -70,6 +70,7 @@ files:
   instructPrompt: Enter instruction (e.g., move these to software category, update descriptions...)
   instructSelected: "{count} files selected"
   instructRunning: Running...
+  instructStarted: AI instruction submitted, running in background
   instructDone: AI instruction completed
   previewNotSupported: Preview not supported for this file type
   previewTooLarge: File too large for preview (max 1MB)
