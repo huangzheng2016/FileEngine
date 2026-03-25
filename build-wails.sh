@@ -66,6 +66,7 @@ if [[ -z "$BACKEND_BIN" ]]; then
 fi
 
 echo "Using backend: $BACKEND_BIN"
+mkdir -p "${WAILS_DIR}/bin"
 cp "$BACKEND_BIN" "${WAILS_DIR}/bin/backend.bin"
 
 # Build Wails
