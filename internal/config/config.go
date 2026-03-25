@@ -10,7 +10,6 @@ import (
 type Config struct {
 	Server   ServerConfig   `yaml:"server" json:"server"`
 	Database DatabaseConfig `yaml:"database" json:"database"`
-	Model    ModelConfig    `yaml:"model" json:"model"`
 	Agent    AgentConfig    `yaml:"agent" json:"agent"`
 }
 
@@ -25,7 +24,6 @@ type DatabaseConfig struct {
 }
 
 // RemoteFSConfig is the internal representation used by remotefs.NewFromConfig().
-// It is NOT part of the global config — filesystem connections are managed via the Filesystem DB entity.
 type RemoteFSConfig struct {
 	Protocol string
 	BasePath string
@@ -36,23 +34,12 @@ type RemoteFSConfig struct {
 	KeyPath  string
 }
 
-type ModelConfig struct {
-	Provider    string  `yaml:"provider" json:"provider"`
-	APIKey      string  `yaml:"api_key" json:"api_key,omitempty"`
-	Model       string  `yaml:"model" json:"model"`
-	BaseURL     string  `yaml:"base_url" json:"base_url"`
-	Temperature float64 `yaml:"temperature" json:"temperature"`
-	MaxTokens   int     `yaml:"max_tokens" json:"max_tokens"`
-}
-
 type AgentConfig struct {
-	BatchSize         int    `yaml:"batch_size" json:"batch_size"`
-	Concurrency       int    `yaml:"concurrency" json:"concurrency"`
-	MaxFileReadSize   int    `yaml:"max_file_read_size" json:"max_file_read_size"`
-	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`
-	AllowAutoCategory bool   `yaml:"allow_auto_category" json:"allow_auto_category"`
-	AllowReadFile     bool   `yaml:"allow_read_file" json:"allow_read_file"`
-	SystemPrompt      string `yaml:"system_prompt" json:"system_prompt"`
+	BatchSize       int    `yaml:"batch_size" json:"batch_size"`
+	Concurrency     int    `yaml:"concurrency" json:"concurrency"`
+	MaxFileReadSize int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	MaxRetries      int    `yaml:"max_retries" json:"max_retries"`
+	SystemPrompt    string `yaml:"system_prompt" json:"system_prompt"`
 }
 
 var (
@@ -98,15 +85,6 @@ func Save(path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
-}
-
-// Sanitized returns config with sensitive fields masked.
-func (c *Config) Sanitized() Config {
-	cp := *c
-	if cp.Model.APIKey != "" {
-		cp.Model.APIKey = "****"
-	}
-	return cp
 }
 
 func setDefaults(cfg *Config) {

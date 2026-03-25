@@ -118,9 +118,6 @@ export const getConfig = () =>
 export const updateConfig = (data: Config) =>
   api.put<Config>('/config', data)
 
-export const testModel = (data: Config['model']) =>
-  api.post('/config/test-model', data)
-
 // Logs
 export const listLogs = (params: Record<string, any>) =>
   api.get<PageResult<AgentLog>>('/logs', { params })

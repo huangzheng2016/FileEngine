@@ -131,9 +131,10 @@ type ToolBuilder struct {
 	filesystemID uint
 	logger       *Logger
 	cfg          config.AgentConfig
+	session      *db.ScanSession
 }
 
-func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig) *ToolBuilder {
+func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession) *ToolBuilder {
 	return &ToolBuilder{
 		repo:         repo,
 		fs:           fs,
@@ -141,6 +142,7 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 		filesystemID: filesystemID,
 		logger:       logger,
 		cfg:          cfg,
+		session:      session,
 	}
 }
 
@@ -182,11 +184,11 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 
 	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, setTarget}
 
-	if tb.cfg.AllowReadFile {
+	if tb.session.AllowReadFile {
 		allTools = append(allTools, readFile)
 	}
 
-	if tb.cfg.AllowAutoCategory {
+	if tb.session.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用", tb.createCategory)
 		if err != nil {
 			return nil, fmt.Errorf("build create_category: %w", err)

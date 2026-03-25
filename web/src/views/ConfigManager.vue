@@ -33,10 +33,6 @@
           <el-form-item :label="$t('config.agent.maxRetries')">
             <el-input-number v-model="config.agent.max_retries" :min="0" :max="10" />
           </el-form-item>
-          <el-form-item :label="$t('config.agent.allowAutoCategory')">
-            <el-switch v-model="config.agent.allow_auto_category" />
-            <span style="margin-left: 8px; font-size: 12px; color: #909399">{{ $t('config.agent.allowAutoCategoryHint') }}</span>
-          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
           </el-form-item>
@@ -112,8 +108,7 @@ function initEditor(content: string) {
 const config = reactive<Config>({
   server: { port: 8080, host: '0.0.0.0' },
   database: { driver: 'sqlite', dsn: 'fileengine.db' },
-  model: { provider: 'openai', api_key: '', model: 'gpt-4o', base_url: '', temperature: 0.1, max_tokens: 4096 },
-  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3, allow_auto_category: false, allow_read_file: true },
+  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3 },
 })
 
 onMounted(async () => {

@@ -82,7 +82,6 @@ func (s *Server) setupRouter() {
 		// Config
 		api.GET("/config", s.getConfig)
 		api.PUT("/config", s.updateConfig)
-		api.POST("/config/test-model", s.testModel)
 
 		// Prompt
 		api.GET("/prompt", s.getPrompt)

@@ -70,7 +70,7 @@ go build -o fileengine .
 
 ### 配置
 
-创建 `config.yaml`（仅服务器和数据库配置，模型通过 Web UI 管理）：
+创建 `config.yaml`：
 
 ```yaml
 server:
@@ -81,20 +81,16 @@ database:
   driver: sqlite        # sqlite 或 mysql
   dsn: fileengine.db
 
-model:                  # 全局默认模型（可选，推荐通过模型管理页面添加）
-  provider: openai
-  api_key: sk-xxx
-  model: gpt-4o
-  base_url: ""
-  temperature: 0.1
-  max_tokens: 4096
-
 agent:
-  batch_size: 10
-  concurrency: 1
-  max_file_read_size: 102400
-  max_retries: 3
+  batch_size: 10        # 每批处理的文件数
+  concurrency: 1        # 并行 Agent 工作线程数
+  max_file_read_size: 102400  # 最大文件读取大小 (bytes)
+  max_retries: 3        # 最大重试次数
 ```
+
+- **模型配置** — 通过 Web UI「模型管理」页面管理（OpenAI / Claude / Ollama）
+- **文件系统连接** — 通过 Web UI「文件系统」页面管理
+- **每个扫描会话** — 独立选择模型、是否允许读取文件、是否允许自动创建分类
 
 ## 使用流程
 

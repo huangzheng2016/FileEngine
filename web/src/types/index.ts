@@ -115,21 +115,11 @@ export interface PlanItem {
 export interface Config {
   server: { port: number; host: string }
   database: { driver: string; dsn: string }
-  model: {
-    provider: string
-    api_key: string
-    model: string
-    base_url: string
-    temperature: number
-    max_tokens: number
-  }
   agent: {
     batch_size: number
     concurrency: number
     max_file_read_size: number
     max_retries: number
-    allow_auto_category: boolean
-    allow_read_file: boolean
   }
 }
 
