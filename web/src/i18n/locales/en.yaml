@@ -131,6 +131,13 @@ tasks:
   allowAutoCategory: Allow Auto-Create Categories
   allowAutoCategoryHint: Agent can create new categories automatically
   settingsSaved: Session settings saved
+  status_scanning: Scanning
+  status_scanned: Scanned
+  status_tagging: Tagging
+  status_tagged: Tagged
+  status_executing: Executing
+  status_done: Done
+  statusError: Error
   rootPathRequired: Root path is required
   executionPlans: Execution Plans
   planName: Name
