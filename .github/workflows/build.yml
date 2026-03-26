@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -192,7 +195,7 @@ jobs:
       id: version
       run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.version }}
         name: FileEngine ${{ steps.version.outputs.version }}
@@ -211,5 +214,3 @@ jobs:
           - **macOS AMD64**: `fileengine-desktop_darwin_amd64.tar.gz`
           - **macOS ARM64**: `fileengine-desktop_darwin_arm64.tar.gz`
           - **Windows AMD64**: `fileengine-desktop_windows_amd64.zip`
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
