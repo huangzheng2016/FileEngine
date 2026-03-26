@@ -117,7 +117,7 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 	}
 
 	filesystemID := session.FilesystemID
-	var batchCounter int32
+	var batchCounter int32 = int32(a.repo.MaxBatchIndex(a.sessionID))
 
 	// Process each depth level from deepest to shallowest
 	for depth := maxDepth; depth >= 0; depth-- {

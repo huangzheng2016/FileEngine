@@ -45,7 +45,10 @@
               :style="{ background: categoryFilter === cat.path ? '#ecf5ff' : '', borderLeft: categoryFilter === cat.path ? '3px solid #409eff' : '3px solid transparent' }"
               @click="setCategoryFilter(cat.path)">
               <div style="flex: 1; min-width: 0">
-                <div style="font-size: 13px; font-weight: 500">{{ cat.name }}</div>
+                <div style="display: flex; align-items: center; gap: 4px">
+                  <span style="font-size: 13px; font-weight: 500">{{ cat.name }}</span>
+                  <el-tag v-if="cat.agent_created" size="small" type="info" style="font-size: 10px">AI</el-tag>
+                </div>
                 <div style="font-size: 11px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ cat.path }}</div>
               </div>
               <div style="flex-shrink: 0; margin-left: 8px">
@@ -182,6 +185,10 @@
         </el-form-item>
         <el-form-item :label="$t('common.description')">
           <el-input v-model="catForm.description" type="textarea" :rows="2" :placeholder="$t('categories.descriptionPlaceholder')" />
+        </el-form-item>
+        <el-form-item :label="$t('categories.agentEditable')">
+          <el-switch v-model="catForm.agent_editable" />
+          <p style="font-size: 12px; color: #909399; margin: 4px 0 0">{{ $t('categories.agentEditableHint') }}</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -328,7 +335,7 @@ const treeData = ref<TreeNode[]>([])
 const sidebarTab = ref('categories')
 const catDialogVisible = ref(false)
 const editingCatId = ref<number | null>(null)
-const catForm = ref({ name: '', path: '', structure: '', description: '' })
+const catForm = ref({ name: '', path: '', structure: '', description: '', agent_editable: false })
 
 onMounted(async () => {
   const res = await listFilesystems()
@@ -448,10 +455,10 @@ async function handleInstruct() {
 function openCatDialog(cat?: Category) {
   if (cat) {
     editingCatId.value = cat.id
-    catForm.value = { name: cat.name, path: cat.path, structure: cat.structure, description: cat.description }
+    catForm.value = { name: cat.name, path: cat.path, structure: cat.structure, description: cat.description, agent_editable: cat.agent_editable }
   } else {
     editingCatId.value = null
-    catForm.value = { name: '', path: '', structure: '', description: '' }
+    catForm.value = { name: '', path: '', structure: '', description: '', agent_editable: false }
   }
   catDialogVisible.value = true
 }

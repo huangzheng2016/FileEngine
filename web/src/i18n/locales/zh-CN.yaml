@@ -87,6 +87,8 @@ categories:
   structurePlaceholder: "例如: 按厂商/产品名称组织"
   descriptionPlaceholder: 该目录应存放什么类型的文件
   deleteConfirm: 确定删除该分类？
+  agentEditable: 允许 AI 修改
+  agentEditableHint: 开启后 Agent 可以修改或删除此分类
 
 filesystems:
   title: 文件系统管理

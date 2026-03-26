@@ -29,14 +29,16 @@ type FileEntry struct {
 }
 
 type Category struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	FilesystemID uint      `gorm:"index;uniqueIndex:idx_fs_category_name,priority:1" json:"filesystem_id"`
-	Name         string    `gorm:"uniqueIndex:idx_fs_category_name,priority:2;size:256" json:"name"`
-	Path         string    `gorm:"size:1024" json:"path"`
-	Structure    string    `gorm:"type:text" json:"structure"`
-	Description  string    `gorm:"type:text" json:"description"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	FilesystemID   uint      `gorm:"index;uniqueIndex:idx_fs_category_name,priority:1" json:"filesystem_id"`
+	Name           string    `gorm:"uniqueIndex:idx_fs_category_name,priority:2;size:256" json:"name"`
+	Path           string    `gorm:"size:1024" json:"path"`
+	Structure      string    `gorm:"type:text" json:"structure"`
+	Description    string    `gorm:"type:text" json:"description"`
+	AgentCreated   bool      `gorm:"default:false" json:"agent_created"`
+	AgentEditable  bool      `gorm:"default:false" json:"agent_editable"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Filesystem struct {

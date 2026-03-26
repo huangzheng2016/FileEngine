@@ -425,6 +425,17 @@ func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	return *minBatch - 1
 }
 
+func (r *Repository) MaxBatchIndex(sessionID uint) int {
+	var maxBatch *int
+	r.db.Model(&AgentLog{}).
+		Where("scan_session_id = ? AND batch_index > 0", sessionID).
+		Select("MAX(batch_index)").Scan(&maxBatch)
+	if maxBatch == nil {
+		return 0
+	}
+	return *maxBatch
+}
+
 func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]BatchInfo, int64, error) {
 	base := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", sessionID)
 

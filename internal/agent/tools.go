@@ -97,10 +97,11 @@ type ListCategoriesOutput struct {
 }
 
 type CategoryItem struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Structure   string `json:"structure,omitempty"`
-	Description string `json:"description"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	Structure     string `json:"structure,omitempty"`
+	Description   string `json:"description"`
+	AgentEditable bool   `json:"agent_editable"`
 }
 
 type ListCategoryFilesInput struct {
@@ -468,10 +469,11 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 	items := make([]CategoryItem, len(cats))
 	for i, c := range cats {
 		items[i] = CategoryItem{
-			Name:        c.Name,
-			Path:        c.Path,
-			Structure:   c.Structure,
-			Description: c.Description,
+			Name:          c.Name,
+			Path:          c.Path,
+			Structure:     c.Structure,
+			Description:   c.Description,
+			AgentEditable: c.AgentEditable,
 		}
 	}
 
@@ -553,10 +555,12 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
 	cat := &db.Category{
-		FilesystemID: tb.filesystemID,
-		Name:         input.Name,
-		Path:         input.Path,
-		Description:  input.Description,
+		FilesystemID:  tb.filesystemID,
+		Name:          input.Name,
+		Path:          input.Path,
+		Description:   input.Description,
+		AgentCreated:  true,
+		AgentEditable: true,
 	}
 	if err := tb.repo.CreateCategory(cat); err != nil {
 		return nil, fmt.Errorf("create category: %w", err)
@@ -583,6 +587,10 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	}
 	if cat == nil {
 		return nil, fmt.Errorf("category not found: %s", input.Name)
+	}
+
+	if !cat.AgentEditable {
+		return nil, fmt.Errorf("category '%s' is not editable by agent (user-managed)", input.Name)
 	}
 
 	oldPath := cat.Path
@@ -623,6 +631,10 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 	}
 	if cat == nil {
 		return nil, fmt.Errorf("category not found: %s", input.Name)
+	}
+
+	if !cat.AgentEditable {
+		return nil, fmt.Errorf("category '%s' is not deletable by agent (user-managed)", input.Name)
 	}
 
 	// Clear all planned files under this category and reset tagged for re-classification

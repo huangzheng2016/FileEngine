@@ -25,6 +25,8 @@ export interface Category {
   path: string
   structure: string
   description: string
+  agent_created: boolean
+  agent_editable: boolean
 }
 
 export interface Filesystem {

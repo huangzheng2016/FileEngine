@@ -87,6 +87,8 @@ categories:
   structurePlaceholder: "e.g., By vendor/product name"
   descriptionPlaceholder: What files should go here
   deleteConfirm: Delete this category?
+  agentEditable: AI Editable
+  agentEditableHint: When enabled, the agent can modify or delete this category
 
 filesystems:
   title: Filesystem Management
