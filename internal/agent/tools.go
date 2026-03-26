@@ -118,7 +118,7 @@ type ListCategoryFilesOutput struct {
 
 type SetTargetInput struct {
 	Path    string `json:"path" jsonschema_description:"Original path of the file/directory"`
-	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder"`
+	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder. Empty string clears the target"`
 }
 
 type SetTargetOutput struct {
@@ -214,7 +214,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build list_categories: %w", err)
 	}
 
-	setTarget, err := utils.InferTool("set_target", "为文件/目录设置整理目标路径（仅修改数据库，不操作实际文件）", tb.setTarget)
+	setTarget, err := utils.InferTool("set_target", "为文件/目录设置整理目标路径（仅修改数据库，不操作实际文件）。new_path 传空字符串可清除已有目标", tb.setTarget)
 	if err != nil {
 		return nil, fmt.Errorf("build set_target: %w", err)
 	}
@@ -522,14 +522,20 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
 
-	f.NewPath = input.NewPath
-	f.Operation = "planned"
+	if input.NewPath == "" {
+		// Clear target
+		f.NewPath = ""
+		f.Operation = ""
+	} else {
+		f.NewPath = input.NewPath
+		f.Operation = "planned"
+	}
 	if err := tb.repo.UpdateFile(f); err != nil {
 		return nil, err
 	}
 
 	// If target is a directory, clear children's targets (outer target overrides inner)
-	if f.FileType == "directory" {
+	if f.FileType == "directory" && input.NewPath != "" {
 		_ = tb.repo.ClearChildrenTarget(tb.sessionID, input.Path)
 	}
 
