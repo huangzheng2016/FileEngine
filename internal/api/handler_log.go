@@ -2,14 +2,14 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 
 	"FileEngine/internal/db"
 
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
 
@@ -90,10 +90,16 @@ func (s *Server) streamLogs(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
+	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		log.Printf("websocket accept: %v", err)
+		return
+	}
+	defer conn.CloseNow()
+
+	ctx := conn.CloseRead(c.Request.Context())
 
 	// Subscribe to agent logger if running
 	agentMu.Lock()
@@ -110,18 +116,20 @@ func (s *Server) streamLogs(c *gin.Context) {
 		defer UnregisterSSEListener(uint(sessionID), logCh)
 	}
 
-	ctx := c.Request.Context()
-	c.Stream(func(w io.Writer) bool {
+	for {
 		select {
 		case <-ctx.Done():
-			return false
-		case log, ok := <-logCh:
+			conn.Close(websocket.StatusNormalClosure, "")
+			return
+		case entry, ok := <-logCh:
 			if !ok {
-				return false
+				conn.Close(websocket.StatusNormalClosure, "")
+				return
 			}
-			data, _ := json.Marshal(log)
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			return true
+			data, _ := json.Marshal(entry)
+			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+				return
+			}
 		}
-	})
+	}
 }

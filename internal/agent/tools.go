@@ -562,6 +562,20 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
+	// Check for existing category with same name or path
+	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cats {
+		if c.Name == input.Name {
+			return nil, fmt.Errorf("category with name '%s' already exists (path: %s). Use set_target to assign files to it, or update_category to modify it", c.Name, c.Path)
+		}
+		if c.Path == input.Path {
+			return nil, fmt.Errorf("category with path '%s' already exists (name: %s). Use that category instead of creating a duplicate", c.Path, c.Name)
+		}
+	}
+
 	cat := &db.Category{
 		FilesystemID:  tb.filesystemID,
 		Name:          input.Name,
