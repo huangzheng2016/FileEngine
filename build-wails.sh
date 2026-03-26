@@ -78,7 +78,11 @@ if [[ ! -f go.sum ]]; then
 fi
 
 echo "Building Wails app..."
-GOARCH="$ARCH" wails build -platform "${PLATFORM}/${ARCH}" -clean -ldflags "-s -w" -skipbindings -s
+LDFLAGS="-s -w"
+if [[ "$PLATFORM" == "windows" ]]; then
+  LDFLAGS="-s -w -H windowsgui"
+fi
+GOARCH="$ARCH" wails build -platform "${PLATFORM}/${ARCH}" -clean -ldflags "$LDFLAGS" -skipbindings -s
 
 # Package
 OUTPUT_DIR="${WAILS_DIR}/build/bin"
