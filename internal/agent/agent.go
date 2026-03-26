@@ -530,7 +530,7 @@ func extractTokenUsage(msg *schema.Message) (prompt, completion, total int) {
 
 func buildDirectoryPrompt(dir db.FileEntry) string {
 	var sb strings.Builder
-	sb.WriteString("分析以下目录：\n\n")
+	sb.WriteString("处理以下目录：\n\n")
 	sb.WriteString(fmt.Sprintf("路径: %s\n", dir.OriginalPath))
 	sb.WriteString(fmt.Sprintf("类型: %s | 大小: %d | 子项数: %d | 深度: %d\n", dir.FileType, dir.Size, dir.ChildCount, dir.Depth))
 	if dir.Description != "" {
@@ -539,24 +539,12 @@ func buildDirectoryPrompt(dir db.FileEntry) string {
 	if dir.ParentPath != "" {
 		sb.WriteString(fmt.Sprintf("父目录: %s\n", dir.ParentPath))
 	}
-	sb.WriteString("\n操作步骤：\n")
-	sb.WriteString(fmt.Sprintf("1. 使用 list_files(parent_path=\"%s\") 查看目录内容\n", dir.OriginalPath))
-	sb.WriteString("2. 读取关键文件（README、配置文件等）了解用途\n")
-	sb.WriteString("3. **重要**：如果路径很深或目录名看起来是某个大项目的子目录（如 node_modules、src、lib、spec、test 等），\n")
-	sb.WriteString("   请使用 get_file_info 向上逐级查看父目录，找到项目根目录（通常包含 README、package.json、go.mod 等）\n")
-	sb.WriteString("   然后对项目根目录执行 update_description + set_target + mark_tagged，一次性标记整个项目\n")
-	sb.WriteString("4. 使用 update_description 写描述\n")
-	sb.WriteString("5. 如果是完整单元（项目、安装包、相册等）：\n")
-	sb.WriteString("   → 使用 list_categories 查找目标分类\n")
-	sb.WriteString("   → 使用 set_target 设置目标路径\n")
-	sb.WriteString("   → 使用 mark_tagged 标记（所有子项自动标记）\n")
-	sb.WriteString("6. 如果内容混杂，仅描述，不要 mark_tagged\n")
 	return sb.String()
 }
 
 func buildBatchPrompt(entries []db.FileEntry) string {
 	var sb strings.Builder
-	sb.WriteString("请分析并整理以下文件：\n\n")
+	sb.WriteString("处理以下散文件：\n\n")
 	for i, e := range entries {
 		sb.WriteString(fmt.Sprintf("%d. 路径: %s\n   类型: %s | 大小: %d\n",
 			i+1, e.OriginalPath, e.FileType, e.Size))
@@ -565,9 +553,5 @@ func buildBatchPrompt(entries []db.FileEntry) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("For each item:\n")
-	sb.WriteString("1. Read the file if needed to understand it\n")
-	sb.WriteString("2. Write a description using update_description\n")
-	sb.WriteString("3. Plan_move it to the right category and mark_tagged\n")
 	return sb.String()
 }
