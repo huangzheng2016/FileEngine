@@ -89,16 +89,19 @@
       <el-card style="flex: 1; overflow: auto">
         <template #header>
           <div style="display: flex; justify-content: flex-end">
-            <el-popover trigger="click" width="240">
+            <el-popover trigger="click" width="220">
               <template #reference>
                 <el-button size="small" text><el-icon><Setting /></el-icon>{{ $t('files.columns') }}</el-button>
               </template>
-              <div v-for="(col, idx) in allColumns" :key="col.key" style="display: flex; align-items: center; gap: 4px; padding: 3px 0">
-                <el-checkbox v-model="col.visible" @change="saveColumnPrefs" style="margin-right: 0" />
-                <span style="font-size: 13px; flex: 1">{{ col.label }}</span>
-                <el-button size="small" text :disabled="idx === 0" @click="moveColumn(idx, -1)" style="padding: 2px"><el-icon size="12"><Top /></el-icon></el-button>
-                <el-button size="small" text :disabled="idx === allColumns.length - 1" @click="moveColumn(idx, 1)" style="padding: 2px"><el-icon size="12"><Bottom /></el-icon></el-button>
-              </div>
+              <draggable v-model="allColumns" item-key="key" handle=".drag-handle" @end="saveColumnPrefs">
+                <template #item="{ element }">
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: default">
+                    <el-icon class="drag-handle" style="cursor: grab; color: #c0c4cc"><Rank /></el-icon>
+                    <el-checkbox v-model="element.visible" @change="saveColumnPrefs" style="margin-right: 0" />
+                    <span style="font-size: 13px">{{ element.label }}</span>
+                  </div>
+                </template>
+              </draggable>
             </el-popover>
           </div>
         </template>
@@ -257,6 +260,7 @@ import { useI18n } from 'vue-i18n'
 import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
 import type { FileEntry, Filesystem, ScanSession, Category, TreeNode } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import draggable from 'vuedraggable'
 
 const { t } = useI18n()
 
@@ -302,14 +306,6 @@ const allColumns = ref<ColumnDef[]>(loadColumnPrefs())
 const visibleColumns = computed(() => allColumns.value.filter(c => c.visible))
 function saveColumnPrefs() {
   localStorage.setItem('fe_columns', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
-}
-function moveColumn(index: number, dir: -1 | 1) {
-  const target = index + dir
-  if (target < 0 || target >= allColumns.value.length) return
-  const cols = [...allColumns.value]
-  ;[cols[index], cols[target]] = [cols[target], cols[index]]
-  allColumns.value = cols
-  saveColumnPrefs()
 }
 
 const loaded = ref(false)
