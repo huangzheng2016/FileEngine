@@ -52,7 +52,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - All icons globally registered from `@element-plus/icons-vue`
 - CodeMirror for prompt editing (One Dark theme + markdown)
 - Colored tags for protocols (SMB/SFTP/FTP/NFS/LOCAL), file types (文件夹/文件), providers (OpenAI/Claude/Ollama), session status (i18n)
-- localStorage for user preferences: `fe_last_fs_id`, `fe_log_order`
+- localStorage for user preferences: `fe_last_fs_id`, `fe_log_order`, `fe_columns`
 
 ## Architecture Notes
 
@@ -60,27 +60,41 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - **Phase 1 (DB-only):** Agent scans, tags, and sets target paths — only modifies database records
 - **Phase 2 (Execution):** Executor reads plans from DB, user chooses copy or move mode, performs actual file operations via RemoteFS
 
+### Scanner
+- Recursive directory walker, creates `FileEntry` records for all files/directories
+- Supports blacklist/whitelist directory filtering (`ScanSession.FilterMode` + `FilterDirs`)
+- `ExcludeCategoryDirs` option auto-appends category paths to blacklist
+- Filter dirs stored as newline-separated text, parsed at scan time
+
 ### Agent Tagging Algorithm
 - Processes directories **bottom-up by depth level** (deepest first)
 - Each directory gets its own agent call (not batched)
-- Agent aggressively explores upward: if depth > 3 or directory name matches common sub-dir patterns (src, lib, test, spec, node_modules, vendor), finds project root and marks entire project
-- `mark_tagged` cascades to all descendants via `LIKE` query
+- Agent explores upward to find project roots, marks entire project at once
+- `mark_tagged` cascades to all descendants via `LIKE` query; also writes `batch_index`
+- `set_target` on a directory cascades: clears all children's targets (outer overrides inner)
+- `set_target` with empty `new_path` clears the target
 - Before processing each directory, re-checks tagged status (another worker may have cascade-tagged it)
-- Configurable concurrency: each worker gets its own FS connection + ReAct agent instance
-- System prompt and directory prompt are in Chinese
+- Configurable concurrency: each worker gets its own FS connection + ReAct agent instance + token tracker
+- All agent config (concurrency, batch_size, max_retries, system_prompt) read from live `config.Get()` each iteration — hot-reloadable without restart
+- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s), 60s timeout per Generate call
+- `processRemainingFiles` has 1000-iteration safety limit to prevent infinite loops
 
 ### Agent Tools
-- 6 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `set_target`
+- 8 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `list_category_files`, `set_target`, `update_category`, `delete_category`
 - 2 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true)
 - Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`
-- `set_target` replaces old `plan_move`/`plan_copy` — Agent only sets the target path, copy vs move is decided at execution time
+- All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
+- `delete_category` clears planned files under that category and resets `tagged=false` for re-classification
+- Categories have `agent_created` and `agent_editable` flags; agent can only modify/delete `agent_editable=true` categories
+- Instruct mode (`RunInstruct`) has all tools available including `list_files`, `get_file_info`, `mark_tagged`
+- Token tracking: `tokenTrackingModel` wrapper intercepts all LLM Generate calls (including intermediate ReAct rounds) to accumulate accurate token counts
 
 ### Model Providers
 - `ModelProvider` DB entity stores multiple LLM configurations (name, provider, api_key, model, base_url, temperature, max_tokens)
 - Supports OpenAI (via `eino-ext/components/model/openai`), Claude (native via `eino-ext/components/model/claude`), Ollama (via OpenAI-compatible endpoint)
 - Each `ScanSession` has `ModelProviderID` — can use a different model per scan
-- Falls back to global `config.yaml` model if no provider is set on session
 - `model.NewChatModelFromProvider()` creates model from DB entity
+- Model test endpoint sends "Hi" to verify connectivity and shows reply
 
 ### RemoteFS
 - Unified `RemoteFS` interface in `internal/remotefs/interface.go`
@@ -127,6 +141,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | All DB queries | `internal/db/repository.go` |
 | Agent tagging loop | `internal/agent/agent.go` (RunTagging) |
 | Agent tools | `internal/agent/tools.go` |
+| Token tracker | `internal/agent/token_tracker.go` |
 | System prompt | `internal/agent/prompt.go` |
 | LLM factory | `internal/model/factory.go` |
 | FS interface | `internal/remotefs/interface.go` |
@@ -136,6 +151,9 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | Frontend API | `web/src/api/index.ts` |
 | Frontend routes | `web/src/router/index.ts` |
 | Model manager page | `web/src/views/ModelManager.vue` |
+| Wails desktop app | `wails/main.go`, `wails/app.go` |
+| Wails build script | `build-wails.sh` |
+| CI/CD | `.github/workflows/build.yml` |
 
 ## Common Tasks
 

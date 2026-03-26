@@ -530,7 +530,6 @@ func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategor
 	return out, nil
 }
 
-// PLACEHOLDER_SETTARGET
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 
@@ -668,12 +667,5 @@ func isTextContent(s string) bool {
 			return false
 		}
 	}
-	return !strings.ContainsRune(s[:min(len(s), 512)], '\x00')
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return true
 }

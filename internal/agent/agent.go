@@ -23,7 +23,6 @@ import (
 type Agent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
-	cfg           *config.Config
 	modelProvider *db.ModelProvider
 	session       *db.ScanSession
 	logger        *Logger
@@ -38,7 +37,6 @@ func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, s
 	return &Agent{
 		repo:          repo,
 		fsCfg:         fsCfg,
-		cfg:           cfg,
 		modelProvider: modelProvider,
 		session:       session,
 		sessionID:     sessionID,
@@ -100,12 +98,6 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 		return fmt.Errorf("create model: %w", err)
 	}
 
-	// Get system prompt
-	systemPrompt := DefaultSystemPrompt
-	if a.cfg.Agent.SystemPrompt != "" {
-		systemPrompt = a.cfg.Agent.SystemPrompt
-	}
-
 	// Get max depth
 	maxDepth, err := a.repo.GetMaxDepth(a.sessionID)
 	if err != nil {
@@ -133,10 +125,15 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 
 		log.Printf("depth %d: %d untagged directories", depth, len(dirs))
 
-		// Read concurrency from live config each depth level
-		concurrency := config.Get().Agent.Concurrency
+		// Read live config each depth level
+		liveCfg := config.Get()
+		concurrency := liveCfg.Agent.Concurrency
 		if concurrency <= 0 {
 			concurrency = 1
+		}
+		systemPrompt := DefaultSystemPrompt
+		if liveCfg.Agent.SystemPrompt != "" {
+			systemPrompt = liveCfg.Agent.SystemPrompt
 		}
 
 		// Create work channel
@@ -168,7 +165,11 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 	}
 
 	// Process remaining untagged files (leaf files not in any directory)
-	a.processRemainingFiles(ctx, chatModel, systemPrompt, &batchCounter, filesystemID)
+	remainingPrompt := DefaultSystemPrompt
+	if p := config.Get().Agent.SystemPrompt; p != "" {
+		remainingPrompt = p
+	}
+	a.processRemainingFiles(ctx, chatModel, remainingPrompt, &batchCounter, filesystemID)
 
 	// Update session status
 	session, err = a.repo.GetSession(a.sessionID)
@@ -195,7 +196,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 	filesystemID := a.session.FilesystemID
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, a.cfg.Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, config.Get().Agent, a.session)
 	tools, err := toolBuilder.BuildInstructTools()
 	if err != nil {
 		return "", fmt.Errorf("build tools: %w", err)
@@ -327,7 +328,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 	// Each worker gets its own logger, token tracker, and agent
 	workerLogger := NewLogger(a.repo, a.sessionID)
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		log.Printf("worker %d: failed to build tools: %v", workerID, err)
@@ -378,7 +379,10 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		}()
 		if err != nil {
 			// Retry on failure
-			maxRetries := a.cfg.Agent.MaxRetries
+			maxRetries := config.Get().Agent.MaxRetries
+			if maxRetries <= 0 {
+				maxRetries = 3
+			}
 			for retry := 1; retry <= maxRetries && err != nil; retry++ {
 				if ctx.Err() != nil {
 					return // parent context cancelled, stop immediately
@@ -411,7 +415,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 		FileType:  "file",
 		Tagged:    &falseVal,
 		Page:      1,
-		PageSize:  a.cfg.Agent.BatchSize,
+		PageSize:  config.Get().Agent.BatchSize,
 	})
 	if err != nil || len(files) == 0 {
 		return
@@ -420,13 +424,14 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 	// Process remaining files in a single worker
 	workerFS, err := remotefs.NewFromConfig(a.fsCfg)
 	if err != nil {
+		log.Printf("processRemainingFiles: failed to connect fs: %v", err)
 		return
 	}
 	defer workerFS.Close()
 
 	workerLogger := NewLogger(a.repo, a.sessionID)
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		return
@@ -443,11 +448,17 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 		return
 	}
 
-	for {
+	for iterations := 0; ; iterations++ {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Safety limit: prevent infinite loop if agent fails to mark files
+		if iterations > 1000 {
+			log.Printf("processRemainingFiles: exceeded max iterations, stopping")
+			return
 		}
 
 		falseVal := false
@@ -456,7 +467,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			FileType:  "file",
 			Tagged:    &falseVal,
 			Page:      1,
-			PageSize:  a.cfg.Agent.BatchSize,
+			PageSize:  config.Get().Agent.BatchSize,
 		})
 		if err != nil || len(files) == 0 {
 			return
@@ -479,7 +490,10 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			return agentInst.Generate(callCtx, messages)
 		}()
 		if err != nil {
-			maxRetries := a.cfg.Agent.MaxRetries
+			maxRetries := config.Get().Agent.MaxRetries
+			if maxRetries <= 0 {
+				maxRetries = 3
+			}
 			for retry := 1; retry <= maxRetries && err != nil; retry++ {
 				if ctx.Err() != nil {
 					return
@@ -542,12 +556,12 @@ func buildDirectoryPrompt(dir db.FileEntry) string {
 
 func buildBatchPrompt(entries []db.FileEntry) string {
 	var sb strings.Builder
-	sb.WriteString("Please analyze and organize the following files:\n\n")
+	sb.WriteString("请分析并整理以下文件：\n\n")
 	for i, e := range entries {
-		sb.WriteString(fmt.Sprintf("%d. Path: %s\n   Type: %s | Size: %d\n",
+		sb.WriteString(fmt.Sprintf("%d. 路径: %s\n   类型: %s | 大小: %d\n",
 			i+1, e.OriginalPath, e.FileType, e.Size))
 		if e.Description != "" {
-			sb.WriteString(fmt.Sprintf("   Current description: %s\n", e.Description))
+			sb.WriteString(fmt.Sprintf("   描述: %s\n", e.Description))
 		}
 		sb.WriteString("\n")
 	}
