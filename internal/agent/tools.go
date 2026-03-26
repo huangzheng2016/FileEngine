@@ -254,13 +254,25 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	return allTools, nil
 }
 
-// BuildInstructTools returns tools for user-directed instruct mode (no list_files, read_file, mark_tagged).
+// BuildInstructTools returns tools for user-directed instruct mode.
 func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
+	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持 offset+limit 分页", tb.listFiles)
+	if err != nil {
+		return nil, err
+	}
+	getFileInfo, err := utils.InferTool("get_file_info", "获取单个文件或目录的详细元数据", tb.getFileInfo)
+	if err != nil {
+		return nil, err
+	}
 	updateDesc, err := utils.InferTool("update_description", "修改文件/目录的描述", tb.updateDescription)
 	if err != nil {
 		return nil, err
 	}
-	setTarget, err := utils.InferTool("set_target", "设置文件/目录的整理目标路径", tb.setTarget)
+	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
+	if err != nil {
+		return nil, err
+	}
+	setTarget, err := utils.InferTool("set_target", "设置文件/目录的整理目标路径。new_path 传空字符串可清除已有目标", tb.setTarget)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +284,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	allTools := []tool.BaseTool{updateDesc, setTarget, listCats, listCatFiles}
+	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, setTarget, listCats, listCatFiles}
 
 	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述。路径变更会级联更新文件", tb.updateCategory)
 	if err != nil {

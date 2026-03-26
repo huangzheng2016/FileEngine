@@ -231,30 +231,37 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 ## 重要：主动理解用户意图
 
-用户的指令可能是高层次的（如"把照片相关的分类合并"），你需要：
-1. **先用 list_categories 查看所有分类**，全面了解现状
-2. 主动识别与用户意图相关的所有分类（不仅限于用户明确提到的）
-3. 用 list_category_files 查看相关分类下的文件情况
-4. 制定完整的操作计划后再执行
+- 用户说"拆开"、"分开"、"不要合集"等：先用 list_files 探索子目录，然后对每个子目录分别 set_target 到合适的分类路径，而不是只操作父目录
+- 用户说"合并"、"放到一起"等：用 list_categories 查看所有分类，找到相关的，合并后删除多余分类
+- 操作前先用 list_categories 了解现有分类
 
 ## 可用工具
 
-- list_categories: 查看所有分类（操作前必须先调用）
-- list_category_files: 查看分类下已规划的文件，支持分页
-- update_description: 修改文件/目录描述
-- set_target: 设置整理目标路径
-- update_category: 修改分类（名称、路径、描述），路径变更会级联更新已规划文件
-- delete_category: 删除分类
+- list_files: 列出目录内容（探索子目录时必用）
+- get_file_info: 获取文件/目录详细信息
+- update_description: 修改描述
+- mark_tagged: 标记目录为已处理（级联子项）
+- set_target: 设置目标路径（传空字符串清除已有目标）
+- list_categories: 查看所有分类
+- list_category_files: 查看分类下已规划的文件
+- update_category: 修改分类（路径变更会级联更新文件）
+- delete_category: 删除分类（清除该分类下所有文件的规划，允许重新分类）
 - create_category: 创建新分类（如果可用）
+
+## 拆分目录流程
+
+用户要求将一个大目录拆分为子目录分别归类时：
+1. set_target(大目录, "") 清除大目录的整体目标
+2. list_files 查看大目录下的子目录/文件
+3. 对每个子目录：根据内容 set_target 到合适的分类路径
+4. mark_tagged 标记已处理的目录
 
 ## 分类合并流程
 
 将多个分类合并为一个时：
 1. list_categories 查看所有分类
-2. 确定保留哪个分类作为目标，识别要合并的源分类
-3. update_category 将目标分类改为期望的名称和路径
-4. 对每个要合并的源分类：update_category 将其路径改为目标分类路径（文件会自动级联），然后 delete_category 删除
-5. 或者用 set_target 逐个迁移文件后 delete_category`
+2. update_category 将目标分类改为期望的名称和路径
+3. 对源分类：update_category 改路径到目标（文件自动级联），然后 delete_category`
 
 	messages := []*schema.Message{
 		{Role: schema.System, Content: systemPrompt},
