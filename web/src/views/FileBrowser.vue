@@ -41,7 +41,8 @@
               {{ $t('files.noCategories') }}
             </div>
             <div v-for="cat in categories" :key="cat.id"
-              style="display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f0f0f0; cursor: pointer"
+              style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; border-radius: 4px; margin-bottom: 2px; transition: all 0.2s"
+              :style="{ background: categoryFilter === cat.path ? '#ecf5ff' : '', borderLeft: categoryFilter === cat.path ? '3px solid #409eff' : '3px solid transparent' }"
               @click="setCategoryFilter(cat.path)">
               <div style="flex: 1; min-width: 0">
                 <div style="font-size: 13px; font-weight: 500">{{ cat.name }}</div>
@@ -111,6 +112,14 @@
           <el-table-column :label="$t('files.taggedStatus')" width="70" align="center">
             <template #default="{ row }">
               <el-tag :type="row.tagged ? 'success' : 'info'" size="small">{{ row.tagged ? $t('common.yes') : $t('common.no') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="$t('files.batchIndex')" width="70" align="center">
+            <template #default="{ row }">
+              <router-link v-if="row.batch_index" :to="{ name: 'logs', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
+                style="color: #409eff; text-decoration: none; font-size: 12px">
+                {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
+              </router-link>
             </template>
           </el-table-column>
           <el-table-column prop="new_path" :label="$t('files.plannedPath')" min-width="180" show-overflow-tooltip />

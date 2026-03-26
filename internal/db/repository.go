@@ -226,10 +226,10 @@ func (r *Repository) IsFileTagged(sessionID uint, path string) (bool, error) {
 	return f.Tagged, nil
 }
 
-func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string) error {
+func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string, batchIndex int) error {
 	return r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND original_path LIKE ?", sessionID, parentPath+"/%").
-		Update("tagged", true).Error
+		Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
 }
 
 func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) error {

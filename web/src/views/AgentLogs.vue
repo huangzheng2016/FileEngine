@@ -84,10 +84,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { listSessions, listLogs, listBatches } from '../api'
 import type { ScanSession, AgentLog } from '../types'
 
 const { t } = useI18n()
+const route = useRoute()
 
 const sessions = ref<ScanSession[]>([])
 const sessionId = ref<number>(0)
@@ -130,9 +132,17 @@ function toggleExpand(id: number, type: string) {
 onMounted(async () => {
   const res = await listSessions()
   sessions.value = res.data
-  if (sessions.value.length > 0) {
+  // Support query params: ?session=X&batch=Y
+  const qSession = Number(route.query.session)
+  const qBatch = route.query.batch != null ? Number(route.query.batch) : null
+  if (qSession && sessions.value.find(s => s.id === qSession)) {
+    sessionId.value = qSession
+  } else if (sessions.value.length > 0) {
     sessionId.value = sessions.value[0].id
-    onSessionChange()
+  }
+  await onSessionChange()
+  if (qBatch != null) {
+    selectBatch(qBatch)
   }
 })
 

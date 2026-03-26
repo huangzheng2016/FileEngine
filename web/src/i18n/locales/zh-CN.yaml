@@ -54,6 +54,7 @@ files:
   fileSize: 大小
   fileDescription: 描述
   taggedStatus: 标记
+  batchIndex: 轮次
   plannedPath: 规划路径
   detail: 文件详情
   saveChanges: 保存修改

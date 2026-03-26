@@ -15,6 +15,7 @@ export interface FileEntry {
   parent_path: string
   depth: number
   child_count: number
+  batch_index: number
 }
 
 export interface Category {

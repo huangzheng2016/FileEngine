@@ -29,6 +29,12 @@ func (l *Logger) SetBatch(batch int) {
 	l.mu.Unlock()
 }
 
+func (l *Logger) GetBatch() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.batch
+}
+
 func (l *Logger) Subscribe() chan *db.AgentLog {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -54,6 +54,7 @@ files:
   fileSize: Size
   fileDescription: Description
   taggedStatus: Tagged
+  batchIndex: Batch
   plannedPath: Planned Path
   detail: File Detail
   saveChanges: Save Changes
