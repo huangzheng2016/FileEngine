@@ -209,7 +209,8 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 	// Build message with file context
 	var sb strings.Builder
-	sb.WriteString("用户选择了以下文件/目录，请根据用户指令进行操作：\n\n")
+	sb.WriteString(fmt.Sprintf("## 用户指令\n\n%s\n\n", userPrompt))
+	sb.WriteString("## 选中的文件/目录\n\n")
 	for _, f := range files {
 		sb.WriteString(fmt.Sprintf("- %s (%s, %d bytes)", f.OriginalPath, f.FileType, f.Size))
 		if f.Description != "" {
@@ -220,7 +221,6 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("\n用户指令: %s\n", userPrompt))
 	sb.WriteString("\n请使用工具执行用户的指令。")
 
 	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
