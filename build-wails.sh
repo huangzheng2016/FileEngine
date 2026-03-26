@@ -78,7 +78,7 @@ if [[ ! -f go.sum ]]; then
 fi
 
 echo "Building Wails app..."
-GOARCH="$ARCH" wails build -s -platform "${PLATFORM}/${ARCH}"
+GOARCH="$ARCH" wails build -platform "${PLATFORM}/${ARCH}" -clean -ldflags "-s -w" -skipbindings -s
 
 # Package
 OUTPUT_DIR="${WAILS_DIR}/build/bin"
