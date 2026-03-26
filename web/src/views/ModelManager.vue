@@ -15,8 +15,10 @@
       </el-table-column>
       <el-table-column prop="model" :label="$t('models.modelName')" width="250" show-overflow-tooltip />
       <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="250" show-overflow-tooltip />
-      <el-table-column :label="$t('common.actions')" width="160" fixed="right">
+      <el-table-column :label="$t('common.actions')" width="220" fixed="right">
         <template #default="{ row }">
+          <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
+          <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
           <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
         </template>
@@ -72,6 +74,7 @@ const providers = ref<ModelProvider[]>([])
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const testing = ref(false)
+const testingId = ref<number | null>(null)
 const form = ref({
   name: '', provider: 'openai', api_key: '', model: '',
   base_url: '', temperature: 0.1, max_tokens: 4096,
@@ -142,5 +145,29 @@ async function handleTest() {
   } finally {
     testing.value = false
   }
+}
+
+async function handleTestExisting(m: ModelProvider) {
+  testingId.value = m.id
+  try {
+    const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens }
+    const res = await testModelProviderConnection(data)
+    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
+    else ElMessage.error(t('models.connFail', { error: res.data.error }))
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || 'Test failed')
+  } finally {
+    testingId.value = null
+  }
+}
+
+function handleDuplicate(m: ModelProvider) {
+  editingId.value = null
+  form.value = {
+    name: m.name + ' (copy)', provider: m.provider, api_key: '',
+    model: m.model, base_url: m.base_url,
+    temperature: m.temperature, max_tokens: m.max_tokens,
+  }
+  dialogVisible.value = true
 }
 </script>
