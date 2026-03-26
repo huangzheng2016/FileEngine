@@ -55,6 +55,7 @@ files:
   fileDescription: Description
   taggedStatus: Tagged
   batchIndex: Batch
+  columns: Columns
   plannedPath: Planned Path
   detail: File Detail
   saveChanges: Save Changes
