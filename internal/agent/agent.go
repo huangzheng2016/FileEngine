@@ -112,11 +112,6 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 		return fmt.Errorf("get max depth: %w", err)
 	}
 
-	concurrency := a.cfg.Agent.Concurrency
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-
 	filesystemID := session.FilesystemID
 	var batchCounter int32 = int32(a.repo.MaxBatchIndex(a.sessionID))
 
@@ -137,6 +132,12 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 		}
 
 		log.Printf("depth %d: %d untagged directories", depth, len(dirs))
+
+		// Read concurrency from live config each depth level
+		concurrency := config.Get().Agent.Concurrency
+		if concurrency <= 0 {
+			concurrency = 1
+		}
 
 		// Create work channel
 		workCh := make(chan db.FileEntry, len(dirs))
