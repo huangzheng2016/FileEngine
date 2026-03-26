@@ -400,7 +400,23 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	return logs, total, err
 }
 
-func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]int, int64, error) {
+type BatchInfo struct {
+	BatchIndex int    `json:"batch_index"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (r *Repository) NextManualBatchIndex(sessionID uint) int {
+	var minBatch *int
+	r.db.Model(&AgentLog{}).
+		Where("scan_session_id = ? AND batch_index < 0", sessionID).
+		Select("MIN(batch_index)").Scan(&minBatch)
+	if minBatch == nil {
+		return -1
+	}
+	return *minBatch - 1
+}
+
+func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]BatchInfo, int64, error) {
 	base := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", sessionID)
 
 	var total int64
@@ -416,12 +432,13 @@ func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]int, int
 	}
 	offset := (page - 1) * pageSize
 
-	var batches []int
+	var batches []BatchInfo
 	err := r.db.Model(&AgentLog{}).
+		Select("batch_index, MIN(created_at) as created_at").
 		Where("scan_session_id = ?", sessionID).
-		Distinct("batch_index").
-		Order("batch_index ASC").
+		Group("batch_index").
+		Order("MIN(created_at) ASC").
 		Offset(offset).Limit(pageSize).
-		Pluck("batch_index", &batches).Error
+		Find(&batches).Error
 	return batches, total, err
 }

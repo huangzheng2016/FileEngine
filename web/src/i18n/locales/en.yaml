@@ -220,6 +220,7 @@ logs:
   assistant: Assistant
   tool: Tool
   batch: "Batch #{index}"
+  manualBatch: "Manual #{index}"
   tokens: "{count} tokens"
   input: Input
   output: Output
