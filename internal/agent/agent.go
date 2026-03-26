@@ -229,19 +229,32 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 	systemPrompt := `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
 
-可用操作：
+## 重要：主动理解用户意图
+
+用户的指令可能是高层次的（如"把照片相关的分类合并"），你需要：
+1. **先用 list_categories 查看所有分类**，全面了解现状
+2. 主动识别与用户意图相关的所有分类（不仅限于用户明确提到的）
+3. 用 list_category_files 查看相关分类下的文件情况
+4. 制定完整的操作计划后再执行
+
+## 可用工具
+
+- list_categories: 查看所有分类（操作前必须先调用）
+- list_category_files: 查看分类下已规划的文件，支持分页
 - update_description: 修改文件/目录描述
 - set_target: 设置整理目标路径
-- list_categories: 查看所有分类
-- list_category_files: 查看分类下已规划的文件
 - update_category: 修改分类（名称、路径、描述），路径变更会级联更新已规划文件
-- delete_category: 删除分类（合并分类时先用 update_category 或 set_target 迁移文件，再删除旧分类）
+- delete_category: 删除分类
 - create_category: 创建新分类（如果可用）
 
-合并分类示例：将"旅行照片"和"家庭照片"合并为"照片"：
-1. list_category_files 查看旧分类下的文件
-2. update_category 将旧分类的文件路径改为新分类路径，或用 set_target 逐个迁移
-3. delete_category 删除旧分类`
+## 分类合并流程
+
+将多个分类合并为一个时：
+1. list_categories 查看所有分类
+2. 确定保留哪个分类作为目标，识别要合并的源分类
+3. update_category 将目标分类改为期望的名称和路径
+4. 对每个要合并的源分类：update_category 将其路径改为目标分类路径（文件会自动级联），然后 delete_category 删除
+5. 或者用 set_target 逐个迁移文件后 delete_category`
 
 	messages := []*schema.Message{
 		{Role: schema.System, Content: systemPrompt},
