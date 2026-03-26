@@ -299,7 +299,6 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 // ============ Tool Implementations ============
 
 func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {
-	tb.logger.LogToolCall("list_files", input, nil)
 
 	limit := input.Limit
 	if limit <= 0 {
@@ -346,7 +345,6 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 }
 
 func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput) (*GetFileInfoOutput, error) {
-	tb.logger.LogToolCall("get_file_info", input, nil)
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
 	if err != nil {
@@ -373,7 +371,6 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 }
 
 func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*ReadFileOutput, error) {
-	tb.logger.LogToolCall("read_file", input, nil)
 
 	maxSize := tb.cfg.MaxFileReadSize
 	if maxSize <= 0 {
@@ -410,7 +407,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 }
 
 func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescriptionInput) (*UpdateDescriptionOutput, error) {
-	tb.logger.LogToolCall("update_description", input, nil)
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
 	if err != nil {
@@ -428,7 +424,6 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 }
 
 func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (*MarkTaggedOutput, error) {
-	tb.logger.LogToolCall("mark_tagged", input, nil)
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
 	if err != nil {
@@ -450,7 +445,6 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 }
 
 func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategoriesInput) (*ListCategoriesOutput, error) {
-	tb.logger.LogToolCall("list_categories", input, nil)
 
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
 	if err != nil {
@@ -473,7 +467,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 }
 
 func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategoryFilesInput) (*ListCategoryFilesOutput, error) {
-	tb.logger.LogToolCall("list_category_files", input, nil)
 
 	limit := input.Limit
 	if limit <= 0 {
@@ -515,7 +508,6 @@ func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategor
 // PLACEHOLDER_SETTARGET
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
-	tb.logger.LogToolCall("set_target", input, nil)
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
 	if err != nil {
@@ -545,7 +537,6 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
-	tb.logger.LogToolCall("create_category", input, nil)
 
 	cat := &db.Category{
 		FilesystemID: tb.filesystemID,
@@ -563,7 +554,6 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 }
 
 func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategoryInput) (*UpdateCategoryOutput, error) {
-	tb.logger.LogToolCall("update_category", input, nil)
 
 	// Find category by name
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
@@ -605,7 +595,6 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 }
 
 func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
-	tb.logger.LogToolCall("delete_category", input, nil)
 
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
 	if err != nil {
