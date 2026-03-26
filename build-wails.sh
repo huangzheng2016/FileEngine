@@ -85,17 +85,30 @@ OUTPUT_DIR="${WAILS_DIR}/build/bin"
 mkdir -p "$OUTPUT_DIR"
 
 OUTPUT_NAME="fileengine-desktop_${PLATFORM}_${ARCH}"
-WAILS_BIN=$(find "${WAILS_DIR}/build/bin" -name "fileengine-desktop*" -not -name "*.tar.gz" -not -name "*.zip" | head -1)
 
-if [[ -z "$WAILS_BIN" ]]; then
-  echo "ERROR: Wails build output not found"
-  exit 1
-fi
-
-if [[ "$PLATFORM" == "windows" ]]; then
+if [[ "$PLATFORM" == "darwin" ]]; then
+  # macOS: Wails outputs a .app bundle
+  WAILS_BIN=$(find "${OUTPUT_DIR}" -name "*.app" -maxdepth 1 | head -1)
+  if [[ -z "$WAILS_BIN" ]]; then
+    echo "ERROR: Wails .app bundle not found"
+    exit 1
+  fi
   cd "$OUTPUT_DIR"
-  zip "${OUTPUT_NAME}.zip" "$(basename "$WAILS_BIN")"
+  tar -czf "${OUTPUT_NAME}.tar.gz" "$(basename "$WAILS_BIN")"
+elif [[ "$PLATFORM" == "windows" ]]; then
+  WAILS_BIN=$(find "${OUTPUT_DIR}" -name "fileengine-desktop*.exe" -maxdepth 1 | head -1)
+  if [[ -z "$WAILS_BIN" ]]; then
+    echo "ERROR: Wails exe not found"
+    exit 1
+  fi
+  cd "$OUTPUT_DIR"
+  powershell -Command "Compress-Archive -Path '$(basename "$WAILS_BIN")' -DestinationPath '${OUTPUT_NAME}.zip'"
 else
+  WAILS_BIN=$(find "${OUTPUT_DIR}" -name "fileengine-desktop" -maxdepth 1 | head -1)
+  if [[ -z "$WAILS_BIN" ]]; then
+    echo "ERROR: Wails binary not found"
+    exit 1
+  fi
   cd "$OUTPUT_DIR"
   tar -czf "${OUTPUT_NAME}.tar.gz" "$(basename "$WAILS_BIN")"
 fi
