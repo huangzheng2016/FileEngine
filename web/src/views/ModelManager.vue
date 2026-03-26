@@ -15,7 +15,7 @@
       </el-table-column>
       <el-table-column prop="model" :label="$t('models.modelName')" width="250" show-overflow-tooltip />
       <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="250" show-overflow-tooltip />
-      <el-table-column :label="$t('common.actions')" width="220" fixed="right">
+      <el-table-column :label="$t('common.actions')" width="300" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
           <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
