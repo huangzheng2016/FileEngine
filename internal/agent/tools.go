@@ -311,6 +311,15 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 
 // ============ Tool Implementations ============
 
+// normalizePath strips leading slash to match DB storage format.
+func normalizePath(p string) string {
+	return strings.TrimPrefix(p, "/")
+}
+
+func ptrStr(s string) *string {
+	return &s
+}
+
 func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {
 
 	limit := input.Limit
@@ -325,7 +334,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 	page := (offset / limit) + 1
 	q := db.FileQuery{
 		SessionID:  tb.sessionID,
-		ParentPath: &input.ParentPath,
+		ParentPath: ptrStr(normalizePath(input.ParentPath)),
 		FileType:   input.FileType,
 		Tagged:     input.Tagged,
 		Page:       page,
@@ -359,7 +368,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 
 func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput) (*GetFileInfoOutput, error) {
 
-	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
+	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
@@ -390,7 +399,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 		maxSize = 102400
 	}
 
-	reader, err := tb.fs.ReadFile(ctx, input.Path)
+	reader, err := tb.fs.ReadFile(ctx, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read file: %w", err)
 	}
@@ -421,7 +430,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 
 func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescriptionInput) (*UpdateDescriptionOutput, error) {
 
-	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
+	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
@@ -438,7 +447,7 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 
 func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (*MarkTaggedOutput, error) {
 
-	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
+	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
@@ -450,7 +459,7 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 		return nil, err
 	}
 
-	if err := tb.repo.MarkChildrenTagged(tb.sessionID, input.Path, batch); err != nil {
+	if err := tb.repo.MarkChildrenTagged(tb.sessionID, normalizePath(input.Path), batch); err != nil {
 		return nil, err
 	}
 
@@ -525,7 +534,7 @@ func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategor
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 
-	f, err := tb.repo.GetFileByPath(tb.sessionID, input.Path)
+	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
@@ -544,7 +553,7 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 	// If target is a directory, clear children's targets (outer target overrides inner)
 	if f.FileType == "directory" && input.NewPath != "" {
-		_ = tb.repo.ClearChildrenTarget(tb.sessionID, input.Path)
+		_ = tb.repo.ClearChildrenTarget(tb.sessionID, normalizePath(input.Path))
 	}
 
 	out := &SetTargetOutput{Success: true}
