@@ -193,6 +193,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	defer workerFS.Close()
 
 	filesystemID := a.session.FilesystemID
+	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, a.cfg.Agent, a.session)
 	tools, err := toolBuilder.BuildInstructTools()
 	if err != nil {
@@ -200,7 +201,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	}
 
 	agentInst, err := react.NewAgent(ctx, &react.AgentConfig{
-		Model:       chatModel,
+		Model:       tracker,
 		ToolsConfig: compose.ToolsNodeConfig{Tools: tools},
 		MaxStep:     30,
 	})
@@ -304,7 +305,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 	response := ""
 	if result != nil {
-		pt, ct, tt := extractTokenUsage(result)
+		pt, ct, tt := tracker.Usage()
 		a.logger.LogMessage("assistant", result.Content, pt, ct, tt)
 		response = result.Content
 	}
@@ -322,8 +323,9 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 	}
 	defer workerFS.Close()
 
-	// Each worker gets its own logger and agent
+	// Each worker gets its own logger, token tracker, and agent
 	workerLogger := NewLogger(a.repo, a.sessionID)
+	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
@@ -333,7 +335,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 
 	// Create ReAct agent for this worker
 	agentInst, err := react.NewAgent(ctx, &react.AgentConfig{
-		Model: chatModel,
+		Model: tracker,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: tools,
 		},
@@ -394,8 +396,9 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		}
 
 		if result != nil {
-			pt, ct, tt := extractTokenUsage(result)
+			pt, ct, tt := tracker.Usage()
 			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+			tracker.ResetUsage()
 		}
 	}
 }
@@ -421,6 +424,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 	defer workerFS.Close()
 
 	workerLogger := NewLogger(a.repo, a.sessionID)
+	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, a.cfg.Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
@@ -428,7 +432,7 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 	}
 
 	agentInst, err := react.NewAgent(ctx, &react.AgentConfig{
-		Model: chatModel,
+		Model: tracker,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: tools,
 		},
@@ -492,8 +496,9 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			}
 		}
 		if result != nil {
-			pt, ct, tt := extractTokenUsage(result)
+			pt, ct, tt := tracker.Usage()
 			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+			tracker.ResetUsage()
 		}
 		_ = a.repo.RefreshSessionCounts(a.sessionID)
 	}
