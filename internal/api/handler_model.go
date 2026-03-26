@@ -1,13 +1,13 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"
 )
 
@@ -152,10 +152,22 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		Provider: req.Provider, APIKey: apiKey, Model: req.Model,
 		BaseURL: req.BaseURL, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 	}
-	_, err := modelfactory.NewChatModelFromProvider(context.Background(), testProvider)
+	chatModel, err := modelfactory.NewChatModelFromProvider(c.Request.Context(), testProvider)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	// Send a test message to verify the model actually works
+	result, err := chatModel.Generate(c.Request.Context(), []*schema.Message{
+		{Role: schema.User, Content: "Hi"},
+	})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	reply := ""
+	if result != nil {
+		reply = result.Content
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "reply": reply})
 }

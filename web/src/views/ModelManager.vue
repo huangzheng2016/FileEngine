@@ -135,7 +135,7 @@ async function handleTest() {
   testing.value = true
   try {
     const res = await testModelProviderConnection(form.value)
-    if (res.data.success) ElMessage.success(t('models.connOk'))
+    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Test failed')
