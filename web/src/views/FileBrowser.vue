@@ -89,13 +89,15 @@
       <el-card style="flex: 1; overflow: auto">
         <template #header>
           <div style="display: flex; justify-content: flex-end">
-            <el-popover trigger="click" width="200">
+            <el-popover trigger="click" width="240">
               <template #reference>
                 <el-button size="small" text><el-icon><Setting /></el-icon>{{ $t('files.columns') }}</el-button>
               </template>
-              <div v-for="col in allColumns" :key="col.key" style="display: flex; align-items: center; gap: 8px; padding: 4px 0">
-                <el-checkbox v-model="col.visible" @change="saveColumnPrefs" />
-                <span style="font-size: 13px">{{ col.label }}</span>
+              <div v-for="(col, idx) in allColumns" :key="col.key" style="display: flex; align-items: center; gap: 4px; padding: 3px 0">
+                <el-checkbox v-model="col.visible" @change="saveColumnPrefs" style="margin-right: 0" />
+                <span style="font-size: 13px; flex: 1">{{ col.label }}</span>
+                <el-button size="small" text :disabled="idx === 0" @click="moveColumn(idx, -1)" style="padding: 2px"><el-icon size="12"><Top /></el-icon></el-button>
+                <el-button size="small" text :disabled="idx === allColumns.length - 1" @click="moveColumn(idx, 1)" style="padding: 2px"><el-icon size="12"><Bottom /></el-icon></el-button>
               </div>
             </el-popover>
           </div>
@@ -260,14 +262,14 @@ const { t } = useI18n()
 
 // Column configuration
 interface ColumnDef { key: string; label: string; visible: boolean }
-const defaultColumns: { key: string; defaultVisible: boolean }[] = [
+const defaultColumnOrder: { key: string; defaultVisible: boolean }[] = [
   { key: 'name', defaultVisible: true },
-  { key: 'file_type', defaultVisible: false },
+  { key: 'new_path', defaultVisible: true },
+  { key: 'file_type', defaultVisible: true },
+  { key: 'tagged', defaultVisible: true },
   { key: 'size', defaultVisible: false },
   { key: 'description', defaultVisible: false },
-  { key: 'tagged', defaultVisible: false },
   { key: 'batch_index', defaultVisible: false },
-  { key: 'new_path', defaultVisible: true },
   { key: 'preview', defaultVisible: false },
 ]
 const columnLabels: Record<string, () => string> = {
@@ -279,18 +281,35 @@ function loadColumnPrefs(): ColumnDef[] {
   try {
     const saved = JSON.parse(localStorage.getItem('fe_columns') || '[]') as { key: string; visible: boolean }[]
     if (saved.length > 0) {
-      return defaultColumns.map(dc => {
-        const s = saved.find(s => s.key === dc.key)
-        return { key: dc.key, label: columnLabels[dc.key](), visible: s ? s.visible : dc.defaultVisible }
-      })
+      // Restore saved order, append any new columns at the end
+      const result: ColumnDef[] = []
+      for (const s of saved) {
+        if (columnLabels[s.key]) {
+          result.push({ key: s.key, label: columnLabels[s.key](), visible: s.visible })
+        }
+      }
+      for (const dc of defaultColumnOrder) {
+        if (!result.find(r => r.key === dc.key)) {
+          result.push({ key: dc.key, label: columnLabels[dc.key](), visible: dc.defaultVisible })
+        }
+      }
+      return result
     }
   } catch {}
-  return defaultColumns.map(dc => ({ key: dc.key, label: columnLabels[dc.key](), visible: dc.defaultVisible }))
+  return defaultColumnOrder.map(dc => ({ key: dc.key, label: columnLabels[dc.key](), visible: dc.defaultVisible }))
 }
 const allColumns = ref<ColumnDef[]>(loadColumnPrefs())
 const visibleColumns = computed(() => allColumns.value.filter(c => c.visible))
 function saveColumnPrefs() {
   localStorage.setItem('fe_columns', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
+}
+function moveColumn(index: number, dir: -1 | 1) {
+  const target = index + dir
+  if (target < 0 || target >= allColumns.value.length) return
+  const cols = [...allColumns.value]
+  ;[cols[index], cols[target]] = [cols[target], cols[index]]
+  allColumns.value = cols
+  saveColumnPrefs()
 }
 
 const loaded = ref(false)
