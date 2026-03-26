@@ -121,27 +121,16 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 func (s *Scanner) updateChildCounts(sessionID uint, files []db.FileEntry) {
 	childMap := make(map[string]int)
 	for _, f := range files {
-		childMap[f.ParentPath]++
+		if f.ParentPath != "" {
+			childMap[f.ParentPath]++
+		}
 	}
 
+	// Batch update: direct UPDATE without reading each row first
 	for parentPath, count := range childMap {
-		if parentPath == "" {
-			continue
-		}
-		f, err := s.repo.GetFileByPath(sessionID, parentPath)
-		if err != nil {
-			continue
-		}
-		f.ChildCount = count
-		s.repo.UpdateFile(f)
-	}
-
-	// Also count root-level children for the root directory entry
-	rootCount := 0
-	for _, f := range files {
-		if strings.Count(strings.TrimPrefix(f.OriginalPath, files[0].ParentPath), "/") <= 1 {
-			rootCount++
-		}
+		s.repo.DB().Model(&db.FileEntry{}).
+			Where("scan_session_id = ? AND original_path = ?", sessionID, parentPath).
+			Update("child_count", count)
 	}
 }
 

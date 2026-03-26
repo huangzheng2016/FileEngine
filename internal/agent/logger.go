@@ -2,16 +2,20 @@ package agent
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
 	"FileEngine/internal/db"
 )
 
+const logBufferSize = 20
+
 type Logger struct {
 	repo      *db.Repository
 	sessionID uint
 	batch     int
+	buffer    []*db.AgentLog
 	mu        sync.Mutex
 	listeners []chan *db.AgentLog
 }
@@ -20,6 +24,7 @@ func NewLogger(repo *db.Repository, sessionID uint) *Logger {
 	return &Logger{
 		repo:      repo,
 		sessionID: sessionID,
+		buffer:    make([]*db.AgentLog, 0, logBufferSize),
 	}
 }
 
@@ -93,18 +98,42 @@ func (l *Logger) LogToolCall(toolName string, input, output interface{}) {
 	l.save(log)
 }
 
-func (l *Logger) save(log *db.AgentLog) {
-	_ = l.repo.CreateAgentLog(log)
-
+func (l *Logger) save(entry *db.AgentLog) {
 	l.mu.Lock()
+	l.buffer = append(l.buffer, entry)
+	shouldFlush := len(l.buffer) >= logBufferSize
+	// Copy listeners for broadcast
 	listeners := make([]chan *db.AgentLog, len(l.listeners))
 	copy(listeners, l.listeners)
 	l.mu.Unlock()
 
+	// Broadcast to WebSocket listeners immediately (in-memory, no contention)
 	for _, ch := range listeners {
 		select {
-		case ch <- log:
+		case ch <- entry:
 		default:
 		}
+	}
+
+	if shouldFlush {
+		l.Flush()
+	}
+}
+
+// Flush writes all buffered logs to DB in a single batch.
+func (l *Logger) Flush() {
+	l.mu.Lock()
+	if len(l.buffer) == 0 {
+		l.mu.Unlock()
+		return
+	}
+	batch := l.buffer
+	l.buffer = make([]*db.AgentLog, 0, logBufferSize)
+	l.mu.Unlock()
+
+	if err := db.WithRetry(func() error {
+		return l.repo.CreateAgentLogs(batch)
+	}); err != nil {
+		log.Printf("logger: failed to flush %d logs: %v", len(batch), err)
 	}
 }

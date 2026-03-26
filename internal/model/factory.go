@@ -57,9 +57,7 @@ func newClaudeModel(ctx context.Context, apiKey, modelName, baseURL string, temp
 	if baseURL != "" {
 		cfg.BaseURL = &baseURL
 	}
-	if temperature > 0 {
-		temp := float32(temperature)
-		cfg.Temperature = &temp
-	}
+	temp := float32(temperature)
+	cfg.Temperature = &temp
 	return claude.NewChatModel(ctx, cfg)
 }

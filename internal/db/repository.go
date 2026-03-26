@@ -1,8 +1,6 @@
 package db
 
 import (
-	"database/sql"
-
 	"gorm.io/gorm"
 )
 
@@ -68,31 +66,46 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 		return err
 	}
 
-	var total, tagged, planned, executed int64
-	r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).Count(&total)
-	r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND tagged = ?", id, true).Count(&tagged)
-	r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND operation != ''", id).Count(&planned)
-	r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND executed = ?", id, true).Count(&executed)
+	// Single query for all FileEntry aggregations (was 5 separate queries)
+	var fileCounts struct {
+		Total    int64
+		Tagged   int64
+		Planned  int64
+		Executed int64
+		Size     int64
+	}
+	if err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).
+		Select(`COUNT(*) AS total,
+			SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END) AS tagged,
+			SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END) AS planned,
+			SUM(CASE WHEN executed = ? THEN 1 ELSE 0 END) AS executed,
+			COALESCE(SUM(size), 0) AS size`, true, true).
+		Scan(&fileCounts).Error; err != nil {
+		return err
+	}
 
-	var totalSize sql.NullInt64
-	r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).Select("COALESCE(SUM(size), 0)").Scan(&totalSize)
+	// Single query for all AgentLog token sums (was 3 separate queries)
+	var tokenSums struct {
+		PromptTokens     int64
+		CompletionTokens int64
+		TotalTokens      int64
+	}
+	if err := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
+		Select(`COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+			COALESCE(SUM(total_tokens), 0) AS total_tokens`).
+		Scan(&tokenSums).Error; err != nil {
+		return err
+	}
 
-	var promptTokens, completionTokens, totalTokens sql.NullInt64
-	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
-		Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&promptTokens)
-	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
-		Select("COALESCE(SUM(completion_tokens), 0)").Scan(&completionTokens)
-	r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
-		Select("COALESCE(SUM(total_tokens), 0)").Scan(&totalTokens)
-
-	session.TotalFiles = int(total)
-	session.TaggedFiles = int(tagged)
-	session.PlannedOps = int(planned)
-	session.ExecutedOps = int(executed)
-	session.TotalSize = totalSize.Int64
-	session.PromptTokens = int(promptTokens.Int64)
-	session.CompletionTokens = int(completionTokens.Int64)
-	session.TotalTokens = int(totalTokens.Int64)
+	session.TotalFiles = int(fileCounts.Total)
+	session.TaggedFiles = int(fileCounts.Tagged)
+	session.PlannedOps = int(fileCounts.Planned)
+	session.ExecutedOps = int(fileCounts.Executed)
+	session.TotalSize = fileCounts.Size
+	session.PromptTokens = int(tokenSums.PromptTokens)
+	session.CompletionTokens = int(tokenSums.CompletionTokens)
+	session.TotalTokens = int(tokenSums.TotalTokens)
 	return r.db.Save(&session).Error
 }
 
@@ -280,6 +293,12 @@ func (r *Repository) ListCategories(filesystemID uint) ([]Category, error) {
 	return cats, err
 }
 
+func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*Category, error) {
+	var cat Category
+	err := r.db.Where("filesystem_id = ? AND name = ?", filesystemID, name).First(&cat).Error
+	return &cat, err
+}
+
 func (r *Repository) UpdateCategory(c *Category) error {
 	return r.db.Save(c).Error
 }
@@ -359,6 +378,13 @@ func (r *Repository) DeleteModelProvider(id uint) error {
 
 func (r *Repository) CreateAgentLog(log *AgentLog) error {
 	return r.db.Create(log).Error
+}
+
+func (r *Repository) CreateAgentLogs(logs []*AgentLog) error {
+	if len(logs) == 0 {
+		return nil
+	}
+	return r.db.CreateInBatches(logs, 100).Error
 }
 
 type LogQuery struct {

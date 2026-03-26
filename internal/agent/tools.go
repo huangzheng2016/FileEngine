@@ -17,22 +17,20 @@ import (
 // ============ Tool Input/Output Types ============
 
 type ListFilesInput struct {
-	ParentPath string `json:"parent_path" jsonschema_description:"Parent directory path to list files from"`
-	FileType   string `json:"file_type,omitempty" jsonschema_description:"Filter by type: file, directory, symlink"`
-	Tagged     *bool  `json:"tagged,omitempty" jsonschema_description:"Filter by tagged status"`
-	Offset     int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
-	Limit      int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
+	ParentPath   string `json:"parent_path" jsonschema_description:"Parent directory path to list files from"`
+	FileType     string `json:"file_type,omitempty" jsonschema_description:"Filter by type: file, directory, symlink"`
+	Tagged       *bool  `json:"tagged,omitempty" jsonschema_description:"Filter by tagged status"`
+	CategoryPath string `json:"category_path,omitempty" jsonschema_description:"Filter by category path prefix (files whose target starts with this path)"`
+	Offset       int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
+	Limit        int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
 }
 
 type ListFilesOutput struct {
-	Files  []FileItem `json:"files"`
-	Total  int64      `json:"total"`
-	Offset int        `json:"offset"`
-	Limit  int        `json:"limit"`
+	Files []FileItem `json:"files"`
+	Total int64      `json:"total"`
 }
 
 type FileItem struct {
-	ID           uint   `json:"id"`
 	OriginalPath string `json:"original_path"`
 	Name         string `json:"name"`
 	Size         int64  `json:"size"`
@@ -48,18 +46,14 @@ type GetFileInfoInput struct {
 }
 
 type GetFileInfoOutput struct {
-	ID           uint   `json:"id"`
 	OriginalPath string `json:"original_path"`
 	Name         string `json:"name"`
 	Size         int64  `json:"size"`
 	FileType     string `json:"file_type"`
-	ModTime      string `json:"mod_time"`
-	Permissions  string `json:"permissions"`
 	Description  string `json:"description"`
 	Tagged       bool   `json:"tagged"`
 	NewPath      string `json:"new_path"`
 	ParentPath   string `json:"parent_path"`
-	Depth        int    `json:"depth"`
 	ChildCount   int    `json:"child_count"`
 }
 
@@ -86,8 +80,7 @@ type MarkTaggedInput struct {
 }
 
 type MarkTaggedOutput struct {
-	Success       bool `json:"success"`
-	ChildrenCount int  `json:"children_count"`
+	Success bool `json:"success"`
 }
 
 type ListCategoriesInput struct{}
@@ -102,19 +95,6 @@ type CategoryItem struct {
 	Structure     string `json:"structure,omitempty"`
 	Description   string `json:"description"`
 	AgentEditable bool   `json:"agent_editable"`
-}
-
-type ListCategoryFilesInput struct {
-	CategoryPath string `json:"category_path" jsonschema_description:"Category path to list files from (the new_path prefix)"`
-	Offset       int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
-	Limit        int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
-}
-
-type ListCategoryFilesOutput struct {
-	Files  []FileItem `json:"files"`
-	Total  int64      `json:"total"`
-	Offset int        `json:"offset"`
-	Limit  int        `json:"limit"`
 }
 
 type SetTargetInput struct {
@@ -185,7 +165,7 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 }
 
 func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "列出目录中的文件。已打标的文件会包含描述和目标路径。支持 offset+limit 分页（默认 offset=0, limit=300），如果 total > limit 需要用 offset 翻页", tb.listFiles)
+	listFiles, err := utils.InferTool("list_files", "列出目录中的文件。已打标的文件会包含描述和目标路径。支持 offset+limit 分页（默认 offset=0, limit=300），如果 total > limit 需要用 offset 翻页。可用 category_path 过滤某分类下已规划的文件", tb.listFiles)
 	if err != nil {
 		return nil, fmt.Errorf("build list_files: %w", err)
 	}
@@ -220,12 +200,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build set_target: %w", err)
 	}
 
-	listCatFiles, err := utils.InferTool("list_category_files", "列出某个分类下已规划的文件，支持 offset+limit 分页。用于了解分类现状以做重构决策", tb.listCategoryFiles)
-	if err != nil {
-		return nil, fmt.Errorf("build list_category_files: %w", err)
-	}
-
-	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, listCatFiles, setTarget}
+	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, setTarget}
 
 	// update_category is always available
 	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述等。如果修改了路径，该分类下所有文件的目标路径会自动更新", tb.updateCategory)
@@ -257,7 +232,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 
 // BuildInstructTools returns tools for user-directed instruct mode.
 func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持 offset+limit 分页", tb.listFiles)
+	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持 offset+limit 分页。可用 category_path 过滤某分类下已规划的文件", tb.listFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -281,11 +256,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	listCatFiles, err := utils.InferTool("list_category_files", "列出某个分类下已规划的文件", tb.listCategoryFiles)
-	if err != nil {
-		return nil, err
-	}
-	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, setTarget, listCats, listCatFiles}
+	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, setTarget, listCats}
 
 	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述。路径变更会级联更新文件", tb.updateCategory)
 	if err != nil {
@@ -298,6 +269,14 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 		return nil, err
 	}
 	allTools = append(allTools, deleteCat)
+
+	if tb.session.AllowReadFile {
+		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, readFile)
+	}
 
 	if tb.session.AllowAutoCategory {
 		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
@@ -340,6 +319,9 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		Page:       page,
 		PageSize:   limit,
 	}
+	if input.CategoryPath != "" {
+		q.CategoryPath = &input.CategoryPath
+	}
 
 	files, total, err := tb.repo.ListFiles(q)
 	if err != nil {
@@ -349,7 +331,6 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 	items := make([]FileItem, len(files))
 	for i, f := range files {
 		items[i] = FileItem{
-			ID:           f.ID,
 			OriginalPath: f.OriginalPath,
 			Name:         f.Name,
 			Size:         f.Size,
@@ -361,7 +342,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		}
 	}
 
-	out := &ListFilesOutput{Files: items, Total: total, Offset: offset, Limit: limit}
+	out := &ListFilesOutput{Files: items, Total: total}
 	tb.logger.LogToolCall("list_files", input, out)
 	return out, nil
 }
@@ -374,18 +355,14 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 	}
 
 	out := &GetFileInfoOutput{
-		ID:           f.ID,
 		OriginalPath: f.OriginalPath,
 		Name:         f.Name,
 		Size:         f.Size,
 		FileType:     f.FileType,
-		ModTime:      f.ModTime.Format("2006-01-02 15:04:05"),
-		Permissions:  f.Permissions,
 		Description:  f.Description,
 		Tagged:       f.Tagged,
 		NewPath:      f.NewPath,
 		ParentPath:   f.ParentPath,
-		Depth:        f.Depth,
 		ChildCount:   f.ChildCount,
 	}
 	tb.logger.LogToolCall("get_file_info", input, out)
@@ -491,45 +468,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 	return out, nil
 }
 
-func (tb *ToolBuilder) listCategoryFiles(ctx context.Context, input *ListCategoryFilesInput) (*ListCategoryFilesOutput, error) {
-
-	limit := input.Limit
-	if limit <= 0 {
-		limit = 300
-	}
-	offset := input.Offset
-	if offset < 0 {
-		offset = 0
-	}
-
-	page := (offset / limit) + 1
-	categoryPath := input.CategoryPath
-	q := db.FileQuery{
-		SessionID:    tb.sessionID,
-		CategoryPath: &categoryPath,
-		Page:         page,
-		PageSize:     limit,
-	}
-
-	files, total, err := tb.repo.ListFiles(q)
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]FileItem, len(files))
-	for i, f := range files {
-		items[i] = FileItem{
-			ID: f.ID, OriginalPath: f.OriginalPath, Name: f.Name,
-			Size: f.Size, FileType: f.FileType, Description: f.Description,
-			Tagged: f.Tagged, NewPath: f.NewPath, ChildCount: f.ChildCount,
-		}
-	}
-
-	out := &ListCategoryFilesOutput{Files: items, Total: total, Offset: offset, Limit: limit}
-	tb.logger.LogToolCall("list_category_files", input, out)
-	return out, nil
-}
-
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 
@@ -552,7 +490,9 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 	// If target is a directory, clear children's targets (outer target overrides inner)
 	if f.FileType == "directory" && input.NewPath != "" {
-		_ = tb.repo.ClearChildrenTarget(tb.sessionID, normalizePath(input.Path))
+		if err := tb.repo.ClearChildrenTarget(tb.sessionID, normalizePath(input.Path)); err != nil {
+			return nil, fmt.Errorf("failed to clear children targets: %w", err)
+		}
 	}
 
 	out := &SetTargetOutput{Success: true}
@@ -562,15 +502,17 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
-	// Check for existing category with same name or path
+	// Fast name check via indexed lookup
+	if existing, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name); err == nil {
+		return nil, fmt.Errorf("category with name '%s' already exists (path: %s). Use set_target to assign files to it, or update_category to modify it", existing.Name, existing.Path)
+	}
+
+	// Still need full list for path duplicate check
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
 	if err != nil {
 		return nil, err
 	}
 	for _, c := range cats {
-		if c.Name == input.Name {
-			return nil, fmt.Errorf("category with name '%s' already exists (path: %s). Use set_target to assign files to it, or update_category to modify it", c.Name, c.Path)
-		}
 		if c.Path == input.Path {
 			return nil, fmt.Errorf("category with path '%s' already exists (name: %s). Use that category instead of creating a duplicate", c.Path, c.Name)
 		}
@@ -595,19 +537,8 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 
 func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategoryInput) (*UpdateCategoryOutput, error) {
 
-	// Find category by name
-	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, err
-	}
-	var cat *db.Category
-	for i := range cats {
-		if cats[i].Name == input.Name {
-			cat = &cats[i]
-			break
-		}
-	}
-	if cat == nil {
 		return nil, fmt.Errorf("category not found: %s", input.Name)
 	}
 
@@ -640,18 +571,8 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
 
-	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, err
-	}
-	var cat *db.Category
-	for i := range cats {
-		if cats[i].Name == input.Name {
-			cat = &cats[i]
-			break
-		}
-	}
-	if cat == nil {
 		return nil, fmt.Errorf("category not found: %s", input.Name)
 	}
 
@@ -660,7 +581,9 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 	}
 
 	// Clear all planned files under this category and reset tagged for re-classification
-	_ = tb.repo.ClearPlannedByTargetPath(tb.filesystemID, cat.Path)
+	if err := tb.repo.ClearPlannedByTargetPath(tb.filesystemID, cat.Path); err != nil {
+		return nil, fmt.Errorf("failed to clear planned files: %w", err)
+	}
 
 	if err := tb.repo.DeleteCategory(cat.ID); err != nil {
 		return nil, fmt.Errorf("delete category: %w", err)

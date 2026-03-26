@@ -39,6 +39,8 @@ type AgentConfig struct {
 	Concurrency     int    `yaml:"concurrency" json:"concurrency"`
 	MaxFileReadSize int    `yaml:"max_file_read_size" json:"max_file_read_size"`
 	MaxRetries      int    `yaml:"max_retries" json:"max_retries"`
+	MaxStep         int    `yaml:"max_step" json:"max_step"`
+	InstructMaxStep int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt    string `yaml:"system_prompt" json:"system_prompt"`
 }
 
@@ -111,5 +113,11 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.MaxRetries == 0 {
 		cfg.Agent.MaxRetries = 3
+	}
+	if cfg.Agent.MaxStep == 0 {
+		cfg.Agent.MaxStep = 50
+	}
+	if cfg.Agent.InstructMaxStep == 0 {
+		cfg.Agent.InstructMaxStep = 30
 	}
 }
