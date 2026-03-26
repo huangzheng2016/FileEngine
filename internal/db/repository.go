@@ -238,6 +238,15 @@ func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) erro
 		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
 }
 
+// ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
+// whose new_path falls under the given category path, across all sessions of a filesystem.
+func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {
+	prefix := categoryPath + "/"
+	return r.db.Model(&FileEntry{}).
+		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND (new_path = ? OR new_path LIKE ?)", filesystemID, categoryPath, prefix+"%").
+		Updates(map[string]interface{}{"new_path": "", "operation": "", "tagged": false}).Error
+}
+
 func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
 	var files []FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ?", sessionID, false).
