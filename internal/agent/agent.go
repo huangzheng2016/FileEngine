@@ -79,6 +79,13 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 		a.running = false
 		a.cancelFn = nil
 		a.mu.Unlock()
+		// If stopped (context cancelled), update status to "tagged" instead of leaving "tagging"
+		if ctx.Err() != nil {
+			if s, err := a.repo.GetSession(a.sessionID); err == nil && s.Status == "tagging" {
+				s.Status = "tagged"
+				a.repo.UpdateSession(s)
+			}
+		}
 	}()
 
 	// Update session status
