@@ -106,7 +106,7 @@ const isLive = ref(false)
 const orderDesc = ref(localStorage.getItem('fe_log_order') !== 'asc')
 const expanded = reactive<Record<string, boolean>>({})
 const jsonCache = new Map<string, string>()
-let eventSource: EventSource | null = null
+let ws: WebSocket | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LIVE_LOGS = 200
 
@@ -204,8 +204,9 @@ function toggleOrder() {
 function startLive() {
   if (!sessionId.value) return
   isLive.value = true
-  eventSource = new EventSource(`/api/v1/logs/stream?session_id=${sessionId.value}`)
-  eventSource.onmessage = (e) => {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(`${proto}//${location.host}/api/v1/logs/stream?session_id=${sessionId.value}`)
+  ws.onmessage = (e) => {
     const log: AgentLog = JSON.parse(e.data)
     if (selectedBatch.value !== null && log.batch_index !== selectedBatch.value) return
     if (orderDesc.value) {
@@ -221,12 +222,13 @@ function startLive() {
       batchTotal.value++
     }
   }
-  eventSource.onerror = () => { stopLive(); startPolling() }
+  ws.onerror = () => { stopLive(); startPolling() }
+  ws.onclose = () => { if (isLive.value) { stopLive(); startPolling() } }
 }
 
 function stopLive() {
   isLive.value = false
-  if (eventSource) { eventSource.close(); eventSource = null }
+  if (ws) { ws.close(); ws = null }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 

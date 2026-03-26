@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,10 +144,29 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 			systemPrompt = liveCfg.Agent.SystemPrompt
 		}
 
-		// Create work channel
-		workCh := make(chan db.FileEntry, len(dirs))
+		// Distribute directories by interleaving different parent paths
+		// so concurrent workers process different subtrees instead of the same one
+		buckets := make(map[string][]db.FileEntry)
+		var bucketKeys []string
 		for _, dir := range dirs {
-			workCh <- dir
+			key := dir.ParentPath
+			if _, exists := buckets[key]; !exists {
+				bucketKeys = append(bucketKeys, key)
+			}
+			buckets[key] = append(buckets[key], dir)
+		}
+		sort.Strings(bucketKeys)
+
+		workCh := make(chan db.FileEntry, len(dirs))
+		for more := true; more; {
+			more = false
+			for _, key := range bucketKeys {
+				if len(buckets[key]) > 0 {
+					workCh <- buckets[key][0]
+					buckets[key] = buckets[key][1:]
+					more = true
+				}
+			}
 		}
 		close(workCh)
 

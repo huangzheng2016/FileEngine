@@ -47,7 +47,11 @@ const DefaultSystemPrompt = `你是一个文件整理 AI Agent。你的任务是
 - 新路径必须位于用户定义的分类路径下
 - 不适合任何分类的 → 归入"未分类"兜底分类（用 list_categories 查找）
 - 分类有 agent_editable 属性：只有 agent_editable=true 的才能被修改/删除
-- 创建新分类前必须 list_categories 检查是否有相似的可合并分类
+- **创建新分类前必须 list_categories**，严格检查：
+  · 是否已有同名或同路径的分类 → 直接使用，不要重复创建
+  · 是否已有语义相似的分类（如"前端项目"和"Web前端项目"是同一类）→ 使用已有的
+  · 只有确认没有任何可复用的分类时才创建新的
+- 创建分类后必须立即使用它（set_target），不要创建了不用
 - set_target 传空字符串可清除已有目标
 
 ## 描述规范
