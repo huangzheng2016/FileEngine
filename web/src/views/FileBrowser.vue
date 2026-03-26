@@ -87,49 +87,66 @@
 
       <!-- File table -->
       <el-card style="flex: 1; overflow: auto">
+        <template #header>
+          <div style="display: flex; justify-content: flex-end">
+            <el-popover trigger="click" width="200">
+              <template #reference>
+                <el-button size="small" text><el-icon><Setting /></el-icon>{{ $t('files.columns') }}</el-button>
+              </template>
+              <div v-for="col in allColumns" :key="col.key" style="display: flex; align-items: center; gap: 8px; padding: 4px 0">
+                <el-checkbox v-model="col.visible" @change="saveColumnPrefs" />
+                <span style="font-size: 13px">{{ col.label }}</span>
+              </div>
+            </el-popover>
+          </div>
+        </template>
         <el-table :data="files" style="width: 100%" height="100%" @selection-change="onSelectionChange">
           <el-table-column type="selection" width="40" />
-          <el-table-column prop="name" :label="$t('files.fileName')" min-width="200">
-            <template #default="{ row }">
-              <span style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px" @click.stop="openEditDrawer(row)">
-                <el-icon v-if="row.file_type === 'directory'" style="color: #e6a23c"><Folder /></el-icon>
-                <el-icon v-else style="color: #909399"><Document /></el-icon>
-                <span style="color: #409eff">{{ row.name }}</span>
-                <el-icon style="color: #c0c4cc; font-size: 12px"><Edit /></el-icon>
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="file_type" :label="$t('files.fileType')" width="90">
-            <template #default="{ row }">
-              <el-tag v-if="row.file_type === 'directory'" type="warning" size="small" effect="plain">{{ $t('files.directory') }}</el-tag>
-              <el-tag v-else size="small" effect="plain">{{ $t('files.file') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('files.fileSize')" width="90">
-            <template #default="{ row }">{{ formatSize(row.size) }}</template>
-          </el-table-column>
-          <el-table-column prop="description" :label="$t('files.fileDescription')" min-width="180" show-overflow-tooltip />
-          <el-table-column :label="$t('files.taggedStatus')" width="70" align="center">
-            <template #default="{ row }">
-              <el-tag :type="row.tagged ? 'success' : 'info'" size="small">{{ row.tagged ? $t('common.yes') : $t('common.no') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('files.batchIndex')" width="70" align="center">
-            <template #default="{ row }">
-              <router-link v-if="row.batch_index" :to="{ name: 'logs', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
-                style="color: #409eff; text-decoration: none; font-size: 12px">
-                {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
-              </router-link>
-            </template>
-          </el-table-column>
-          <el-table-column prop="new_path" :label="$t('files.plannedPath')" min-width="180" show-overflow-tooltip />
-          <el-table-column :label="$t('files.preview')" width="60" align="center">
-            <template #default="{ row }">
-              <el-button v-if="row.file_type === 'file'" size="small" text @click.stop="previewFile(row)">
-                <el-icon><View /></el-icon>
-              </el-button>
-            </template>
-          </el-table-column>
+          <template v-for="col in visibleColumns" :key="col.key">
+            <el-table-column v-if="col.key === 'name'" prop="name" :label="col.label" min-width="200">
+              <template #default="{ row }">
+                <span style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px" @click.stop="openEditDrawer(row)">
+                  <el-icon v-if="row.file_type === 'directory'" style="color: #e6a23c"><Folder /></el-icon>
+                  <el-icon v-else style="color: #909399"><Document /></el-icon>
+                  <span style="color: #409eff">{{ row.name }}</span>
+                  <el-icon style="color: #c0c4cc; font-size: 12px"><Edit /></el-icon>
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'file_type'" prop="file_type" :label="col.label" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.file_type === 'directory'" type="warning" size="small" effect="plain">{{ $t('files.directory') }}</el-tag>
+                <el-tag v-else size="small" effect="plain">{{ $t('files.file') }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'size'" :label="col.label" width="90">
+              <template #default="{ row }">{{ formatSize(row.size) }}</template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'description'" prop="description" :label="col.label" min-width="180" show-overflow-tooltip />
+            <el-table-column v-else-if="col.key === 'tagged'" :label="col.label" width="70" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.tagged ? 'success' : 'info'" size="small">{{ row.tagged ? $t('common.yes') : $t('common.no') }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'batch_index'" :label="col.label" width="70" align="center">
+              <template #default="{ row }">
+                <router-link v-if="row.batch_index" :to="{ name: 'logs', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
+                  style="color: #409eff; text-decoration: none; font-size: 12px">
+                  {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
+                </router-link>
+              </template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'new_path'" :label="col.label" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ displayPath(row.new_path) }}</template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'preview'" :label="col.label" width="60" align="center">
+              <template #default="{ row }">
+                <el-button v-if="row.file_type === 'file'" size="small" text @click.stop="previewFile(row)">
+                  <el-icon><View /></el-icon>
+                </el-button>
+              </template>
+            </el-table-column>
+          </template>
         </el-table>
       </el-card>
       <el-pagination v-if="total > pageSize" style="justify-content: center; flex-shrink: 0"
@@ -233,13 +250,48 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
 import type { FileEntry, Filesystem, ScanSession, Category, TreeNode } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
+
+// Column configuration
+interface ColumnDef { key: string; label: string; visible: boolean }
+const defaultColumns: { key: string; defaultVisible: boolean }[] = [
+  { key: 'name', defaultVisible: true },
+  { key: 'file_type', defaultVisible: false },
+  { key: 'size', defaultVisible: false },
+  { key: 'description', defaultVisible: false },
+  { key: 'tagged', defaultVisible: false },
+  { key: 'batch_index', defaultVisible: false },
+  { key: 'new_path', defaultVisible: true },
+  { key: 'preview', defaultVisible: false },
+]
+const columnLabels: Record<string, () => string> = {
+  name: () => t('files.fileName'), file_type: () => t('files.fileType'), size: () => t('files.fileSize'),
+  description: () => t('files.fileDescription'), tagged: () => t('files.taggedStatus'),
+  batch_index: () => t('files.batchIndex'), new_path: () => t('files.plannedPath'), preview: () => t('files.preview'),
+}
+function loadColumnPrefs(): ColumnDef[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem('fe_columns') || '[]') as { key: string; visible: boolean }[]
+    if (saved.length > 0) {
+      return defaultColumns.map(dc => {
+        const s = saved.find(s => s.key === dc.key)
+        return { key: dc.key, label: columnLabels[dc.key](), visible: s ? s.visible : dc.defaultVisible }
+      })
+    }
+  } catch {}
+  return defaultColumns.map(dc => ({ key: dc.key, label: columnLabels[dc.key](), visible: dc.defaultVisible }))
+}
+const allColumns = ref<ColumnDef[]>(loadColumnPrefs())
+const visibleColumns = computed(() => allColumns.value.filter(c => c.visible))
+function saveColumnPrefs() {
+  localStorage.setItem('fe_columns', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
+}
 
 const loaded = ref(false)
 const filesystems = ref<Filesystem[]>([])
@@ -411,6 +463,12 @@ function formatSize(bytes: number): string {
   let i = 0; let size = bytes
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
   return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i]
+}
+
+function displayPath(path: string): string {
+  if (!path || !categoryFilter.value || categoryFilter.value.startsWith('__')) return path
+  const prefix = categoryFilter.value.endsWith('/') ? categoryFilter.value : categoryFilter.value + '/'
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path
 }
 
 function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {

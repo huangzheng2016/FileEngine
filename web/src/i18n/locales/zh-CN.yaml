@@ -55,6 +55,7 @@ files:
   fileDescription: 描述
   taggedStatus: 标记
   batchIndex: 轮次
+  columns: 列设置
   plannedPath: 规划路径
   detail: 文件详情
   saveChanges: 保存修改
