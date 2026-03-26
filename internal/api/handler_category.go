@@ -91,6 +91,13 @@ func (s *Server) deleteCategory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	cat, err := s.repo.GetCategory(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "category not found"})
+		return
+	}
+	// Clear planned files under this category and reset tagged for re-classification
+	_ = s.repo.ClearPlannedByTargetPath(cat.FilesystemID, cat.Path)
 	if err := s.repo.DeleteCategory(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

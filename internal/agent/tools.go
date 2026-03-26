@@ -613,6 +613,9 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 		return nil, fmt.Errorf("category not found: %s", input.Name)
 	}
 
+	// Clear all planned files under this category and reset tagged for re-classification
+	_ = tb.repo.ClearPlannedByTargetPath(tb.filesystemID, cat.Path)
+
 	if err := tb.repo.DeleteCategory(cat.ID); err != nil {
 		return nil, fmt.Errorf("delete category: %w", err)
 	}
