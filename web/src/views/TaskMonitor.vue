@@ -29,8 +29,8 @@
             </div>
             <div v-if="row.total_tokens > 0" style="font-size: 12px; color: #999; margin-top: 2px">
               Token: {{ row.prompt_tokens.toLocaleString() }}↑ {{ row.completion_tokens.toLocaleString() }}↓ = {{ row.total_tokens.toLocaleString() }}
-              <span v-if="row.total_files > 0"> | {{ (row.total_tokens / row.total_files).toFixed(0) }}/{{ $t('files.file') }}</span>
-              <span v-if="row.total_size > 0"> | {{ (row.total_tokens / (row.total_size / 1048576)).toFixed(0) }}/MB</span>
+              <span v-if="row.total_files > 0 && row.total_tokens / row.total_files >= 1"> | {{ (row.total_tokens / row.total_files).toFixed(0) }}/{{ $t('files.file') }}</span>
+              <span v-if="row.total_size > 0 && row.total_tokens / (row.total_size / 1048576) >= 1"> | {{ (row.total_tokens / (row.total_size / 1048576)).toFixed(0) }}/MB</span>
             </div>
             <el-progress v-if="row.total_files > 0"
               :percentage="Math.round((row.tagged_files / row.total_files) * 100)"
