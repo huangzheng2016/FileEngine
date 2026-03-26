@@ -368,14 +368,23 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 			{Role: schema.User, Content: userMsg},
 		}
 
-		result, err := agentInst.Generate(ctx, messages)
+		result, err := func() (*schema.Message, error) {
+			callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+			defer callCancel()
+			return agentInst.Generate(callCtx, messages)
+		}()
 		if err != nil {
 			// Retry on failure
 			maxRetries := a.cfg.Agent.MaxRetries
 			for retry := 1; retry <= maxRetries && err != nil; retry++ {
+				if ctx.Err() != nil {
+					return // parent context cancelled, stop immediately
+				}
 				log.Printf("worker %d batch %d retry %d/%d: %v", workerID, batchIdx, retry, maxRetries, err)
 				time.Sleep(time.Duration(retry) * 2 * time.Second)
-				result, err = agentInst.Generate(ctx, messages)
+				callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+				result, err = agentInst.Generate(callCtx, messages)
+				callCancel()
 			}
 			if err != nil {
 				log.Printf("worker %d batch %d error after %d retries: %v", workerID, batchIdx, maxRetries, err)
@@ -459,13 +468,22 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			{Role: schema.User, Content: userMsg},
 		}
 
-		result, err := agentInst.Generate(ctx, messages)
+		result, err := func() (*schema.Message, error) {
+			callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+			defer callCancel()
+			return agentInst.Generate(callCtx, messages)
+		}()
 		if err != nil {
 			maxRetries := a.cfg.Agent.MaxRetries
 			for retry := 1; retry <= maxRetries && err != nil; retry++ {
+				if ctx.Err() != nil {
+					return
+				}
 				log.Printf("remaining files batch %d retry %d/%d: %v", batchIdx, retry, maxRetries, err)
 				time.Sleep(time.Duration(retry) * 2 * time.Second)
-				result, err = agentInst.Generate(ctx, messages)
+				callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+				result, err = agentInst.Generate(callCtx, messages)
+				callCancel()
 			}
 			if err != nil {
 				log.Printf("remaining files batch %d error after %d retries: %v", batchIdx, maxRetries, err)
