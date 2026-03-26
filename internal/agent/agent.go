@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -369,9 +370,18 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 
 		result, err := agentInst.Generate(ctx, messages)
 		if err != nil {
-			log.Printf("worker %d batch %d error: %v", workerID, batchIdx, err)
-			workerLogger.LogMessage("system", fmt.Sprintf("Error: %v", err), 0, 0, 0)
-			continue
+			// Retry on failure
+			maxRetries := a.cfg.Agent.MaxRetries
+			for retry := 1; retry <= maxRetries && err != nil; retry++ {
+				log.Printf("worker %d batch %d retry %d/%d: %v", workerID, batchIdx, retry, maxRetries, err)
+				time.Sleep(time.Duration(retry) * 2 * time.Second)
+				result, err = agentInst.Generate(ctx, messages)
+			}
+			if err != nil {
+				log.Printf("worker %d batch %d error after %d retries: %v", workerID, batchIdx, maxRetries, err)
+				workerLogger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
+				continue
+			}
 		}
 
 		if result != nil {
@@ -451,8 +461,17 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 
 		result, err := agentInst.Generate(ctx, messages)
 		if err != nil {
-			log.Printf("remaining files batch %d error: %v", batchIdx, err)
-			continue
+			maxRetries := a.cfg.Agent.MaxRetries
+			for retry := 1; retry <= maxRetries && err != nil; retry++ {
+				log.Printf("remaining files batch %d retry %d/%d: %v", batchIdx, retry, maxRetries, err)
+				time.Sleep(time.Duration(retry) * 2 * time.Second)
+				result, err = agentInst.Generate(ctx, messages)
+			}
+			if err != nil {
+				log.Printf("remaining files batch %d error after %d retries: %v", batchIdx, maxRetries, err)
+				workerLogger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
+				continue
+			}
 		}
 		if result != nil {
 			pt, ct, tt := extractTokenUsage(result)
