@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -85,7 +86,7 @@ func (s *Server) startTagging(c *gin.Context) {
 	agentMu.Unlock()
 
 	go func() {
-		if err := a.RunTagging(context.Background()); err != nil {
+		if err := a.RunTagging(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "tagging" {
