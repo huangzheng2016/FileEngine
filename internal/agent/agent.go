@@ -223,7 +223,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	sb.WriteString(fmt.Sprintf("\n用户指令: %s\n", userPrompt))
 	sb.WriteString("\n请使用工具执行用户的指令。")
 
-	a.logger.SetBatch(-1)
+	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
 	userMsg := sb.String()
 	a.logger.LogMessage("user", userMsg, 0, 0, 0)
 

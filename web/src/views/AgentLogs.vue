@@ -18,11 +18,11 @@
             @click="selectBatch(null)">
             {{ $t('logs.live') }}
           </div>
-          <div v-for="b in displayBatches" :key="b"
+          <div v-for="b in displayBatches" :key="b.batch_index"
             style="padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px"
-            :style="{ background: selectedBatch === b ? '#ecf5ff' : '', color: selectedBatch === b ? '#409eff' : '' }"
-            @click="selectBatch(b)">
-            {{ $t('logs.batch', { index: b }) }}
+            :style="{ background: selectedBatch === b.batch_index ? '#ecf5ff' : '', color: selectedBatch === b.batch_index ? '#409eff' : '' }"
+            @click="selectBatch(b.batch_index)">
+            {{ batchLabel(b.batch_index) }}
           </div>
         </div>
         <el-pagination v-if="batchTotal > batchPageSize" size="small" layout="prev, next"
@@ -53,7 +53,7 @@
             <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 3px">
               <el-tag :type="roleTagType(log.role)" size="small">{{ log.role }}</el-tag>
               <el-tag v-if="log.tool_name" size="small" type="warning">{{ log.tool_name }}</el-tag>
-              <span style="font-size: 12px; color: #999">{{ $t('logs.batch', { index: log.batch_index }) }} | {{ formatTime(log.created_at) }}</span>
+              <span style="font-size: 12px; color: #999">{{ batchLabel(log.batch_index) }} | {{ formatTime(log.created_at) }}</span>
               <span v-if="log.total_tokens" style="font-size: 12px; color: #999">{{ log.prompt_tokens }}↑ {{ log.completion_tokens }}↓ = {{ log.total_tokens }}</span>
             </div>
             <div v-if="log.content">
@@ -92,7 +92,7 @@ const { t } = useI18n()
 const sessions = ref<ScanSession[]>([])
 const sessionId = ref<number>(0)
 const logs = ref<AgentLog[]>([])
-const batches = ref<number[]>([])
+const batches = ref<{ batch_index: number; created_at: string }[]>([])
 const batchTotal = ref(0)
 const batchPage = ref(1)
 const batchPageSize = 50
@@ -110,7 +110,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LIVE_LOGS = 200
 
 const totalTokens = computed(() => logs.value.reduce((sum, l) => sum + (l.total_tokens || 0), 0))
-// Batches always show newest first (descending)
+// Batches already sorted by created_at from backend, reverse for newest first
 const displayBatches = computed(() => [...batches.value].reverse())
 
 function cachedJSON(id: number, type: string, raw: string): string {
@@ -207,9 +207,8 @@ function startLive() {
       if (logs.value.length > MAX_LIVE_LOGS) logs.value.splice(0, logs.value.length - MAX_LIVE_LOGS)
       nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
     }
-    if (!batches.value.includes(log.batch_index)) {
-      batches.value.push(log.batch_index)
-      batches.value.sort((a, b) => a - b)
+    if (!batches.value.find(b => b.batch_index === log.batch_index)) {
+      batches.value.push({ batch_index: log.batch_index, created_at: log.created_at })
       batchTotal.value++
     }
   }
@@ -255,6 +254,16 @@ function roleColor(role: string) {
 function roleTagType(role: string): '' | 'success' | 'warning' | 'info' | 'danger' {
   const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = { system: 'info', user: '', assistant: 'success', tool: 'warning' }
   return map[role] || 'info'
+}
+
+function batchLabel(index: number): string {
+  if (index < 0) {
+    // Count how many manual batches exist up to this one (by time order)
+    const manualBatches = batches.value.filter(b => b.batch_index < 0)
+    const pos = manualBatches.findIndex(b => b.batch_index === index)
+    return t('logs.manualBatch', { index: pos >= 0 ? pos + 1 : 1 })
+  }
+  return t('logs.batch', { index })
 }
 
 function formatTime(t: string) {

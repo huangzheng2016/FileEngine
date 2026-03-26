@@ -220,7 +220,8 @@ logs:
   user: 用户
   assistant: 助手
   tool: 工具
-  batch: "批次 #{index}"
+  batch: "轮次 #{index}"
+  manualBatch: "手动 #{index}"
   tokens: "{count} tokens"
   input: 输入
   output: 输出
