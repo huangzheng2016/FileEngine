@@ -57,14 +57,7 @@
               <span v-if="log.total_tokens" style="font-size: 12px; color: #999">{{ log.prompt_tokens }}↑ {{ log.completion_tokens }}↓ = {{ log.total_tokens }}</span>
             </div>
             <div v-if="log.content">
-              <div ref="contentRefs" style="white-space: pre-wrap; font-size: 13px; line-height: 1.5; overflow: hidden"
-                :style="{ maxHeight: expanded[log.id + '_content'] ? 'none' : '100px' }">{{ log.content }}</div>
-              <el-button v-if="!expanded[log.id + '_content']" size="small" text type="primary" @click="toggleExpand(log.id, 'content')">
-                {{ $t('logs.expand') }}
-              </el-button>
-              <el-button v-else size="small" text type="primary" @click="toggleExpand(log.id, 'content')">
-                {{ $t('logs.collapse') }}
-              </el-button>
+              <div style="white-space: pre-wrap; font-size: 13px; line-height: 1.5">{{ log.content }}</div>
             </div>
             <template v-if="log.tool_input || log.tool_output">
               <div style="margin-top: 4px; display: flex; gap: 6px">
