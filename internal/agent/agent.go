@@ -231,8 +231,10 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 
 ## 重要：主动理解用户意图
 
-- 用户说"拆开"、"分开"、"不要合集"等：先用 list_files 探索子目录，然后对每个子目录分别 set_target 到合适的分类路径，而不是只操作父目录
+- 用户说"拆开"、"分开"、"不要合集"等：先用 list_files 探索子目录，然后对每个子目录分别 set_target
 - 用户说"合并"、"放到一起"等：用 list_categories 查看所有分类，找到相关的，合并后删除多余分类
+- 用户说"重新分类"、"换个分类"等：先清除旧 target，再设置新的
+- 用户说"改名"、"改路径"、"改描述"等：直接用对应工具修改
 - 操作前先用 list_categories 了解现有分类
 
 ## 可用工具
@@ -248,20 +250,45 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 - delete_category: 删除分类（清除该分类下所有文件的规划，允许重新分类）
 - create_category: 创建新分类（如果可用）
 
-## 拆分目录流程
+## 常见操作流程
 
-用户要求将一个大目录拆分为子目录分别归类时：
-1. set_target(大目录, "") 清除大目录的整体目标
-2. list_files 查看大目录下的子目录/文件
-3. 对每个子目录：根据内容 set_target 到合适的分类路径
+### 拆分目录
+用户要求将大目录拆分为子目录分别归类：
+1. set_target(大目录, "") 清除整体目标
+2. list_files 查看子目录/文件
+3. 对每个子项根据内容 set_target 到合适的分类路径
 4. mark_tagged 标记已处理的目录
 
-## 分类合并流程
-
-将多个分类合并为一个时：
+### 合并分类
+将多个分类合并为一个：
 1. list_categories 查看所有分类
 2. update_category 将目标分类改为期望的名称和路径
-3. 对源分类：update_category 改路径到目标（文件自动级联），然后 delete_category`
+3. 对源分类：update_category 改路径到目标（文件自动级联），然后 delete_category
+
+### 重新分类
+将文件从一个分类移到另一个：
+1. list_categories 查看可用分类
+2. set_target 设置新的目标路径
+
+### 批量改描述
+用户要求统一修改描述格式（如"都改成 YYYYMMDD+内容 格式"）：
+1. 对每个选中的文件/目录调用 update_description
+
+### 批量改目标路径
+用户要求统一调整路径格式（如"路径都加上年份前缀"）：
+1. list_categories 确认分类路径
+2. 对每个文件 set_target 设置新路径
+
+### 取消规划
+用户要求撤销某些文件的分类规划：
+1. set_target(文件, "") 清除目标路径
+
+### 深入探索后分类
+用户选了一个大目录但想按内容细分：
+1. list_files 逐层探索目录结构
+2. get_file_info 了解关键文件/目录
+3. 根据内容对不同子目录 set_target 到不同分类
+4. mark_tagged 标记已处理`
 
 	messages := []*schema.Message{
 		{Role: schema.System, Content: systemPrompt},
