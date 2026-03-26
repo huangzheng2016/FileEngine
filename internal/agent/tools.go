@@ -430,12 +430,14 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
 
+	batch := tb.logger.GetBatch()
 	f.Tagged = true
+	f.BatchIndex = batch
 	if err := tb.repo.UpdateFile(f); err != nil {
 		return nil, err
 	}
 
-	if err := tb.repo.MarkChildrenTagged(tb.sessionID, input.Path); err != nil {
+	if err := tb.repo.MarkChildrenTagged(tb.sessionID, input.Path, batch); err != nil {
 		return nil, err
 	}
 

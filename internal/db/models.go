@@ -23,6 +23,7 @@ type FileEntry struct {
 	ParentPath    string    `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
 	Depth         int       `gorm:"index:idx_session_type_tagged_depth,priority:4" json:"depth"`
 	ChildCount    int       `json:"child_count"`
+	BatchIndex    int       `json:"batch_index"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
