@@ -269,10 +269,10 @@ interface ColumnDef { key: string; label: string; visible: boolean }
 const defaultColumnOrder: { key: string; defaultVisible: boolean }[] = [
   { key: 'name', defaultVisible: true },
   { key: 'new_path', defaultVisible: true },
+  { key: 'description', defaultVisible: true },
   { key: 'file_type', defaultVisible: true },
   { key: 'tagged', defaultVisible: true },
   { key: 'size', defaultVisible: false },
-  { key: 'description', defaultVisible: false },
   { key: 'batch_index', defaultVisible: false },
   { key: 'preview', defaultVisible: false },
 ]
