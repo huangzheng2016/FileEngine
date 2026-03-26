@@ -35,3 +35,6 @@ wails/bin/backend.bin
 
 # Claude Code
 .claude/
+
+# Temp files
+temp

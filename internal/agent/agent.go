@@ -21,6 +21,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+type fileBatch struct {
+	files    []db.FileEntry
+	batchIdx int32
+}
+
 type Agent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
@@ -232,7 +237,7 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	agentInst, err := react.NewAgent(ctx, &react.AgentConfig{
 		Model:       tracker,
 		ToolsConfig: compose.ToolsNodeConfig{Tools: tools},
-		MaxStep:     30,
+		MaxStep:     config.Get().Agent.InstructMaxStep,
 	})
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
@@ -258,77 +263,13 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	userMsg := sb.String()
 	a.logger.LogMessage("user", userMsg, 0, 0, 0)
 
-	systemPrompt := `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
-
-## 重要：主动理解用户意图
-
-- 用户说"拆开"、"分开"、"不要合集"等：先用 list_files 探索子目录，然后对每个子目录分别 set_target
-- 用户说"合并"、"放到一起"等：用 list_categories 查看所有分类，找到相关的，合并后删除多余分类
-- 用户说"重新分类"、"换个分类"等：先清除旧 target，再设置新的
-- 用户说"改名"、"改路径"、"改描述"等：直接用对应工具修改
-- 操作前先用 list_categories 了解现有分类
-
-## 可用工具
-
-- list_files: 列出目录内容（探索子目录时必用）
-- get_file_info: 获取文件/目录详细信息
-- update_description: 修改描述
-- mark_tagged: 标记目录为已处理（级联子项）
-- set_target: 设置目标路径（传空字符串清除已有目标）
-- list_categories: 查看所有分类
-- list_category_files: 查看分类下已规划的文件
-- update_category: 修改分类（路径变更会级联更新文件）
-- delete_category: 删除分类（清除该分类下所有文件的规划，允许重新分类）
-- create_category: 创建新分类（如果可用）
-
-## 常见操作流程
-
-### 拆分目录
-用户要求将大目录拆分为子目录分别归类：
-1. set_target(大目录, "") 清除整体目标
-2. list_files 查看子目录/文件
-3. 对每个子项根据内容 set_target 到合适的分类路径
-4. mark_tagged 标记已处理的目录
-
-### 合并分类
-将多个分类合并为一个：
-1. list_categories 查看所有分类
-2. update_category 将目标分类改为期望的名称和路径
-3. 对源分类：update_category 改路径到目标（文件自动级联），然后 delete_category
-
-### 重新分类
-将文件从一个分类移到另一个：
-1. list_categories 查看可用分类
-2. set_target 设置新的目标路径
-
-### 批量改描述
-用户要求统一修改描述格式（如"都改成 YYYYMMDD+内容 格式"）：
-1. 对每个选中的文件/目录调用 update_description
-
-### 批量改目标路径
-用户要求统一调整路径格式（如"路径都加上年份前缀"）：
-1. list_categories 确认分类路径
-2. 对每个文件 set_target 设置新路径
-
-### 取消规划
-用户要求撤销某些文件的分类规划：
-1. set_target(文件, "") 清除目标路径
-
-### 深入探索后分类
-用户选了一个大目录但想按内容细分：
-1. list_files 逐层探索目录结构
-2. get_file_info 了解关键文件/目录
-3. 根据内容对不同子目录 set_target 到不同分类
-4. mark_tagged 标记已处理`
-
 	messages := []*schema.Message{
-		{Role: schema.System, Content: systemPrompt},
+		{Role: schema.System, Content: DefaultInstructPrompt},
 		{Role: schema.User, Content: userMsg},
 	}
 
-	result, err := agentInst.Generate(ctx, messages)
+	result, err := generateWithRetry(ctx, agentInst, messages, a.logger, "instruct")
 	if err != nil {
-		a.logger.LogMessage("system", fmt.Sprintf("Error: %v", err), 0, 0, 0)
 		return "", err
 	}
 
@@ -354,6 +295,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 
 	// Each worker gets its own logger, token tracker, and agent
 	workerLogger := NewLogger(a.repo, a.sessionID)
+	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
@@ -368,7 +310,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: tools,
 		},
-		MaxStep: 50,
+		MaxStep: config.Get().Agent.MaxStep,
 	})
 	if err != nil {
 		log.Printf("worker %d: failed to create agent: %v", workerID, err)
@@ -399,32 +341,10 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 			{Role: schema.User, Content: userMsg},
 		}
 
-		result, err := func() (*schema.Message, error) {
-			callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
-			defer callCancel()
-			return agentInst.Generate(callCtx, messages)
-		}()
+		label := fmt.Sprintf("worker %d batch %d", workerID, batchIdx)
+		result, err := generateWithRetry(ctx, agentInst, messages, workerLogger, label)
 		if err != nil {
-			// Retry on failure
-			maxRetries := config.Get().Agent.MaxRetries
-			if maxRetries <= 0 {
-				maxRetries = 3
-			}
-			for retry := 1; retry <= maxRetries && err != nil; retry++ {
-				if ctx.Err() != nil {
-					return // parent context cancelled, stop immediately
-				}
-				log.Printf("worker %d batch %d retry %d/%d: %v", workerID, batchIdx, retry, maxRetries, err)
-				time.Sleep(time.Duration(retry) * 2 * time.Second)
-				callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
-				result, err = agentInst.Generate(callCtx, messages)
-				callCancel()
-			}
-			if err != nil {
-				log.Printf("worker %d batch %d error after %d retries: %v", workerID, batchIdx, maxRetries, err)
-				workerLogger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
-				continue
-			}
+			continue
 		}
 
 		if result != nil {
@@ -432,6 +352,7 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
 			tracker.ResetUsage()
 		}
+		workerLogger.Flush()
 	}
 }
 
@@ -448,19 +369,74 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 		return
 	}
 
-	// Process remaining files in a single worker
+	liveCfg := config.Get()
+	concurrency := liveCfg.Agent.Concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	workCh := make(chan fileBatch, concurrency)
+
+	// Dispatcher: fetch batches and send to workers
+	go func() {
+		defer close(workCh)
+		for iterations := 0; ; iterations++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if iterations > 1000 {
+				log.Printf("processRemainingFiles: exceeded max iterations, stopping")
+				return
+			}
+			falseVal := false
+			batch, _, err := a.repo.ListFiles(db.FileQuery{
+				SessionID: a.sessionID,
+				FileType:  "file",
+				Tagged:    &falseVal,
+				Page:      1,
+				PageSize:  config.Get().Agent.BatchSize,
+			})
+			if err != nil || len(batch) == 0 {
+				return
+			}
+			batchIdx := atomic.AddInt32(batchCounter, 1)
+			select {
+			case workCh <- fileBatch{files: batch, batchIdx: batchIdx}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			a.runRemainingFilesWorker(ctx, workerID, workCh, chatModel, systemPrompt, filesystemID)
+		}(w)
+	}
+	wg.Wait()
+	_ = a.repo.RefreshSessionCounts(a.sessionID)
+}
+
+func (a *Agent) runRemainingFilesWorker(ctx context.Context, workerID int, workCh <-chan fileBatch, chatModel einomodel.ChatModel, systemPrompt string, filesystemID uint) {
 	workerFS, err := remotefs.NewFromConfig(a.fsCfg)
 	if err != nil {
-		log.Printf("processRemainingFiles: failed to connect fs: %v", err)
+		log.Printf("remaining worker %d: failed to connect fs: %v", workerID, err)
 		return
 	}
 	defer workerFS.Close()
 
 	workerLogger := NewLogger(a.repo, a.sessionID)
+	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
+		log.Printf("remaining worker %d: failed to build tools: %v", workerID, err)
 		return
 	}
 
@@ -469,41 +445,22 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: tools,
 		},
-		MaxStep: 50,
+		MaxStep: config.Get().Agent.MaxStep,
 	})
 	if err != nil {
+		log.Printf("remaining worker %d: failed to create agent: %v", workerID, err)
 		return
 	}
 
-	for iterations := 0; ; iterations++ {
+	for batch := range workCh {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
 
-		// Safety limit: prevent infinite loop if agent fails to mark files
-		if iterations > 1000 {
-			log.Printf("processRemainingFiles: exceeded max iterations, stopping")
-			return
-		}
-
-		falseVal := false
-		files, _, err := a.repo.ListFiles(db.FileQuery{
-			SessionID: a.sessionID,
-			FileType:  "file",
-			Tagged:    &falseVal,
-			Page:      1,
-			PageSize:  config.Get().Agent.BatchSize,
-		})
-		if err != nil || len(files) == 0 {
-			return
-		}
-
-		batchIdx := atomic.AddInt32(batchCounter, 1)
-		workerLogger.SetBatch(int(batchIdx))
-
-		userMsg := buildBatchPrompt(files)
+		workerLogger.SetBatch(int(batch.batchIdx))
+		userMsg := buildBatchPrompt(batch.files)
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
@@ -511,38 +468,17 @@ func (a *Agent) processRemainingFiles(ctx context.Context, chatModel einomodel.C
 			{Role: schema.User, Content: userMsg},
 		}
 
-		result, err := func() (*schema.Message, error) {
-			callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
-			defer callCancel()
-			return agentInst.Generate(callCtx, messages)
-		}()
+		label := fmt.Sprintf("remaining worker %d batch %d", workerID, batch.batchIdx)
+		result, err := generateWithRetry(ctx, agentInst, messages, workerLogger, label)
 		if err != nil {
-			maxRetries := config.Get().Agent.MaxRetries
-			if maxRetries <= 0 {
-				maxRetries = 3
-			}
-			for retry := 1; retry <= maxRetries && err != nil; retry++ {
-				if ctx.Err() != nil {
-					return
-				}
-				log.Printf("remaining files batch %d retry %d/%d: %v", batchIdx, retry, maxRetries, err)
-				time.Sleep(time.Duration(retry) * 2 * time.Second)
-				callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
-				result, err = agentInst.Generate(callCtx, messages)
-				callCancel()
-			}
-			if err != nil {
-				log.Printf("remaining files batch %d error after %d retries: %v", batchIdx, maxRetries, err)
-				workerLogger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
-				continue
-			}
+			continue
 		}
 		if result != nil {
 			pt, ct, tt := tracker.Usage()
 			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
 			tracker.ResetUsage()
 		}
-		_ = a.repo.RefreshSessionCounts(a.sessionID)
+		workerLogger.Flush()
 	}
 }
 
@@ -553,6 +489,35 @@ func extractTokenUsage(msg *schema.Message) (prompt, completion, total int) {
 	}
 	u := msg.ResponseMeta.Usage
 	return u.PromptTokens, u.CompletionTokens, u.TotalTokens
+}
+
+func generateWithRetry(ctx context.Context, agentInst *react.Agent, messages []*schema.Message, logger *Logger, label string) (*schema.Message, error) {
+	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer callCancel()
+	result, err := agentInst.Generate(callCtx, messages)
+	if err == nil {
+		return result, nil
+	}
+
+	maxRetries := config.Get().Agent.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	for retry := 1; retry <= maxRetries; retry++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		log.Printf("%s retry %d/%d: %v", label, retry, maxRetries, err)
+		time.Sleep(time.Duration(retry) * 2 * time.Second)
+		retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
+		result, err = agentInst.Generate(retryCtx, messages)
+		retryCancel()
+		if err == nil {
+			return result, nil
+		}
+	}
+	logger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
+	return nil, err
 }
 
 func buildDirectoryPrompt(dir db.FileEntry) string {

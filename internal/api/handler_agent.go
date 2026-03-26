@@ -86,6 +86,11 @@ func (s *Server) startTagging(c *gin.Context) {
 	agentMu.Unlock()
 
 	go func() {
+		defer func() {
+			agentMu.Lock()
+			delete(agents, sessionID)
+			agentMu.Unlock()
+		}()
 		if err := a.RunTagging(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
@@ -258,7 +263,12 @@ func (s *Server) startExecute(c *gin.Context) {
 	execMu.Unlock()
 
 	go func() {
-		defer fs.Close()
+		defer func() {
+			execMu.Lock()
+			delete(executors, sessionID)
+			execMu.Unlock()
+			fs.Close()
+		}()
 		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
 			log.Printf("execution session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
