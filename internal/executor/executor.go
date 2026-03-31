@@ -6,6 +6,7 @@ import (
 	"log"
 	"path"
 	"sync"
+	"time"
 
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -59,6 +60,66 @@ func (e *Executor) Stop() {
 	if e.cancelFn != nil {
 		e.cancelFn()
 	}
+}
+
+type ValidationIssue struct {
+	OriginalPath string `json:"original_path"`
+	NewPath      string `json:"new_path"`
+	Issue        string `json:"issue"` // "conflict" / "duplicate"
+	Detail       string `json:"detail"`
+}
+
+type ValidationResult struct {
+	OK     bool              `json:"ok"`
+	Issues []ValidationIssue `json:"issues"`
+}
+
+func (e *Executor) Validate(ctx context.Context, sessionID uint) (*ValidationResult, error) {
+	files, err := e.repo.GetPlannedFiles(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &ValidationResult{OK: true}
+
+	// Check duplicate targets
+	targetCount := map[string][]string{}
+	for _, f := range files {
+		if f.NewPath == "" || f.Executed {
+			continue
+		}
+		targetCount[f.NewPath] = append(targetCount[f.NewPath], f.OriginalPath)
+	}
+	for target, sources := range targetCount {
+		if len(sources) > 1 {
+			result.OK = false
+			result.Issues = append(result.Issues, ValidationIssue{
+				NewPath: target,
+				Issue:   "duplicate",
+				Detail:  fmt.Sprintf("%d files target the same path", len(sources)),
+			})
+		}
+	}
+
+	// Check FS conflicts (target already exists)
+	if e.fs != nil {
+		for _, f := range files {
+			if f.NewPath == "" || f.Executed {
+				continue
+			}
+			if _, err := e.fs.Stat(ctx, f.NewPath); err == nil {
+				result.OK = false
+				result.Issues = append(result.Issues, ValidationIssue{
+					OriginalPath: f.OriginalPath,
+					NewPath:      f.NewPath,
+					Issue:        "conflict",
+					Detail:       "target path already exists on filesystem",
+				})
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (e *Executor) DryRun(sessionID uint) ([]PlanItem, error) {
@@ -155,6 +216,9 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 		}
 
 		f.Executed = true
+		now := time.Now()
+		f.ExecutedAt = &now
+		f.ExecuteMode = op
 		if err := e.repo.UpdateFile(&f); err != nil {
 			log.Printf("update file record: %v", err)
 		}

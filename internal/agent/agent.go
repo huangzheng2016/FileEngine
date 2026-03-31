@@ -333,7 +333,9 @@ func (a *Agent) runWorker(ctx context.Context, workerID int, workCh <-chan db.Fi
 		batchIdx := atomic.AddInt32(batchCounter, 1)
 		workerLogger.SetBatch(int(batchIdx))
 
-		userMsg := buildDirectoryPrompt(dir)
+		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		catSummary := buildCategorySummary(usages)
+		userMsg := buildDirectoryPrompt(dir, catSummary)
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
@@ -460,7 +462,9 @@ func (a *Agent) runRemainingFilesWorker(ctx context.Context, workerID int, workC
 		}
 
 		workerLogger.SetBatch(int(batch.batchIdx))
-		userMsg := buildBatchPrompt(batch.files)
+		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		catSummary := buildCategorySummary(usages)
+		userMsg := buildBatchPrompt(batch.files, catSummary)
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
@@ -520,7 +524,19 @@ func generateWithRetry(ctx context.Context, agentInst *react.Agent, messages []*
 	return nil, err
 }
 
-func buildDirectoryPrompt(dir db.FileEntry) string {
+func buildCategorySummary(usages []db.CategoryUsage) string {
+	if len(usages) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## 当前分类使用情况\n")
+	for _, u := range usages {
+		sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项\n", u.Name, u.Path, u.FileCount))
+	}
+	return sb.String()
+}
+
+func buildDirectoryPrompt(dir db.FileEntry, categorySummary string) string {
 	var sb strings.Builder
 	sb.WriteString("处理以下目录：\n\n")
 	sb.WriteString(fmt.Sprintf("路径: %s\n", dir.OriginalPath))
@@ -531,10 +547,11 @@ func buildDirectoryPrompt(dir db.FileEntry) string {
 	if dir.ParentPath != "" {
 		sb.WriteString(fmt.Sprintf("父目录: %s\n", dir.ParentPath))
 	}
+	sb.WriteString(categorySummary)
 	return sb.String()
 }
 
-func buildBatchPrompt(entries []db.FileEntry) string {
+func buildBatchPrompt(entries []db.FileEntry, categorySummary string) string {
 	var sb strings.Builder
 	sb.WriteString("处理以下散文件：\n\n")
 	for i, e := range entries {
@@ -545,5 +562,6 @@ func buildBatchPrompt(entries []db.FileEntry) string {
 		}
 		sb.WriteString("\n")
 	}
+	sb.WriteString(categorySummary)
 	return sb.String()
 }

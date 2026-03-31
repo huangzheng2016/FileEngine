@@ -217,6 +217,42 @@ func (s *Server) tagStatus(c *gin.Context) {
 	})
 }
 
+func (s *Server) validatePlans(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	sessionID := uint(id)
+	session, err := s.repo.GetSession(sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	fsCfg, err := s.resolveFSConfig(session)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	fs, err := remotefs.NewFromConfig(fsCfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
+		return
+	}
+	defer fs.Close()
+
+	e := executor.New(s.repo, fs)
+	result, err := e.Validate(c.Request.Context(), sessionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (s *Server) startExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -343,4 +379,55 @@ func (s *Server) getPlans(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, plans)
+}
+
+func (s *Server) exportPlans(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	e := executor.New(s.repo, nil)
+	plans, err := e.DryRun(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=plans_session_%d.csv", id))
+	// BOM for Excel UTF-8 compatibility
+	c.Writer.Write([]byte("\xEF\xBB\xBF"))
+	c.Writer.WriteString("original_path,new_path,operation,file_type,name\n")
+	for _, p := range plans {
+		c.Writer.WriteString(fmt.Sprintf("%s,%s,%s,%s,%s\n",
+			csvEscape(p.OriginalPath), csvEscape(p.NewPath),
+			p.Operation, p.FileType, csvEscape(p.Name)))
+	}
+}
+
+func csvEscape(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	needsQuote := false
+	for _, c := range s {
+		if c == ',' || c == '"' || c == '\n' || c == '\r' {
+			needsQuote = true
+			break
+		}
+	}
+	if !needsQuote {
+		return s
+	}
+	escaped := "\""
+	for _, c := range s {
+		if c == '"' {
+			escaped += "\"\""
+		} else {
+			escaped += string(c)
+		}
+	}
+	return escaped + "\""
 }

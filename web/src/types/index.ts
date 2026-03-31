@@ -5,6 +5,8 @@ export interface FileEntry {
   new_path: string
   operation: string
   executed: boolean
+  executed_at: string | null
+  execute_mode: string
   name: string
   size: number
   mod_time: string
@@ -133,4 +135,38 @@ export interface PageResult<T> {
   files?: T[]
   logs?: T[]
   total: number
+}
+
+export interface ValidationIssue {
+  original_path: string
+  new_path: string
+  issue: string
+  detail: string
+}
+
+export interface ValidationResult {
+  ok: boolean
+  issues: ValidationIssue[]
+}
+
+export interface CategoryDistribution {
+  name: string
+  path: string
+  file_count: number
+  total_size: number
+}
+
+export interface SessionStats {
+  category_distribution: CategoryDistribution[]
+  total_files: number
+  tagged_files: number
+  planned_ops: number
+  total_tokens: number
+}
+
+export interface CategoryExportItem {
+  name: string
+  path: string
+  structure?: string
+  description?: string
 }

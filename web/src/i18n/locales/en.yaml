@@ -57,6 +57,7 @@ files:
   batchIndex: Batch
   columns: Columns
   plannedPath: Planned Path
+  executedAt: Executed
   detail: File Detail
   saveChanges: Save Changes
   originalPath: Path
@@ -89,6 +90,10 @@ categories:
   deleteConfirm: Delete this category?
   agentEditable: AI Editable
   agentEditableHint: When enabled, the agent can modify or delete this category
+  exportCategories: Export
+  importCategories: Import
+  importSuccess: "Imported {created} categories, skipped {skipped} existing"
+  importFailed: Import failed
 
 filesystems:
   title: Filesystem Management
@@ -170,6 +175,20 @@ tasks:
   execMode: Execute Mode
   execCopyHint: (keep original)
   execMoveHint: (delete original)
+  exportPlans: Export CSV
+  exportPlansSuccess: Plans exported
+  validate: Validate
+  validating: Validating...
+  validateOk: Validation passed, no conflicts
+  validateIssues: "{count} issues found"
+  issueConflict: Target exists
+  issueDuplicate: Duplicate target
+  stats: Stats
+  statsTitle: Session Statistics
+  categoryDistribution: Category Distribution
+  fileCount: Files
+  totalSizeLabel: Total Size
+  noStats: No statistics available
 
 config:
   title: Configuration

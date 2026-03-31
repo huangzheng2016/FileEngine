@@ -49,6 +49,7 @@
                   <el-dropdown-item command="rescan" :disabled="row.status === 'scanning'"><el-icon><Refresh /></el-icon>{{ $t('tasks.rescan') }}</el-dropdown-item>
                   <el-dropdown-item command="tag" :disabled="!canTag(row)"><el-icon><PriceTag /></el-icon>{{ row.status === 'tagging' ? $t('tasks.stopTag') : $t('tasks.tag') }}</el-dropdown-item>
                   <el-dropdown-item command="plans" :disabled="row.planned_ops === 0"><el-icon><Document /></el-icon>{{ $t('tasks.plans') }}</el-dropdown-item>
+                  <el-dropdown-item command="stats"><el-icon><DataAnalysis /></el-icon>{{ $t('tasks.stats') }}</el-dropdown-item>
                   <el-dropdown-item command="execute" :disabled="!canExecute(row)"><el-icon><VideoPlay /></el-icon>{{ row.status === 'executing' ? $t('tasks.stop') : $t('tasks.execute') }}</el-dropdown-item>
                   <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>{{ $t('common.delete') }}</el-dropdown-item>
                 </el-dropdown-menu>
@@ -61,6 +62,23 @@
 
     <!-- Plans dialog -->
     <el-dialog v-model="plansVisible" :title="$t('tasks.executionPlans')" width="80%">
+      <template #header>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span>{{ $t('tasks.executionPlans') }}</span>
+          <el-button size="small" @click="handleExportPlans" :icon="Download">{{ $t('tasks.exportPlans') }}</el-button>
+          <el-button size="small" @click="handleValidate" :loading="validating" :icon="CircleCheck">{{ $t('tasks.validate') }}</el-button>
+        </div>
+      </template>
+      <el-alert v-if="validationResult && !validationResult.ok" type="warning" :closable="false" style="margin-bottom: 10px">
+        <template #title>{{ $t('tasks.validateIssues', { count: validationResult.issues.length }) }}</template>
+        <div v-for="(issue, idx) in validationResult.issues" :key="idx" style="font-size: 12px; margin-top: 4px">
+          <el-tag :type="issue.issue === 'conflict' ? 'danger' : 'warning'" size="small">{{ $t('tasks.issue' + (issue.issue === 'conflict' ? 'Conflict' : 'Duplicate')) }}</el-tag>
+          {{ issue.new_path }} — {{ issue.detail }}
+        </div>
+      </el-alert>
+      <el-alert v-if="validationResult && validationResult.ok" type="success" :closable="false" style="margin-bottom: 10px">
+        {{ $t('tasks.validateOk') }}
+      </el-alert>
       <el-table :data="plans" style="width: 100%" max-height="500">
         <el-table-column prop="name" :label="$t('tasks.planName')" width="200" />
         <el-table-column prop="operation" :label="$t('tasks.planOp')" width="80">
@@ -77,6 +95,22 @@
           </template>
         </el-table-column>
       </el-table>
+    </el-dialog>
+
+    <!-- Stats dialog -->
+    <el-dialog v-model="statsVisible" :title="$t('tasks.statsTitle')" width="500px">
+      <div v-if="sessionStatsData && sessionStatsData.category_distribution && sessionStatsData.category_distribution.length > 0">
+        <p style="margin-bottom: 8px; font-weight: 500">{{ $t('tasks.categoryDistribution') }}</p>
+        <el-table :data="sessionStatsData.category_distribution" size="small" max-height="300">
+          <el-table-column prop="name" :label="$t('common.name')" width="150" />
+          <el-table-column prop="path" :label="$t('common.path')" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="file_count" :label="$t('tasks.fileCount')" width="80" align="right" />
+          <el-table-column :label="$t('tasks.totalSizeLabel')" width="100" align="right">
+            <template #default="{ row }">{{ formatSize(row.total_size) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <el-empty v-else :description="$t('tasks.noStats')" />
     </el-dialog>
 
     <!-- New scan dialog -->
@@ -190,9 +224,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listSessions, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, listFilesystems, listModelProviders } from '../api'
-import type { ScanSession, PlanItem, Filesystem, ModelProvider } from '../types'
+import { listSessions, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, exportPlansCSV, validatePlans, getSessionStats, listFilesystems, listModelProviders } from '../api'
+import type { ScanSession, PlanItem, Filesystem, ModelProvider, ValidationResult, SessionStats } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download, CircleCheck, DataAnalysis } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const sessions = ref<ScanSession[]>([])
@@ -208,6 +243,11 @@ const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
 const settingsSessionId = ref(0)
 const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
+const validating = ref(false)
+const validationResult = ref<ValidationResult | null>(null)
+const currentPlansSessionId = ref(0)
+const statsVisible = ref(false)
+const sessionStatsData = ref<SessionStats | null>(null)
 
 let timer: ReturnType<typeof setInterval>
 
@@ -331,7 +371,41 @@ async function confirmExecute() {
 async function showPlans(s: ScanSession) {
   const res = await getPlans(s.id)
   plans.value = res.data
+  currentPlansSessionId.value = s.id
+  validationResult.value = null
   plansVisible.value = true
+}
+
+async function handleExportPlans() {
+  try {
+    const res = await exportPlansCSV(currentPlansSessionId.value)
+    const url = URL.createObjectURL(new Blob([res.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `plans_session_${currentPlansSessionId.value}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('tasks.exportPlansSuccess'))
+  } catch { ElMessage.error(t('common.error')) }
+}
+
+async function handleValidate() {
+  validating.value = true
+  try {
+    const res = await validatePlans(currentPlansSessionId.value)
+    validationResult.value = res.data
+    if (res.data.ok) ElMessage.success(t('tasks.validateOk'))
+    else ElMessage.warning(t('tasks.validateIssues', { count: res.data.issues.length }))
+  } catch { ElMessage.error(t('common.error')) }
+  finally { validating.value = false }
+}
+
+async function showStats(s: ScanSession) {
+  try {
+    const res = await getSessionStats(s.id)
+    sessionStatsData.value = res.data
+    statsVisible.value = true
+  } catch { ElMessage.error(t('common.error')) }
 }
 
 async function handleDelete(s: ScanSession) {
@@ -355,6 +429,7 @@ function handleCommand(cmd: string, row: ScanSession) {
     case 'plans': showPlans(row); break
     case 'execute': handleExecute(row); break
     case 'settings': openSettings(row); break
+    case 'stats': showStats(row); break
     case 'delete': handleDelete(row); break
   }
 }

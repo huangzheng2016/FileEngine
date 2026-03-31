@@ -12,7 +12,9 @@ type FileEntry struct {
 	OriginalPath  string    `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string    `gorm:"size:1024" json:"new_path"`
 	Operation     string    `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"` // "move" / "copy" / ""
-	Executed      bool      `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
+	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
+	ExecutedAt    *time.Time `json:"executed_at"`
+	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"
 	Name          string    `gorm:"size:512" json:"name"`
 	Size          int64     `json:"size"`
 	ModTime       time.Time `json:"mod_time"`
