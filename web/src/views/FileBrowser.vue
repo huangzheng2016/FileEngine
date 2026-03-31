@@ -34,7 +34,10 @@
       <el-card v-if="selectedFsId" style="flex: 1; overflow: auto; display: flex; flex-direction: column">
         <el-tabs v-model="sidebarTab" style="flex: 1; display: flex; flex-direction: column">
           <el-tab-pane :label="$t('files.categoryManagement')" name="categories">
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 8px">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 8px; gap: 4px">
+              <el-button size="small" @click="handleExportCategories">{{ $t('categories.exportCategories') }}</el-button>
+              <el-button size="small" @click="triggerImportCategories">{{ $t('categories.importCategories') }}</el-button>
+              <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportCategories" />
               <el-button size="small" type="primary" @click="openCatDialog()">{{ $t('categories.addCategory') }}</el-button>
             </div>
             <div v-if="categories.length === 0" style="color: #999; font-size: 13px; text-align: center; padding: 8px 0">
@@ -146,6 +149,14 @@
             </el-table-column>
             <el-table-column v-else-if="col.key === 'new_path'" :label="col.label" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">{{ displayPath(row.new_path) }}</template>
+            </el-table-column>
+            <el-table-column v-else-if="col.key === 'executed_at'" :label="col.label" width="150">
+              <template #default="{ row }">
+                <template v-if="row.executed && row.executed_at">
+                  <el-tag size="small" :type="row.execute_mode === 'move' ? 'warning' : 'success'">{{ row.execute_mode }}</el-tag>
+                  <span style="font-size: 11px; color: #999; margin-left: 4px">{{ row.executed_at?.slice(0, 16).replace('T', ' ') }}</span>
+                </template>
+              </template>
             </el-table-column>
             <el-table-column v-else-if="col.key === 'preview'" :label="col.label" width="60" align="center">
               <template #default="{ row }">
@@ -264,8 +275,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
-import type { FileEntry, Filesystem, ScanSession, Category, TreeNode } from '../types'
+import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, exportCategories, importCategories, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
+import type { FileEntry, Filesystem, ScanSession, Category, TreeNode, CategoryExportItem } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import draggable from 'vuedraggable'
 
@@ -281,12 +292,13 @@ const defaultColumnOrder: { key: string; defaultVisible: boolean }[] = [
   { key: 'tagged', defaultVisible: true },
   { key: 'size', defaultVisible: false },
   { key: 'batch_index', defaultVisible: false },
+  { key: 'executed_at', defaultVisible: false },
   { key: 'preview', defaultVisible: false },
 ]
 const columnLabels: Record<string, () => string> = {
   name: () => t('files.fileName'), file_type: () => t('files.fileType'), size: () => t('files.fileSize'),
   description: () => t('files.fileDescription'), tagged: () => t('files.taggedStatus'),
-  batch_index: () => t('files.batchIndex'), new_path: () => t('files.plannedPath'), preview: () => t('files.preview'),
+  batch_index: () => t('files.batchIndex'), new_path: () => t('files.plannedPath'), executed_at: () => t('files.executedAt'), preview: () => t('files.preview'),
 }
 function loadColumnPrefs(): ColumnDef[] {
   try {
@@ -477,6 +489,39 @@ async function handleDeleteCat(id: number) {
   await deleteCategory(id)
   ElMessage.success(t('common.deleted'))
   categories.value = (await listCategories(selectedFsId.value)).data
+}
+
+// Category export/import
+const importFileInput = ref<HTMLInputElement | null>(null)
+
+async function handleExportCategories() {
+  try {
+    const res = await exportCategories(selectedFsId.value)
+    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `categories_fs_${selectedFsId.value}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch { ElMessage.error(t('common.error')) }
+}
+
+function triggerImportCategories() {
+  importFileInput.value?.click()
+}
+
+async function handleImportCategories(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const items: CategoryExportItem[] = JSON.parse(text)
+    const res = await importCategories(selectedFsId.value, items)
+    ElMessage.success(t('categories.importSuccess', { created: res.data.created, skipped: res.data.skipped }))
+    categories.value = (await listCategories(selectedFsId.value)).data
+  } catch { ElMessage.error(t('categories.importFailed')) }
+  finally { if (importFileInput.value) importFileInput.value.value = '' }
 }
 
 function formatSize(bytes: number): string {

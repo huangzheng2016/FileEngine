@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { FileEntry, Filesystem, Category, ScanSession, AgentLog, TreeNode, PlanItem, Config, PageResult, ModelProvider } from '../types'
+import type { FileEntry, Filesystem, Category, ScanSession, AgentLog, TreeNode, PlanItem, Config, PageResult, ModelProvider, ValidationResult, SessionStats, CategoryExportItem } from '../types'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -50,6 +50,15 @@ export const getExecuteStatus = (id: number) =>
 export const getPlans = (id: number) =>
   api.get<PlanItem[]>(`/sessions/${id}/plans`)
 
+export const exportPlansCSV = (id: number) =>
+  api.get(`/sessions/${id}/plans/export`, { responseType: 'blob' })
+
+export const validatePlans = (id: number) =>
+  api.get<ValidationResult>(`/sessions/${id}/execute/validate`)
+
+export const getSessionStats = (id: number) =>
+  api.get<SessionStats>(`/sessions/${id}/stats`)
+
 // Files
 export const listFiles = (params: Record<string, any>) =>
   api.get<PageResult<FileEntry>>('/files', { params })
@@ -78,6 +87,12 @@ export const updateCategory = (id: number, data: Partial<Category>) =>
 
 export const deleteCategory = (id: number) =>
   api.delete(`/categories/${id}`)
+
+export const exportCategories = (filesystemId: number) =>
+  api.get<CategoryExportItem[]>('/categories/export', { params: { filesystem_id: filesystemId } })
+
+export const importCategories = (filesystemId: number, data: CategoryExportItem[]) =>
+  api.post<{ created: number; skipped: number }>('/categories/import', data, { params: { filesystem_id: filesystemId } })
 
 // Filesystems
 export const listFilesystems = () =>

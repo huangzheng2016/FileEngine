@@ -299,6 +299,32 @@ func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*Categor
 	return &cat, err
 }
 
+// CategoryUsage holds a category's name, path, and how many files are planned under it.
+type CategoryUsage struct {
+	Name      string
+	Path      string
+	FileCount int64
+}
+
+// GetCategoryUsageSummary returns each category with the count of planned files under its path.
+func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) ([]CategoryUsage, error) {
+	cats, err := r.ListCategories(filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	var result []CategoryUsage
+	for _, c := range cats {
+		var count int64
+		r.db.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND new_path LIKE ?", sessionID, c.Path+"%").
+			Count(&count)
+		if count > 0 {
+			result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, FileCount: count})
+		}
+	}
+	return result, nil
+}
+
 func (r *Repository) UpdateCategory(c *Category) error {
 	return r.db.Save(c).Error
 }
@@ -487,4 +513,38 @@ func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]BatchInf
 		Offset(offset).Limit(pageSize).
 		Find(&batches).Error
 	return batches, total, err
+}
+
+// CategoryDistribution holds a category name/path and the count+size of files planned under it.
+type CategoryDistribution struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	FileCount int64  `json:"file_count"`
+	TotalSize int64  `json:"total_size"`
+}
+
+// GetSessionStats returns category distribution for a session.
+func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]CategoryDistribution, error) {
+	cats, err := r.ListCategories(filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	var result []CategoryDistribution
+	for _, c := range cats {
+		var stats struct {
+			Count int64
+			Size  int64
+		}
+		r.db.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND new_path LIKE ?", sessionID, c.Path+"%").
+			Select("COUNT(*) AS count, COALESCE(SUM(size), 0) AS size").
+			Scan(&stats)
+		if stats.Count > 0 {
+			result = append(result, CategoryDistribution{
+				Name: c.Name, Path: c.Path,
+				FileCount: stats.Count, TotalSize: stats.Size,
+			})
+		}
+	}
+	return result, nil
 }

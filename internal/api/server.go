@@ -40,6 +40,7 @@ func (s *Server) setupRouter() {
 		api.DELETE("/sessions/:id", s.deleteSession)
 		api.PATCH("/sessions/:id", s.updateSessionConfig)
 		api.POST("/sessions/:id/rescan", s.rescanSession)
+		api.GET("/sessions/:id/stats", s.getSessionStats)
 
 		// Agent tasks
 		api.POST("/sessions/:id/tag", s.startTagging)
@@ -49,7 +50,9 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/execute", s.startExecute)
 		api.POST("/sessions/:id/execute/stop", s.stopExecute)
 		api.GET("/sessions/:id/execute/status", s.executeStatus)
+		api.GET("/sessions/:id/execute/validate", s.validatePlans)
 		api.GET("/sessions/:id/plans", s.getPlans)
+		api.GET("/sessions/:id/plans/export", s.exportPlans)
 
 		// Files
 		api.GET("/files", s.listFiles)
@@ -63,6 +66,8 @@ func (s *Server) setupRouter() {
 		api.POST("/categories", s.createCategory)
 		api.PUT("/categories/:id", s.updateCategory)
 		api.DELETE("/categories/:id", s.deleteCategory)
+		api.GET("/categories/export", s.exportCategories)
+		api.POST("/categories/import", s.importCategories)
 
 		// Filesystems
 		api.GET("/filesystems", s.listFilesystems)

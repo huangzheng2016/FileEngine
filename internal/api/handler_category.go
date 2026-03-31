@@ -104,3 +104,63 @@ func (s *Server) deleteCategory(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
+
+type CategoryExportItem struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Structure   string `json:"structure,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+func (s *Server) exportCategories(c *gin.Context) {
+	fsID, err := strconv.ParseUint(c.Query("filesystem_id"), 10, 32)
+	if err != nil || fsID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem_id required"})
+		return
+	}
+	cats, err := s.repo.ListCategories(uint(fsID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	items := make([]CategoryExportItem, len(cats))
+	for i, c := range cats {
+		items[i] = CategoryExportItem{Name: c.Name, Path: c.Path, Structure: c.Structure, Description: c.Description}
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+func (s *Server) importCategories(c *gin.Context) {
+	fsID, err := strconv.ParseUint(c.Query("filesystem_id"), 10, 32)
+	if err != nil || fsID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem_id required"})
+		return
+	}
+
+	var items []CategoryExportItem
+	if err := c.ShouldBindJSON(&items); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	created := 0
+	skipped := 0
+	for _, item := range items {
+		if _, err := s.repo.GetCategoryByName(uint(fsID), item.Name); err == nil {
+			skipped++
+			continue
+		}
+		cat := &db.Category{
+			FilesystemID: uint(fsID),
+			Name:         item.Name,
+			Path:         item.Path,
+			Structure:    item.Structure,
+			Description:  item.Description,
+		}
+		if err := s.repo.CreateCategory(cat); err != nil {
+			continue
+		}
+		created++
+	}
+	c.JSON(http.StatusOK, gin.H{"created": created, "skipped": skipped})
+}

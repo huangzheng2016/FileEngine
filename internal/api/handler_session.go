@@ -286,3 +286,28 @@ func (s *Server) rescanSession(c *gin.Context) {
 	s.startScan(session, filesystem.ToRemoteFSConfig())
 	c.JSON(http.StatusOK, session)
 }
+
+func (s *Server) getSessionStats(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	session, err := s.repo.GetSession(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	dist, err := s.repo.GetSessionStats(uint(id), session.FilesystemID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"category_distribution": dist,
+		"total_files":           session.TotalFiles,
+		"tagged_files":          session.TaggedFiles,
+		"planned_ops":           session.PlannedOps,
+		"total_tokens":          session.TotalTokens,
+	})
+}

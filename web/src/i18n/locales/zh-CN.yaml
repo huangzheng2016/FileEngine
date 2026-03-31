@@ -57,6 +57,7 @@ files:
   batchIndex: 轮次
   columns: 列设置
   plannedPath: 规划路径
+  executedAt: 执行记录
   detail: 文件详情
   saveChanges: 保存修改
   originalPath: 原始路径
@@ -89,6 +90,10 @@ categories:
   deleteConfirm: 确定删除该分类？
   agentEditable: 允许 AI 修改
   agentEditableHint: 开启后 Agent 可以修改或删除此分类
+  exportCategories: 导出分类
+  importCategories: 导入分类
+  importSuccess: "成功导入 {created} 个分类，跳过 {skipped} 个已存在"
+  importFailed: 导入失败
 
 filesystems:
   title: 文件系统管理
@@ -170,6 +175,20 @@ tasks:
   execMode: 执行方式
   execCopyHint: （保留原文件）
   execMoveHint: （删除原文件）
+  exportPlans: 导出 CSV
+  exportPlansSuccess: 计划已导出
+  validate: 预检
+  validating: 正在预检...
+  validateOk: 预检通过，无冲突
+  validateIssues: "发现 {count} 个问题"
+  issueConflict: 目标已存在
+  issueDuplicate: 重复目标
+  stats: 统计
+  statsTitle: 会话统计
+  categoryDistribution: 分类分布
+  fileCount: 文件数
+  totalSizeLabel: 总大小
+  noStats: 暂无统计数据
 
 config:
   title: 系统配置
