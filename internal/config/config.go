@@ -35,13 +35,16 @@ type RemoteFSConfig struct {
 }
 
 type AgentConfig struct {
-	BatchSize       int    `yaml:"batch_size" json:"batch_size"`
-	Concurrency     int    `yaml:"concurrency" json:"concurrency"`
-	MaxFileReadSize int    `yaml:"max_file_read_size" json:"max_file_read_size"`
-	MaxRetries      int    `yaml:"max_retries" json:"max_retries"`
-	MaxStep         int    `yaml:"max_step" json:"max_step"`
-	InstructMaxStep int    `yaml:"instruct_max_step" json:"instruct_max_step"`
-	SystemPrompt    string `yaml:"system_prompt" json:"system_prompt"`
+	BatchSize               int    `yaml:"batch_size" json:"batch_size"`
+	Concurrency             int    `yaml:"concurrency" json:"concurrency"`
+	MaxFileReadSize         int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	MaxRetries              int    `yaml:"max_retries" json:"max_retries"`
+	MaxStep                 int    `yaml:"max_step" json:"max_step"`
+	InstructMaxStep         int    `yaml:"instruct_max_step" json:"instruct_max_step"`
+	SystemPrompt            string `yaml:"system_prompt" json:"system_prompt"`
+	InstructSystemPrompt    string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
+	MaxCategorySummaryCount int    `yaml:"max_category_summary_count" json:"max_category_summary_count"`
+	AgentTimeout            int    `yaml:"agent_timeout" json:"agent_timeout"`
 }
 
 var (
@@ -119,5 +122,11 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.InstructMaxStep == 0 {
 		cfg.Agent.InstructMaxStep = 30
+	}
+	if cfg.Agent.MaxCategorySummaryCount == 0 {
+		cfg.Agent.MaxCategorySummaryCount = 20
+	}
+	if cfg.Agent.AgentTimeout == 0 {
+		cfg.Agent.AgentTimeout = 60
 	}
 }

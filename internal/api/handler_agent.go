@@ -19,10 +19,11 @@ import (
 )
 
 var (
-	agentMu   sync.Mutex
-	agents    = make(map[uint]*agent.Agent)
-	execMu    sync.Mutex
-	executors = make(map[uint]*executor.Executor)
+	agentMu        sync.Mutex
+	agents         = make(map[uint]*agent.Agent)
+	instructAgents = make(map[uint]*agent.Agent)
+	execMu         sync.Mutex
+	executors      = make(map[uint]*executor.Executor)
 )
 
 // resolveFSConfig resolves the RemoteFSConfig for a session via its Filesystem entity.
@@ -91,7 +92,7 @@ func (s *Server) startTagging(c *gin.Context) {
 			delete(agents, sessionID)
 			agentMu.Unlock()
 		}()
-		if err := a.RunTagging(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+		if err := a.RunTagging(c.Request.Context()); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "tagging" {
@@ -162,8 +163,22 @@ func (s *Server) instructAgent(c *gin.Context) {
 	cfg := config.Get()
 	a := agent.New(s.repo, fsCfg, cfg, sessionID, modelProvider, session)
 
+	agentMu.Lock()
+	if _, ok := instructAgents[sessionID]; ok {
+		agentMu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "instruct already running"})
+		return
+	}
+	instructAgents[sessionID] = a
+	agentMu.Unlock()
+
 	go func() {
-		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil {
+		defer func() {
+			agentMu.Lock()
+			delete(instructAgents, sessionID)
+			agentMu.Unlock()
+		}()
+		if _, err := a.RunInstruct(c.Request.Context(), files, req.Prompt); err != nil {
 			log.Printf("instruct session %d failed: %v", sessionID, err)
 		}
 	}()
@@ -253,6 +268,25 @@ func (s *Server) validatePlans(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (s *Server) stopInstruct(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	agentMu.Lock()
+	a, ok := instructAgents[uint(id)]
+	agentMu.Unlock()
+
+	if !ok || !a.IsRunning() {
+		c.JSON(http.StatusOK, gin.H{"message": "not running"})
+		return
+	}
+	a.Stop()
+	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
+}
+
 func (s *Server) startExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -305,7 +339,7 @@ func (s *Server) startExecute(c *gin.Context) {
 			execMu.Unlock()
 			fs.Close()
 		}()
-		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
+		if err := e.Execute(c.Request.Context(), sessionID, mode); err != nil {
 			log.Printf("execution session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "executing" {

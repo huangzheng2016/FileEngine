@@ -11,6 +11,7 @@ type RemoteFS interface {
 	ReadFile(ctx context.Context, path string) (io.ReadCloser, error)
 	MoveFile(ctx context.Context, src, dst string) error
 	CopyFile(ctx context.Context, src, dst string) error
+	Delete(ctx context.Context, path string) error
 	MkdirAll(ctx context.Context, path string) error
 	Close() error
 }

@@ -163,6 +163,10 @@ func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
 	return err
 }
 
+func (s *SFTPFS) Delete(_ context.Context, p string) error {
+	return s.client.RemoveAll(s.resolve(p))
+}
+
 func (s *SFTPFS) MkdirAll(_ context.Context, p string) error {
 	return s.client.MkdirAll(s.resolve(p))
 }

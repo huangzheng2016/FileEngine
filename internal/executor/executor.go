@@ -262,9 +262,15 @@ func (e *Executor) executeDir(ctx context.Context, src, dst, op string) error {
 		if err := e.fs.MoveFile(ctx, src, dst); err == nil {
 			return nil
 		}
-		// Rename failed — fall back to recursive copy then we'd need delete
-		// For safety, just do recursive copy (user chose "move" but cross-share move isn't atomic)
-		log.Printf("directory rename failed for %s, falling back to recursive copy", src)
+		// Rename failed — fall back to recursive copy + delete source
+		log.Printf("directory rename failed for %s, falling back to recursive copy+delete", src)
+		if err := e.recursiveCopy(ctx, src, dst); err != nil {
+			return err
+		}
+		if err := e.fs.Delete(ctx, src); err != nil {
+			log.Printf("warning: failed to delete source directory %s after copy: %v", src, err)
+		}
+		return nil
 	}
 
 	// Recursive copy

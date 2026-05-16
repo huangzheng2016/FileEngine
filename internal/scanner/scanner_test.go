@@ -40,7 +40,7 @@ func TestScan_SMB(t *testing.T) {
 	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
 	repo.CreateSession(session)
 
-	sc := New(fs, repo)
+	sc := New(fs, repo, "", nil)
 	if err := sc.Scan(context.Background(), session); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestScan_FTP(t *testing.T) {
 	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
 	repo.CreateSession(session)
 
-	sc := New(fs, repo)
+	sc := New(fs, repo, "", nil)
 	if err := sc.Scan(context.Background(), session); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestScan_SFTP(t *testing.T) {
 	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
 	repo.CreateSession(session)
 
-	sc := New(fs, repo)
+	sc := New(fs, repo, "", nil)
 	if err := sc.Scan(context.Background(), session); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

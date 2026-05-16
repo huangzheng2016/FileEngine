@@ -32,9 +32,9 @@ type FileEntry struct {
 
 type Category struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
-	FilesystemID   uint      `gorm:"index;uniqueIndex:idx_fs_category_name,priority:1" json:"filesystem_id"`
+	FilesystemID   uint      `gorm:"index;uniqueIndex:idx_fs_category_name,priority:1;uniqueIndex:idx_fs_category_path,priority:1" json:"filesystem_id"`
 	Name           string    `gorm:"uniqueIndex:idx_fs_category_name,priority:2;size:256" json:"name"`
-	Path           string    `gorm:"size:1024" json:"path"`
+	Path           string    `gorm:"size:1024;uniqueIndex:idx_fs_category_path,priority:2" json:"path"`
 	Structure      string    `gorm:"type:text" json:"structure"`
 	Description    string    `gorm:"type:text" json:"description"`
 	AgentCreated   bool      `gorm:"default:false" json:"agent_created"`

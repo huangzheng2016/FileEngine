@@ -108,11 +108,16 @@ func (l *Logger) save(entry *db.AgentLog) {
 	l.mu.Unlock()
 
 	// Broadcast to WebSocket listeners immediately (in-memory, no contention)
+	// Use recover() to prevent panic if a listener was unsubscribed (channel closed)
+	// between the slice copy and the send.
 	for _, ch := range listeners {
-		select {
-		case ch <- entry:
-		default:
-		}
+		func() {
+			defer func() { recover() }()
+			select {
+			case ch <- entry:
+			default:
+			}
+		}()
 	}
 
 	if shouldFlush {

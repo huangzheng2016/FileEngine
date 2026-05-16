@@ -382,24 +382,36 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	}
 	defer reader.Close()
 
-	buf := make([]byte, maxSize+1)
-	n, err := io.ReadFull(reader, buf)
+	// First, peek at the first 1KB to detect binary content before allocating large buffer
+	peekBuf := make([]byte, 1024)
+	peekN, err := io.ReadFull(reader, peekBuf)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return nil, fmt.Errorf("read error: %w", err)
 	}
-
-	truncated := n > maxSize
-	if truncated {
-		n = maxSize
-	}
-
-	content := string(buf[:n])
-	if !isTextContent(content) {
+	if peekN > 0 && !isTextContent(string(peekBuf[:peekN])) {
 		out := &ReadFileOutput{Content: "[binary file - content not displayable]", Truncated: false}
 		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
+	// Read remaining content up to maxSize
+	buf := make([]byte, maxSize+1)
+	copy(buf, peekBuf[:peekN])
+	remaining := maxSize + 1 - peekN
+	if remaining > 0 {
+		n, err := io.ReadFull(reader, buf[peekN:peekN+remaining])
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			return nil, fmt.Errorf("read error: %w", err)
+		}
+		peekN += n
+	}
+
+	truncated := peekN > maxSize
+	if truncated {
+		peekN = maxSize
+	}
+
+	content := string(buf[:peekN])
 	out := &ReadFileOutput{Content: content, Truncated: truncated}
 	tb.logger.LogToolCall("read_file", input, out)
 	return out, nil
@@ -410,6 +422,13 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
+	}
+
+	// Idempotency check: description already matches
+	if f.Description == input.Description {
+		out := &UpdateDescriptionOutput{Success: true}
+		tb.logger.LogToolCall("update_description", input, out)
+		return out, nil
 	}
 
 	f.Description = input.Description
@@ -429,14 +448,15 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
 
-	batch := tb.logger.GetBatch()
-	f.Tagged = true
-	f.BatchIndex = batch
-	if err := tb.repo.UpdateFile(f); err != nil {
-		return nil, err
+	// Idempotency check: already tagged, skip DB write
+	if f.Tagged {
+		out := &MarkTaggedOutput{Success: true}
+		tb.logger.LogToolCall("mark_tagged", input, out)
+		return out, nil
 	}
 
-	if err := tb.repo.MarkChildrenTagged(tb.sessionID, normalizePath(input.Path), batch); err != nil {
+	batch := tb.logger.GetBatch()
+	if err := tb.repo.MarkTaggedAtomic(tb.sessionID, normalizePath(input.Path), batch); err != nil {
 		return nil, err
 	}
 
@@ -476,23 +496,21 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		return nil, fmt.Errorf("file not found: %s", input.Path)
 	}
 
-	if input.NewPath == "" {
-		// Clear target
-		f.NewPath = ""
-		f.Operation = ""
-	} else {
-		f.NewPath = input.NewPath
-		f.Operation = "planned"
-	}
-	if err := tb.repo.UpdateFile(f); err != nil {
-		return nil, err
+	newPath := input.NewPath
+	op := ""
+	if newPath != "" {
+		op = "planned"
 	}
 
-	// If target is a directory, clear children's targets (outer target overrides inner)
-	if f.FileType == "directory" && input.NewPath != "" {
-		if err := tb.repo.ClearChildrenTarget(tb.sessionID, normalizePath(input.Path)); err != nil {
-			return nil, fmt.Errorf("failed to clear children targets: %w", err)
-		}
+	// Idempotency check: already in target state, skip DB write
+	if f.NewPath == newPath && f.Operation == op {
+		out := &SetTargetOutput{Success: true}
+		tb.logger.LogToolCall("set_target", input, out)
+		return out, nil
+	}
+
+	if err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(input.Path), newPath, op, f.FileType); err != nil {
+		return nil, fmt.Errorf("failed to set target: %w", err)
 	}
 
 	out := &SetTargetOutput{Success: true}
@@ -502,22 +520,6 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
-	// Fast name check via indexed lookup
-	if existing, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name); err == nil {
-		return nil, fmt.Errorf("category with name '%s' already exists (path: %s). Use set_target to assign files to it, or update_category to modify it", existing.Name, existing.Path)
-	}
-
-	// Still need full list for path duplicate check
-	cats, err := tb.repo.ListCategories(tb.filesystemID)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range cats {
-		if c.Path == input.Path {
-			return nil, fmt.Errorf("category with path '%s' already exists (name: %s). Use that category instead of creating a duplicate", c.Path, c.Name)
-		}
-	}
-
 	cat := &db.Category{
 		FilesystemID:  tb.filesystemID,
 		Name:          input.Name,
@@ -526,8 +528,12 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 		AgentCreated:  true,
 		AgentEditable: true,
 	}
-	if err := tb.repo.CreateCategory(cat); err != nil {
+	created, err := tb.repo.CreateCategoryWithConflict(cat)
+	if err != nil {
 		return nil, fmt.Errorf("create category: %w", err)
+	}
+	if !created {
+		return nil, fmt.Errorf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
 	}
 
 	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
@@ -544,6 +550,11 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 	if !cat.AgentEditable {
 		return nil, fmt.Errorf("category '%s' is not editable by agent (user-managed)", input.Name)
+	}
+
+	// Guard against no-op: at least one field must be provided for update
+	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
+		return nil, fmt.Errorf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name)
 	}
 
 	oldPath := cat.Path
@@ -594,14 +605,27 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 	return out, nil
 }
 
-// isTextContent checks if content appears to be text (not binary)
+// isTextContent checks if content appears to be text (not binary).
+// It samples multiple positions in the string to avoid missing null bytes
+// that appear after the first 512 bytes.
 func isTextContent(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	for i := 0; i < len(s) && i < 512; i++ {
-		if s[i] == 0 {
-			return false
+	// Sample positions: start, middle, end
+	positions := []int{0, len(s) / 2, len(s) - 512}
+	for _, start := range positions {
+		if start < 0 {
+			start = 0
+		}
+		end := start + 512
+		if end > len(s) {
+			end = len(s)
+		}
+		for i := start; i < end; i++ {
+			if s[i] == 0 {
+				return false
+			}
 		}
 	}
 	return true

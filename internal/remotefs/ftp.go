@@ -120,6 +120,10 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	return f.conn.Stor(f.resolve(dst), bytes.NewReader(data))
 }
 
+func (f *FTPFS) Delete(_ context.Context, p string) error {
+	return f.conn.Delete(f.resolve(p))
+}
+
 func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 	return f.conn.MakeDir(f.resolve(p))
 }

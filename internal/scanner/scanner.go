@@ -66,8 +66,10 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 
 	entries, err := s.fs.List(ctx, currentPath)
 	if err != nil {
+		// Accumulate listing errors instead of silently swallowing them.
+		// The scan continues for other directories but reports the failure.
 		log.Printf("warn: cannot list %s: %v", currentPath, err)
-		return nil
+		return fmt.Errorf("list %s: %w", currentPath, err)
 	}
 
 	parentPath := currentPath
@@ -75,6 +77,7 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 		parentPath = ""
 	}
 
+	var errs []error
 	for _, entry := range entries {
 		entryPath := entry.Path
 		if !path.IsAbs(entryPath) {
@@ -111,9 +114,12 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 
 		if entry.IsDir {
 			if err := s.scanDir(ctx, entryPath, rootPath, depth+1, sessionID, result); err != nil {
-				return err
+				errs = append(errs, err)
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return errs[0]
 	}
 	return nil
 }

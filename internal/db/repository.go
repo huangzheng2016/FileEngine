@@ -1,6 +1,8 @@
 package db
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 )
 
@@ -144,6 +146,7 @@ type FileQuery struct {
 	Search       string
 	Page         int
 	PageSize     int
+	MinID        uint // cursor-based pagination: only return rows with id > MinID
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
@@ -185,10 +188,14 @@ func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	if q.PageSize <= 0 {
 		q.PageSize = 50
 	}
-	offset := (q.Page - 1) * q.PageSize
 
 	var files []FileEntry
-	err := tx.Order("file_type ASC, name ASC").Offset(offset).Limit(q.PageSize).Find(&files).Error
+	query := tx
+	if q.MinID > 0 {
+		query = query.Where("id > ?", q.MinID)
+	}
+	offset := (q.Page - 1) * q.PageSize
+	err := query.Order("file_type ASC, name ASC").Offset(offset).Limit(q.PageSize).Find(&files).Error
 	return files, total, err
 }
 
@@ -239,16 +246,59 @@ func (r *Repository) IsFileTagged(sessionID uint, path string) (bool, error) {
 	return f.Tagged, nil
 }
 
+// ClaimDirectory atomically claims an untagged directory for processing by setting its batch_index.
+// Returns true if the claim succeeded (directory was untagged), false if already claimed or tagged.
+func (r *Repository) ClaimDirectory(sessionID uint, path string, batchIndex int) (bool, error) {
+	result := r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND original_path = ? AND tagged = ?", sessionID, path, false).
+		Updates(map[string]interface{}{"batch_index": batchIndex})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string, batchIndex int) error {
 	return r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND original_path LIKE ?", sessionID, parentPath+"/%").
 		Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
 }
 
+// MarkTaggedAtomic atomically marks a directory and all its children as tagged within a transaction.
+func (r *Repository) MarkTaggedAtomic(sessionID uint, path string, batchIndex int) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
+			Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND original_path LIKE ?", sessionID, path+"/%").
+			Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
+	})
+}
+
 func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) error {
 	return r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND original_path LIKE ? AND operation != ''", sessionID, parentPath+"/%").
 		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
+}
+
+// SetTargetAtomic atomically sets a file's target and clears children's targets (for directories) within a transaction.
+func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
+			Updates(map[string]interface{}{"new_path": newPath, "operation": operation}).Error; err != nil {
+			return err
+		}
+		if fileType == "directory" && newPath != "" {
+			return tx.Model(&FileEntry{}).
+				Where("scan_session_id = ? AND original_path LIKE ? AND operation != ''", sessionID, path+"/%").
+				Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
+		}
+		return nil
+	})
 }
 
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
@@ -279,6 +329,19 @@ func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]FileEntr
 
 func (r *Repository) CreateCategory(c *Category) error {
 	return r.db.Create(c).Error
+}
+
+// CreateCategoryWithConflict creates a category and returns whether it already existed.
+func (r *Repository) CreateCategoryWithConflict(c *Category) (created bool, err error) {
+	err = r.db.Create(c).Error
+	if err != nil {
+		// Check for unique constraint violation (name or path already exists)
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) GetCategory(id uint) (*Category, error) {

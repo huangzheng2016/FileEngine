@@ -122,6 +122,11 @@ func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
 	return err
 }
 
+func (l *LocalFS) Delete(_ context.Context, p string) error {
+	fullPath := l.resolve(p)
+	return os.RemoveAll(fullPath)
+}
+
 func (l *LocalFS) MkdirAll(_ context.Context, path string) error {
 	return os.MkdirAll(l.resolve(path), 0755)
 }

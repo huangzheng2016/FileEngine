@@ -3,12 +3,13 @@ module FileEngine
 go 1.25.0
 
 require (
-	github.com/cloudwego/eino v0.8.5
-	github.com/cloudwego/eino-ext/components/model/claude v0.1.16
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.10
+	github.com/cloudwego/eino v0.8.13
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.18
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/coder/websocket v1.8.14
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hirochachacha/go-smb2 v1.1.0
+	github.com/huangzheng2016/KnowCompact v0.0.0-20260516175849-b1c6750ae3bb
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/pkg/sftp v1.13.10
 	github.com/vmware/go-nfs-client v0.0.0-20190605212624-d43b92724c1b
@@ -41,13 +42,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9 // indirect
 	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.14 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
@@ -79,7 +81,7 @@ require (
 	github.com/mailru/easyjson v0.9.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.37 // indirect
-	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect

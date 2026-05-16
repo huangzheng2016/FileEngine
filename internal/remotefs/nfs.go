@@ -149,6 +149,10 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	return err
 }
 
+func (n *NFSFS) Delete(_ context.Context, p string) error {
+	return n.target.RemoveAll(n.resolve(p))
+}
+
 func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 	_, err := n.target.Mkdir(n.resolve(p), 0755)
 	return err

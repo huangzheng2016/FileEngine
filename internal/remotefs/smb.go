@@ -151,6 +151,10 @@ func (s *SMBFS) CopyFile(_ context.Context, src, dst string) error {
 	return err
 }
 
+func (s *SMBFS) Delete(_ context.Context, p string) error {
+	return s.share.RemoveAll(s.resolve(p))
+}
+
 func (s *SMBFS) MkdirAll(_ context.Context, p string) error {
 	return s.share.MkdirAll(s.resolve(p), 0755)
 }
