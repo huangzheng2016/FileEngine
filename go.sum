@@ -151,8 +151,8 @@ github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9
 github.com/hirochachacha/go-smb2 v1.1.0 h1:b6hs9qKIql9eVXAiN0M2wSFY5xnhbHAQoCwRKbaRTZI=
 github.com/hirochachacha/go-smb2 v1.1.0/go.mod h1:8F1A4d5EZzrGu5R7PU163UcMRDJQl4FtcxjBfsY8TZE=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
-github.com/huangzheng2016/KnowCompact v0.0.0-20260516175849-b1c6750ae3bb h1:Szm5OdR3MBNO7KCwOeVDLEw/lJuAKNP6NbNzJNnY6mM=
-github.com/huangzheng2016/KnowCompact v0.0.0-20260516175849-b1c6750ae3bb/go.mod h1:/Vr+A1uyzBUvwK/nrRrk5Hmroh3S/+sXaqxB0rtcei8=
+github.com/huangzheng2016/KnowCompact v0.0.0-20260516192823-1991b76694be h1:BtzTi4QUQoPd9o2l0GBjGpyJbjXt16HTtYafdoBWTDU=
+github.com/huangzheng2016/KnowCompact v0.0.0-20260516192823-1991b76694be/go.mod h1:/Vr+A1uyzBUvwK/nrRrk5Hmroh3S/+sXaqxB0rtcei8=
 github.com/jessevdk/go-flags v1.4.0/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/jinzhu/inflection v1.0.0 h1:K317FqzuhWc8YvSVlFMCCUb36O/S9MCKRDI7QkRKD/E=
 github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkryuEj+Srlc=

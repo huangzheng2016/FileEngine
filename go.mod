@@ -9,7 +9,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hirochachacha/go-smb2 v1.1.0
-	github.com/huangzheng2016/KnowCompact v0.0.0-20260516175849-b1c6750ae3bb
+	github.com/huangzheng2016/KnowCompact v0.0.0-20260516192823-1991b76694be
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/pkg/sftp v1.13.10
 	github.com/vmware/go-nfs-client v0.0.0-20190605212624-d43b92724c1b
