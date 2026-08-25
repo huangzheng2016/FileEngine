@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -137,7 +138,7 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 	defer callCancel()
 
 	tracker.ResetUsage()
-	result, err := runADKOnce(callCtx, agent, messages)
+	result, err := runADKOnce(callCtx, agent, messages, logger)
 	if err == nil {
 		return result, nil
 	}
@@ -154,7 +155,7 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 		time.Sleep(time.Duration(retry) * 2 * time.Second)
 		retryCtx, retryCancel := context.WithTimeout(ctx, timeout)
 		tracker.ResetUsage()
-		result, err = runADKOnce(retryCtx, agent, messages)
+		result, err = runADKOnce(retryCtx, agent, messages, logger)
 		retryCancel()
 		if err == nil {
 			return result, nil
@@ -164,7 +165,14 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 	return nil, err
 }
 
-func runADKOnce(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message) (*schema.Message, error) {
+// runADKOnce executes one full agent run and forwards every ADK AgentEvent to
+// the session event bus as step-level protocol events:
+//   - assistant message with tool calls -> transient `message` (reasoning
+//     text, if any) + one `tool_call` per invocation
+//   - tool result message               -> `tool_result`
+//   - the final assistant message is NOT emitted here: the caller logs it via
+//     LogMessage with token usage (persisted + published there)
+func runADKOnce(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger) (*schema.Message, error) {
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	iterator := runner.Run(ctx, messages)
 
@@ -184,11 +192,27 @@ func runADKOnce(ctx context.Context, agent *adk.ChatModelAgent, messages []*sche
 			}
 			return nil, event.Err
 		}
-		if event.Output != nil && event.Output.MessageOutput != nil {
-			msg := event.Output.MessageOutput.Message
-			if msg != nil && msg.Role == schema.Assistant {
-				lastAssistantMsg = msg
+		if event.Output == nil || event.Output.MessageOutput == nil {
+			continue
+		}
+		mo := event.Output.MessageOutput
+		msg := mo.Message
+		if msg == nil {
+			continue
+		}
+		switch mo.Role {
+		case schema.Assistant:
+			lastAssistantMsg = msg
+			if len(msg.ToolCalls) > 0 {
+				if strings.TrimSpace(msg.Content) != "" {
+					logger.EmitMessage("assistant", msg.Content)
+				}
+				for _, tc := range msg.ToolCalls {
+					logger.EmitToolCall(tc.Function.Name, tc.Function.Arguments)
+				}
 			}
+		case schema.Tool:
+			logger.EmitToolResult(mo.ToolName, msg.Content, true)
 		}
 	}
 	return lastAssistantMsg, nil

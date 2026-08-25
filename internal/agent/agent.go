@@ -58,11 +58,12 @@ func (a *Agent) Stop() {
 }
 
 // RunTagging delegates to AutoTagAgent for automatic file classification.
-func (a *Agent) RunTagging(ctx context.Context) error {
+// On success it returns the summary report for the run_done event.
+func (a *Agent) RunTagging(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
-		return fmt.Errorf("agent is already running")
+		return "", fmt.Errorf("agent is already running")
 	}
 	a.running = true
 	ctx, cancel := context.WithCancel(ctx)
@@ -83,8 +84,7 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 	}()
 
 	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)
-	_, err := orch.Run(ctx, OrchestratorRequest{Type: RequestAutoTag})
-	return err
+	return orch.Run(ctx, OrchestratorRequest{Type: RequestAutoTag})
 }
 
 // RunInstruct delegates to InstructAgent for user-directed operations.

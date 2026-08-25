@@ -177,6 +177,8 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 			continue
 		}
 
+		workerLogger.EmitBatchStart(dir.OriginalPath)
+
 		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildDirectoryPrompt(dir, catSummary)
@@ -189,6 +191,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		label := fmt.Sprintf("worker %d batch %d", workerID, batchIdx)
 		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
+			a.emitTagProgress(int(batchIdx))
 			continue
 		}
 
@@ -198,7 +201,24 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 			tracker.ResetUsage()
 		}
 		workerLogger.Flush()
+		a.emitTagProgress(int(batchIdx))
 	}
+}
+
+// emitTagProgress publishes absolute tagging counters after a finished batch.
+func (a *AutoTagAgent) emitTagProgress(batchIdx int) {
+	p, err := a.repo.GetSessionProgress(a.sessionID)
+	if err != nil {
+		return
+	}
+	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: a.sessionID, Payload: db.ProgressPayload{
+		SessionID:  a.sessionID,
+		Phase:      db.PhaseTagging,
+		Total:      p.Total,
+		Tagged:     p.Tagged,
+		Planned:    p.Planned,
+		BatchIndex: batchIdx,
+	}})
 }
 
 func (a *AutoTagAgent) processRemainingFiles(ctx context.Context, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
@@ -307,6 +327,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 
 		workerLogger.SetBatch(int(batch.batchIdx))
+		workerLogger.EmitBatchStart(fmt.Sprintf("%d files", len(batch.files)))
 		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildBatchPrompt(batch.files, catSummary)
@@ -319,6 +340,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		label := fmt.Sprintf("remaining worker %d batch %d", workerID, batch.batchIdx)
 		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
+			a.emitTagProgress(int(batch.batchIdx))
 			continue
 		}
 		if result != nil {
@@ -327,5 +349,6 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			tracker.ResetUsage()
 		}
 		workerLogger.Flush()
+		a.emitTagProgress(int(batch.batchIdx))
 	}
 }

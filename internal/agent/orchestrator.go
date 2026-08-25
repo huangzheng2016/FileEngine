@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -90,9 +91,15 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	if err := o.repo.UpdateSession(session); err != nil {
 		return "", err
 	}
+	o.emitRunStatus(db.PhaseTagging, db.StatusStarted, "")
 
 	autoTag := NewAutoTagAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID)
 	if err := autoTag.Run(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			o.emitRunStatus(db.PhaseTagging, db.StatusStopped, "")
+		} else {
+			o.emitRunStatus(db.PhaseTagging, db.StatusError, err.Error())
+		}
 		return "", fmt.Errorf("auto-tag failed: %w", err)
 	}
 
@@ -105,6 +112,7 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	if err := o.repo.UpdateSession(session); err != nil {
 		return "", err
 	}
+	o.emitRunStatus(db.PhaseTagging, db.StatusDone, "")
 
 	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
@@ -119,11 +127,18 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
 	log.Printf("orchestrator: routing to InstructAgent for session %d", o.sessionID)
 
+	o.emitRunStatus(db.PhaseInstruct, db.StatusStarted, "")
 	instruct := NewInstructAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger)
 	response, err := instruct.Run(ctx, files, userPrompt)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			o.emitRunStatus(db.PhaseInstruct, db.StatusStopped, "")
+		} else {
+			o.emitRunStatus(db.PhaseInstruct, db.StatusError, err.Error())
+		}
 		return "", fmt.Errorf("instruct failed: %w", err)
 	}
+	o.emitRunStatus(db.PhaseInstruct, db.StatusDone, "")
 
 	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
@@ -134,4 +149,14 @@ func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntr
 	}
 
 	return response + "\n\n---\n\n" + report, nil
+}
+
+// emitRunStatus publishes a run_status event mirroring a phase transition.
+func (o *OrchestratorAgent) emitRunStatus(phase, status, message string) {
+	db.PublishEvent(db.Event{Type: db.EventRunStatus, SessionID: o.sessionID, Payload: db.RunStatusPayload{
+		SessionID: o.sessionID,
+		Phase:     phase,
+		Status:    status,
+		Message:   message,
+	}})
 }
