@@ -107,6 +107,10 @@ type CreateSessionRequest struct {
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 	FilterMode          string `json:"filter_mode"`
 	FilterDirs          string `json:"filter_dirs"`
+	// AllowVision is additive: old clients omit it (nil → false). When set it
+	// configures the session's vision switch at creation, so the frontend no
+	// longer needs a compensating PATCH after create.
+	AllowVision *bool `json:"allow_vision"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -128,7 +132,7 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
-		AllowVision:         false,
+		AllowVision:         req.AllowVision != nil && *req.AllowVision,
 		FilesystemID:        filesystem.ID,
 		ScanPath:            req.ScanPath,
 		RootPath:            scanRootPath(req.ScanPath),

@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync"
 
 	"FileEngine/internal/config"
 
@@ -13,7 +14,13 @@ import (
 	"github.com/vmware/go-nfs-client/nfs/rpc"
 )
 
+// NFSFS is safe for concurrent use: the locked go-nfs-client issues RPCs over
+// one non-multiplexed TCP stream per connection (rpc.Client.Call has no
+// locking — concurrent Calls interleave frames and fail with "xid did not
+// match"), and eino executes parallel tool calls concurrently, so every RPC
+// path here is serialized with mu.
 type NFSFS struct {
+	mu       sync.Mutex
 	mount    *nfsclient.Mount
 	target   *nfsclient.Target
 	basePath string
@@ -25,25 +32,39 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 		port = 2049
 	}
 
-	// basePath format: "export_path" or "export_path/sub/dir"
-	exportPath := cfg.BasePath
-	subPath := ""
-	if idx := strings.Index(cfg.BasePath[1:], "/"); idx > 0 {
-		exportPath = cfg.BasePath[:idx+1]
-		subPath = cfg.BasePath[idx+1:]
-	}
-
 	mount, err := nfsclient.DialMount(cfg.Host)
 	if err != nil {
 		return nil, fmt.Errorf("nfs dial mount: %w", err)
 	}
 
 	auth := rpc.NewAuthUnix("fileengine", 0, 0)
-	target, err := mount.Mount(exportPath, auth.Auth())
-	if err != nil {
-		mount.Close()
-		return nil, fmt.Errorf("nfs mount %s: %w", exportPath, err)
+
+	// The export path is not necessarily the first path segment — servers may
+	// export a deep path (e.g. fnOS exports "/fs/1000/nfs" whole). Probe the
+	// MNT protocol from the deepest candidate upward; the first path that
+	// mounts is the export, the remainder is the sub-path inside it.
+	exportPath := strings.TrimSuffix(cfg.BasePath, "/")
+	if exportPath == "" {
+		exportPath = "/"
 	}
+	var target *nfsclient.Target
+	var firstErr error
+	for {
+		target, err = mount.Mount(exportPath, auth.Auth())
+		if err == nil {
+			break
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		idx := strings.LastIndex(exportPath, "/")
+		if idx <= 0 {
+			mount.Close()
+			return nil, fmt.Errorf("nfs mount %s: %w", cfg.BasePath, firstErr)
+		}
+		exportPath = exportPath[:idx]
+	}
+	subPath := strings.TrimPrefix(strings.TrimPrefix(cfg.BasePath, exportPath), "/")
 
 	return &NFSFS{
 		mount:    mount,
@@ -74,6 +95,8 @@ func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	entries, err := n.target.ReadDirPlus(fullPath)
 	if err != nil {
 		return nil, err
@@ -108,6 +131,8 @@ func (n *NFSFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	info, _, err := n.target.Lookup(fullPath)
 	if err != nil {
 		return nil, err
@@ -134,11 +159,45 @@ func (n *NFSFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	n.mu.Lock()
 	f, err := n.target.Open(fullPath)
+	n.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return f, nil
+	return &nfsLockedFile{mu: &n.mu, f: f}, nil
+}
+
+// nfsLockedFile serializes an opened file's RPC-issuing methods (Read/Seek/
+// Close) with the parent connection's mutex — the underlying rpc.Client is a
+// single non-multiplexed stream, so concurrent reads must not interleave.
+type nfsLockedFile struct {
+	mu *sync.Mutex
+	f  *nfsclient.File
+}
+
+func (l *nfsLockedFile) Read(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.f.Read(p)
+}
+
+func (l *nfsLockedFile) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.f.Write(p)
+}
+
+func (l *nfsLockedFile) Seek(offset int64, whence int) (int64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.f.Seek(offset, whence)
+}
+
+func (l *nfsLockedFile) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.f.Close()
 }
 
 func (n *NFSFS) MoveFile(ctx context.Context, src, dst string) error {
@@ -150,6 +209,8 @@ func (n *NFSFS) MoveFile(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	return n.target.Remove(srcFull)
 }
 
@@ -162,6 +223,10 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
+	// Hold the lock across the whole copy: the raw files below issue RPCs on
+	// the same single-stream client without their own locking.
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	srcFile, err := n.target.Open(srcFull)
 	if err != nil {
 		return err
@@ -186,6 +251,8 @@ func (n *NFSFS) Delete(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	return n.target.RemoveAll(fullPath)
 }
 
@@ -194,11 +261,15 @@ func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	_, err = n.target.Mkdir(fullPath, 0755)
 	return err
 }
 
 func (n *NFSFS) Close() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.target.Close()
 	return n.mount.Close()
 }

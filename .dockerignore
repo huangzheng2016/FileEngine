@@ -1,0 +1,31 @@
+# VCS / tooling
+.git
+.github
+.tower
+.claude
+
+# Frontend artifacts (rebuilt inside the image)
+web/node_modules
+web/dist
+
+# Backend artifacts
+fileengine
+*.db
+*.db-shm
+*.db-wal
+*.test
+*.out
+
+# Local config & secrets — never enter the build context
+config.yaml
+deploy/.env
+deploy/data
+
+# Wails
+wails/build
+wails/bin
+
+# OS / IDE
+.DS_Store
+.idea
+.vscode

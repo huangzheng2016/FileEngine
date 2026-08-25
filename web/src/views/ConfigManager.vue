@@ -12,6 +12,7 @@
       <el-tabs v-model="activeTab">
         <el-tab-pane :label="$t('config.tabs.database')" name="database">
           <div class="form-stack" style="max-width: 560px">
+            <el-alert type="warning" :title="$t('config.database.dangerWarning')" :closable="false" show-icon />
             <div class="form-field">
               <label class="form-field__label">{{ $t('config.database.driver') }}</label>
               <el-select v-model="config.database.driver">
@@ -34,21 +35,25 @@
             <div class="form-row">
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.batchSize') }}</label>
-                <el-input-number v-model="config.agent.batch_size" :min="1" :max="200" style="width: 100%" />
+                <el-input-number v-model="config.agent.batch_size" :min="1" :max="500" style="width: 100%" />
+                <p class="form-field__hint">{{ $t('config.agent.batchSizeHint') }}</p>
               </div>
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.concurrency') }}</label>
                 <el-input-number v-model="config.agent.concurrency" :min="1" :max="20" style="width: 100%" />
+                <p class="form-field__hint">{{ $t('config.agent.concurrencyHint') }}</p>
               </div>
             </div>
             <div class="form-row">
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.maxFileReadSize') }}</label>
                 <el-input-number v-model="config.agent.max_file_read_size" :min="1024" :step="1024" style="width: 100%" />
+                <p class="form-field__hint">{{ $t('config.agent.maxFileReadSizeHint') }}</p>
               </div>
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.maxRetries') }}</label>
                 <el-input-number v-model="config.agent.max_retries" :min="0" :max="10" style="width: 100%" />
+                <p class="form-field__hint">{{ $t('config.agent.maxRetriesHint') }}</p>
               </div>
             </div>
             <div>

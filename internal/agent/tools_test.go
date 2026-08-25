@@ -79,12 +79,12 @@ func TestSetTargetRejectsIllegalPaths(t *testing.T) {
 
 	bad := []string{"/", "..", "../escape", "/../etc/passwd", "/organized/../../escape"}
 	for _, p := range bad {
-		_, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: p})
-		if err == nil {
-			t.Fatalf("setTarget new_path=%q: got nil error, want rejection", p)
+		out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: p})
+		if err != nil {
+			t.Fatalf("setTarget new_path=%q: rejection must be a non-fatal result, got run error: %v", p, err)
 		}
-		if !strings.Contains(err.Error(), "invalid new_path") {
-			t.Fatalf("setTarget new_path=%q: error %v lacks 'invalid new_path'", p, err)
+		if out.Success || !strings.Contains(out.Error, "invalid new_path") {
+			t.Fatalf("setTarget new_path=%q: got %+v, want invalid-path rejection", p, out)
 		}
 	}
 
@@ -127,11 +127,11 @@ func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
 
-	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err == nil {
-		t.Fatal("createCategory with escaping path: got nil error, want rejection")
+	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err != nil || out.Success {
+		t.Fatalf("createCategory with escaping path: got %+v, %v — want non-fatal rejection", out, err)
 	}
-	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err == nil {
-		t.Fatal("createCategory with empty path: got nil error, want rejection")
+	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err != nil || out.Success {
+		t.Fatalf("createCategory with empty path: got %+v, %v — want non-fatal rejection", out, err)
 	}
 	// The version guard only lets create_category run against a list the agent
 	// has just seen — prime it via list_categories.
@@ -142,8 +142,8 @@ func TestCategoryPathValidation(t *testing.T) {
 		t.Fatalf("createCategory valid: %v", err)
 	}
 
-	if _, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/a/../../b"}); err == nil {
-		t.Fatal("updateCategory with escaping new_path: got nil error, want rejection")
+	if out, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/a/../../b"}); err != nil || out.Success {
+		t.Fatalf("updateCategory with escaping new_path: got %+v, %v — want non-fatal rejection", out, err)
 	}
 	cat, err := repo.GetCategoryByName(7, "Good")
 	if err != nil {
@@ -154,5 +154,30 @@ func TestCategoryPathValidation(t *testing.T) {
 	}
 	if _, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/organized/better"}); err != nil {
 		t.Fatalf("updateCategory valid: %v", err)
+	}
+}
+
+// set_target on a directory cascade-clears planned children — the tool result
+// must surface that consequence (cleared_children + guidance) so the agent
+// can re-decide instead of silently discarding finer classifications.
+func TestSetTargetCascadeClearWarning(t *testing.T) {
+	repo := setupToolTestRepo(t)
+	seedFile(t, repo, 1, "db", "directory")
+	seedFile(t, repo, 1, "db/azure", "directory")
+	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{}, false)
+
+	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db/azure", NewPath: "/backups/database/azure"}); err != nil {
+		t.Fatalf("child set: %v", err)
+	}
+	out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db", NewPath: "/backups/database"})
+	if err != nil {
+		t.Fatalf("parent set: %v", err)
+	}
+	if out.ClearedChildren != 1 || !strings.Contains(out.Guidance, "覆盖") {
+		t.Fatalf("cascade clear must be reported: %+v", out)
+	}
+	f, _ := repo.GetFileByPath(1, "db/azure")
+	if f.NewPath != "" {
+		t.Fatalf("child target must be cascade-cleared, got %q", f.NewPath)
 	}
 }

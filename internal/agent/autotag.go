@@ -70,6 +70,18 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 		return fmt.Errorf("create model: %w", err)
 	}
 
+	// Auto-ignore well-known system junk before any dispatch: no batch, no
+	// tokens, and the rows stop polluting the untagged queues (the ignored
+	// count lands in the run reconciliation via the JunkBatchIndex sentinel).
+	if !config.Get().Agent.JunkFilterDisabled {
+		if n, err := a.repo.MarkJunkEntries(a.sessionID, junkFileNames, junkDirNames); err != nil {
+			log.Printf("junk filter: %v (continuing)", err)
+		} else if n > 0 {
+			log.Printf("junk filter: auto-ignored %d system junk entries", n)
+			a.emitTagProgress(0)
+		}
+	}
+
 	// Get max depth
 	maxDepth, err := a.repo.GetMaxDepth(a.sessionID)
 	if err != nil {
@@ -292,6 +304,10 @@ func (a *AutoTagAgent) emitTagProgress(batchIdx int) {
 }
 
 func (a *AutoTagAgent) processRemainingFiles(ctx context.Context, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
+	if !config.Get().Agent.HarnessDisabled {
+		a.processRemainingFilesContinuous(ctx, chatModel, systemPrompt, batchCounter, filesystemID)
+		return
+	}
 	falseVal := false
 	files, _, err := a.repo.ListFiles(db.FileQuery{
 		SessionID: a.sessionID,
@@ -415,7 +431,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			toolBuilder.noteCategoryUsages(usages)
 		}
 		catSummary := buildCategorySummary(usages)
-		userMsg := buildBatchPrompt(batch.files, catSummary)
+		userMsg := buildBatchPrompt(batch.files, catSummary, a.archiveHints(ctx, workerFS, batch.files, config.Get().Agent))
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{
@@ -442,6 +458,104 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		workerLogger.Flush()
 		a.emitTagProgress(int(batch.batchIdx))
 	}
+}
+
+// processRemainingFilesContinuous is the harness-mode loose-file pass: each
+// worker runs ONE long agent run that pulls the next untagged batch itself
+// (list_files / query_files with tagged=false, auto-sharded by id % workers)
+// until its shard is empty. Batch knowledge carries across pulls inside the
+// run; the reduction/summarization middlewares bound the context; leftover
+// files after a run are covered by the outer sweep rounds and a failed run's
+// shard is picked up again on the next pass (untagged rows are naturally
+// resumable).
+func (a *AutoTagAgent) processRemainingFilesContinuous(ctx context.Context, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
+	falseVal := false
+	files, _, err := a.repo.ListFiles(db.FileQuery{
+		SessionID: a.sessionID,
+		FileType:  "file",
+		Tagged:    &falseVal,
+		Page:      1,
+		PageSize:  1,
+	})
+	if err != nil {
+		log.Printf("harness: count untagged files failed: %v", err)
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	liveCfg := config.Get()
+	concurrency := liveCfg.Agent.Concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			a.runContinuousWorker(ctx, workerID, concurrency, chatModel, systemPrompt, batchCounter, filesystemID)
+		}(w)
+	}
+	wg.Wait()
+	_ = a.repo.RefreshSessionCounts(a.sessionID)
+}
+
+func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWorkers int, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
+	workerFS, err := remotefs.NewFromConfig(a.fsCfg)
+	if err != nil {
+		log.Printf("harness worker %d: failed to connect fs: %v", workerID, err)
+		return
+	}
+	defer workerFS.Close()
+
+	workerLogger := NewLogger(a.repo, a.sessionID)
+	defer workerLogger.Flush()
+	tracker := newTokenTrackingModel(chatModel)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled).
+		withHarness(workerID, numWorkers, batchCounter)
+	tools, err := toolBuilder.BuildTools()
+	if err != nil {
+		log.Printf("harness worker %d: failed to build tools: %v", workerID, err)
+		return
+	}
+
+	maxStep := config.Get().Agent.HarnessMaxStep
+	if maxStep <= 0 {
+		maxStep = 2000
+	}
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, maxStep, a.modelProvider.EffectiveContextWindow())
+	if err != nil {
+		log.Printf("harness worker %d: failed to create agent: %v", workerID, err)
+		return
+	}
+
+	usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+	if err != nil {
+		log.Printf("harness worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
+	} else {
+		toolBuilder.noteCategoryUsages(usages)
+	}
+	userMsg := buildHarnessPrompt(buildCategorySummary(usages))
+	workerLogger.LogMessage("user", userMsg, 0, 0, 0)
+
+	label := fmt.Sprintf("harness worker %d", workerID)
+	result, err := runADKWithRetry(ctx, agentInst, []*schema.Message{{Role: schema.User, Content: userMsg}}, workerLogger, label, tracker)
+	if err != nil {
+		log.Printf("%s failed after retries: %v", label, err)
+		a.noteFailure(BatchFailure{BatchIndex: int(atomic.LoadInt32(batchCounter)), Target: label, Err: err.Error()})
+		a.emitTagProgress(int(atomic.LoadInt32(batchCounter)))
+		return
+	}
+	if result != nil {
+		pt, ct, tt := tracker.Usage()
+		workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+		tracker.ResetUsage()
+	}
+	workerLogger.Flush()
+	a.emitTagProgress(int(atomic.LoadInt32(batchCounter)))
 }
 
 // recheckBatchTagged verifies that a finished loose-file batch actually

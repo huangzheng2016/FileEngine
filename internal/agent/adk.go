@@ -182,7 +182,11 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 			return result, nil
 		}
 	}
-	logger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), 0, 0, 0)
+	// Attribute the last attempt's token usage to the system row too — a failed
+	// batch otherwise vanishes from the token accounting (batch cards showed
+	// no tokens for failed batches).
+	pt, ct, tt := tracker.Usage()
+	logger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), pt, ct, tt)
 	return nil, err
 }
 

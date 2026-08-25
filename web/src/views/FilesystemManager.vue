@@ -20,7 +20,9 @@
         </el-table-column>
         <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="110">
           <template #default="{ row }">
-            <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+            <el-tooltip :content="protocolCapsText(row.protocol)" placement="top">
+              <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="base_path" :label="$t('filesystems.basePath')" min-width="220" show-overflow-tooltip>
@@ -30,10 +32,12 @@
           <template #default="{ row }"><span class="cell-time">{{ row.host || '-' }}</span></template>
         </el-table-column>
         <el-table-column prop="description" :label="$t('common.description')" min-width="200" show-overflow-tooltip />
-        <el-table-column :label="$t('common.actions')" width="160" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="140" >
           <template #default="{ row }">
-            <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
-            <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            <div class="table-actions">
+              <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
+              <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -155,14 +159,15 @@ function protocolChipClass(protocol: string): string {
 
 // Per-protocol capability hint (random access / archive support), matching
 // the backend matrix documented in CLAUDE.md.
-const protocolCapsHint = computed(() => {
-  const keys: Record<string, string> = {
-    local: 'filesystems.capsLocal', sftp: 'filesystems.capsSftp', smb: 'filesystems.capsSmb',
-    nfs: 'filesystems.capsNfs', ftp: 'filesystems.capsFtp',
-  }
-  const key = keys[form.value.protocol]
+const capsKeys: Record<string, string> = {
+  local: 'filesystems.capsLocal', sftp: 'filesystems.capsSftp', smb: 'filesystems.capsSmb',
+  nfs: 'filesystems.capsNfs', ftp: 'filesystems.capsFtp',
+}
+function protocolCapsText(protocol: string): string {
+  const key = capsKeys[protocol]
   return key ? t(key) : ''
-})
+}
+const protocolCapsHint = computed(() => protocolCapsText(form.value.protocol))
 
 async function load() {
   loading.value = true

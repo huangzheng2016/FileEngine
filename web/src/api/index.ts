@@ -7,7 +7,7 @@ const api = axios.create({
 })
 
 // Sessions
-export const createSession = (data: { filesystem_id: number; scan_path?: string; model_provider_id?: number | null; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string }) =>
+export const createSession = (data: { filesystem_id: number; scan_path?: string; model_provider_id?: number | null; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string; allow_vision?: boolean }) =>
   api.post<ScanSession>('/sessions', data)
 
 export const listSessions = (filesystemId?: number) =>

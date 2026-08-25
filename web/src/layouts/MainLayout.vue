@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { ElIcon } from 'element-plus'
 import {
   FolderOpened, Monitor, Setting,
-  Moon, Sunny, Fold, Expand, SwitchFilled, Folder, Odometer,
+  Moon, Sunny, Fold, Expand, SwitchFilled, Folder,
 } from '@element-plus/icons-vue'
 import { setLocale } from '../i18n'
 
@@ -22,7 +22,6 @@ function toggleTheme() {
 }
 
 const navItems = computed(() => [
-  { name: 'dashboard', label: t('nav.dashboard'), icon: Odometer, path: '/dashboard' },
   { name: 'tasks', label: t('nav.tasks'), icon: Monitor, path: '/tasks' },
   { name: 'files', label: t('nav.files'), icon: FolderOpened, path: '/files' },
   { name: 'settings', label: t('nav.settings'), icon: Setting, path: '/settings' },
@@ -55,24 +54,32 @@ function switchLang(lang: string) {
       </div>
 
       <nav class="nav-list">
-        <router-link
+        <el-tooltip
           v-for="item in navItems"
           :key="item.name"
-          :to="item.path"
-          class="nav-item"
-          :class="{ 'is-active': activeName === item.name }"
+          :content="item.label"
+          placement="right"
+          :disabled="!collapsed"
         >
-          <ElIcon :size="18"><component :is="item.icon" /></ElIcon>
-          <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
-        </router-link>
+          <router-link
+            :to="item.path"
+            class="nav-item"
+            :class="{ 'is-active': activeName === item.name }"
+          >
+            <ElIcon :size="18"><component :is="item.icon" /></ElIcon>
+            <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
+          </router-link>
+        </el-tooltip>
       </nav>
 
-      <button class="rail-toggle" @click="collapsed = !collapsed">
-        <ElIcon :size="16">
-          <Fold v-if="!collapsed" />
-          <Expand v-else />
-        </ElIcon>
-      </button>
+      <el-tooltip :content="collapsed ? t('nav.expand') : t('nav.collapse')" placement="right">
+        <button class="rail-toggle" :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')" @click="collapsed = !collapsed">
+          <ElIcon :size="16">
+            <Fold v-if="!collapsed" />
+            <Expand v-else />
+          </ElIcon>
+        </button>
+      </el-tooltip>
     </aside>
 
     <main class="shell-main">
@@ -104,7 +111,7 @@ function switchLang(lang: string) {
       </header>
 
       <router-view v-slot="{ Component }">
-        <transition name="page-fade" mode="out-in">
+        <transition name="page-fade">
           <component :is="Component" />
         </transition>
       </router-view>
@@ -346,6 +353,12 @@ function switchLang(lang: string) {
 .page-fade-leave-active {
   transition: opacity var(--duration-fast) var(--ease-spring),
               transform var(--duration-base) var(--ease-spring);
+}
+
+/* The leaving view disappears at once (no stacking, no stuck transition);
+   only the entering view fades in. */
+.page-fade-leave-active {
+  display: none;
 }
 
 .page-fade-enter-from {

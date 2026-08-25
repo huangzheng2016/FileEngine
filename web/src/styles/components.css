@@ -293,6 +293,14 @@
   background: var(--danger-soft);
 }
 
+/* Single-row table action group: text buttons, fixed gap, no wrapping. */
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 .filter-tabs {
   display: flex;
   gap: 4px;
@@ -477,6 +485,40 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Grouped form section (e.g. scan dialog's 扫哪里/用哪个模型/高级选项). */
+.scan-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+}
+
+.scan-group__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.scan-group__title--muted {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.scan-advanced .el-collapse-item__header,
+.scan-advanced .el-collapse-item__wrap {
+  border-bottom: none;
+}
+
+.filter-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .form-row {

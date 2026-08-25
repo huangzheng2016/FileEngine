@@ -181,6 +181,11 @@ type FileQuery struct {
 	Page         int
 	PageSize     int
 	MinID        uint // cursor-based pagination: only return rows with id > MinID
+	// IDMod/IDModRem shard the result set deterministically by primary key
+	// (id % IDMod = IDModRem); harness workers pull disjoint shards of the
+	// untagged queue this way. IDMod <= 1 disables sharding.
+	IDMod    int
+	IDModRem int
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
@@ -236,6 +241,9 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	if q.Search != "" {
 		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
 	}
+	if q.IDMod > 1 {
+		tx = tx.Where("id % ? = ?", q.IDMod, q.IDModRem)
+	}
 	return tx
 }
 
@@ -265,6 +273,16 @@ func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
 
 func (r *Repository) UpdateFile(f *FileEntry) error {
 	return r.db.Save(f).Error
+}
+
+// UpdateDescription writes only the description column. The tool layer runs
+// concurrently with other tools on the same row (eino executes parallel tool
+// calls), so a full-row Save of a previously loaded struct would clobber
+// concurrent field writes (e.g. a racing set_target's new_path).
+func (r *Repository) UpdateDescription(sessionID uint, path, description string) error {
+	return r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
+		Update("description", description).Error
 }
 
 func (r *Repository) GetUntaggedDirectories(sessionID uint, batchSize int) ([]FileEntry, error) {
@@ -395,20 +413,85 @@ func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) erro
 }
 
 // SetTargetAtomic atomically sets a file's target and clears children's targets (for directories) within a transaction.
-func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// It returns how many already-planned children the cascade cleared (outer
+// overrides inner) so the caller can surface that consequence to the agent.
+func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) (int64, error) {
+	var cleared int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&FileEntry{}).
 			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
 			Updates(map[string]interface{}{"new_path": newPath, "operation": operation}).Error; err != nil {
 			return err
 		}
 		if fileType == "directory" && newPath != "" {
-			return tx.Model(&FileEntry{}).
+			res := tx.Model(&FileEntry{}).
 				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(path)).
-				Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
+				Updates(map[string]interface{}{"new_path": "", "operation": ""})
+			cleared = res.RowsAffected
+			return res.Error
 		}
 		return nil
 	})
+	return cleared, err
+}
+
+// MarkJunkEntries auto-ignores well-known system junk before tagging: files
+// whose base name matches fileNames (ASCII-lowered) or the AppleDouble "._*"
+// prefix, and directories matching dirNames with all their descendants.
+// Matched rows are flipped to tagged with the JunkBatchIndex sentinel and an
+// explanatory description, so they never reach an agent batch. Returns the
+// number of rows ignored.
+func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []string) (int64, error) {
+	var total int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND tagged = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+likeEscapeClause+")", sessionID, false, fileNames).
+			Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾文件（自动忽略）"})
+		if res.Error != nil {
+			return res.Error
+		}
+		total += res.RowsAffected
+
+		var dirs []FileEntry
+		if err := tx.Where("scan_session_id = ? AND tagged = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, false, dirNames).
+			Find(&dirs).Error; err != nil {
+			return err
+		}
+		for _, d := range dirs {
+			res := tx.Model(&FileEntry{}).
+				Where("scan_session_id = ? AND tagged = ? AND (original_path = ? OR original_path LIKE ?"+likeEscapeClause+")", sessionID, false, d.OriginalPath, childPathPattern(d.OriginalPath)).
+				Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾目录（自动忽略）"})
+			if res.Error != nil {
+				return res.Error
+			}
+			total += res.RowsAffected
+		}
+		return nil
+	})
+	return total, err
+}
+
+// CountIgnoredJunk returns how many entries the junk filter has auto-ignored
+// in this session (the JunkBatchIndex sentinel rows).
+func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
+	var n int64
+	err := r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND batch_index = ?", sessionID, JunkBatchIndex).
+		Count(&n).Error
+	return n, err
+}
+
+// CountPlannedByTargetPath counts planned files under a category path across
+// ALL sessions of a filesystem — the filesystem-level usage view. The
+// empty-category prune must use this (not the per-session summary): a
+// category filled by an earlier run shows zero in the current session yet is
+// genuinely in use (multi-session rescan workflows).
+func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath string) (int64, error) {
+	var n int64
+	err := r.db.Model(&FileEntry{}).
+		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND operation != '' AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", filesystemID, categoryPath, childPathPattern(categoryPath)).
+		Count(&n).Error
+	return n, err
 }
 
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files

@@ -15,10 +15,10 @@
 
     <div class="page-body">
       <el-table :data="providers" v-loading="loading" style="width: 100%">
-        <el-table-column prop="name" :label="$t('common.name')" width="150">
+        <el-table-column prop="name" :label="$t('common.name')" width="120">
           <template #default="{ row }"><span class="cell-phone">{{ row.name }}</span></template>
         </el-table-column>
-        <el-table-column prop="provider" :label="$t('models.provider')" width="110">
+        <el-table-column prop="provider" :label="$t('models.provider')" width="90">
           <template #default="{ row }">
             <span class="status-chip" :class="providerChipClass(row.provider)">{{ providerLabel(row.provider) }}</span>
           </template>
@@ -26,26 +26,28 @@
         <el-table-column prop="model" :label="$t('models.modelName')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><code class="cell-mono">{{ row.model }}</code></template>
         </el-table-column>
-        <el-table-column :label="$t('models.contextWindow')" width="120" align="center">
+        <el-table-column :label="$t('models.contextWindow')" width="100" align="center">
           <template #default="{ row }">
             <span class="metric-chip"><span class="metric-value">{{ formatWindow(row.context_window) }}</span></span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('models.visionEnabled')" width="90" align="center">
+        <el-table-column :label="$t('models.visionEnabled')" width="80" align="center">
           <template #default="{ row }">
             <span v-if="row.vision_enabled" class="status-chip is-live"><span class="status-dot"></span>{{ $t('common.yes') }}</span>
             <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }"><span class="cell-time">{{ row.base_url || '-' }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="220" >
           <template #default="{ row }">
-            <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
-            <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
-            <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
-            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
+            <div class="table-actions">
+              <button class="link-button" :disabled="testingId === row.id" @click="handleTestExisting(row)">{{ $t('models.testConn') }}</button>
+              <button class="link-button" @click="handleDuplicate(row)">{{ $t('common.copy') }}</button>
+              <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
+              <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -115,6 +117,16 @@
           <p class="form-field__hint">{{ $t('models.contextWindowHint') }}</p>
         </div>
         <div class="form-field">
+          <label class="form-field__label">{{ $t('models.reasoningEffort') }}</label>
+          <el-select v-model="form.reasoning_effort">
+            <el-option :label="$t('models.reasoningDefault')" value="" />
+            <el-option label="low" value="low" />
+            <el-option label="medium" value="medium" />
+            <el-option label="high" value="high" />
+          </el-select>
+          <p class="form-field__hint">{{ $t('models.reasoningEffortHint') }}</p>
+        </div>
+        <div class="form-field">
           <label class="form-field__label">{{ $t('models.visionEnabled') }}</label>
           <div>
             <el-switch v-model="form.vision_enabled" />
@@ -137,7 +149,7 @@ import { useI18n } from 'vue-i18n'
 import { listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider, testModelProviderConnection } from '../api'
 import type { ModelProvider } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Cpu, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Cpu } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const providers = ref<ModelProvider[]>([])
@@ -153,7 +165,7 @@ const CUSTOM_TIER = -1
 const emptyForm = () => ({
   name: '', provider: 'openai', api_key: '', model: '',
   base_url: '', temperature: 0.1, max_tokens: 4096,
-  context_window: 200_000, vision_enabled: false,
+  context_window: 200_000, vision_enabled: false, reasoning_effort: '',
 })
 const form = ref(emptyForm())
 
@@ -201,6 +213,7 @@ function fillForm(m: ModelProvider, nameSuffix: string) {
     model: m.model, base_url: m.base_url,
     temperature: m.temperature, max_tokens: m.max_tokens,
     context_window: m.context_window || 200_000, vision_enabled: m.vision_enabled,
+    reasoning_effort: m.reasoning_effort || '',
   }
 }
 
@@ -239,7 +252,7 @@ async function handleTest() {
   testing.value = true
   try {
     const res = await testModelProviderConnection(form.value)
-    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
+    if (res.data.success) ElMessage.success(t('models.connOk'))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Test failed')
@@ -251,9 +264,9 @@ async function handleTest() {
 async function handleTestExisting(m: ModelProvider) {
   testingId.value = m.id
   try {
-    const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens }
+    const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens, reasoning_effort: m.reasoning_effort || '' }
     const res = await testModelProviderConnection(data)
-    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
+    if (res.data.success) ElMessage.success(t('models.connOk'))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Test failed')

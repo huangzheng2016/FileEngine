@@ -99,6 +99,7 @@
       <SessionTimeline
         :session-id="current.id"
         :highlight-batch="highlightBatch"
+        :total-tokens-server="current.total_tokens"
         @run-done="refreshSession(current.id)"
         @run-status="refreshSession(current.id)"
       />
@@ -179,62 +180,79 @@
     </el-dialog>
 
     <!-- New scan dialog -->
-    <el-dialog append-to-body v-model="showNewDialog" :title="$t('tasks.newScan')" width="460px">
+    <el-dialog append-to-body v-model="showNewDialog" :title="$t('tasks.newScan')" width="480px">
       <div class="form-stack">
-        <div class="form-field">
-          <label class="form-field__label is-required">{{ $t('tasks.filesystem') }}</label>
-          <el-select v-model="newScan.filesystemId" style="width: 100%" :placeholder="$t('tasks.selectFs')">
-            <el-option v-for="fs in filesystems" :key="fs.id" :label="`[${fs.protocol.toUpperCase()}] ${fs.name}`" :value="fs.id">
-              <span style="display: flex; align-items: center; gap: 6px">
-                <span class="status-chip" :class="protocolChipClass(fs.protocol)" style="width: 52px; justify-content: center">{{ fs.protocol.toUpperCase() }}</span>
-                {{ fs.name }}
-              </span>
-            </el-option>
-          </el-select>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.scanPath') }}</label>
-          <el-input v-model="newScan.scanPath" :placeholder="$t('tasks.scanPathHint')" />
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('models.selectModel') }}</label>
-          <el-select v-model="newScan.modelProviderId" style="width: 100%" clearable :placeholder="$t('models.noModel')">
-            <el-option v-for="m in modelProviders" :key="m.id" :label="`[${providerLabel(m.provider)}] ${m.name}`" :value="m.id">
-              <span style="display: flex; align-items: center; gap: 6px">
-                <span class="status-chip" :class="providerChipClass(m.provider)">{{ providerLabel(m.provider) }}</span>
-                {{ m.name }} ({{ m.model }})
-                <span v-if="m.vision_enabled" class="status-chip is-live" style="margin-left: auto">{{ $t('tasks.visionOn') }}</span>
-              </span>
-            </el-option>
-          </el-select>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.allowVision') }}</label>
-          <div><el-switch v-model="newScan.allowVision" /></div>
-          <p class="form-field__hint">{{ $t('tasks.allowVisionHint') }}</p>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.allowScript') }}</label>
-          <div><el-switch v-model="newScan.allowScript" /></div>
-          <p class="form-field__hint">{{ $t('tasks.allowScriptHint') }}</p>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.excludeCategoryDirs') }}</label>
-          <div><el-switch v-model="newScan.excludeCategoryDirs" /></div>
-          <p class="form-field__hint">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.filterMode') }}</label>
-          <el-radio-group v-model="newScan.filterMode">
-            <el-radio value="blacklist">{{ $t('tasks.filterBlacklist') }}</el-radio>
-            <el-radio value="whitelist">{{ $t('tasks.filterWhitelist') }}</el-radio>
-          </el-radio-group>
-        </div>
-        <div class="form-field">
-          <label class="form-field__label">{{ $t('tasks.filterDirs') }}</label>
-          <el-input v-model="newScan.filterDirs" type="textarea" :rows="4" :placeholder="$t('tasks.filterDirsPlaceholder')" />
-          <p class="form-field__hint">{{ $t('tasks.filterDirsHint') }}</p>
-        </div>
+        <section class="scan-group">
+          <div class="scan-group__title">{{ $t('tasks.scanGroupSource') }}</div>
+          <div class="form-field">
+            <label class="form-field__label is-required">{{ $t('tasks.filesystem') }}</label>
+            <el-select v-model="newScan.filesystemId" style="width: 100%" :placeholder="$t('tasks.selectFs')">
+              <el-option v-for="fs in filesystems" :key="fs.id" :label="`[${fs.protocol.toUpperCase()}] ${fs.name}`" :value="fs.id">
+                <span style="display: flex; align-items: center; gap: 6px">
+                  <span class="status-chip" :class="protocolChipClass(fs.protocol)" style="width: 52px; justify-content: center">{{ fs.protocol.toUpperCase() }}</span>
+                  {{ fs.name }}
+                </span>
+              </el-option>
+            </el-select>
+          </div>
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('tasks.scanPath') }}</label>
+            <el-input v-model="newScan.scanPath" :placeholder="$t('tasks.scanPathHint')" />
+          </div>
+        </section>
+
+        <section class="scan-group">
+          <div class="scan-group__title">{{ $t('tasks.scanGroupModel') }}</div>
+          <div class="form-field">
+            <el-select v-model="newScan.modelProviderId" style="width: 100%" clearable :placeholder="$t('models.noModel')">
+              <el-option v-for="m in modelProviders" :key="m.id" :label="`[${providerLabel(m.provider)}] ${m.name}`" :value="m.id">
+                <span style="display: flex; align-items: center; gap: 6px">
+                  <span class="status-chip" :class="providerChipClass(m.provider)">{{ providerLabel(m.provider) }}</span>
+                  {{ m.name }} ({{ m.model }})
+                  <span v-if="m.vision_enabled" class="status-chip is-live" style="margin-left: auto">{{ $t('tasks.visionOn') }}</span>
+                </span>
+              </el-option>
+            </el-select>
+          </div>
+        </section>
+
+        <el-collapse class="scan-advanced">
+          <el-collapse-item name="advanced">
+            <template #title>
+              <span class="scan-group__title scan-group__title--muted">{{ $t('tasks.scanGroupAdvanced') }}</span>
+            </template>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('tasks.allowVision') }}</label>
+              <div><el-switch v-model="newScan.allowVision" :disabled="!newScanVisionCapable" /></div>
+              <p class="form-field__hint">{{ newScanVisionCapable ? $t('tasks.allowVisionHint') : $t('tasks.visionNotCapable') }}</p>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('tasks.allowScript') }}</label>
+              <div><el-switch v-model="newScan.allowScript" /></div>
+              <p class="form-field__hint">{{ $t('tasks.allowScriptHint') }}</p>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('tasks.excludeCategoryDirs') }}</label>
+              <div><el-switch v-model="newScan.excludeCategoryDirs" /></div>
+              <p class="form-field__hint">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('tasks.filterMode') }}</label>
+              <el-radio-group v-model="newScan.filterMode">
+                <el-radio value="blacklist">{{ $t('tasks.filterBlacklist') }}</el-radio>
+                <el-radio value="whitelist">{{ $t('tasks.filterWhitelist') }}</el-radio>
+              </el-radio-group>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('tasks.filterDirs') }}</label>
+              <div class="filter-presets">
+                <button v-for="preset in filterPresets" :key="preset" type="button" class="link-button" @click="addFilterPreset(preset)">{{ preset }}</button>
+              </div>
+              <el-input v-model="newScan.filterDirs" type="textarea" :rows="4" :placeholder="$t('tasks.filterDirsPlaceholder')" />
+              <p class="form-field__hint">{{ $t('tasks.filterDirsHint') }}</p>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
       <template #footer>
         <el-button @click="showNewDialog = false">{{ $t('common.cancel') }}</el-button>
@@ -347,6 +365,24 @@ const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
 const newScan = ref<{ filesystemId: number; scanPath: string; modelProviderId: number | null; allowVision: boolean; allowScript: boolean; excludeCategoryDirs: boolean; filterMode: string; filterDirs: string }>({ filesystemId: 0, scanPath: '', modelProviderId: null, allowVision: false, allowScript: true, excludeCategoryDirs: false, filterMode: 'blacklist', filterDirs: '' })
+
+// Vision linkage: the switch only makes sense when the chosen model accepts
+// image input; otherwise it is disabled and forced off.
+const newScanVisionCapable = computed(() => {
+  const m = modelProviders.value.find(m => m.id === newScan.value.modelProviderId)
+  return !!m?.vision_enabled
+})
+watch(() => newScan.value.modelProviderId, () => {
+  if (!newScanVisionCapable.value) newScan.value.allowVision = false
+})
+
+// One-click directory-filter presets (common generated/junk dirs).
+const filterPresets = ['.git', 'node_modules', '@eaDir']
+function addFilterPreset(name: string) {
+  const lines = newScan.value.filterDirs.split('\n').map(s => s.trim()).filter(Boolean)
+  if (!lines.includes(name)) lines.push(name)
+  newScan.value.filterDirs = lines.join('\n')
+}
 const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
@@ -563,7 +599,7 @@ function statusLabel(status: string): string {
 function statusChipClass(status: string): string {
   if (status === 'done' || status === 'tagged') return 'is-live'
   if (status.startsWith('error')) return 'is-danger'
-  if (status === 'scanning' || status === 'tagging' || status === 'executing') return 'is-warning'
+  if (status === 'scanning' || status === 'tagging' || status === 'executing' || status === 'tagged_partial') return 'is-warning'
   return 'is-muted'
 }
 
@@ -577,7 +613,7 @@ function formatSize(bytes: number): string {
 
 // ===== Actions =====
 function canTag(s: ScanSession) {
-  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagging' || s.status.startsWith('error')
+  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagged_partial' || s.status === 'tagging' || s.status.startsWith('error')
 }
 
 function canExecute(s: ScanSession) {
@@ -725,17 +761,7 @@ function openNewScanDialog() {
 
 async function handleNewScan() {
   if (!newScan.value.filesystemId) { ElMessage.warning(t('tasks.selectFsRequired')); return }
-  const res = await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath, model_provider_id: newScan.value.modelProviderId, exclude_category_dirs: newScan.value.excludeCategoryDirs, filter_mode: newScan.value.filterMode, filter_dirs: newScan.value.filterDirs })
-  // CreateSessionRequest has no allow_vision field (backend defaults it off);
-  // patch it on only when the user explicitly opted in.
-  if (newScan.value.allowVision) {
-    try {
-      await updateSessionConfig(res.data.id, { allow_vision: true })
-    } catch (e: any) {
-      // Session IS created at this point — warn instead of failing silently.
-      ElMessage.warning(t('tasks.allowVisionPatchFailed', { error: e.response?.data?.error || e.message }))
-    }
-  }
+  const res = await createSession({ filesystem_id: newScan.value.filesystemId, scan_path: newScan.value.scanPath, model_provider_id: newScan.value.modelProviderId, exclude_category_dirs: newScan.value.excludeCategoryDirs, filter_mode: newScan.value.filterMode, filter_dirs: newScan.value.filterDirs, allow_vision: newScan.value.allowVision && newScanVisionCapable.value })
   // allow_script is the mirror image: the backend defaults it ON, so patch
   // only when the user explicitly opted out.
   if (!newScan.value.allowScript) {

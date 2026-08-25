@@ -13,27 +13,29 @@ import (
 )
 
 type ModelProviderResponse struct {
-	VisionEnabled bool    `json:"vision_enabled"`
-	ID            uint    `json:"id"`
-	Name          string  `json:"name"`
-	Provider      string  `json:"provider"`
-	Model         string  `json:"model"`
-	BaseURL       string  `json:"base_url"`
-	Temperature   float64 `json:"temperature"`
-	MaxTokens     int     `json:"max_tokens"`
-	ContextWindow int     `json:"context_window"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	VisionEnabled   bool    `json:"vision_enabled"`
+	ID              uint    `json:"id"`
+	Name            string  `json:"name"`
+	Provider        string  `json:"provider"`
+	Model           string  `json:"model"`
+	BaseURL         string  `json:"base_url"`
+	Temperature     float64 `json:"temperature"`
+	MaxTokens       int     `json:"max_tokens"`
+	ContextWindow   int     `json:"context_window"`
+	ReasoningEffort string  `json:"reasoning_effort"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 	return ModelProviderResponse{
 		ID: m.ID, Name: m.Name, Provider: m.Provider, Model: m.Model,
 		BaseURL: m.BaseURL, Temperature: m.Temperature, MaxTokens: m.MaxTokens,
-		ContextWindow: m.EffectiveContextWindow(),
-		VisionEnabled: m.VisionEnabled,
-		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:     m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ContextWindow:   m.EffectiveContextWindow(),
+		VisionEnabled:   m.VisionEnabled,
+		ReasoningEffort: m.ReasoningEffort,
+		CreatedAt:       m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:       m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 
@@ -64,6 +66,23 @@ type ModelProviderRequest struct {
 	// VisionEnabled is additive like context_window: absent (nil) means
 	// "not provided" — create defaults to false, update keeps the stored value.
 	VisionEnabled *bool `json:"vision_enabled"`
+	// ReasoningEffort is additive too: ""/low/medium/high; absent (nil) keeps
+	// the stored value on update, means unset on create.
+	ReasoningEffort *string `json:"reasoning_effort"`
+}
+
+// validReasoningEfforts are the values passed through to OpenAI-compatible
+// APIs; "" means "not set — use the model default".
+var validReasoningEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true}
+
+func resolveReasoningEffort(v *string, fallback string) (string, error) {
+	if v == nil {
+		return fallback, nil
+	}
+	if !validReasoningEfforts[*v] {
+		return "", fmt.Errorf("reasoning_effort must be one of: low, medium, high (or empty for the model default)")
+	}
+	return *v, nil
 }
 
 // resolveContextWindow validates an optional context_window value. Lenient by
@@ -89,11 +108,16 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	m := &db.ModelProvider{
 		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
 		Model: req.Model, BaseURL: req.BaseURL,
 		Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-		ContextWindow: contextWindow,
+		ContextWindow: contextWindow, ReasoningEffort: reasoningEffort,
 	}
 	if req.VisionEnabled != nil {
 		m.VisionEnabled = *req.VisionEnabled
@@ -154,6 +178,14 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 	if req.VisionEnabled != nil {
 		m.VisionEnabled = *req.VisionEnabled
 	}
+	if req.ReasoningEffort != nil {
+		reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, m.ReasoningEffort)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		m.ReasoningEffort = reasoningEffort
+	}
 	if req.APIKey != "" && req.APIKey != "****" {
 		m.APIKey = req.APIKey
 	}
@@ -196,6 +228,9 @@ func (s *Server) testModelProvider(c *gin.Context) {
 	testProvider := &db.ModelProvider{
 		Provider: req.Provider, APIKey: apiKey, Model: req.Model,
 		BaseURL: req.BaseURL, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
+	}
+	if req.ReasoningEffort != nil {
+		testProvider.ReasoningEffort = *req.ReasoningEffort
 	}
 	chatModel, err := modelfactory.NewChatModelFromProvider(c.Request.Context(), testProvider)
 	if err != nil {

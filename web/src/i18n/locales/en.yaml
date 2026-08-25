@@ -2,45 +2,18 @@ app:
   tagline: AI File Organizer
 
 nav:
-  dashboard: Dashboard
   files: Files
   filesystems: Filesystems
   tasks: Sessions
   config: Config
   models: Models
   settings: Settings
-
-dashboard:
-  title: Dashboard
-  subtitle: Source → Scan → Tag → Execute — four steps to organized files
-  stepSource: Source
-  stepScan: Scan
-  stepTag: Tag
-  stepExecute: Execute
-  sourceStatus: "Filesystems connected: {count}"
-  sourceEmpty: No filesystems yet — add one first
-  scanStatus: "Scan sessions: {count}"
-  scanEmpty: No scan sessions yet
-  scanActive: Scanning…
-  tagProgress: "Latest session tagged {tagged}/{total}"
-  tagEmpty: Tag after the scan finishes
-  executeStatus: "{planned} planned · {executed} executed"
-  executeEmpty: Plans appear after tagging
-  ctaAddFs: Add Filesystem
-  ctaManageFs: Manage Filesystems
-  ctaNewScan: New Scan
-  ctaTag: Start Tagging
-  ctaReview: Review Results
-  ctaExecute: Start Execute
-  ctaFiles: View Files
-  ctaViewSession: View session →
-  stateDone: Done
-  stateActive: Active
-  stateTodo: To do
-  latestSession: Current Session
+  collapse: Collapse navigation
+  expand: Expand navigation
 
 common:
   save: Save
+  copy: Copy
   cancel: Cancel
   delete: Delete
   edit: Edit
@@ -56,8 +29,8 @@ common:
   size: Size
   status: Status
   description: Description
-  yes: "Yes"
-  no: "No"
+  'yes': "Yes"
+  'no': "No"
   deleted: Deleted
   saved: Saved
   created: Created
@@ -70,10 +43,16 @@ files:
   addFsNow: Add Now
   noSession: No scan sessions for this filesystem, create one in Tasks first
   categoryManagement: Categories
+  manageCategories: Manage categories
+  navDirs: Dirs
+  navCats: Categories
   noCategories: No categories yet
   categoryFilter: Category
-  categorized: Categorized
-  uncategorized: Uncategorized
+  categorized: Has category
+  uncategorized: No category
+  containerDir: Container · not planned
+  noCategoryYet: Not categorized
+  unprocessed: Unprocessed
   directoryTree: Directory Tree
   session: Session
   searchPlaceholder: Search files...
@@ -149,6 +128,10 @@ tasks:
   title: Session Center
   subtitle: "One session per screen: status, progress and run timeline"
   newScan: New Scan
+  scanGroupSource: Where to scan
+  scanGroupModel: Which model
+  scanGroupAdvanced: Advanced (usually no changes needed)
+  visionNotCapable: This model has no vision capability (enable it in Model Manager)
   filesystem: Filesystem
   selectFs: Select a filesystem
   selectFsRequired: Please select a filesystem
@@ -201,6 +184,7 @@ tasks:
   status_scanned: Scanned
   status_tagging: Tagging
   status_tagged: Tagged
+  status_tagged_partial: Partial
   status_executing: Executing
   status_done: Done
   statusError: Error
@@ -255,11 +239,16 @@ config:
   database:
     driver: Driver
     dsn: DSN
+    dangerWarning: Database settings affect all stored data; a bad value makes the service unusable — back up first
   agent:
     batchSize: Loose Files per Batch
     concurrency: Directory Worker Threads
     maxFileReadSize: Max File Read Size
     maxRetries: Max Retries
+    batchSizeHint: Loose files per batch (default 200, cap 500); script bulk mode decouples steps from file count
+    concurrencyHint: Tagging worker threads (own connection + token tracker each; <=10 recommended)
+    maxFileReadSizeHint: Per-call read cap of read_file, in bytes (default 102400 = 100KB)
+    maxRetriesHint: Auto retries per failed batch (linear backoff 2s/4s/6s)
   prompt:
     customLabel: Custom
     defaultLabel: Default
@@ -275,6 +264,12 @@ logs:
   noLogsHint: Start tagging or an AI instruction and the run will stream here live
   totalTokens: Total Tokens
   batch: "Batch #{index}"
+  batchWithFiles: "Batch #{index} ({count} files)"
+  batchNavPlaceholder: Jump to batch…
+  failed: Failed
+  techDetails: Technical details
+  loadedTokens: "{count} loaded locally"
+  toolRunError: "Tool {tool} failed: {reason} (retried per policy)"
   manualBatch: "Manual #{index}"
   stepCount: "{count} steps"
   input: Input
@@ -303,6 +298,9 @@ models:
   contextCustom: Custom…
   visionEnabled: Vision
   visionEnabledHint: Model accepts image input (required before sessions can let the agent view images)
+  reasoningEffort: Reasoning Effort
+  reasoningEffortHint: Passed through to OpenAI-compatible APIs as reasoning_effort; Default means unset (use the model's own default)
+  reasoningDefault: Default
   keepApiKey: Leave empty to keep current
   deleteConfirm: Delete this model provider?
   testConn: Test Connection

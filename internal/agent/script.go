@@ -100,11 +100,15 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - count_files({同上过滤条件}) → 整数
 - get_file_info(path) → 文件详情 map；找不到返回 error 值
 - get_categories() → 分类数组（name/path/structure/description/agent_editable）
+- mark_tagged(path) → true；标记文件/目录为已处理（目录级联子项）。批量流程收尾必须对每个处理过的文件调用
 - set_target(path, new_path) → true；new_path 传 "" 清除目标。与工具同样校验路径合法性
 - set_category(path, category_name) → true；把文件归入指定分类（目标=分类路径+文件名）
 - create_category(name, path, description) → 分类 map；受与 create_category 工具完全相同的护栏约束（需先 get_categories；同名/同路径拒绝）%s
 - rename_category(name, new_name) → true；仅 agent_editable 的分类可改
 - sample_files(n) 或 sample_files({过滤条件}, n) → 随机抽取至多 n 个文件（默认 %d，上限 %d），用于抽样了解大批文件
+
+文件记录的字段（query_files/sample_files/get_file_info 返回的 map）：original_path, name, size, file_type, tagged, description?, new_path?, child_count?（带 ? 的字段为空时不出现；访问不存在的字段得到 undefined）
+标准库模块需 import 后使用，如 json := import("json")
 
 约定：
 - 失败的内置函数返回 error 值，用 is_error(x) 判断，不会中断脚本（参数形状错误会直接报运行时错误）
@@ -258,6 +262,7 @@ func (tb *ToolBuilder) scriptBuiltins(ctx context.Context) map[string]*tengo.Use
 		"sample_files":    {Name: "sample_files", Value: tb.scriptSampleFiles(ctx)},
 		"get_file_info":   {Name: "get_file_info", Value: tb.scriptGetFileInfo(ctx)},
 		"get_categories":  {Name: "get_categories", Value: tb.scriptGetCategories(ctx)},
+		"mark_tagged":     {Name: "mark_tagged", Value: tb.scriptMarkTagged(ctx)},
 		"set_target":      {Name: "set_target", Value: tb.scriptSetTarget(ctx)},
 		"set_category":    {Name: "set_category", Value: tb.scriptSetCategory(ctx)},
 		"rename_category": {Name: "rename_category", Value: tb.scriptRenameCategory(ctx)},
@@ -436,13 +441,26 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 		if err != nil {
 			return nil, err
 		}
-		files, total, err := tb.repo.ListFiles(filter.toFileQuery(tb.sessionID))
+		q := filter.toFileQuery(tb.sessionID)
+		isPull := tb.harnessShard(&q)
+		files, total, err := tb.repo.ListFiles(q)
 		if err != nil {
 			return scriptError(err), nil
 		}
 		items := make([]interface{}, len(files))
 		for i, f := range files {
 			items[i] = fileToScriptMap(f)
+		}
+		if isPull && total > 0 {
+			tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
+			summaries := tb.archiveSummaries(ctx, files)
+			for i, f := range files {
+				if s := summaries[f.ID]; s != "" {
+					if m, ok := items[i].(map[string]interface{}); ok {
+						m["archive_summary"] = s
+					}
+				}
+			}
 		}
 		return scriptObject(map[string]interface{}{"files": items, "total": total})
 	}
@@ -558,6 +576,29 @@ func (tb *ToolBuilder) scriptGetCategories(ctx context.Context) tengo.CallableFu
 
 // --- mutating builtins (reuse the tool core logic) ---
 
+func (tb *ToolBuilder) scriptMarkTagged(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("mark_tagged", args, 1, 1); err != nil {
+			return nil, err
+		}
+		p, err := scriptStringArg("mark_tagged", "path", args[0])
+		if err != nil {
+			return nil, err
+		}
+		f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(p))
+		if err != nil {
+			return scriptError(fmt.Errorf("file not found: %s", p)), nil
+		}
+		if f.Tagged {
+			return tengo.TrueValue, nil
+		}
+		if err := tb.repo.MarkTaggedAtomic(tb.sessionID, normalizePath(p), tb.logger.GetBatch()); err != nil {
+			return scriptError(err), nil
+		}
+		return tengo.TrueValue, nil
+	}
+}
+
 func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {
 		if err := scriptArgCount("set_target", args, 2, 2); err != nil {
@@ -571,7 +612,7 @@ func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 		if err != nil {
 			return nil, err
 		}
-		if err := tb.setTargetCore(ctx, p, np); err != nil {
+		if _, err := tb.setTargetCore(ctx, p, np); err != nil {
 			return scriptError(err), nil
 		}
 		return tengo.TrueValue, nil
@@ -600,7 +641,7 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 			return scriptError(fmt.Errorf("file not found: %s", p)), nil
 		}
 		target := strings.TrimSuffix(cat.Path, "/") + "/" + f.Name
-		if err := tb.setTargetCore(ctx, p, target); err != nil {
+		if _, err := tb.setTargetCore(ctx, p, target); err != nil {
 			return scriptError(err), nil
 		}
 		return tengo.TrueValue, nil

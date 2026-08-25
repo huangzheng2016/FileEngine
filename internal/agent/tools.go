@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -41,6 +42,9 @@ type FileItem struct {
 	Tagged       bool   `json:"tagged"`
 	NewPath      string `json:"new_path,omitempty"`
 	ChildCount   int    `json:"child_count,omitempty"`
+	// ArchiveSummary is the one-line listing hint for archive files (only
+	// populated on harness untagged pulls — see ToolBuilder.archiveSummaries).
+	ArchiveSummary string `json:"archive_summary,omitempty"`
 }
 
 type GetFileInfoInput struct {
@@ -74,7 +78,8 @@ type UpdateDescriptionInput struct {
 }
 
 type UpdateDescriptionOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type MarkTaggedInput struct {
@@ -82,7 +87,8 @@ type MarkTaggedInput struct {
 }
 
 type MarkTaggedOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type ListCategoriesInput struct{}
@@ -105,7 +111,13 @@ type SetTargetInput struct {
 }
 
 type SetTargetOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	// ClearedChildren reports how many already-planned descendants the
+	// directory cascade overrode (outer target wins over inner). Non-zero
+	// means finer child classifications were just discarded.
+	ClearedChildren int64  `json:"cleared_children,omitempty"`
+	Guidance        string `json:"guidance,omitempty"`
 }
 
 type CreateCategoryInput struct {
@@ -118,6 +130,10 @@ type CreateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	// Error carries an agent-recoverable rejection (guard rails, duplicates,
+	// invalid input) with guidance for the next decision; Success is false.
+	// System failures still abort the run as Go errors.
+	Error string `json:"error,omitempty"`
 	// SimilarCategories lists fuzzy lookalikes found after a successful
 	// creation (path overlap/containment) — reference info for the model to
 	// judge whether a merge is warranted; empty when there are none.
@@ -146,6 +162,7 @@ type UpdateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	Error   string `json:"error,omitempty"`
 }
 
 type DeleteCategoryInput struct {
@@ -153,7 +170,21 @@ type DeleteCategoryInput struct {
 }
 
 type DeleteCategoryOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// rejectError marks agent-recoverable tool rejections: the model can fix its
+// input (guard-rail rejection, duplicate, not-found, invalid argument) and
+// continue, so tool handlers report these as success=false results instead of
+// aborting the whole agent run — eino makes any tool error fatal to the ReAct
+// loop. System failures (DB/FS errors) stay ordinary fatal errors.
+type rejectError struct{ msg string }
+
+func (e *rejectError) Error() string { return e.msg }
+
+func rejectf(format string, args ...interface{}) error {
+	return &rejectError{msg: fmt.Sprintf(format, args...)}
 }
 
 // ============ Tool Builder ============
@@ -173,6 +204,49 @@ type ToolBuilder struct {
 	// guard remembers the category-set snapshot this worker's agent last saw
 	// and backs the create_category guard rails (see category_guard.go).
 	guard categoryGuard
+	// harness, when non-nil, marks this builder as belonging to a continuous
+	// (long-run) worker: untagged pulls (list_files / query_files with
+	// tagged=false) are auto-sharded by id % numWorkers = workerID so
+	// concurrent harness workers never see each other's files, and every
+	// such pull rolls a fresh batch (batch_start + logger batch switch) so
+	// the SSE timeline keeps its per-batch grouping.
+	harness *harnessContext
+}
+
+type harnessContext struct {
+	workerID     int
+	numWorkers   int
+	batchCounter *int32
+}
+
+// withHarness marks the builder as a continuous worker's toolset.
+func (tb *ToolBuilder) withHarness(workerID, numWorkers int, batchCounter *int32) *ToolBuilder {
+	tb.harness = &harnessContext{workerID: workerID, numWorkers: numWorkers, batchCounter: batchCounter}
+	return tb
+}
+
+// harnessShard applies harness semantics to an untagged file query before it
+// runs: shard it to this worker so concurrent harness workers never see each
+// other's files. Returns true when the query is an untagged pull under an
+// active harness — the caller then rolls a new batch once the pull comes
+// back non-empty (harnessEmitBatch).
+func (tb *ToolBuilder) harnessShard(q *db.FileQuery) bool {
+	if tb.harness == nil || q.Tagged == nil || *q.Tagged {
+		return false
+	}
+	if tb.harness.numWorkers > 1 {
+		q.IDMod, q.IDModRem = tb.harness.numWorkers, tb.harness.workerID
+	}
+	return true
+}
+
+func (tb *ToolBuilder) harnessEmitBatch(label string) {
+	if tb.harness == nil {
+		return
+	}
+	batchIdx := atomic.AddInt32(tb.harness.batchCounter, 1)
+	tb.logger.SetBatch(int(batchIdx))
+	tb.logger.EmitBatchStart(label)
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -417,9 +491,15 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		q.CategoryPath = &input.CategoryPath
 	}
 
+	isPull := tb.harnessShard(&q)
 	files, total, err := tb.repo.ListFiles(q)
 	if err != nil {
 		return nil, err
+	}
+	if isPull && total > 0 {
+		// A fresh untagged pull in a continuous run = a new batch on the
+		// SSE timeline (emitted before the tool log so it groups correctly).
+		tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
 	}
 
 	items := make([]FileItem, len(files))
@@ -433,6 +513,16 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 			Tagged:       f.Tagged,
 			NewPath:      f.NewPath,
 			ChildCount:   f.ChildCount,
+		}
+	}
+	if isPull && total > 0 {
+		// Harness pulls carry the same archive listing summaries the batch
+		// prompt promises (bounded per pull — see archiveSummaries).
+		summaries := tb.archiveSummaries(ctx, files)
+		for i, f := range files {
+			if s := summaries[f.ID]; s != "" {
+				items[i].ArchiveSummary = s
+			}
 		}
 	}
 
@@ -635,7 +725,9 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
+		out := &UpdateDescriptionOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
+		tb.logger.LogToolCall("update_description", input, out)
+		return out, nil
 	}
 
 	// Idempotency check: description already matches
@@ -645,8 +737,10 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 		return out, nil
 	}
 
-	f.Description = input.Description
-	if err := tb.repo.UpdateFile(f); err != nil {
+	// Column-scoped write: a full-row Save of the struct loaded above races
+	// with parallel tool calls on the same row (e.g. set_target) and would
+	// silently restore their fields to stale values.
+	if err := tb.repo.UpdateDescription(tb.sessionID, normalizePath(input.Path), input.Description); err != nil {
 		return nil, err
 	}
 
@@ -659,7 +753,9 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
+		out := &MarkTaggedOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
+		tb.logger.LogToolCall("mark_tagged", input, out)
+		return out, nil
 	}
 
 	// Idempotency check: already tagged, skip DB write
@@ -711,10 +807,21 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 }
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
-	if err := tb.setTargetCore(ctx, input.Path, input.NewPath); err != nil {
+	cleared, err := tb.setTargetCore(ctx, input.Path, input.NewPath)
+	if err != nil {
+		var rj *rejectError
+		if errors.As(err, &rj) {
+			out := &SetTargetOutput{Error: rj.msg}
+			tb.logger.LogToolCall("set_target", input, out)
+			return out, nil
+		}
 		return nil, err
 	}
 	out := &SetTargetOutput{Success: true}
+	if cleared > 0 {
+		out.ClearedChildren = cleared
+		out.Guidance = fmt.Sprintf("已级联覆盖并清除 %d 个子项的既有规划路径（外层目标覆盖内层）。若这些子项需要更细的独立归类，请对它们重新 set_target；若本目录就应作为整体归类，则无需处理", cleared)
+	}
 	tb.logger.LogToolCall("set_target", input, out)
 	return out, nil
 }
@@ -722,18 +829,18 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 // setTargetCore is the set_target logic shared by the tool handler and the
 // run_script builtin: same validation, same idempotency, same atomic write.
 // Only the tool handler logs; script-internal calls are covered by the single
-// run_script log entry.
-func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) error {
+// run_script log entry. Returns how many planned children the cascade cleared.
+func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) (int64, error) {
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
 	if err := ValidateFSPath(newPath); err != nil {
-		return fmt.Errorf("invalid new_path: %w", err)
+		return 0, rejectf("invalid new_path: %v", err)
 	}
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(path))
 	if err != nil {
-		return fmt.Errorf("file not found: %s", path)
+		return 0, rejectf("file not found: %s", path)
 	}
 
 	op := ""
@@ -743,18 +850,28 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 
 	// Idempotency check: already in target state, skip DB write
 	if f.NewPath == newPath && f.Operation == op {
-		return nil
+		return 0, nil
 	}
 
-	if err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(path), newPath, op, f.FileType); err != nil {
-		return fmt.Errorf("failed to set target: %w", err)
+	cleared, err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(path), newPath, op, f.FileType)
+	if err != nil {
+		return 0, fmt.Errorf("failed to set target: %w", err)
 	}
-	return nil
+	return cleared, nil
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 	out, err := tb.createCategoryCore(ctx, input)
 	if err != nil {
+		// Guard rejections are guidance, not failure: hand them to the model
+		// as a success=false result so the run continues and the next
+		// decision is made from the rejection's reference info.
+		var rj *rejectError
+		if errors.As(err, &rj) {
+			out := &CreateCategoryOutput{Error: rj.msg}
+			tb.logger.LogToolCall("create_category", input, out)
+			return out, nil
+		}
 		return nil, err
 	}
 	tb.logger.LogToolCall("create_category", input, out)
@@ -773,7 +890,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
 		}
-		return nil, fmt.Errorf("invalid category path: %w", err)
+		return nil, rejectf("invalid category path: %v", err)
 	}
 
 	// Fresh category state feeds both guard rails below (and its per-category
@@ -799,7 +916,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		if list == "" {
 			list = "（当前没有任何分类）"
 		}
-		return nil, fmt.Errorf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
+		return nil, rejectf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
 	}
 
 	// Similarity guard, two classes: objective duplicates (normalized identical
@@ -815,7 +932,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项（%s）\n", s.usage.Name, s.usage.Path, s.usage.FileCount, s.reason))
 		}
 		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不同的名称和路径")
-		return nil, errors.New(sb.String())
+		return nil, rejectf("%s", sb.String())
 	}
 
 	cat := &db.Category{
@@ -831,7 +948,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, fmt.Errorf("create category: %w", err)
 	}
 	if !created {
-		return nil, fmt.Errorf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
+		return nil, rejectf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
 	}
 
 	// The agent knows the post-create set (its snapshot plus its own
@@ -856,25 +973,31 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 
 func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategoryInput) (*UpdateCategoryOutput, error) {
 
+	reject := func(msg string) (*UpdateCategoryOutput, error) {
+		out := &UpdateCategoryOutput{Error: msg}
+		tb.logger.LogToolCall("update_category", input, out)
+		return out, nil
+	}
+
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("category not found: %s", input.Name)
+		return reject(fmt.Sprintf("category not found: %s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return nil, fmt.Errorf("category '%s' is not editable by agent (user-managed)", input.Name)
+		return reject(fmt.Sprintf("category '%s' is not editable by agent (user-managed)", input.Name))
 	}
 
 	// Guard against no-op: at least one field must be provided for update
 	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
-		return nil, fmt.Errorf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name)
+		return reject(fmt.Sprintf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name))
 	}
 
 	// A changed category path cascades into planned files' new_path; apply the
 	// same root-confinement rules as set_target.
 	if input.NewPath != "" {
 		if err := ValidateFSPath(input.NewPath); err != nil {
-			return nil, fmt.Errorf("invalid new_path: %w", err)
+			return reject(fmt.Sprintf("invalid new_path: %v", err))
 		}
 	}
 
@@ -903,13 +1026,19 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
 
+	reject := func(msg string) (*DeleteCategoryOutput, error) {
+		out := &DeleteCategoryOutput{Error: msg}
+		tb.logger.LogToolCall("delete_category", input, out)
+		return out, nil
+	}
+
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("category not found: %s", input.Name)
+		return reject(fmt.Sprintf("category not found: %s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return nil, fmt.Errorf("category '%s' is not deletable by agent (user-managed)", input.Name)
+		return reject(fmt.Sprintf("category '%s' is not deletable by agent (user-managed)", input.Name))
 	}
 
 	// Clear all planned files under this category and reset tagged for re-classification

@@ -1,10 +1,25 @@
 <template>
   <div class="timeline-wrap">
     <div class="timeline-toolbar">
-      <span class="metric-chip">
+      <span class="metric-chip" :title="serverTokensTitle">
         <span class="metric-label">{{ $t('logs.totalTokens') }}</span>
-        <span class="metric-value">{{ totalTokens.toLocaleString() }}</span>
+        <span class="metric-value">{{ shownTotalTokens.toLocaleString() }}</span>
       </span>
+      <el-select
+        v-if="displayGroups.length > 1"
+        class="batch-nav"
+        size="small"
+        filterable
+        :placeholder="$t('logs.batchNavPlaceholder')"
+        @change="revealBatch"
+      >
+        <el-option
+          v-for="g in displayGroups"
+          :key="g.batch_index"
+          :value="g.batch_index"
+          :label="navLabel(g)"
+        />
+      </el-select>
       <span v-if="stream.connected.value" class="status-chip is-live">
         <span class="status-dot"></span>{{ $t('logs.live') }}
       </span>
@@ -33,6 +48,7 @@
           <el-icon class="batch-chevron" :class="{ 'is-open': !isCollapsed(group, gi) }"><ArrowDown /></el-icon>
           <span class="batch-label">{{ groupLabel(group, gi) }}</span>
           <span v-if="group.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
+          <span v-if="groupFailed(group)" class="status-chip is-danger">{{ $t('logs.failed') }}</span>
           <span class="batch-meta cell-time">{{ $t('logs.stepCount', { count: group.steps.length }) }}</span>
           <span v-if="group.tokenSum > 0" class="batch-meta cell-time">{{ group.tokenSum.toLocaleString() }} tok</span>
           <span v-if="group.started_at" class="batch-meta cell-time">{{ formatTime(group.started_at) }}</span>
@@ -44,11 +60,18 @@
             <div v-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
               <div class="msg-meta">
                 <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
-                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
                 <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑ {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
               </div>
               <div class="msg-bubble">
                 <MarkdownView v-if="step.role === 'assistant'" :content="step.content" />
+                <template v-else-if="step.role === 'system'">
+                  <div class="msg-text">{{ systemSummary(step.content) }}</div>
+                  <details class="sys-details">
+                    <summary>{{ $t('logs.techDetails') }}</summary>
+                    <pre class="sys-pre">{{ step.content }}</pre>
+                  </details>
+                </template>
                 <div v-else class="msg-text">{{ step.content }}</div>
               </div>
             </div>
@@ -64,7 +87,7 @@
                 <span v-if="step.pending" class="status-chip is-warning">{{ $t('logs.toolRunning') }}</span>
                 <span v-else-if="step.ok === true" class="status-chip is-live">{{ $t('logs.toolOk') }}</span>
                 <span v-else-if="step.ok === false" class="status-chip is-danger">{{ $t('logs.toolFailed') }}</span>
-                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
                 <span class="tool-toggles">
                   <button v-if="step.input" class="link-button" @click.stop="toggleStepDetail(step, 'input')">
                     {{ $t('logs.input') }} {{ stepDetail[step.key + '_input'] ? '▾' : '▸' }}
@@ -102,7 +125,10 @@ import MarkdownView from './MarkdownView.vue'
 const props = withDefaults(defineProps<{
   sessionId: number
   highlightBatch?: number | null
-}>(), { highlightBatch: null })
+  /** Server-side session token total (single source of truth); when provided
+      the toolbar shows it instead of the sum over locally loaded pages. */
+  totalTokensServer?: number | null
+}>(), { highlightBatch: null, totalTokensServer: null })
 
 const emit = defineEmits<{
   /** A run reached its terminal event — parent should refresh session counters. */
@@ -214,6 +240,18 @@ const displayGroups = computed<BatchGroup[]>(() => {
 })
 
 const totalTokens = computed(() => displayGroups.value.reduce((sum, g) => sum + g.tokenSum, 0))
+
+// Token口径统一：优先服务端会话累计（含未加载页），否则退回本地已加载合计。
+const shownTotalTokens = computed(() => props.totalTokensServer ?? totalTokens.value)
+const serverTokensTitle = computed(() =>
+  props.totalTokensServer != null
+    ? t('logs.loadedTokens', { count: totalTokens.value.toLocaleString() })
+    : undefined)
+
+/** A batch counts as failed when any persisted/live system message exists. */
+function groupFailed(group: BatchGroup): boolean {
+  return group.steps.some(s => s.kind === 'message' && s.role === 'system')
+}
 
 // ===== Lifecycle =====
 // Handlers are registered ONCE per stream instance — open(id) only re-points
@@ -398,7 +436,9 @@ function scheduleHistoryReload() {
 function isCollapsed(group: BatchGroup, gi: number): boolean {
   const explicit = collapsedMap.get(group.batch_index)
   if (explicit !== undefined) return explicit
-  // Default: only the latest group is expanded.
+  // Default: expand live and failed batches plus the latest group; collapse
+  // finished healthy batches.
+  if (group.live || groupFailed(group)) return false
   return gi < displayGroups.value.length - 1
 }
 
@@ -421,12 +461,35 @@ function prettyJSON(key: string, part: string, raw: string): string {
 }
 
 function groupLabel(group: BatchGroup, gi: number): string {
-  if (group.label) return group.label
+  if (group.label) {
+    // Backend labels loose-file batches in English ("10 files") — localize.
+    const m = /^(\d+) files$/.exec(group.label)
+    if (m) return t('logs.batchWithFiles', { index: group.batch_index, count: Number(m[1]) })
+    return group.label
+  }
   if (group.batch_index < 0) {
     const manualBefore = displayGroups.value.slice(0, gi).filter(g => g.batch_index < 0).length
     return t('logs.manualBatch', { index: manualBefore + 1 })
   }
   return t('logs.batch', { index: group.batch_index })
+}
+
+function navLabel(group: BatchGroup): string {
+  const gi = displayGroups.value.findIndex(g => g.batch_index === group.batch_index)
+  return groupLabel(group, gi)
+}
+
+/** First-line Chinese conclusion for a persisted system error dump; the raw
+    dump stays available behind 技术详情. */
+function systemSummary(content: string): string {
+  const tool = /failed to invoke tool\[name:([^\s\]]+)/.exec(content)
+  const errLine = content.split('\n')
+    .map(l => l.trim())
+    .find(l => l.startsWith('err='))
+  const reason = errLine ? errLine.slice(4) : content.split('\n')[0]
+  const short = reason.length > 200 ? reason.slice(0, 200) + '…' : reason
+  if (tool) return t('logs.toolRunError', { tool: tool[1], reason: short })
+  return short
 }
 
 function roleLabel(role: string): string {
@@ -441,7 +504,8 @@ function roleChipClass(role: string): string {
 
 function formatTime(tstr: string) {
   if (!tstr) return ''
-  return new Date(tstr).toLocaleTimeString()
+  // Unified site-wide: local 24h with date (sv-SE renders ISO-style).
+  return new Date(tstr).toLocaleString('sv-SE')
 }
 
 function setGroupRef(bi: number, el: any) {
@@ -676,6 +740,38 @@ function scrollToBottom(smooth: boolean) {
   overflow-x: auto;
   max-height: 260px;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ===== Floating scroll button ===== */
+.batch-nav {
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.sys-details {
+  margin-top: 6px;
+}
+
+.sys-details summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sys-pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--surface-strong);
+  border-radius: var(--radius-xs);
+  max-height: 200px;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }

@@ -12,188 +12,210 @@
     </div>
   </section>
 
-  <div v-else-if="loaded" class="files-row">
-    <!-- Zone A: filesystem + category management -->
-    <div class="files-side">
-      <!-- Filesystem selector -->
-      <section class="page-card side-card">
-        <el-select v-model="selectedFsId" :placeholder="$t('files.selectFs')" style="width: 100%" @change="onFsChange">
-          <el-option v-for="fs in filesystems" :key="fs.id" :label="`[${fs.protocol.toUpperCase()}] ${fs.name}`" :value="fs.id">
-            <span style="display: flex; align-items: center; gap: 6px">
-              <span class="status-chip" :class="protocolChipClass(fs.protocol)" style="width: 52px; justify-content: center">{{ fs.protocol.toUpperCase() }}</span>
-              {{ fs.name }}
-            </span>
-          </el-option>
-        </el-select>
-        <el-select v-if="sessions.length > 1" v-model="sessionId" :placeholder="$t('files.session')" style="width: 100%" @change="onSessionChange">
-          <el-option v-for="s in sessions" :key="s.id"
-            :label="formatSessionLabel(s)"
-            :value="s.id" />
-        </el-select>
-        <div v-else-if="selectedFsId && sessions.length === 0" class="side-hint">
-          {{ $t('files.noSession') }}
-        </div>
-      </section>
-
-      <!-- Category management -->
-      <section v-if="selectedFsId" class="page-card side-card side-card--fill">
-        <div class="side-title">{{ $t('files.categoryManagement') }}</div>
-        <div class="cat-actions">
-          <el-button size="small" @click="handleExportCategories">{{ $t('categories.exportCategories') }}</el-button>
-          <el-button size="small" @click="triggerImportCategories">{{ $t('categories.importCategories') }}</el-button>
-          <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportCategories" />
-          <el-button size="small" type="primary" @click="openCatDialog()">{{ $t('categories.addCategory') }}</el-button>
-        </div>
-        <div class="cat-list">
-          <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
-          <div v-for="cat in categories" :key="cat.id"
-            class="cat-item" :class="{ 'is-active': categoryFilter === cat.path }"
-            @click="setCategoryFilter(cat.path)">
-            <div class="cat-item__main">
-              <div class="cat-item__name">
-                <span>{{ cat.name }}</span>
-                <span v-if="cat.agent_created" class="status-chip is-accent" style="height: 18px; padding: 0 8px">AI</span>
-              </div>
-              <div class="cat-item__path">{{ cat.path }}</div>
+  <div v-else-if="loaded" class="files-page">
+    <!-- Single compact toolbar: everything on one row, never wraps to a second line -->
+    <header class="files-toolbar page-card">
+      <el-select v-model="selectedFsId" :placeholder="$t('files.selectFs')" class="tb-fs" @change="onFsChange">
+        <el-option v-for="fs in filesystems" :key="fs.id" :label="`[${fs.protocol.toUpperCase()}] ${fs.name}`" :value="fs.id">
+          <span style="display: flex; align-items: center; gap: 6px">
+            <span class="status-chip" :class="protocolChipClass(fs.protocol)" style="width: 52px; justify-content: center">{{ fs.protocol.toUpperCase() }}</span>
+            {{ fs.name }}
+          </span>
+        </el-option>
+      </el-select>
+      <el-select v-if="sessions.length > 1" v-model="sessionId" :placeholder="$t('files.session')" class="tb-session" @change="onSessionChange">
+        <el-option v-for="s in sessions" :key="s.id" :label="formatSessionLabel(s)" :value="s.id" />
+      </el-select>
+      <span v-else-if="selectedFsId && sessions.length === 0" class="side-hint">{{ $t('files.noSession') }}</span>
+      <el-input v-model="search" :placeholder="$t('files.searchPlaceholder')" clearable class="tb-search" @clear="loadFiles" @keyup.enter="loadFiles" />
+      <el-select v-model="typeFilter" :placeholder="$t('files.typeFilter')" clearable class="tb-filter" @change="loadFiles">
+        <el-option :label="$t('files.file')" value="file" />
+        <el-option :label="$t('files.directory')" value="directory" />
+      </el-select>
+      <el-select v-model="taggedFilter" :placeholder="$t('files.taggedFilter')" clearable class="tb-filter" @change="loadFiles">
+        <el-option :label="$t('files.tagged')" value="true" />
+        <el-option :label="$t('files.untagged')" value="false" />
+      </el-select>
+      <el-select v-model="categoryFilter" :placeholder="$t('files.categoryFilter')" clearable class="tb-category" @change="loadFiles">
+        <el-option :label="$t('files.categorized')" value="__categorized__" />
+        <el-option :label="$t('files.uncategorized')" value="__uncategorized__" />
+        <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.path" />
+      </el-select>
+      <div class="tb-spacer"></div>
+      <el-tooltip :content="$t('files.manageCategories')" placement="bottom">
+        <button class="icon-button" :aria-label="$t('files.manageCategories')" @click="catDrawerVisible = true"><el-icon><Collection /></el-icon></button>
+      </el-tooltip>
+      <el-popover trigger="click" width="220">
+        <template #reference>
+          <button class="icon-button" :title="$t('files.columns')" :aria-label="$t('files.columns')"><el-icon><Setting /></el-icon></button>
+        </template>
+        <draggable v-model="allColumns" item-key="key" handle=".drag-handle" @end="saveColumnPrefs">
+          <template #item="{ element }">
+            <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: default">
+              <el-icon class="drag-handle" style="cursor: grab; color: var(--text-muted)"><Rank /></el-icon>
+              <el-checkbox v-model="element.visible" @change="saveColumnPrefs" style="margin-right: 0" />
+              <span style="font-size: 13px">{{ element.label }}</span>
             </div>
-            <div class="cat-item__actions">
-              <button class="icon-button icon-button--sm" @click.stop="openCatDialog(cat)"><el-icon :size="14"><Edit /></el-icon></button>
-              <button class="icon-button icon-button--sm is-danger" @click.stop="handleDeleteCat(cat.id)"><el-icon :size="14"><Delete /></el-icon></button>
+          </template>
+        </draggable>
+      </el-popover>
+    </header>
+
+    <div class="files-body">
+      <!-- Unified nav tree: directories / categories in one collapsible pane -->
+      <aside class="files-nav page-card" :class="{ 'is-folded': navFolded }">
+        <div class="files-nav__head">
+          <el-tabs v-if="!navFolded" v-model="navTab" stretch>
+            <el-tab-pane :label="$t('files.navDirs')" name="dirs" />
+            <el-tab-pane :label="$t('files.navCats')" name="cats" />
+          </el-tabs>
+          <el-tooltip :content="navFolded ? $t('nav.expand') : $t('nav.collapse')" placement="right">
+            <button class="rail-toggle rail-toggle--sm" :aria-label="navFolded ? $t('nav.expand') : $t('nav.collapse')" @click="navFolded = !navFolded">
+              <el-icon :size="14"><Fold v-if="!navFolded" /><Expand v-else /></el-icon>
+            </button>
+          </el-tooltip>
+        </div>
+        <div v-if="!navFolded" class="files-nav__scroll">
+          <el-tree v-show="navTab === 'dirs'" :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
+            lazy :load="loadNode" node-key="original_path" highlight-current @node-click="onNodeClick" />
+          <div v-show="navTab === 'cats'" class="cat-tree">
+            <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
+            <div v-for="cat in categories" :key="cat.id"
+              class="cat-item" :class="{ 'is-active': categoryFilter === cat.path }"
+              @click="setCategoryFilter(cat.path)">
+              <div class="cat-item__main">
+                <div class="cat-item__name">
+                  <span>{{ cat.name }}</span>
+                  <span v-if="cat.agent_created" class="status-chip is-accent" style="height: 18px; padding: 0 8px">AI</span>
+                </div>
+                <div class="cat-item__path">{{ cat.path }}</div>
+              </div>
             </div>
           </div>
         </div>
-      </section>
-    </div>
+      </aside>
 
-    <!-- Zone B: directory tree + file table + preview -->
-    <section v-if="selectedFsId && sessionId" class="page-card tree-pane">
-      <div class="side-title">{{ $t('files.directoryTree') }}</div>
-      <div class="tree-scroll">
-        <el-tree :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
-          lazy :load="loadNode" node-key="original_path" highlight-current @node-click="onNodeClick" />
-      </div>
-    </section>
-
-    <!-- Right main area -->
-    <div class="files-main">
-      <!-- Filter bar -->
-      <div class="page-toolbar">
-        <el-input v-model="search" :placeholder="$t('files.searchPlaceholder')" clearable style="width: 200px" @clear="loadFiles" @keyup.enter="loadFiles" />
-        <el-select v-model="typeFilter" :placeholder="$t('files.typeFilter')" clearable style="width: 130px" @change="loadFiles">
-          <el-option :label="$t('files.file')" value="file" />
-          <el-option :label="$t('files.directory')" value="directory" />
-        </el-select>
-        <el-select v-model="taggedFilter" :placeholder="$t('files.taggedFilter')" clearable style="width: 130px" @change="loadFiles">
-          <el-option :label="$t('files.tagged')" value="true" />
-          <el-option :label="$t('files.untagged')" value="false" />
-        </el-select>
-        <el-select v-model="categoryFilter" :placeholder="$t('files.categoryFilter')" clearable style="width: 160px" @change="loadFiles">
-          <el-option :label="$t('files.categorized')" value="__categorized__" />
-          <el-option :label="$t('files.uncategorized')" value="__uncategorized__" />
-          <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.path" />
-        </el-select>
-        <el-tag v-if="currentPath" closable @close="currentPath = ''; loadFiles()">{{ currentPath }}</el-tag>
-        <el-popover trigger="click" width="220">
-          <template #reference>
-            <button class="icon-button" style="margin-left: auto" :title="$t('files.columns')"><el-icon><Setting /></el-icon></button>
-          </template>
-          <draggable v-model="allColumns" item-key="key" handle=".drag-handle" @end="saveColumnPrefs">
-            <template #item="{ element }">
-              <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: default">
-                <el-icon class="drag-handle" style="cursor: grab; color: var(--text-muted)"><Rank /></el-icon>
-                <el-checkbox v-model="element.visible" @change="saveColumnPrefs" style="margin-right: 0" />
-                <span style="font-size: 13px">{{ element.label }}</span>
+      <!-- File table as the main zone -->
+      <div class="files-main">
+        <el-tag v-if="currentPath" closable class="current-path-tag" @close="currentPath = ''; loadFiles()">{{ currentPath }}</el-tag>
+        <section class="page-card table-card">
+          <el-table :data="files" v-loading="tableLoading" style="width: 100%" height="100%" @selection-change="onSelectionChange">
+            <el-table-column type="selection" width="40" />
+            <template v-for="col in visibleColumns" :key="col.key">
+              <el-table-column v-if="col.key === 'name'" prop="name" :label="col.label" min-width="200">
+                <template #default="{ row }">
+                  <span class="name-cell" :class="{ 'name-cell--drill': row.file_type === 'directory' }" @click.stop="row.file_type === 'directory' ? drillDir(row) : openEditDrawer(row)">
+                    <el-icon v-if="row.file_type === 'directory'" style="color: var(--warning)"><Folder /></el-icon>
+                    <el-icon v-else style="color: var(--text-muted)"><Document /></el-icon>
+                    <span class="name-cell__text">{{ row.name }}</span>
+                    <el-icon class="name-cell__edit" @click.stop="openEditDrawer(row)"><Edit /></el-icon>
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'file_type'" prop="file_type" :label="col.label" width="100">
+                <template #default="{ row }">
+                  <span v-if="row.file_type === 'directory'" class="status-chip is-warning">{{ $t('files.directory') }}</span>
+                  <span v-else class="status-chip is-muted">{{ $t('files.file') }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'size'" :label="col.label" width="90">
+                <template #default="{ row }"><span class="cell-time">{{ formatSize(row.size) }}</span></template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'description'" prop="description" :label="col.label" min-width="180" show-overflow-tooltip />
+              <el-table-column v-else-if="col.key === 'tagged'" :label="col.label" width="80" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.tagged" class="status-chip is-live">{{ $t('common.yes') }}</span>
+                  <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'batch_index'" :label="col.label" width="70" align="center">
+                <template #default="{ row }">
+                  <router-link v-if="row.batch_index" :to="{ name: 'tasks', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
+                    class="cell-link cell-time">
+                    {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
+                  </router-link>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'new_path'" :label="col.label" min-width="180" show-overflow-tooltip>
+                <template #default="{ row}">
+                  <span v-if="row.new_path" class="cell-time">{{ displayPath(row.new_path) }}</span>
+                  <span v-else-if="row.file_type === 'directory'" class="cell-muted">{{ $t('files.containerDir') }}</span>
+                  <span v-else-if="row.tagged" class="cell-muted">{{ $t('files.noCategoryYet') }}</span>
+                  <span v-else class="cell-muted">{{ $t('files.unprocessed') }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'executed_at'" :label="col.label" width="160">
+                <template #default="{ row }">
+                  <template v-if="row.executed && row.executed_at">
+                    <span class="status-chip" :class="row.execute_mode === 'move' ? 'is-warning' : 'is-live'">{{ row.execute_mode }}</span>
+                    <span class="cell-time" style="margin-left: 6px">{{ row.executed_at?.slice(0, 16).replace('T', ' ') }}</span>
+                  </template>
+                </template>
+              </el-table-column>
+              <el-table-column v-else-if="col.key === 'preview'" :label="col.label" width="60" align="center">
+                <template #default="{ row }">
+                  <button v-if="row.file_type === 'file'" class="icon-button icon-button--sm" @click.stop="previewFile(row)">
+                    <el-icon :size="14"><View /></el-icon>
+                  </button>
+                </template>
+              </el-table-column>
+            </template>
+            <template #empty>
+              <div class="empty-state-card empty-state-card--inline">
+                <div class="empty-state-card__icon">
+                  <el-icon :size="24"><Search /></el-icon>
+                </div>
+                <div class="empty-state-card__text">
+                  <h4 class="empty-state-card__title">{{ $t('files.title') }}</h4>
+                </div>
               </div>
             </template>
-          </draggable>
-        </el-popover>
-      </div>
+          </el-table>
+        </section>
 
-      <!-- File table -->
-      <section class="page-card table-card">
-        <el-table :data="files" v-loading="tableLoading" style="width: 100%" height="100%" @selection-change="onSelectionChange">
-          <el-table-column type="selection" width="40" />
-          <template v-for="col in visibleColumns" :key="col.key">
-            <el-table-column v-if="col.key === 'name'" prop="name" :label="col.label" min-width="200">
-              <template #default="{ row }">
-                <span class="name-cell" @click.stop="openEditDrawer(row)">
-                  <el-icon v-if="row.file_type === 'directory'" style="color: var(--warning)"><Folder /></el-icon>
-                  <el-icon v-else style="color: var(--text-muted)"><Document /></el-icon>
-                  <span class="name-cell__text">{{ row.name }}</span>
-                  <el-icon class="name-cell__edit"><Edit /></el-icon>
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'file_type'" prop="file_type" :label="col.label" width="100">
-              <template #default="{ row }">
-                <span v-if="row.file_type === 'directory'" class="status-chip is-warning">{{ $t('files.directory') }}</span>
-                <span v-else class="status-chip is-muted">{{ $t('files.file') }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'size'" :label="col.label" width="90">
-              <template #default="{ row }"><span class="cell-time">{{ formatSize(row.size) }}</span></template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'description'" prop="description" :label="col.label" min-width="180" show-overflow-tooltip />
-            <el-table-column v-else-if="col.key === 'tagged'" :label="col.label" width="80" align="center">
-              <template #default="{ row }">
-                <span v-if="row.tagged" class="status-chip is-live">{{ $t('common.yes') }}</span>
-                <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'batch_index'" :label="col.label" width="70" align="center">
-              <template #default="{ row }">
-                <router-link v-if="row.batch_index" :to="{ name: 'tasks', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
-                  class="cell-link cell-time">
-                  {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
-                </router-link>
-              </template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'new_path'" :label="col.label" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }"><span class="cell-time">{{ displayPath(row.new_path) }}</span></template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'executed_at'" :label="col.label" width="160">
-              <template #default="{ row }">
-                <template v-if="row.executed && row.executed_at">
-                  <span class="status-chip" :class="row.execute_mode === 'move' ? 'is-warning' : 'is-live'">{{ row.execute_mode }}</span>
-                  <span class="cell-time" style="margin-left: 6px">{{ row.executed_at?.slice(0, 16).replace('T', ' ') }}</span>
-                </template>
-              </template>
-            </el-table-column>
-            <el-table-column v-else-if="col.key === 'preview'" :label="col.label" width="60" align="center">
-              <template #default="{ row }">
-                <button v-if="row.file_type === 'file'" class="icon-button icon-button--sm" @click.stop="previewFile(row)">
-                  <el-icon :size="14"><View /></el-icon>
-                </button>
-              </template>
-            </el-table-column>
-          </template>
-          <template #empty>
-            <div class="empty-state-card empty-state-card--inline">
-              <div class="empty-state-card__icon">
-                <el-icon :size="24"><Search /></el-icon>
-              </div>
-              <div class="empty-state-card__text">
-                <h4 class="empty-state-card__title">{{ $t('files.title') }}</h4>
-              </div>
-            </div>
-          </template>
-        </el-table>
-      </section>
+        <footer v-if="total > pageSize" class="page-pager files-pager">
+          <el-pagination
+            layout="total, prev, pager, next" :total="total" :page-size="pageSize"
+            v-model:current-page="page" @current-change="loadFiles" background />
+        </footer>
 
-      <footer v-if="total > pageSize" class="page-pager files-pager">
-        <el-pagination
-          layout="total, prev, pager, next" :total="total" :page-size="pageSize"
-          v-model:current-page="page" @current-change="loadFiles" background />
-      </footer>
-
-      <!-- Selection action bar -->
-      <div v-if="selectedFiles.length > 0" class="selection-bar">
-        <span>{{ $t('files.instructSelected', { count: selectedFiles.length }) }}</span>
-        <el-button type="primary" size="small" @click="instructDialogVisible = true">
-          <el-icon style="margin-right: 4px"><MagicStick /></el-icon>{{ $t('files.instruct') }}
-        </el-button>
+        <!-- Selection action bar -->
+        <div v-if="selectedFiles.length > 0" class="selection-bar">
+          <span>{{ $t('files.instructSelected', { count: selectedFiles.length }) }}</span>
+          <el-button type="primary" size="small" @click="instructDialogVisible = true">
+            <el-icon style="margin-right: 4px"><MagicStick /></el-icon>{{ $t('files.instruct') }}
+          </el-button>
+        </div>
       </div>
     </div>
+
+    <!-- Category management drawer (moved off the main browsing area) -->
+    <el-drawer append-to-body v-model="catDrawerVisible" :title="$t('files.categoryManagement')" size="420px" direction="rtl">
+      <div class="cat-actions">
+        <el-button size="small" @click="handleExportCategories">{{ $t('categories.exportCategories') }}</el-button>
+        <el-button size="small" @click="triggerImportCategories">{{ $t('categories.importCategories') }}</el-button>
+        <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportCategories" />
+        <el-button size="small" type="primary" @click="openCatDialog()">{{ $t('categories.addCategory') }}</el-button>
+      </div>
+      <div class="cat-list">
+        <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
+        <div v-for="cat in categories" :key="cat.id"
+          class="cat-item" :class="{ 'is-active': categoryFilter === cat.path }"
+          @click="setCategoryFilter(cat.path)">
+          <div class="cat-item__main">
+            <div class="cat-item__name">
+              <span>{{ cat.name }}</span>
+              <span v-if="cat.agent_created" class="status-chip is-accent" style="height: 18px; padding: 0 8px">AI</span>
+            </div>
+            <div class="cat-item__path">{{ cat.path }}</div>
+          </div>
+          <div class="cat-item__actions">
+            <button class="icon-button icon-button--sm" @click.stop="openCatDialog(cat)"><el-icon :size="14"><Edit /></el-icon></button>
+            <button class="icon-button icon-button--sm is-danger" @click.stop="handleDeleteCat(cat.id)"><el-icon :size="14"><Delete /></el-icon></button>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
 
     <!-- Category CRUD dialog -->
     <el-dialog append-to-body v-model="catDialogVisible" :title="editingCatId ? $t('categories.editCategory') : $t('categories.addCategory')" width="500px">
@@ -327,7 +349,7 @@ const columnLabels: Record<string, () => string> = {
 }
 function loadColumnPrefs(): ColumnDef[] {
   try {
-    const saved = JSON.parse(localStorage.getItem('fe_columns') || '[]') as { key: string; visible: boolean }[]
+    const saved = JSON.parse(localStorage.getItem('fe_columns_v2') || '[]') as { key: string; visible: boolean }[]
     if (saved.length > 0) {
       const result: ColumnDef[] = []
       for (const s of saved) {
@@ -348,7 +370,7 @@ function loadColumnPrefs(): ColumnDef[] {
 const allColumns = ref<ColumnDef[]>(loadColumnPrefs())
 const visibleColumns = computed(() => allColumns.value.filter(c => c.visible))
 function saveColumnPrefs() {
-  localStorage.setItem('fe_columns', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
+  localStorage.setItem('fe_columns_v2', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
 }
 
 const loaded = ref(false)
@@ -372,8 +394,21 @@ const treeData = ref<TreeNode[]>([])
 const catDialogVisible = ref(false)
 const editingCatId = ref<number | null>(null)
 const catForm = ref({ name: '', path: '', structure: '', description: '', agent_editable: false })
+// Unified nav pane: directory tree / category tree in one foldable sidebar;
+// category management lives in a drawer off the main browsing area.
+const navTab = ref<'dirs' | 'cats'>('dirs')
+const navFolded = ref(false)
+const catDrawerVisible = ref(false)
 
-// Selection is mirrored into the URL (?fs=N&session=N) so dashboard / session
+// Directory rows drill into the table (same as clicking the tree node);
+// files open the edit drawer instead.
+function drillDir(row: FileEntry) {
+  currentPath.value = row.original_path
+  page.value = 1
+  loadFiles()
+}
+
+// Selection is mirrored into the URL (?fs=N&session=N) so session
 // center CTAs land with the right context preselected.
 onMounted(async () => {
   const res = await listFilesystems()
@@ -665,12 +700,12 @@ async function previewFile(file: FileEntry) {
 </script>
 
 <style scoped>
-.files-row {
+.files-page {
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  gap: 14px;
   flex: 1;
   min-height: 0;
-  align-items: stretch;
 }
 
 .files-empty {
@@ -678,58 +713,107 @@ async function previewFile(file: FileEntry) {
   justify-content: center;
 }
 
-/* ===== Left sidebar ===== */
-.files-side {
-  width: 340px;
-  flex-shrink: 0;
+/* ===== Single compact toolbar (never wraps) ===== */
+.files-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-}
-
-.side-card {
-  padding: 18px;
-  gap: 12px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
   border-radius: var(--radius-lg);
+  overflow-x: auto;
+  flex-shrink: 0;
 }
 
-.side-card--fill {
+.files-toolbar > * {
+  flex-shrink: 0;
+}
+
+.tb-fs { width: 172px; }
+.tb-session { width: 140px; }
+.tb-search { width: 160px; }
+.tb-filter { width: 100px; }
+.tb-category { width: 132px; }
+.tb-spacer { flex: 1 1 auto; }
+
+/* ===== Body: unified nav + main table ===== */
+.files-body {
+  display: flex;
+  gap: 14px;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
 }
 
-.side-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+.files-nav {
+  width: 264px;
   flex-shrink: 0;
-}
-
-.tree-pane {
-  width: 240px;
-  flex-shrink: 0;
-  padding: 18px;
-  gap: 12px;
+  padding: 12px;
   border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   overflow: hidden;
+  transition: width var(--duration-base) var(--ease-spring), padding var(--duration-base) var(--ease-spring);
 }
 
-.tree-scroll {
+.files-nav.is-folded {
+  width: 44px;
+  padding: 12px 6px;
+}
+
+.files-nav__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.files-nav__head .el-tabs {
+  flex: 1;
+}
+
+.rail-toggle--sm {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.files-nav__scroll {
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
 }
 
+.cat-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.current-path-tag {
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
+.cell-muted {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.name-cell--drill {
+  color: var(--accent);
+}
+
 .cat-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   margin-bottom: 8px;
+}
+
+.cat-actions .el-button {
+  margin-left: 0;
 }
 
 .cat-list {

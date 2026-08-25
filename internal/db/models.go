@@ -100,18 +100,22 @@ type ScanSession struct {
 }
 
 type ModelProvider struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	Name          string    `gorm:"uniqueIndex;size:256" json:"name"`
-	Provider      string    `gorm:"size:32" json:"provider"` // openai / claude / ollama
-	APIKey        string    `gorm:"size:512" json:"-"`
-	Model         string    `gorm:"size:256" json:"model"`
-	BaseURL       string    `gorm:"size:512" json:"base_url"`
-	Temperature   float64   `json:"temperature"`
-	MaxTokens     int       `json:"max_tokens"`                          // output completion cap passed to the LLM API
-	ContextWindow int       `json:"context_window"`                      // model context window in tokens (drives compaction thresholds)
-	VisionEnabled bool      `gorm:"default:false" json:"vision_enabled"` // model can read images (gates the view_image tool)
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uint    `gorm:"primaryKey" json:"id"`
+	Name          string  `gorm:"uniqueIndex;size:256" json:"name"`
+	Provider      string  `gorm:"size:32" json:"provider"` // openai / claude / ollama
+	APIKey        string  `gorm:"size:512" json:"-"`
+	Model         string  `gorm:"size:256" json:"model"`
+	BaseURL       string  `gorm:"size:512" json:"base_url"`
+	Temperature   float64 `json:"temperature"`
+	MaxTokens     int     `json:"max_tokens"`     // output completion cap passed to the LLM API
+	ContextWindow int     `json:"context_window"` // model context window in tokens (drives compaction thresholds)
+	// ReasoningEffort is passed through to OpenAI-compatible APIs as
+	// reasoning_effort: "" keeps the model default, low/medium/high override
+	// it (e.g. low cuts kimi-k3 thinking tokens ~85% on tool-heavy runs).
+	ReasoningEffort string    `gorm:"size:16" json:"reasoning_effort"`
+	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"` // model can read images (gates the view_image tool)
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // DefaultContextWindow is the fallback context window (tokens) used when a
@@ -146,6 +150,11 @@ type AgentLog struct {
 // statuses ("error: ...") must be truncated with TruncateStatus before saving
 // so MySQL strict mode does not reject over-long values.
 const StatusMaxLen = 255
+
+// JunkBatchIndex is the sentinel batch_index stamped on entries the autotag
+// junk filter auto-ignored (system files like .DS_Store, @eaDir) without an
+// agent batch. It distinguishes them from agent-tagged rows for reporting.
+const JunkBatchIndex = -1
 
 // TruncateStatus truncates s to StatusMaxLen runes for safe storage in
 // ScanSession.Status.

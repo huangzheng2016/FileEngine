@@ -60,14 +60,33 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 // are expected deltas — container directories are described but deliberately
 // left untagged so their children can be classified on their own, and symlinks
 // never participate in tagging. Only a non-zero file count signals real
-// misses, which the failure section above then explains.
-func untaggedReconciliationSection(b db.UntaggedBreakdown) string {
+// misses, which the failure section above then explains. ignored reports how
+// many entries the junk filter auto-ignored without spending agent tokens.
+func untaggedReconciliationSection(b db.UntaggedBreakdown, ignored int64) string {
 	miss := ""
 	if b.Files > 0 {
 		miss = "；未打标文件不为 0 表示存在漏标，原因见失败批次与日志"
 	}
-	return fmt.Sprintf("\n## 打标对账\n\n- 未打标剩余：文件 %d / 目录 %d / 软链 %d（容器目录与软链属正常差额：容器只描述不打标、软链不参与打标%s）\n",
-		b.Files, b.Directories, b.Symlinks, miss)
+	junk := ""
+	if ignored > 0 {
+		junk = fmt.Sprintf("；已自动忽略系统垃圾文件 %d 项", ignored)
+	}
+	return fmt.Sprintf("\n## 打标对账\n\n- 未打标剩余：文件 %d / 目录 %d / 软链 %d（容器目录与软链属正常差额：容器只描述不打标、软链不参与打标%s%s）\n",
+		b.Files, b.Directories, b.Symlinks, miss, junk)
+}
+
+// emptyCategoryPruneSection records the AI-created empty categories pruned at
+// run end ("建了不用" — created but never used). Empty input renders nothing.
+func emptyCategoryPruneSection(pruned []string) string {
+	if len(pruned) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\n## 空分类清理（%d）\n\n", len(pruned)))
+	for _, p := range pruned {
+		sb.WriteString(fmt.Sprintf("- %s：AI 创建但零归入，已自动删除\n", p))
+	}
+	return sb.String()
 }
 
 // failureReportSection renders the failed-batch section appended to a tagging

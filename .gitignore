@@ -38,3 +38,8 @@ wails/bin/backend.bin
 
 # Temp files
 temp
+
+# Docker test environment (secrets + persistent runtime data)
+deploy/.env
+deploy/data/
+deploy/runs/
