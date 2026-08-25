@@ -60,7 +60,7 @@
             <div v-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
               <div class="msg-meta">
                 <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
-                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
                 <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑ {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
               </div>
               <div class="msg-bubble">
@@ -87,7 +87,7 @@
                 <span v-if="step.pending" class="status-chip is-warning">{{ $t('logs.toolRunning') }}</span>
                 <span v-else-if="step.ok === true" class="status-chip is-live">{{ $t('logs.toolOk') }}</span>
                 <span v-else-if="step.ok === false" class="status-chip is-danger">{{ $t('logs.toolFailed') }}</span>
-                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
                 <span class="tool-toggles">
                   <button v-if="step.input" class="link-button" @click.stop="toggleStepDetail(step, 'input')">
                     {{ $t('logs.input') }} {{ stepDetail[step.key + '_input'] ? '▾' : '▸' }}

@@ -252,7 +252,7 @@ async function handleTest() {
   testing.value = true
   try {
     const res = await testModelProviderConnection(form.value)
-    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
+    if (res.data.success) ElMessage.success(t('models.connOk'))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Test failed')
@@ -266,7 +266,7 @@ async function handleTestExisting(m: ModelProvider) {
   try {
     const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens, reasoning_effort: m.reasoning_effort || '' }
     const res = await testModelProviderConnection(data)
-    if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
+    if (res.data.success) ElMessage.success(t('models.connOk'))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || 'Test failed')
