@@ -61,3 +61,40 @@ func TestAgentDefaultsStillApplied(t *testing.T) {
 		t.Fatalf("agent defaults not applied: %+v", cfg.Agent)
 	}
 }
+
+// The empty-DSN default follows the driver: PostgreSQL gets a libpq-style
+// DSN, sqlite/mysql keep the historical SQLite file default.
+func TestDatabaseDSNDefaultFollowsDriver(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"unset driver", "", "fileengine.db"},
+		{"sqlite", "database:\n  driver: sqlite\n", "fileengine.db"},
+		{"mysql", "database:\n  driver: mysql\n", "fileengine.db"},
+		{"postgres", "database:\n  driver: postgres\n", "host=localhost port=5432 user=postgres dbname=fileengine sslmode=disable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tc.yaml))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if cfg.Database.DSN != tc.want {
+				t.Fatalf("default DSN: got %q, want %q", cfg.Database.DSN, tc.want)
+			}
+		})
+	}
+}
+
+// An explicit DSN is never replaced by the driver default.
+func TestDatabaseExplicitDSNPreserved(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "database:\n  driver: postgres\n  dsn: postgres://u:p@db.internal:5433/fe?sslmode=require\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Database.DSN != "postgres://u:p@db.internal:5433/fe?sslmode=require" {
+		t.Fatalf("explicit DSN overwritten: got %q", cfg.Database.DSN)
+	}
+}

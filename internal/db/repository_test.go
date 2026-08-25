@@ -268,3 +268,83 @@ func TestTaggedStatusByIDs(t *testing.T) {
 		t.Fatalf("empty ids: got %v, %v", got, err)
 	}
 }
+
+// LIKE wildcards in directory names must match literally: marking children of
+// "in/my_dir" must not cascade into the sibling "in/myXdir" (an unescaped '_'
+// is a single-character wildcard in every dialect).
+func TestMarkChildrenTaggedLiteralUnderscore(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	entries := []FileEntry{
+		{ScanSessionID: 1, OriginalPath: "in/my_dir", Name: "my_dir", FileType: "directory"},
+		{ScanSessionID: 1, OriginalPath: "in/my_dir/a.txt", Name: "a.txt", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/myXdir", Name: "myXdir", FileType: "directory"},
+		{ScanSessionID: 1, OriginalPath: "in/myXdir/b.txt", Name: "b.txt", FileType: "file"},
+	}
+	for _, f := range entries {
+		fe := f
+		if err := r.CreateFile(&fe); err != nil {
+			t.Fatalf("create file %s: %v", f.OriginalPath, err)
+		}
+	}
+
+	if err := r.MarkChildrenTagged(1, "in/my_dir", 1); err != nil {
+		t.Fatalf("MarkChildrenTagged: %v", err)
+	}
+
+	tagged, err := r.IsFileTagged(1, "in/my_dir/a.txt")
+	if err != nil {
+		t.Fatalf("IsFileTagged a.txt: %v", err)
+	}
+	if !tagged {
+		t.Fatal("child of my_dir must be tagged")
+	}
+	sibling, err := r.IsFileTagged(1, "in/myXdir/b.txt")
+	if err != nil {
+		t.Fatalf("IsFileTagged b.txt: %v", err)
+	}
+	if sibling {
+		t.Fatal("sibling myXdir must NOT be tagged — '_' in my_dir leaked as a LIKE wildcard")
+	}
+}
+
+// Name search stays case-insensitive on SQLite (and must treat a literal '%'
+// in the query as text, not as a wildcard).
+func TestListFilesSearchCaseAndEscapes(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	for _, f := range []FileEntry{
+		{ScanSessionID: 1, OriginalPath: "in/Photo.JPG", Name: "Photo.JPG", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/100%.txt", Name: "100%.txt", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/1000x.txt", Name: "1000x.txt", FileType: "file"},
+	} {
+		fe := f
+		if err := r.CreateFile(&fe); err != nil {
+			t.Fatalf("create file %s: %v", f.OriginalPath, err)
+		}
+	}
+
+	files, total, err := r.ListFiles(FileQuery{SessionID: 1, Search: "photo"})
+	if err != nil {
+		t.Fatalf("ListFiles search photo: %v", err)
+	}
+	if total != 1 || len(files) != 1 || files[0].Name != "Photo.JPG" {
+		t.Fatalf("case-insensitive search: got total=%d files=%v", total, files)
+	}
+
+	files, total, err = r.ListFiles(FileQuery{SessionID: 1, Search: "100%"})
+	if err != nil {
+		t.Fatalf("ListFiles search 100%%: %v", err)
+	}
+	if total != 1 || len(files) != 1 || files[0].Name != "100%.txt" {
+		t.Fatalf("literal %% search must match only 100%%.txt: got total=%d files=%v", total, files)
+	}
+}

@@ -154,11 +154,14 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - The old WebSocket endpoint `GET /logs/stream` was removed — its broadcast source never reached tagging workers or instruct runs (dead live channel). Use the SSE stream instead.
 
 ### Database
-- SQLite (default) or MySQL, configured in `config.yaml`
+- Three dialects, selected by `database.driver` in `config.yaml`: `sqlite` (default), `mysql`, `postgres`. The DSN format follows the driver: file path for SQLite, go-sql-driver DSN for MySQL (`user:pass@tcp(host:3306)/dbname`), libpq keyword/value string or `postgres://` URL for PostgreSQL (e.g. `host=localhost port=5432 user=postgres password=... dbname=fileengine sslmode=disable`)
 - SQLite optimized: WAL mode, busy_timeout=30s, _txlock=immediate, MaxOpenConns=1 (single writer), mmap_size=256MB
 - `db.WithRetry()` wraps write operations with retry on "database is locked"
 - Composite indexes defined via GORM struct tags (not separate migration files)
 - Key indexes: `idx_uniq_session_path`, `idx_session_type_tagged_depth`, `idx_session_parent`, `idx_session_op_exec`
+- LIKE semantics are unified in `internal/db/dialect.go`: path-prefix matches (`original_path`/`new_path` under `path/`) are intentionally case-sensitive exact prefixes — plain LIKE is correct on all dialects because paths come from the same scanner — while user-facing name search must be case-insensitive, so PostgreSQL uses `ILIKE` (its LIKE is case-sensitive, unlike SQLite ASCII / MySQL `*_ci`). All LIKE patterns escape `%`/`_` with `ESCAPE '!'` (a backslash escape would need dialect-specific quoting in the clause itself), so wildcard characters in directory names or search text match literally
+- AutoMigrate runs on startup for all dialects; on PostgreSQL it creates fresh tables cleanly, but altering column types on an existing PG database is strict — schema changes on live PG deployments need manual migration
+- PostgreSQL-specific behavior is covered by `TestPostgresDialectSemantics` in `internal/db/postgres_integration_test.go`, skipped unless `FILEENGINE_TEST_PG_DSN` is set (point it at a scratch database — the test drops tables)
 
 ### Eino Framework
 - Agent: `adk.NewChatModelAgent()` creates a ReAct agent (see `internal/agent/adk.go`); executed via `adk.Runner`, `MaxIterations` caps the tool-call rounds per run
@@ -183,7 +186,8 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | Entry point | `main.go` |
 | All API routes | `internal/api/server.go` (setupRouter) |
 | DB models + indexes | `internal/db/models.go` |
-| DB init + SQLite opts | `internal/db/db.go` |
+| DB init + dialect selection | `internal/db/db.go` |
+| LIKE dialect helpers (escape, ILIKE) | `internal/db/dialect.go` |
 | All DB queries | `internal/db/repository.go` |
 | Session event bus + SSE protocol types | `internal/db/events.go` |
 | SSE endpoint + run event helpers | `internal/api/handler_events.go` |

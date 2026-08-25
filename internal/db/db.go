@@ -9,6 +9,7 @@ import (
 	"FileEngine/internal/config"
 
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -25,6 +26,8 @@ func Init(cfg config.DatabaseConfig) error {
 		dialector = sqlite.Open(dsn)
 	case "mysql":
 		dialector = mysql.Open(cfg.DSN)
+	case "postgres":
+		dialector = postgres.Open(cfg.DSN)
 	default:
 		return fmt.Errorf("unsupported database driver: %s", cfg.Driver)
 	}
