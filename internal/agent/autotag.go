@@ -70,6 +70,18 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 		return fmt.Errorf("create model: %w", err)
 	}
 
+	// Auto-ignore well-known system junk before any dispatch: no batch, no
+	// tokens, and the rows stop polluting the untagged queues (the ignored
+	// count lands in the run reconciliation via the JunkBatchIndex sentinel).
+	if !config.Get().Agent.JunkFilterDisabled {
+		if n, err := a.repo.MarkJunkEntries(a.sessionID, junkFileNames, junkDirNames); err != nil {
+			log.Printf("junk filter: %v (continuing)", err)
+		} else if n > 0 {
+			log.Printf("junk filter: auto-ignored %d system junk entries", n)
+			a.emitTagProgress(0)
+		}
+	}
+
 	// Get max depth
 	maxDepth, err := a.repo.GetMaxDepth(a.sessionID)
 	if err != nil {

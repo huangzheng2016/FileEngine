@@ -421,6 +421,52 @@ func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string
 	})
 }
 
+// MarkJunkEntries auto-ignores well-known system junk before tagging: files
+// whose base name matches fileNames (ASCII-lowered) or the AppleDouble "._*"
+// prefix, and directories matching dirNames with all their descendants.
+// Matched rows are flipped to tagged with the JunkBatchIndex sentinel and an
+// explanatory description, so they never reach an agent batch. Returns the
+// number of rows ignored.
+func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []string) (int64, error) {
+	var total int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND tagged = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+likeEscapeClause+")", sessionID, false, fileNames).
+			Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾文件（自动忽略）"})
+		if res.Error != nil {
+			return res.Error
+		}
+		total += res.RowsAffected
+
+		var dirs []FileEntry
+		if err := tx.Where("scan_session_id = ? AND tagged = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, false, dirNames).
+			Find(&dirs).Error; err != nil {
+			return err
+		}
+		for _, d := range dirs {
+			res := tx.Model(&FileEntry{}).
+				Where("scan_session_id = ? AND tagged = ? AND (original_path = ? OR original_path LIKE ?"+likeEscapeClause+")", sessionID, false, d.OriginalPath, childPathPattern(d.OriginalPath)).
+				Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾目录（自动忽略）"})
+			if res.Error != nil {
+				return res.Error
+			}
+			total += res.RowsAffected
+		}
+		return nil
+	})
+	return total, err
+}
+
+// CountIgnoredJunk returns how many entries the junk filter has auto-ignored
+// in this session (the JunkBatchIndex sentinel rows).
+func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
+	var n int64
+	err := r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND batch_index = ?", sessionID, JunkBatchIndex).
+		Count(&n).Error
+	return n, err
+}
+
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
 // whose new_path falls under the given category path, across all sessions of a filesystem.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {

@@ -67,9 +67,14 @@ type AgentConfig struct {
 	// run_script guardrails (only reachable when ScanSession.AllowScript is on).
 	// ScriptTimeout is per script execution and deliberately independent of
 	// AgentTimeout: agent runs are unlimited by default, scripts never are.
-	ScriptMaxSize       int `yaml:"script_max_size" json:"script_max_size"`               // max script source bytes
-	ScriptTimeout       int `yaml:"script_timeout" json:"script_timeout"`                 // seconds per script run
-	ScriptMaxResultSize int `yaml:"script_max_result_size" json:"script_max_result_size"` // max bytes of print output and of return value, each
+	ScriptMaxSize       int  `yaml:"script_max_size" json:"script_max_size"`               // max script source bytes
+	ScriptTimeout       int  `yaml:"script_timeout" json:"script_timeout"`                 // seconds per script run
+	ScriptMaxResultSize int  `yaml:"script_max_result_size" json:"script_max_result_size"` // max bytes of print output and of return value, each
+	// JunkFilterDisabled turns off the default system-junk auto-ignore
+	// (.DS_Store/Thumbs.db/desktop.ini/._*/@eaDir/__MACOSX/$RECYCLE.BIN …):
+	// when false (default) such entries are marked tagged without an agent
+	// batch — no tokens spent — and reported in the run reconciliation.
+	JunkFilterDisabled bool `yaml:"junk_filter_disabled" json:"junk_filter_disabled"`
 }
 
 var (

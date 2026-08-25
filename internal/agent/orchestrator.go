@@ -135,11 +135,15 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	report += failureReportSection(failures)
 	// Reconciliation: split the untagged remainder by entry type so the
 	// expected deltas (container dirs, symlinks) are distinguishable from
-	// real tagging misses (files).
+	// real tagging misses (files); junk-filter ignores are reported too.
+	var ignored int64
+	if n, err := o.repo.CountIgnoredJunk(o.sessionID); err == nil {
+		ignored = n
+	}
 	if breakdown, err := o.repo.CountUntaggedByType(o.sessionID); err != nil {
 		log.Printf("orchestrator: untagged reconciliation failed: %v", err)
 	} else {
-		report += untaggedReconciliationSection(breakdown)
+		report += untaggedReconciliationSection(breakdown, ignored)
 	}
 	return report, nil
 }

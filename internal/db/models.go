@@ -151,6 +151,11 @@ type AgentLog struct {
 // so MySQL strict mode does not reject over-long values.
 const StatusMaxLen = 255
 
+// JunkBatchIndex is the sentinel batch_index stamped on entries the autotag
+// junk filter auto-ignored (system files like .DS_Store, @eaDir) without an
+// agent batch. It distinguishes them from agent-tagged rows for reporting.
+const JunkBatchIndex = -1
+
 // TruncateStatus truncates s to StatusMaxLen runes for safe storage in
 // ScanSession.Status.
 func TruncateStatus(s string) string {

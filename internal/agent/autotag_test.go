@@ -180,18 +180,23 @@ func TestRecheckBatchTagged(t *testing.T) {
 // The reconciliation line splits the untagged remainder by entry type and only
 // flags files (dirs/symlinks are expected deltas).
 func TestUntaggedReconciliationSection(t *testing.T) {
-	out := untaggedReconciliationSection(db.UntaggedBreakdown{Files: 3, Directories: 12, Symlinks: 2})
+	out := untaggedReconciliationSection(db.UntaggedBreakdown{Files: 3, Directories: 12, Symlinks: 2}, 0)
 	for _, want := range []string{"打标对账", "文件 3 / 目录 12 / 软链 2", "漏标"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("reconciliation missing %q:\n%s", want, out)
 		}
 	}
 
-	clean := untaggedReconciliationSection(db.UntaggedBreakdown{Directories: 5, Symlinks: 1})
+	clean := untaggedReconciliationSection(db.UntaggedBreakdown{Directories: 5, Symlinks: 1}, 0)
 	if !strings.Contains(clean, "文件 0 / 目录 5 / 软链 1") {
 		t.Fatalf("counts missing:\n%s", clean)
 	}
 	if strings.Contains(clean, "漏标") {
 		t.Fatalf("zero untagged files must not raise the miss warning:\n%s", clean)
+	}
+
+	withJunk := untaggedReconciliationSection(db.UntaggedBreakdown{Directories: 5}, 7)
+	if !strings.Contains(withJunk, "已自动忽略系统垃圾文件 7 项") {
+		t.Fatalf("junk ignore count missing:\n%s", withJunk)
 	}
 }
