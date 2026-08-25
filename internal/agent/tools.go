@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -117,6 +118,20 @@ type CreateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	// SimilarCategories lists fuzzy lookalikes found after a successful
+	// creation (path overlap/containment) — reference info for the model to
+	// judge whether a merge is warranted; empty when there are none.
+	SimilarCategories []SimilarCategoryItem `json:"similar_categories,omitempty"`
+	Guidance          string                `json:"guidance,omitempty"`
+}
+
+// SimilarCategoryItem is one fuzzy-similar existing category attached to a
+// successful create_category result.
+type SimilarCategoryItem struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	FileCount int64  `json:"file_count"`
+	Reason    string `json:"reason"`
 }
 
 type UpdateCategoryInput struct {
@@ -155,6 +170,9 @@ type ToolBuilder struct {
 	// (ModelProvider.VisionEnabled); view_image is registered only when it and
 	// ScanSession.AllowVision are both on.
 	modelVisionEnabled bool
+	// guard remembers the category-set snapshot this worker's agent last saw
+	// and backs the create_category guard rails (see category_guard.go).
+	guard categoryGuard
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -226,7 +244,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化会被拒绝并返回最新列表；同名（含大小写变体）或同路径的重复创建会被拒绝。创建成功时若存在路径重叠的相似分类，返回值会附 similar_categories 参考，请评估是否归并", tb.createCategory)
 		if err != nil {
 			return nil, fmt.Errorf("build create_category: %w", err)
 		}
@@ -308,7 +326,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "创建新分类目录", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；同名（含大小写变体）或同路径的重复会被拒绝；创建成功时可能附 similar_categories 相似参考，请评估归并", tb.createCategory)
 		if err != nil {
 			return nil, err
 		}
@@ -330,17 +348,18 @@ func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-// validateFSPath checks that a target/category path is a legal, root-confined
+// ValidateFSPath checks that a target/category path is a legal, root-confined
 // slash path. The executor resolves stored paths against the filesystem root
 // (RemoteFS BasePath), so anything that could escape that root is rejected
-// here instead of being written to the DB. Rules:
+// here instead of being written to the DB. It is shared by the agent tool
+// layer and the REST category handlers so neither can bypass it. Rules:
 //   - "" is allowed for set_target (clears the target); callers reject it for
 //     category paths via their own required-field handling
 //   - no NUL bytes
 //   - no ".." segments (absolute-form paths like "/../etc" would escape the
 //     root on SFTP-style backends that treat leading "/" as host-absolute)
 //   - must name an entry — the bare root ("/", ".") is not a valid target
-func validateFSPath(p string) error {
+func ValidateFSPath(p string) error {
 	if p == "" {
 		return nil
 	}
@@ -546,6 +565,14 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 		}
 	}
 
+	// The agent is receiving the category list — record its snapshot for the
+	// create_category version guard.
+	names := make([]string, len(cats))
+	for i, c := range cats {
+		names[i] = c.Name
+	}
+	tb.guard.note(names)
+
 	out := &ListCategoriesOutput{Categories: items}
 	tb.logger.LogToolCall("list_categories", input, out)
 	return out, nil
@@ -556,7 +583,7 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
-	if err := validateFSPath(input.NewPath); err != nil {
+	if err := ValidateFSPath(input.NewPath); err != nil {
 		return nil, fmt.Errorf("invalid new_path: %w", err)
 	}
 
@@ -591,11 +618,53 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 
 	// Category paths become new_path prefixes for planned files; apply the
 	// same root-confinement rules as set_target.
-	if err := validateFSPath(input.Path); err != nil || input.Path == "" {
+	if err := ValidateFSPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
 		}
 		return nil, fmt.Errorf("invalid category path: %w", err)
+	}
+
+	// Fresh category state feeds both guard rails below (and its per-category
+	// file counts feed the reference info in rejections).
+	usages, err := tb.repo.GetCategoryUsageSummary(tb.filesystemID, tb.sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("create category: read current categories: %w", err)
+	}
+	names := make([]string, len(usages))
+	for i, u := range usages {
+		names[i] = u.Name
+	}
+
+	// Version guard: creation is only allowed from a category list the agent
+	// has just seen (batch-prompt summary or list_categories). If the set
+	// changed since — or the agent never saw one — reject and hand back the
+	// latest complete list. The rejection doubles as the agent's re-read, so
+	// it is also recorded as the new snapshot: a retry decided from that list
+	// passes (unless the set changed again).
+	if lastFP, seen := tb.guard.last(); !seen || lastFP != categoryFingerprint(names) {
+		tb.guard.note(names)
+		list := strings.TrimSpace(buildCategorySummary(usages))
+		if list == "" {
+			list = "（当前没有任何分类）"
+		}
+		return nil, fmt.Errorf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
+	}
+
+	// Similarity guard, two classes: objective duplicates (normalized identical
+	// name or path) are hard-rejected with the existing category as reference;
+	// fuzzy lookalikes (path containment/prefix overlap) never block — the
+	// creation proceeds and they are attached to the result as reference info
+	// so the model itself can judge whether to merge.
+	hard, soft := findSimilarCategories(usages, input.Name, input.Path)
+	if len(hard) > 0 {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("已存在相同分类（名称或路径重复），拒绝创建 %q (%s)：\n", input.Name, input.Path))
+		for _, s := range hard {
+			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项（%s）\n", s.usage.Name, s.usage.Path, s.usage.FileCount, s.reason))
+		}
+		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不同的名称和路径")
+		return nil, errors.New(sb.String())
 	}
 
 	cat := &db.Category{
@@ -614,7 +683,23 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 		return nil, fmt.Errorf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
 	}
 
+	// The agent knows the post-create set (its snapshot plus its own
+	// creation), so back-to-back creations are not re-challenged; a change
+	// made by anyone else still mismatches and forces a re-read.
+	tb.guard.note(append(names, cat.Name))
+
 	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
+	for _, s := range soft {
+		out.SimilarCategories = append(out.SimilarCategories, SimilarCategoryItem{
+			Name:      s.usage.Name,
+			Path:      s.usage.Path,
+			FileCount: s.usage.FileCount,
+			Reason:    s.reason,
+		})
+	}
+	if len(out.SimilarCategories) > 0 {
+		out.Guidance = "提示：存在路径重叠的相似分类（见 similar_categories）。若语义重复，请改用 set_target 把文件归入现有分类（或用 update_category/delete_category 归并）；确认确有必要则无需处理"
+	}
 	tb.logger.LogToolCall("create_category", input, out)
 	return out, nil
 }
@@ -638,7 +723,7 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	// A changed category path cascades into planned files' new_path; apply the
 	// same root-confinement rules as set_target.
 	if input.NewPath != "" {
-		if err := validateFSPath(input.NewPath); err != nil {
+		if err := ValidateFSPath(input.NewPath); err != nil {
 			return nil, fmt.Errorf("invalid new_path: %w", err)
 		}
 	}

@@ -21,8 +21,8 @@ func TestValidateFSPath(t *testing.T) {
 		"relative/dir",
 	}
 	for _, p := range valid {
-		if err := validateFSPath(p); err != nil {
-			t.Fatalf("validateFSPath(%q): got error %v, want nil", p, err)
+		if err := ValidateFSPath(p); err != nil {
+			t.Fatalf("ValidateFSPath(%q): got error %v, want nil", p, err)
 		}
 	}
 
@@ -38,13 +38,13 @@ func TestValidateFSPath(t *testing.T) {
 		"a/b/../../../c",
 	}
 	for _, p := range invalid {
-		if err := validateFSPath(p); err == nil {
-			t.Fatalf("validateFSPath(%q): got nil, want error", p)
+		if err := ValidateFSPath(p); err == nil {
+			t.Fatalf("ValidateFSPath(%q): got nil, want error", p)
 		}
 	}
 
-	if err := validateFSPath("a\x00b"); err == nil {
-		t.Fatal("validateFSPath with NUL byte: got nil, want error")
+	if err := ValidateFSPath("a\x00b"); err == nil {
+		t.Fatal("ValidateFSPath with NUL byte: got nil, want error")
 	}
 }
 
@@ -132,6 +132,11 @@ func TestCategoryPathValidation(t *testing.T) {
 	}
 	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err == nil {
 		t.Fatal("createCategory with empty path: got nil error, want rejection")
+	}
+	// The version guard only lets create_category run against a list the agent
+	// has just seen — prime it via list_categories.
+	if _, err := tb.listCategories(context.Background(), &ListCategoriesInput{}); err != nil {
+		t.Fatalf("listCategories: %v", err)
 	}
 	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Good", Path: "/organized/good"}); err != nil {
 		t.Fatalf("createCategory valid: %v", err)

@@ -202,6 +202,10 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
 			log.Printf("worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
+		} else {
+			// The agent is about to see this list in the prompt — snapshot it
+			// for the create_category version guard.
+			toolBuilder.noteCategoryUsages(usages)
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildDirectoryPrompt(dir, catSummary)
@@ -364,6 +368,10 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
 			log.Printf("remaining worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
+		} else {
+			// The agent is about to see this list in the prompt — snapshot it
+			// for the create_category version guard.
+			toolBuilder.noteCategoryUsages(usages)
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildBatchPrompt(batch.files, catSummary)
