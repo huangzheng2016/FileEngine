@@ -121,6 +121,10 @@ tasks:
   title: 会话中心
   subtitle: 一个会话一屏：状态、进度与运行时间线
   newScan: 新建扫描
+  scanGroupSource: 扫哪里
+  scanGroupModel: 用哪个模型
+  scanGroupAdvanced: 高级选项（通常无需修改）
+  visionNotCapable: 该模型未开启视觉能力（可在模型管理中开启）
   filesystem: 文件系统
   selectFs: 选择一个文件系统
   selectFsRequired: 请选择文件系统

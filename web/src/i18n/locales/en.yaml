@@ -121,6 +121,10 @@ tasks:
   title: Session Center
   subtitle: "One session per screen: status, progress and run timeline"
   newScan: New Scan
+  scanGroupSource: Where to scan
+  scanGroupModel: Which model
+  scanGroupAdvanced: Advanced (usually no changes needed)
+  visionNotCapable: This model has no vision capability (enable it in Model Manager)
   filesystem: Filesystem
   selectFs: Select a filesystem
   selectFsRequired: Please select a filesystem
