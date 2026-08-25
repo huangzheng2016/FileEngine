@@ -65,7 +65,15 @@ func (a *DesktopApp) proxySSE(w http.ResponseWriter, r *http.Request) {
 	a.mu.RUnlock()
 
 	backendURL := fmt.Sprintf("http://127.0.0.1:%d%s?%s", port, r.URL.Path, r.URL.RawQuery)
-	resp, err := http.Get(backendURL)
+	// Tie the backend request to the client connection: when the client
+	// disconnects, r.Context() is canceled and resp.Body.Read unblocks,
+	// so the loop exits instead of leaking the backend SSE connection.
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, backendURL, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -80,7 +88,9 @@ func (a *DesktopApp) proxySSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				break // client disconnected
+			}
 			if flusher != nil {
 				flusher.Flush()
 			}
