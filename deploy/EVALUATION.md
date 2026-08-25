@@ -27,12 +27,16 @@
 | A | c=1，默认 effort，batch 50 | 19.6min | ~155 文件/min | 639K（补跑后 883K） | tagged_partial（3 批 NFS XID 失败） |
 | B | c=10，默认，batch 50 | 10.6min | ~286 文件/min | 912K | tagged（0 失败） |
 | C | c=10，low effort，batch 50 | 3.8min | ~800 文件/min | 588K | tagged_partial（4 批死于重复建分类） |
-| D | c=10，low，batch 200 + 全部新特性 | 4.1min | ~740 文件/min | 924K | **tagged**（0 失败，对账 文件0/目录10/软链0） |
+| D | c=10，low，batch 200 + 全部新特性 | 4.1min | ~740 文件/min | 924K | tagged（0 失败，对账干净） |
+| E | D + harness 连续模式 | ~3.0min | ~1010 文件/min | 888K | tagged（0 失败；见下注①） |
+| F | E + 级联清除警示 | ~3.5min | ~870 文件/min | 893K | **tagged**（0 失败，全量合理，最佳轮） |
 
 结论：
 1. **reasoning_effort=low ≈ 2.6× 吞吐**（800 vs 286 文件/min），completion token 约腰斩（48K→24K/轮）；实测代理真实生效（思考 token 924→151，-84%）。分类质量无可见退化（D 轮 42 项规划全部合理）
 2. c=10 vs c=1 ≈ 1.8×（API 延迟瓶颈）；NFS 互斥锁下 10 并发零 XID 错误
 3. token 结构：prompt 占绝对大头（约 97%），批次清单+分类摘要为主项；200/批与 50/批总 token 同量级，但调用次数更少
+4. **harness 连续模式**：worker 单长 run 自拉批（自动分片）→ list_categories 8→更低、create_category 22→14（跨批知识保留生效），吞吐再提 ~25%（D 740→E 1010 文件/min），覆盖零漏标。跨 worker 的分类集新鲜度由 create 护栏的版本指纹兜底（拒绝即重读，非致命）
+5. 注①：E 轮目录流程出现一次"父目录 set_target 级联清掉 7 个已规划子目录"的静默数据丢失（非 harness 路径，模型低思考下的判断失误）——催生了级联清除警示修复（4c1d9d0）；F 轮该警示触发 2 次，agent 据此恢复，7 个 MySQL 库目录全部正确归入
 
 ## 4. 分类质量评估（抽样）
 
@@ -56,6 +60,8 @@
 | e82ef25 | 护栏拒绝改为 success=false 结果（eino 工具错误致命→可恢复） | C 轮 4 死批 → D 轮 0 死批 |
 | 11c6699 | 空 AI 分类 run 结束自动清理+报告+prompt 纪律 | orchestrator 测试 |
 | 66c15ca | run_script 增 mark_tagged 内建；batch_size 默认 200（上限 500） | 脚本测试 + D 轮 |
+| c4107fd | **harness 连续模式**（散文件长 run 自拉批+自动分片+批次滚动+失败 token 归属） | 分片/滚动/prompt 测试 + E/F 轮实测 |
+| 4c1d9d0 | set_target 级联清除子项可视化（cleared_children+guidance） | 工具测试 + F 轮触发 2 次并恢复 |
 | 6918fe6 | tagged_partial 裸键修复+UI 可重跑 | 截图 01 |
 | 70365ac | 移除仪表盘，首页会话中心 | 截图 01 |
 | 02b89e0 | 表格操作列单排文字按钮+分类按钮组间距 | 截图 11/22 |
@@ -77,7 +83,7 @@
 
 ## 7. 已知限制与后续
 
-- **harness 连续模式**（散文件长 run 自拉批）：autotag 结构性改造，已报 tower 排期（UI 验收后），业主方向已记录
 - 扫描大树无进度可见性（内存累积+末尾单事务写入）——已报 finding（scanner 增量落库+并发遍历建议）
-- 配置页单位/危险警告、协议能力 tooltip（P2-11）等收尾项在 UX 队列
 - Photos/MobileBackup（28.7K 条）可做更大规模回归；vision 尚未开启评估
+- harness 模式下跨 worker 的分类集新鲜度：worker 启动时取一次分类摘要，之后靠 create 护栏版本指纹兜底（他 worker 新建导致指纹失配→拒绝即重读，非致命）；同类兜底归入"未分类"的概率可接受
+- 目录流程仍保留"1 目录 1 批"（业主定：散文件先行）；目录侧的连续化是后续候选
