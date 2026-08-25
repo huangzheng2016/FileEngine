@@ -4,8 +4,8 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElIcon } from 'element-plus'
 import {
-  FolderOpened, Connection, Cpu, Monitor, Document, Setting,
-  Moon, Sunny, Fold, Expand, SwitchFilled, Folder,
+  FolderOpened, Monitor, Setting,
+  Moon, Sunny, Fold, Expand, SwitchFilled, Folder, Odometer,
 } from '@element-plus/icons-vue'
 import { setLocale } from '../i18n'
 
@@ -22,15 +22,14 @@ function toggleTheme() {
 }
 
 const navItems = computed(() => [
-  { name: 'files', label: t('nav.files'), icon: FolderOpened, path: '/files' },
-  { name: 'filesystems', label: t('nav.filesystems'), icon: Connection, path: '/filesystems' },
-  { name: 'models', label: t('nav.models'), icon: Cpu, path: '/models' },
+  { name: 'dashboard', label: t('nav.dashboard'), icon: Odometer, path: '/dashboard' },
   { name: 'tasks', label: t('nav.tasks'), icon: Monitor, path: '/tasks' },
-  { name: 'logs', label: t('nav.logs'), icon: Document, path: '/logs' },
-  { name: 'config', label: t('nav.config'), icon: Setting, path: '/config' },
+  { name: 'files', label: t('nav.files'), icon: FolderOpened, path: '/files' },
+  { name: 'settings', label: t('nav.settings'), icon: Setting, path: '/settings' },
 ])
 
-const activeName = computed(() => route.name as string)
+// Settings section stays active for any /settings/* child route.
+const activeName = computed(() => (route.path.startsWith('/settings') ? 'settings' : (route.name as string)))
 const pageTitle = computed(() => (route.meta.title ? t(route.meta.title as string) : ''))
 
 const currentLangLabel = computed(() => (locale.value === 'zh-CN' ? '中文' : 'EN'))

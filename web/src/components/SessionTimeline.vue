@@ -1,128 +1,117 @@
 <template>
-  <section class="page-card run-card">
-    <!-- Header: session + status + metrics -->
-    <header class="page-header">
-      <div class="page-titles">
-        <span class="page-eyebrow">FileEngine</span>
-        <h2 class="page-heading">{{ $t('logs.title') }}</h2>
-        <p class="page-sub">{{ $t('logs.subtitle') }}</p>
-      </div>
-      <div class="page-actions">
-        <el-select v-model="sessionId" :placeholder="$t('logs.selectSession')" style="width: 300px" @change="onSessionChange">
-          <el-option v-for="s in sessions" :key="s.id" :label="formatSessionLabel(s)" :value="s.id" />
-        </el-select>
-        <span v-if="currentSession" class="status-chip" :class="statusChipClass(currentSession.status)">
-          <span v-if="isSessionActive" class="status-dot"></span>
-          {{ statusLabel(currentSession.status) }}
-        </span>
-        <span v-if="stream.connected.value" class="status-chip is-live">
-          <span class="status-dot"></span>{{ $t('logs.live') }}
-        </span>
-        <span v-else-if="sessionId" class="status-chip is-muted">{{ $t('logs.reconnecting') }}</span>
-      </div>
-    </header>
-
-    <div class="page-body run-body">
-      <div v-if="metricChips.length" class="metric-bar">
-        <span v-for="chip in metricChips" :key="chip.label" class="metric-chip">
-          <span class="metric-label">{{ chip.label }}</span>
-          <span class="metric-value">{{ chip.value }}</span>
-        </span>
-      </div>
-
-      <!-- Timeline -->
-      <div ref="scrollEl" class="timeline-scroll" @scroll="onScroll">
-        <div v-if="hasMore" class="load-earlier">
-          <button class="ghost-button ghost-button--sm" :disabled="loadingHistory" @click="loadEarlier">
-            {{ $t('logs.loadEarlier') }}
-          </button>
-        </div>
-
-        <div v-if="!displayGroups.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
-          <div class="empty-state-card__icon">
-            <el-icon :size="24"><Monitor /></el-icon>
-          </div>
-          <div class="empty-state-card__text">
-            <h4 class="empty-state-card__title">{{ sessionId ? $t('logs.noLogs') : $t('logs.noSessions') }}</h4>
-            <p class="empty-state-card__sub">{{ sessionId ? $t('logs.noLogsHint') : $t('logs.noSessionsHint') }}</p>
-          </div>
-        </div>
-
-        <div v-for="(group, gi) in displayGroups" :key="group.batch_index" :ref="el => setGroupRef(group.batch_index, el)" class="batch-group">
-          <div class="batch-header" @click="toggleGroup(group, gi)">
-            <el-icon class="batch-chevron" :class="{ 'is-open': !isCollapsed(group, gi) }"><ArrowDown /></el-icon>
-            <span class="batch-label">{{ groupLabel(group, gi) }}</span>
-            <span v-if="group.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
-            <span class="batch-meta cell-time">{{ $t('logs.stepCount', { count: group.steps.length }) }}</span>
-            <span v-if="group.tokenSum > 0" class="batch-meta cell-time">{{ group.tokenSum.toLocaleString() }} tok</span>
-            <span v-if="group.started_at" class="batch-meta cell-time">{{ formatTime(group.started_at) }}</span>
-          </div>
-
-          <div v-if="!isCollapsed(group, gi)" class="batch-steps">
-            <template v-for="step in group.steps" :key="step.key">
-              <!-- Chat message -->
-              <div v-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
-                <div class="msg-meta">
-                  <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
-                  <span v-if="step.time" class="cell-time">{{ step.time }}</span>
-                  <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑ {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
-                </div>
-                <div class="msg-bubble">
-                  <MarkdownView v-if="step.role === 'assistant'" :content="step.content" />
-                  <div v-else class="msg-text">{{ step.content }}</div>
-                </div>
-              </div>
-
-              <!-- Tool step -->
-              <div v-else class="tool-row">
-                <div class="tool-head" @click="toggleStepDetail(step)">
-                  <el-icon class="tool-icon" :class="{ 'is-spinning': step.pending }">
-                    <Loading v-if="step.pending" />
-                    <Tools v-else />
-                  </el-icon>
-                  <code class="tool-name">{{ step.tool_name }}</code>
-                  <span v-if="step.pending" class="status-chip is-warning">{{ $t('logs.toolRunning') }}</span>
-                  <span v-else-if="step.ok === true" class="status-chip is-live">{{ $t('logs.toolOk') }}</span>
-                  <span v-else-if="step.ok === false" class="status-chip is-danger">{{ $t('logs.toolFailed') }}</span>
-                  <span v-if="step.time" class="cell-time">{{ step.time }}</span>
-                  <span class="tool-toggles">
-                    <button v-if="step.input" class="link-button" @click.stop="toggleStepDetail(step, 'input')">
-                      {{ $t('logs.input') }} {{ stepDetail[step.key + '_input'] ? '▾' : '▸' }}
-                    </button>
-                    <button v-if="step.output" class="link-button" @click.stop="toggleStepDetail(step, 'output')">
-                      {{ $t('logs.output') }} {{ stepDetail[step.key + '_output'] ? '▾' : '▸' }}
-                    </button>
-                  </span>
-                </div>
-                <pre v-if="stepDetail[step.key + '_input']" class="tool-pre">{{ prettyJSON(step.key, 'input', step.input!) }}</pre>
-                <pre v-if="stepDetail[step.key + '_output']" class="tool-pre tool-pre--output">{{ prettyJSON(step.key, 'output', step.output!) }}</pre>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <!-- Scroll-to-latest -->
-      <transition name="fade">
-        <button v-if="!stickToBottom && displayGroups.length" class="scroll-latest" @click="scrollToBottom(true)">
-          <el-icon :size="14"><Bottom /></el-icon>{{ $t('logs.scrollToLatest') }}
-        </button>
-      </transition>
+  <div class="timeline-wrap">
+    <div class="timeline-toolbar">
+      <span class="metric-chip">
+        <span class="metric-label">{{ $t('logs.totalTokens') }}</span>
+        <span class="metric-value">{{ totalTokens.toLocaleString() }}</span>
+      </span>
+      <span v-if="stream.connected.value" class="status-chip is-live">
+        <span class="status-dot"></span>{{ $t('logs.live') }}
+      </span>
+      <span v-else class="status-chip is-muted">{{ $t('logs.reconnecting') }}</span>
     </div>
-  </section>
+
+    <div ref="scrollEl" class="timeline-scroll" @scroll="onScroll">
+      <div v-if="hasMore" class="load-earlier">
+        <button class="ghost-button ghost-button--sm" :disabled="loadingHistory" @click="loadEarlier">
+          {{ $t('logs.loadEarlier') }}
+        </button>
+      </div>
+
+      <div v-if="!displayGroups.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
+        <div class="empty-state-card__icon">
+          <el-icon :size="24"><Monitor /></el-icon>
+        </div>
+        <div class="empty-state-card__text">
+          <h4 class="empty-state-card__title">{{ $t('logs.noLogs') }}</h4>
+          <p class="empty-state-card__sub">{{ $t('logs.noLogsHint') }}</p>
+        </div>
+      </div>
+
+      <div v-for="(group, gi) in displayGroups" :key="group.batch_index" :ref="el => setGroupRef(group.batch_index, el)" class="batch-group">
+        <div class="batch-header" @click="toggleGroup(group, gi)">
+          <el-icon class="batch-chevron" :class="{ 'is-open': !isCollapsed(group, gi) }"><ArrowDown /></el-icon>
+          <span class="batch-label">{{ groupLabel(group, gi) }}</span>
+          <span v-if="group.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
+          <span class="batch-meta cell-time">{{ $t('logs.stepCount', { count: group.steps.length }) }}</span>
+          <span v-if="group.tokenSum > 0" class="batch-meta cell-time">{{ group.tokenSum.toLocaleString() }} tok</span>
+          <span v-if="group.started_at" class="batch-meta cell-time">{{ formatTime(group.started_at) }}</span>
+        </div>
+
+        <div v-if="!isCollapsed(group, gi)" class="batch-steps">
+          <template v-for="step in group.steps" :key="step.key">
+            <!-- Chat message -->
+            <div v-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
+              <div class="msg-meta">
+                <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
+                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑ {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
+              </div>
+              <div class="msg-bubble">
+                <MarkdownView v-if="step.role === 'assistant'" :content="step.content" />
+                <div v-else class="msg-text">{{ step.content }}</div>
+              </div>
+            </div>
+
+            <!-- Tool step -->
+            <div v-else class="tool-row">
+              <div class="tool-head" @click="toggleStepDetail(step)">
+                <el-icon class="tool-icon" :class="{ 'is-spinning': step.pending }">
+                  <Loading v-if="step.pending" />
+                  <Tools v-else />
+                </el-icon>
+                <code class="tool-name">{{ step.tool_name }}</code>
+                <span v-if="step.pending" class="status-chip is-warning">{{ $t('logs.toolRunning') }}</span>
+                <span v-else-if="step.ok === true" class="status-chip is-live">{{ $t('logs.toolOk') }}</span>
+                <span v-else-if="step.ok === false" class="status-chip is-danger">{{ $t('logs.toolFailed') }}</span>
+                <span v-if="step.time" class="cell-time">{{ step.time }}</span>
+                <span class="tool-toggles">
+                  <button v-if="step.input" class="link-button" @click.stop="toggleStepDetail(step, 'input')">
+                    {{ $t('logs.input') }} {{ stepDetail[step.key + '_input'] ? '▾' : '▸' }}
+                  </button>
+                  <button v-if="step.output" class="link-button" @click.stop="toggleStepDetail(step, 'output')">
+                    {{ $t('logs.output') }} {{ stepDetail[step.key + '_output'] ? '▾' : '▸' }}
+                  </button>
+                </span>
+              </div>
+              <pre v-if="stepDetail[step.key + '_input']" class="tool-pre">{{ prettyJSON(step.key, 'input', step.input!) }}</pre>
+              <pre v-if="stepDetail[step.key + '_output']" class="tool-pre tool-pre--output">{{ prettyJSON(step.key, 'output', step.output!) }}</pre>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scroll-to-latest -->
+    <transition name="fade">
+      <button v-if="!stickToBottom && displayGroups.length" class="scroll-latest" @click="scrollToBottom(true)">
+        <el-icon :size="14"><Bottom /></el-icon>{{ $t('logs.scrollToLatest') }}
+      </button>
+    </transition>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
-import { listSessions, getSession, listLogs } from '../api'
-import type { ScanSession, AgentLog } from '../types'
+import { listLogs } from '../api'
+import type { AgentLog } from '../types'
 import { useSessionEventStream } from '../composables/sessionEvents'
-import MarkdownView from '../components/MarkdownView.vue'
+import MarkdownView from './MarkdownView.vue'
+
+const props = withDefaults(defineProps<{
+  sessionId: number
+  highlightBatch?: number | null
+}>(), { highlightBatch: null })
+
+const emit = defineEmits<{
+  /** A run reached its terminal event — parent should refresh session counters. */
+  (e: 'runDone'): void
+  /** Stream saw a phase start/done transition — parent may refresh the status chip. */
+  (e: 'runStatus'): void
+}>()
 
 const { t } = useI18n()
-const route = useRoute()
 
 // ===== Steps & groups =====
 interface MessageStep {
@@ -160,8 +149,6 @@ interface BatchGroup {
 let stepSeq = 0
 const nextKey = () => `s${++stepSeq}`
 
-const sessions = ref<ScanSession[]>([])
-const sessionId = ref<number>(0)
 const histLogs = ref<AgentLog[]>([]) // ascending by id
 const liveSteps = reactive(new Map<number, Step[]>())
 const liveLabels = reactive(new Map<number, string>())
@@ -180,12 +167,6 @@ const groupEls = new Map<number, Element>()
 const stream = useSessionEventStream()
 let skipFirstOpen = true
 let historyReloadTimer: ReturnType<typeof setTimeout> | null = null
-
-const currentSession = computed(() => sessions.value.find(s => s.id === sessionId.value))
-const isSessionActive = computed(() => {
-  const st = currentSession.value?.status || ''
-  return st === 'scanning' || st === 'tagging' || st === 'executing'
-})
 
 const hasMore = computed(() => histLogs.value.length < totalLogs.value)
 
@@ -234,43 +215,23 @@ const displayGroups = computed<BatchGroup[]>(() => {
 
 const totalTokens = computed(() => displayGroups.value.reduce((sum, g) => sum + g.tokenSum, 0))
 
-const metricChips = computed(() => {
-  const chips: { label: string; value: string }[] = []
-  const s = currentSession.value
-  if (s && s.total_files > 0) {
-    chips.push({ label: t('tasks.totalFiles'), value: String(s.total_files) })
-    chips.push({ label: t('tasks.taggedFiles'), value: `${s.tagged_files}/${s.total_files}` })
-    if (s.planned_ops > 0) chips.push({ label: t('tasks.plannedOps'), value: String(s.planned_ops) })
-    if (s.executed_ops > 0) chips.push({ label: t('tasks.executedOps'), value: String(s.executed_ops) })
-  }
-  if (totalTokens.value > 0) {
-    chips.push({ label: t('logs.totalTokens'), value: totalTokens.value.toLocaleString() })
-  }
-  return chips
-})
-
 // ===== Lifecycle =====
 onMounted(async () => {
-  const res = await listSessions()
-  sessions.value = res.data
-  const qSession = Number(route.query.session)
-  if (qSession && sessions.value.find(s => s.id === qSession)) {
-    sessionId.value = qSession
-  } else if (sessions.value.length > 0) {
-    sessionId.value = sessions.value[0].id
-  }
-  if (sessionId.value) {
-    await onSessionChange()
-    const qBatch = route.query.batch != null ? Number(route.query.batch) : null
-    if (qBatch != null) await revealBatch(qBatch)
-  }
+  if (!props.sessionId) return
+  await init()
+  if (props.highlightBatch != null) await revealBatch(props.highlightBatch)
+})
+
+watch(() => props.sessionId, async (id, oldId) => {
+  if (!id || id === oldId) return
+  await init()
 })
 
 onUnmounted(() => {
   if (historyReloadTimer) clearTimeout(historyReloadTimer)
 })
 
-async function onSessionChange() {
+async function init() {
   stream.close()
   histLogs.value = []
   liveSteps.clear()
@@ -288,10 +249,10 @@ async function onSessionChange() {
 }
 
 async function loadLatest() {
-  if (!sessionId.value) return
+  if (!props.sessionId) return
   loadingHistory.value = true
   try {
-    const res = await listLogs({ session_id: sessionId.value, page: 1, page_size: pageSize, order: 'desc' })
+    const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: pageSize, order: 'desc' })
     const rows = (res.data.logs || []).slice().reverse() // chronological
     histLogs.value = rows
     totalLogs.value = res.data.total
@@ -304,13 +265,13 @@ async function loadLatest() {
 }
 
 async function loadEarlier() {
-  if (!sessionId.value || loadingHistory.value || !hasMore.value) return
+  if (!props.sessionId || loadingHistory.value || !hasMore.value) return
   loadingHistory.value = true
   const el = scrollEl.value
   const prevHeight = el?.scrollHeight || 0
   const prevTop = el?.scrollTop || 0
   try {
-    const res = await listLogs({ session_id: sessionId.value, page: loadedPages.value + 1, page_size: pageSize, order: 'desc' })
+    const res = await listLogs({ session_id: props.sessionId, page: loadedPages.value + 1, page_size: pageSize, order: 'desc' })
     const rows = (res.data.logs || []).slice().reverse()
     histLogs.value = [...rows, ...histLogs.value]
     loadedPages.value += 1
@@ -338,7 +299,7 @@ async function revealBatch(bi: number) {
 }
 
 function openStream() {
-  if (!sessionId.value) return
+  if (!props.sessionId) return
   stream
     .onOpen(() => {
       // First open follows the initial history load; later (re)opens mean we
@@ -381,24 +342,13 @@ function openStream() {
       }
       afterAppend()
     })
-    .on('run_status', () => refreshSession())
-    .on('progress', (p) => {
-      const s = currentSession.value
-      if (!s) return
-      if (p.phase === 'tagging') {
-        s.total_files = p.total
-        s.tagged_files = p.tagged ?? s.tagged_files
-        s.planned_ops = p.planned ?? s.planned_ops
-      } else if (p.phase === 'executing') {
-        s.total_files = p.total
-        s.executed_ops = (p.success ?? 0) + (p.failed ?? 0) + (p.skipped ?? 0)
-      }
-    })
+    .on('run_status', () => emit('runStatus'))
     .on('run_done', () => {
       // Terminal event: persisted rows (with token counts) are now complete.
+      emit('runDone')
       scheduleHistoryReload()
     })
-  stream.open(sessionId.value)
+  stream.open(props.sessionId)
 }
 
 function pushLive(bi: number, step: Step) {
@@ -419,7 +369,7 @@ function scheduleHistoryReload() {
     historyReloadTimer = null
     const liveTotal = [...liveSteps.values()].reduce((n, arr) => n + arr.length, 0)
     const size = Math.max(pageSize, Math.ceil((liveTotal + 10) / pageSize) * pageSize)
-    const res = await listLogs({ session_id: sessionId.value, page: 1, page_size: size, order: 'desc' }).catch(() => null)
+    const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: size, order: 'desc' }).catch(() => null)
     if (!res) return // keep live steps; a later reconnect will retry the refill
     histLogs.value = (res.data.logs || []).slice().reverse()
     totalLogs.value = res.data.total
@@ -427,19 +377,9 @@ function scheduleHistoryReload() {
     liveSteps.clear()
     liveBatches.clear()
     jsonCache.clear()
-    refreshSession()
     await nextTick()
     if (stickToBottom.value) scrollToBottom(false)
   }, 600)
-}
-
-async function refreshSession() {
-  if (!sessionId.value) return
-  try {
-    const res = await getSession(sessionId.value)
-    const idx = sessions.value.findIndex(s => s.id === res.data.id)
-    if (idx >= 0) sessions.value[idx] = res.data
-  } catch { /* ignore */ }
 }
 
 // ===== View helpers =====
@@ -487,24 +427,6 @@ function roleChipClass(role: string): string {
   return map[role] || 'is-muted'
 }
 
-function statusLabel(status: string): string {
-  if (status.startsWith('error')) return t('tasks.statusError')
-  return t('tasks.status_' + status) || status
-}
-
-function statusChipClass(status: string): string {
-  if (status === 'done' || status === 'tagged') return 'is-live'
-  if (status.startsWith('error')) return 'is-danger'
-  if (status === 'scanning' || status === 'tagging' || status === 'executing') return 'is-warning'
-  return 'is-muted'
-}
-
-function formatSessionLabel(s: ScanSession): string {
-  const date = new Date(s.created_at).toLocaleDateString()
-  const path = s.scan_path || t('tasks.allDirectories')
-  return `#${s.id} ${path} · ${s.total_files} · ${date}`
-}
-
 function formatTime(tstr: string) {
   if (!tstr) return ''
   return new Date(tstr).toLocaleTimeString()
@@ -530,13 +452,7 @@ function scrollToBottom(smooth: boolean) {
 </script>
 
 <style scoped>
-.run-card {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.run-body {
+.timeline-wrap {
   flex: 1 1 0;
   min-height: 0;
   position: relative;
@@ -545,9 +461,9 @@ function scrollToBottom(smooth: boolean) {
   gap: 12px;
 }
 
-.metric-bar {
+.timeline-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }

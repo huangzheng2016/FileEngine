@@ -2,12 +2,42 @@ app:
   tagline: AI File Organizer
 
 nav:
+  dashboard: Dashboard
   files: Files
   filesystems: Filesystems
-  tasks: Tasks
-  logs: Agent Runs
+  tasks: Sessions
   config: Config
   models: Models
+  settings: Settings
+
+dashboard:
+  title: Dashboard
+  subtitle: Source → Scan → Tag → Execute — four steps to organized files
+  stepSource: Source
+  stepScan: Scan
+  stepTag: Tag
+  stepExecute: Execute
+  sourceStatus: "Filesystems connected: {count}"
+  sourceEmpty: No filesystems yet — add one first
+  scanStatus: "Scan sessions: {count}"
+  scanEmpty: No scan sessions yet
+  scanActive: Scanning…
+  tagProgress: "Latest session tagged {tagged}/{total}"
+  tagEmpty: Tag after the scan finishes
+  executeStatus: "{planned} planned · {executed} executed"
+  executeEmpty: Plans appear after tagging
+  ctaAddFs: Add Filesystem
+  ctaManageFs: Manage Filesystems
+  ctaNewScan: New Scan
+  ctaTag: Start Tagging
+  ctaReview: Review Results
+  ctaExecute: Start Execute
+  ctaFiles: View Files
+  ctaViewSession: View session →
+  stateDone: Done
+  stateActive: Active
+  stateTodo: To do
+  latestSession: Current Session
 
 common:
   save: Save
@@ -111,8 +141,8 @@ filesystems:
   connFail: "Connection failed: {error}"
 
 tasks:
-  title: Scan Sessions
-  subtitle: Mission control for scanning, tagging and execution
+  title: Session Center
+  subtitle: "One session per screen: status, progress and run timeline"
   newScan: New Scan
   filesystem: Filesystem
   selectFs: Select a filesystem
@@ -194,7 +224,14 @@ tasks:
   noSessionsHint: Create a scan to start organizing your files
   tokensPerFile: "{count}/file"
   tokensPerMB: "{count}/MB"
-  viewRun: View Run
+  selectHint: Pick a session on the left, or start a new scan
+  goReview: Review Results
+  goExecute: Start Execute
+  goTag: Start Tagging
+  guideScanned: "Scan finished — {count} files. Next: tag them."
+  guideTagged: "Tagging finished — {count} plans ready to execute."
+  guideDone: "Execution finished — {count} operations processed."
+  guideError: "Last run failed: {status}"
 
 config:
   title: Configuration
@@ -222,11 +259,6 @@ config:
     promptSaved: Prompt saved
 
 logs:
-  title: Agent Runs
-  subtitle: Follow every agent run step by step, live
-  selectSession: Select session
-  noSessions: No scan sessions yet
-  noSessionsHint: Create a scan in Tasks first
   live: Live
   reconnecting: Connection lost, reconnecting…
   loadEarlier: Load earlier entries

@@ -1,102 +1,121 @@
 <template>
-  <section class="page-card">
-    <header class="page-header">
-      <div class="page-titles">
-        <span class="page-eyebrow">FileEngine</span>
-        <h2 class="page-heading">{{ $t('tasks.title') }}</h2>
-        <p class="page-sub">{{ $t('tasks.subtitle') }}</p>
+  <div class="center-row">
+    <!-- Left: session list -->
+    <section class="page-card list-pane">
+      <el-button type="primary" style="width: 100%" @click="openNewScanDialog">
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>{{ $t('tasks.newScan') }}
+      </el-button>
+      <div class="session-list">
+        <div v-if="!sessions.length && !loading" class="empty-state-card empty-state-card--inline">
+          <div class="empty-state-card__text">
+            <h4 class="empty-state-card__title">{{ $t('tasks.noSessions') }}</h4>
+            <p class="empty-state-card__sub">{{ $t('tasks.noSessionsHint') }}</p>
+          </div>
+        </div>
+        <div
+          v-for="s in sessions"
+          :key="s.id"
+          class="session-item"
+          :class="{ 'is-active': s.id === selectedId }"
+          @click="selectSession(s.id)"
+        >
+          <div class="session-item__top">
+            <code class="session-item__path">{{ s.root_path === '.' ? $t('tasks.allDirectories') : s.root_path }}</code>
+            <span class="status-chip" :class="statusChipClass(s.status)">
+              <span v-if="isActive(s)" class="status-dot"></span>
+              {{ statusLabel(s.status) }}
+            </span>
+          </div>
+          <div class="session-item__meta cell-time">
+            #{{ s.id }} · {{ $t('tasks.taggedFiles') }} {{ s.tagged_files }}/{{ s.total_files }}
+            <template v-if="s.planned_ops > 0"> · {{ $t('tasks.plannedOps') }} {{ s.planned_ops }}</template>
+            <template v-if="s.executed_ops > 0"> · {{ $t('tasks.executedOps') }} {{ s.executed_ops }}</template>
+          </div>
+        </div>
       </div>
-      <div class="page-actions">
-        <el-button @click="load">
-          <el-icon style="margin-right: 4px"><Refresh /></el-icon>{{ $t('common.refresh') }}
-        </el-button>
-        <el-button type="primary" @click="openNewScanDialog">
-          <el-icon style="margin-right: 4px"><Plus /></el-icon>{{ $t('tasks.newScan') }}
-        </el-button>
-      </div>
-    </header>
+    </section>
 
-    <div class="page-body">
-      <el-table :data="sessions" v-loading="loading" style="width: 100%">
-        <el-table-column prop="id" label="ID" width="60">
-          <template #default="{ row }"><span class="cell-time">{{ row.id }}</span></template>
-        </el-table-column>
-        <el-table-column prop="root_path" :label="$t('tasks.rootPath')" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <code class="cell-mono">{{ row.root_path === '.' ? $t('tasks.allDirectories') : row.root_path }}</code>
-          </template>
-        </el-table-column>
-        <el-table-column prop="protocol" :label="$t('tasks.protocol')" width="100">
-          <template #default="{ row }">
-            <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('common.status')" width="150">
-          <template #default="{ row }">
-            <div style="display: flex; gap: 6px; align-items: center">
-              <span class="status-chip" :class="statusChipClass(row.status)">
-                <span v-if="isActive(row)" class="status-dot"></span>
-                {{ statusLabel(row.status) }}
-              </span>
-              <span v-if="row.allow_vision" class="status-chip is-accent">{{ $t('tasks.visionOn') }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('tasks.progress')" min-width="300">
-          <template #default="{ row }">
-            <div class="progress-cell">
-              <div class="progress-chips">
-                <span class="metric-chip"><span class="metric-label">{{ $t('tasks.totalFiles') }}</span><span class="metric-value">{{ row.total_files }}</span></span>
-                <span class="metric-chip"><span class="metric-label">{{ $t('tasks.taggedFiles') }}</span><span class="metric-value">{{ row.tagged_files }}</span></span>
-                <span class="metric-chip"><span class="metric-label">{{ $t('tasks.plannedOps') }}</span><span class="metric-value">{{ row.planned_ops }}</span></span>
-                <span class="metric-chip"><span class="metric-label">{{ $t('tasks.executedOps') }}</span><span class="metric-value">{{ row.executed_ops }}</span></span>
-                <span class="metric-chip" v-if="row.total_size > 0"><span class="metric-label">{{ $t('common.size') }}</span><span class="metric-value">{{ formatSize(row.total_size) }}</span></span>
-              </div>
-              <div v-if="row.total_tokens > 0" class="progress-tokens cell-time">
-                Token: {{ row.prompt_tokens.toLocaleString() }}↑ {{ row.completion_tokens.toLocaleString() }}↓ = {{ row.total_tokens.toLocaleString() }}
-                <span v-if="row.total_files > 0 && row.total_tokens / row.total_files >= 1"> | {{ $t('tasks.tokensPerFile', { count: (row.total_tokens / row.total_files).toFixed(0) }) }}</span>
-                <span v-if="row.total_size > 0 && row.total_tokens / (row.total_size / 1048576) >= 1"> | {{ $t('tasks.tokensPerMB', { count: (row.total_tokens / (row.total_size / 1048576)).toFixed(0) }) }}</span>
-              </div>
-              <el-progress v-if="row.total_files > 0"
-                :percentage="Math.round((row.tagged_files / row.total_files) * 100)"
-                :stroke-width="6" />
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
+    <!-- Right: selected session -->
+    <section v-if="current" class="page-card detail-pane">
+      <!-- Run status card -->
+      <div class="run-card">
+        <div class="run-card__head">
+          <code class="cell-mono run-card__path">#{{ current.id }} {{ current.root_path === '.' ? $t('tasks.allDirectories') : current.root_path }}</code>
+          <span class="status-chip" :class="protocolChipClass(current.protocol)">{{ current.protocol.toUpperCase() }}</span>
+          <span v-if="current.allow_vision" class="status-chip is-accent">{{ $t('tasks.visionOn') }}</span>
+          <span class="status-chip" :class="statusChipClass(current.status)">
+            <span v-if="isActive(current)" class="status-dot"></span>
+            {{ statusLabel(current.status) }}
+          </span>
+          <div class="run-card__actions">
+            <el-button v-if="canTag(current)" size="small" :type="current.status === 'tagging' ? 'warning' : 'primary'" @click="handleTag(current)">
+              {{ current.status === 'tagging' ? $t('tasks.stopTag') : $t('tasks.tag') }}
+            </el-button>
+            <el-button v-if="canExecute(current)" size="small" :type="current.status === 'executing' ? 'warning' : 'primary'" plain @click="handleExecute(current)">
+              {{ current.status === 'executing' ? $t('tasks.stop') : $t('tasks.execute') }}
+            </el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, current!)">
               <el-button size="small">
                 {{ $t('common.actions') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="run"><el-icon><Monitor /></el-icon>{{ $t('tasks.viewRun') }}</el-dropdown-item>
                   <el-dropdown-item command="settings"><el-icon><Setting /></el-icon>{{ $t('tasks.settings') }}</el-dropdown-item>
-                  <el-dropdown-item command="rescan" :disabled="row.status === 'scanning'"><el-icon><Refresh /></el-icon>{{ $t('tasks.rescan') }}</el-dropdown-item>
-                  <el-dropdown-item command="tag" :disabled="!canTag(row)"><el-icon><PriceTag /></el-icon>{{ row.status === 'tagging' ? $t('tasks.stopTag') : $t('tasks.tag') }}</el-dropdown-item>
-                  <el-dropdown-item command="plans" :disabled="row.planned_ops === 0"><el-icon><Document /></el-icon>{{ $t('tasks.plans') }}</el-dropdown-item>
+                  <el-dropdown-item command="rescan" :disabled="current.status === 'scanning'"><el-icon><Refresh /></el-icon>{{ $t('tasks.rescan') }}</el-dropdown-item>
+                  <el-dropdown-item command="plans" :disabled="current.planned_ops === 0"><el-icon><Document /></el-icon>{{ $t('tasks.plans') }}</el-dropdown-item>
                   <el-dropdown-item command="stats"><el-icon><DataAnalysis /></el-icon>{{ $t('tasks.stats') }}</el-dropdown-item>
-                  <el-dropdown-item command="execute" :disabled="!canExecute(row)"><el-icon><VideoPlay /></el-icon>{{ row.status === 'executing' ? $t('tasks.stop') : $t('tasks.execute') }}</el-dropdown-item>
                   <el-dropdown-item command="delete" divided><el-icon><Delete /></el-icon>{{ $t('common.delete') }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <div class="empty-state-card empty-state-card--inline">
-            <div class="empty-state-card__icon">
-              <el-icon :size="24"><Monitor /></el-icon>
-            </div>
-            <div class="empty-state-card__text">
-              <h4 class="empty-state-card__title">{{ $t('tasks.noSessions') }}</h4>
-              <p class="empty-state-card__sub">{{ $t('tasks.noSessionsHint') }}</p>
-            </div>
           </div>
-        </template>
-      </el-table>
-    </div>
+        </div>
+        <div class="run-card__metrics">
+          <span class="metric-chip"><span class="metric-label">{{ $t('tasks.totalFiles') }}</span><span class="metric-value">{{ current.total_files }}</span></span>
+          <span class="metric-chip"><span class="metric-label">{{ $t('tasks.taggedFiles') }}</span><span class="metric-value">{{ current.tagged_files }}/{{ current.total_files }}</span></span>
+          <span class="metric-chip"><span class="metric-label">{{ $t('tasks.plannedOps') }}</span><span class="metric-value">{{ current.planned_ops }}</span></span>
+          <span class="metric-chip"><span class="metric-label">{{ $t('tasks.executedOps') }}</span><span class="metric-value">{{ current.executed_ops }}</span></span>
+          <span v-if="current.total_size > 0" class="metric-chip"><span class="metric-label">{{ $t('common.size') }}</span><span class="metric-value">{{ formatSize(current.total_size) }}</span></span>
+          <span v-if="current.total_tokens > 0" class="metric-chip"><span class="metric-label">Token</span><span class="metric-value">{{ current.total_tokens.toLocaleString() }}</span></span>
+        </div>
+        <el-progress v-if="current.total_files > 0"
+          :percentage="Math.round((current.tagged_files / current.total_files) * 100)"
+          :stroke-width="6" />
+
+        <!-- Next-step guide (only when nothing is running) -->
+        <div v-if="guide" class="guide-strip" :class="`is-${guide.tone}`">
+          <el-icon :size="16"><Guide /></el-icon>
+          <span class="guide-strip__text">{{ guide.text }}</span>
+          <div class="guide-strip__actions">
+            <router-link v-if="guide.reviewTo" :to="guide.reviewTo">
+              <el-button size="small">{{ $t('tasks.goReview') }}</el-button>
+            </router-link>
+            <el-button v-if="guide.action" size="small" type="primary" @click="guide.action">{{ guide.actionLabel }}</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SSE step timeline -->
+      <SessionTimeline
+        :session-id="current.id"
+        :highlight-batch="highlightBatch"
+        @run-done="refreshSession(current.id)"
+        @run-status="refreshSession(current.id)"
+      />
+    </section>
+
+    <!-- Empty detail -->
+    <section v-else class="page-card detail-pane detail-pane--empty">
+      <div class="empty-state-card">
+        <div class="empty-state-card__icon">
+          <el-icon :size="28"><Monitor /></el-icon>
+        </div>
+        <div class="empty-state-card__text">
+          <h4 class="empty-state-card__title">{{ $t('tasks.selectHint') }}</h4>
+        </div>
+        <el-button type="primary" @click="openNewScanDialog">{{ $t('tasks.newScan') }}</el-button>
+      </div>
+    </section>
 
     <!-- Plans dialog -->
     <el-dialog append-to-body v-model="plansVisible" :title="$t('tasks.executionPlans')" width="80%">
@@ -289,25 +308,31 @@
         <el-button type="primary" @click="saveSettings">{{ $t('common.save') }}</el-button>
       </template>
     </el-dialog>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { listSessions, getSession, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, exportPlansCSV, validatePlans, getSessionStats, listFilesystems, listModelProviders } from '../api'
 import type { ScanSession, PlanItem, Filesystem, ModelProvider, ValidationResult, SessionStats, ProgressEvent } from '../types'
 import { SessionEventStream } from '../composables/sessionEvents'
+import SessionTimeline from '../components/SessionTimeline.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, CircleCheck, DataAnalysis, Plus, Refresh, Monitor } from '@element-plus/icons-vue'
+import { Download, CircleCheck, DataAnalysis, Plus, Refresh, Monitor, Guide } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
+
 const sessions = ref<ScanSession[]>([])
 const filesystems = ref<Filesystem[]>([])
 const modelProviders = ref<ModelProvider[]>([])
 const loading = ref(false)
+const selectedId = ref<number>(0)
+const highlightBatch = ref<number | null>(null)
+
 const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
@@ -316,11 +341,9 @@ const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
-const settingsSessionId = ref(0)
 const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, allow_vision: false, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
 const validating = ref(false)
 const validationResult = ref<ValidationResult | null>(null)
-const currentPlansSessionId = ref(0)
 const statsVisible = ref(false)
 const sessionStatsData = ref<SessionStats | null>(null)
 
@@ -330,10 +353,22 @@ const sessionStatsData = ref<SessionStats | null>(null)
 const streams = new Map<number, SessionEventStream>()
 let scanPollTimer: ReturnType<typeof setInterval> | null = null
 
-onMounted(() => {
-  load()
-  loadFilesystems()
-  loadModelProviders()
+const current = computed(() => sessions.value.find(s => s.id === selectedId.value) || null)
+
+onMounted(async () => {
+  await Promise.all([load(), loadFilesystems(), loadModelProviders()])
+  // Deep links: ?session=N&batch=M (legacy /logs redirects here), ?new=1 opens the scan dialog.
+  const qSession = Number(route.query.session)
+  if (qSession && sessions.value.find(s => s.id === qSession)) {
+    selectedId.value = qSession
+  } else if (sessions.value.length > 0) {
+    selectedId.value = sessions.value[0].id
+  }
+  highlightBatch.value = route.query.batch != null ? Number(route.query.batch) : null
+  if (route.query.new === '1') {
+    openNewScanDialog()
+    router.replace({ query: { ...route.query, new: undefined } })
+  }
 })
 
 onUnmounted(() => {
@@ -341,6 +376,12 @@ onUnmounted(() => {
   streams.clear()
   if (scanPollTimer) { clearInterval(scanPollTimer); scanPollTimer = null }
 })
+
+function selectSession(id: number) {
+  selectedId.value = id
+  highlightBatch.value = null
+  router.replace({ query: { session: String(id) } })
+}
 
 function isActive(s: ScanSession): boolean {
   return s.status === 'scanning' || s.status === 'tagging' || s.status === 'executing'
@@ -424,6 +465,54 @@ async function loadModelProviders() {
   modelProviders.value = res.data
 }
 
+// ===== Next-step guide =====
+interface Guide {
+  tone: 'accent' | 'success' | 'danger'
+  text: string
+  actionLabel?: string
+  action?: () => void
+  reviewTo?: any
+}
+
+const guide = computed<Guide | null>(() => {
+  const s = current.value
+  if (!s || isActive(s) || s.status === 'scanning') return null
+  if (s.status.startsWith('error')) {
+    return {
+      tone: 'danger',
+      text: t('tasks.guideError', { status: s.status }),
+      actionLabel: s.planned_ops > 0 ? t('tasks.execute') : t('tasks.tag'),
+      action: () => (s.planned_ops > 0 ? handleExecute(s) : handleTag(s)),
+    }
+  }
+  if (s.status === 'scanned') {
+    return {
+      tone: 'accent',
+      text: t('tasks.guideScanned', { count: s.total_files }),
+      actionLabel: t('tasks.goTag'),
+      action: () => handleTag(s),
+    }
+  }
+  if (s.status === 'tagged' && s.planned_ops > 0) {
+    return {
+      tone: 'success',
+      text: t('tasks.guideTagged', { count: s.planned_ops }),
+      actionLabel: t('tasks.goExecute'),
+      action: () => handleExecute(s),
+      reviewTo: { name: 'files', query: { fs: String(s.filesystem_id), session: String(s.id) } },
+    }
+  }
+  if (s.status === 'done') {
+    return {
+      tone: 'success',
+      text: t('tasks.guideDone', { count: s.executed_ops }),
+      reviewTo: { name: 'files', query: { fs: String(s.filesystem_id), session: String(s.id) } },
+    }
+  }
+  return null
+})
+
+// ===== Labels =====
 function providerChipClass(p: string): string {
   const map: Record<string, string> = { openai: 'is-live', claude: 'is-warning', ollama: 'is-muted' }
   return map[p] || 'is-accent'
@@ -453,22 +542,6 @@ function statusChipClass(status: string): string {
   return 'is-muted'
 }
 
-function openNewScanDialog() {
-  const lastId = Number(localStorage.getItem('fe_last_fs_id'))
-  const exists = filesystems.value.find(f => f.id === lastId)
-  const defaultId = exists ? lastId : (filesystems.value.length > 0 ? filesystems.value[0].id : 0)
-  newScan.value = {
-    filesystemId: defaultId,
-    scanPath: '',
-    modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : null,
-    allowVision: false,
-    excludeCategoryDirs: false,
-    filterMode: 'blacklist',
-    filterDirs: '',
-  }
-  showNewDialog.value = true
-}
-
 function formatSize(bytes: number): string {
   if (!bytes) return '0'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -477,6 +550,7 @@ function formatSize(bytes: number): string {
   return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i]
 }
 
+// ===== Actions =====
 function canTag(s: ScanSession) {
   return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagging' || s.status.startsWith('error')
 }
@@ -519,18 +593,18 @@ async function confirmExecute() {
 async function showPlans(s: ScanSession) {
   const res = await getPlans(s.id)
   plans.value = res.data
-  currentPlansSessionId.value = s.id
   validationResult.value = null
   plansVisible.value = true
 }
 
 async function handleExportPlans() {
+  if (!current.value) return
   try {
-    const res = await exportPlansCSV(currentPlansSessionId.value)
+    const res = await exportPlansCSV(current.value.id)
     const url = URL.createObjectURL(new Blob([res.data]))
     const a = document.createElement('a')
     a.href = url
-    a.download = `plans_session_${currentPlansSessionId.value}.csv`
+    a.download = `plans_session_${current.value.id}.csv`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success(t('tasks.exportPlansSuccess'))
@@ -538,9 +612,10 @@ async function handleExportPlans() {
 }
 
 async function handleValidate() {
+  if (!current.value) return
   validating.value = true
   try {
-    const res = await validatePlans(currentPlansSessionId.value)
+    const res = await validatePlans(current.value.id)
     validationResult.value = res.data
     if (res.data.ok) ElMessage.success(t('tasks.validateOk'))
     else ElMessage.warning(t('tasks.validateIssues', { count: res.data.issues.length }))
@@ -562,7 +637,9 @@ async function handleDelete(s: ScanSession) {
   if (stream) { stream.close(); streams.delete(s.id) }
   await deleteSession(s.id)
   ElMessage.success(t('common.deleted'))
-  load()
+  if (selectedId.value === s.id) selectedId.value = 0
+  await load()
+  if (!selectedId.value && sessions.value.length > 0) selectSession(sessions.value[0].id)
 }
 
 async function handleRescan(s: ScanSession) {
@@ -574,11 +651,8 @@ async function handleRescan(s: ScanSession) {
 
 function handleCommand(cmd: string, row: ScanSession) {
   switch (cmd) {
-    case 'run': router.push({ name: 'logs', query: { session: String(row.id) } }); break
     case 'rescan': handleRescan(row); break
-    case 'tag': handleTag(row); break
     case 'plans': showPlans(row); break
-    case 'execute': handleExecute(row); break
     case 'settings': openSettings(row); break
     case 'stats': showStats(row); break
     case 'delete': handleDelete(row); break
@@ -586,7 +660,6 @@ function handleCommand(cmd: string, row: ScanSession) {
 }
 
 function openSettings(s: ScanSession) {
-  settingsSessionId.value = s.id
   sessionSettings.value = {
     allow_read_file: s.allow_read_file,
     allow_auto_category: s.allow_auto_category,
@@ -600,10 +673,27 @@ function openSettings(s: ScanSession) {
 }
 
 async function saveSettings() {
-  await updateSessionConfig(settingsSessionId.value, sessionSettings.value)
+  if (!current.value) return
+  await updateSessionConfig(current.value.id, sessionSettings.value)
   ElMessage.success(t('tasks.settingsSaved'))
   settingsVisible.value = false
   load()
+}
+
+function openNewScanDialog() {
+  const lastId = Number(localStorage.getItem('fe_last_fs_id'))
+  const exists = filesystems.value.find(f => f.id === lastId)
+  const defaultId = exists ? lastId : (filesystems.value.length > 0 ? filesystems.value[0].id : 0)
+  newScan.value = {
+    filesystemId: defaultId,
+    scanPath: '',
+    modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : null,
+    allowVision: false,
+    excludeCategoryDirs: false,
+    filterMode: 'blacklist',
+    filterDirs: '',
+  }
+  showNewDialog.value = true
 }
 
 async function handleNewScan() {
@@ -616,24 +706,171 @@ async function handleNewScan() {
   }
   ElMessage.success(t('tasks.scanStarted'))
   showNewDialog.value = false
-  load()
+  await load()
+  selectSession(res.data.id)
 }
 </script>
 
 <style scoped>
-.progress-cell {
+.center-row {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+/* ===== Left: session list ===== */
+.list-pane {
+  width: 300px;
+  flex-shrink: 0;
+  padding: 18px;
+  gap: 14px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.session-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-elevated);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-spring);
 }
 
-.progress-chips {
+.session-item:hover {
+  border-color: var(--floating-border);
+  transform: translateY(-1px);
+}
+
+.session-item.is-active {
+  background: var(--accent-soft);
+  border-color: var(--floating-border);
+}
+
+.session-item__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-item__path {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.session-item__meta {
+  font-size: 11.5px;
+}
+
+/* ===== Right: detail ===== */
+.detail-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: 14px;
+}
+
+.detail-pane--empty {
+  justify-content: center;
+}
+
+.run-card {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--inner-highlight);
+}
+
+.run-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.run-card__path {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.run-card__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.run-card__metrics {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.progress-tokens {
-  font-size: 12px;
+/* ===== Guide strip ===== */
+.guide-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.guide-strip.is-accent {
+  background: var(--accent-soft);
+  border: 1px solid var(--floating-border);
+  color: var(--accent);
+}
+
+.guide-strip.is-success {
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 22%, transparent);
+  color: var(--success);
+}
+
+.guide-strip.is-danger {
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, transparent);
+  color: var(--danger);
+}
+
+.guide-strip__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.guide-strip__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>

@@ -8,12 +8,12 @@
       <div class="empty-state-card__text">
         <h4 class="empty-state-card__title">{{ $t('files.noFs') }}</h4>
       </div>
-      <el-button type="primary" @click="$router.push('/filesystems')">{{ $t('files.addFsNow') }}</el-button>
+      <el-button type="primary" @click="$router.push('/settings/filesystems')">{{ $t('files.addFsNow') }}</el-button>
     </div>
   </section>
 
   <div v-else-if="loaded" class="files-row">
-    <!-- Left sidebar -->
+    <!-- Zone A: filesystem + category management -->
     <div class="files-side">
       <!-- Filesystem selector -->
       <section class="page-card side-card">
@@ -35,44 +35,44 @@
         </div>
       </section>
 
-      <!-- Tabs: Category / Directory tree -->
+      <!-- Category management -->
       <section v-if="selectedFsId" class="page-card side-card side-card--fill">
-        <el-tabs v-model="sidebarTab" class="side-tabs">
-          <el-tab-pane :label="$t('files.categoryManagement')" name="categories">
-            <div class="cat-actions">
-              <el-button size="small" @click="handleExportCategories">{{ $t('categories.exportCategories') }}</el-button>
-              <el-button size="small" @click="triggerImportCategories">{{ $t('categories.importCategories') }}</el-button>
-              <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportCategories" />
-              <el-button size="small" type="primary" @click="openCatDialog()">{{ $t('categories.addCategory') }}</el-button>
-            </div>
-            <div class="cat-list">
-              <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
-              <div v-for="cat in categories" :key="cat.id"
-                class="cat-item" :class="{ 'is-active': categoryFilter === cat.path }"
-                @click="setCategoryFilter(cat.path)">
-                <div class="cat-item__main">
-                  <div class="cat-item__name">
-                    <span>{{ cat.name }}</span>
-                    <span v-if="cat.agent_created" class="status-chip is-accent" style="height: 18px; padding: 0 8px">AI</span>
-                  </div>
-                  <div class="cat-item__path">{{ cat.path }}</div>
-                </div>
-                <div class="cat-item__actions">
-                  <button class="icon-button icon-button--sm" @click.stop="openCatDialog(cat)"><el-icon :size="14"><Edit /></el-icon></button>
-                  <button class="icon-button icon-button--sm is-danger" @click.stop="handleDeleteCat(cat.id)"><el-icon :size="14"><Delete /></el-icon></button>
-                </div>
+        <div class="side-title">{{ $t('files.categoryManagement') }}</div>
+        <div class="cat-actions">
+          <el-button size="small" @click="handleExportCategories">{{ $t('categories.exportCategories') }}</el-button>
+          <el-button size="small" @click="triggerImportCategories">{{ $t('categories.importCategories') }}</el-button>
+          <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportCategories" />
+          <el-button size="small" type="primary" @click="openCatDialog()">{{ $t('categories.addCategory') }}</el-button>
+        </div>
+        <div class="cat-list">
+          <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
+          <div v-for="cat in categories" :key="cat.id"
+            class="cat-item" :class="{ 'is-active': categoryFilter === cat.path }"
+            @click="setCategoryFilter(cat.path)">
+            <div class="cat-item__main">
+              <div class="cat-item__name">
+                <span>{{ cat.name }}</span>
+                <span v-if="cat.agent_created" class="status-chip is-accent" style="height: 18px; padding: 0 8px">AI</span>
               </div>
+              <div class="cat-item__path">{{ cat.path }}</div>
             </div>
-          </el-tab-pane>
-          <el-tab-pane :label="$t('files.directoryTree')" name="tree" :disabled="!sessionId">
-            <div class="tree-scroll">
-              <el-tree :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
-                lazy :load="loadNode" node-key="original_path" highlight-current @node-click="onNodeClick" />
+            <div class="cat-item__actions">
+              <button class="icon-button icon-button--sm" @click.stop="openCatDialog(cat)"><el-icon :size="14"><Edit /></el-icon></button>
+              <button class="icon-button icon-button--sm is-danger" @click.stop="handleDeleteCat(cat.id)"><el-icon :size="14"><Delete /></el-icon></button>
             </div>
-          </el-tab-pane>
-        </el-tabs>
+          </div>
+        </div>
       </section>
     </div>
+
+    <!-- Zone B: directory tree + file table + preview -->
+    <section v-if="selectedFsId && sessionId" class="page-card tree-pane">
+      <div class="side-title">{{ $t('files.directoryTree') }}</div>
+      <div class="tree-scroll">
+        <el-tree :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
+          lazy :load="loadNode" node-key="original_path" highlight-current @node-click="onNodeClick" />
+      </div>
+    </section>
 
     <!-- Right main area -->
     <div class="files-main">
@@ -142,7 +142,7 @@
             </el-table-column>
             <el-table-column v-else-if="col.key === 'batch_index'" :label="col.label" width="70" align="center">
               <template #default="{ row }">
-                <router-link v-if="row.batch_index" :to="{ name: 'logs', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
+                <router-link v-if="row.batch_index" :to="{ name: 'tasks', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
                   class="cell-link cell-time">
                   {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
                 </router-link>
@@ -294,8 +294,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, exportCategories, importCategories, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
 import type { FileEntry, Filesystem, ScanSession, Category, TreeNode, CategoryExportItem } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -303,6 +304,8 @@ import draggable from 'vuedraggable'
 import Loading from '../components/Loading.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 // Column configuration
 interface ColumnDef { key: string; label: string; visible: boolean }
@@ -366,22 +369,49 @@ const taggedFilter = ref('')
 const categoryFilter = ref('')
 const currentPath = ref('')
 const treeData = ref<TreeNode[]>([])
-const sidebarTab = ref('categories')
 const catDialogVisible = ref(false)
 const editingCatId = ref<number | null>(null)
 const catForm = ref({ name: '', path: '', structure: '', description: '', agent_editable: false })
 
+// Selection is mirrored into the URL (?fs=N&session=N) so dashboard / session
+// center CTAs land with the right context preselected.
 onMounted(async () => {
   const res = await listFilesystems()
   filesystems.value = res.data
   loaded.value = true
   if (filesystems.value.length > 0) {
+    const qFs = Number(route.query.fs)
     const lastId = Number(localStorage.getItem('fe_last_fs_id'))
-    const exists = filesystems.value.find(f => f.id === lastId)
-    selectedFsId.value = exists ? lastId : filesystems.value[0].id
-    onFsChange()
+    const pick = filesystems.value.find(f => f.id === qFs)
+      || filesystems.value.find(f => f.id === lastId)
+      || filesystems.value[0]
+    selectedFsId.value = pick.id
+    await onFsChange()
+    const qSession = Number(route.query.session)
+    if (qSession && sessions.value.find(s => s.id === qSession) && qSession !== sessionId.value) {
+      sessionId.value = qSession
+      await onSessionChange()
+    }
   }
 })
+
+watch(() => [route.query.fs, route.query.session], async ([qFs, qSession]) => {
+  const fsId = Number(qFs)
+  if (fsId && fsId !== selectedFsId.value && filesystems.value.find(f => f.id === fsId)) {
+    selectedFsId.value = fsId
+    await onFsChange()
+  }
+  const sessId = Number(qSession)
+  if (sessId && sessId !== sessionId.value && sessions.value.find(s => s.id === sessId)) {
+    sessionId.value = sessId
+    await onSessionChange()
+  }
+})
+
+function syncQuery() {
+  if (!selectedFsId.value || !sessionId.value) return
+  router.replace({ query: { fs: String(selectedFsId.value), session: String(sessionId.value) } })
+}
 
 async function onFsChange() {
   sessionId.value = 0
@@ -406,6 +436,7 @@ async function onSessionChange() {
   currentPath.value = ''
   page.value = 1
   if (!sessionId.value) { treeData.value = []; files.value = []; return }
+  syncQuery()
   const res = await getFileTree(sessionId.value, '')
   treeData.value = res.data
   loadFiles()
@@ -669,22 +700,26 @@ async function previewFile(file: FileEntry) {
   overflow: hidden;
 }
 
-.side-hint {
+.side-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 8px 0;
+  flex-shrink: 0;
 }
 
-.side-tabs {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+.tree-pane {
+  width: 240px;
+  flex-shrink: 0;
+  padding: 18px;
+  gap: 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-.side-tabs :deep(.el-tabs__content) {
-  flex: 1;
+.tree-scroll {
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
 }
@@ -755,8 +790,11 @@ async function previewFile(file: FileEntry) {
   gap: 4px;
 }
 
-.tree-scroll {
-  min-height: 0;
+.side-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 0;
 }
 
 /* ===== Right main ===== */
