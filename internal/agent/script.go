@@ -447,12 +447,20 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 		if err != nil {
 			return scriptError(err), nil
 		}
-		if isPull && total > 0 {
-			tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
-		}
 		items := make([]interface{}, len(files))
 		for i, f := range files {
 			items[i] = fileToScriptMap(f)
+		}
+		if isPull && total > 0 {
+			tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
+			summaries := tb.archiveSummaries(ctx, files)
+			for i, f := range files {
+				if s := summaries[f.ID]; s != "" {
+					if m, ok := items[i].(map[string]interface{}); ok {
+						m["archive_summary"] = s
+					}
+				}
+			}
 		}
 		return scriptObject(map[string]interface{}{"files": items, "total": total})
 	}

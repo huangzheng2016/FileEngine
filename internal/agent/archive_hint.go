@@ -81,6 +81,86 @@ func formatArchiveHint(kind string, total int, names []string, capped bool) stri
 	return fmt.Sprintf("%s 压缩包，共 %d%s 个条目，含: %s", kind, total, more, strings.Join(names, ", "))
 }
 
+// computeArchiveHint builds the one-line listing summary for one archive
+// file via the given FS connection (a few tail seeks for zip, a bounded
+// header stream for tar). Failures propagate — callers degrade silently.
+func computeArchiveHint(ctx context.Context, fsys remotefs.RemoteFS, protocol, path string, size int64, kind string, maxNames int) (string, error) {
+	rc, err := fsys.ReadFile(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	if kind == "zip" {
+		ra, sz, _, cleanup, err := resolveArchiveReaderAt(rc, size, maxDocumentReadBytes, protocol)
+		if err != nil {
+			return "", err
+		}
+		defer cleanup()
+		return zipHint(ra, sz, maxNames)
+	}
+	return tarHint(rc, kind == "tar.gz", maxNames)
+}
+
+// harnessArchiveHintsPerPull bounds archive opens per untagged harness pull —
+// each hint is a remote seek (zip) or a bounded header stream (tar), and over
+// a high-latency link this caps the per-pull cost while still covering
+// realistic batches.
+const harnessArchiveHintsPerPull = 20
+
+// archiveSummaries computes one-line archive listing summaries for up to
+// harnessArchiveHintsPerPull archive files in a pulled batch, keyed by file
+// ID. Same policy and guardrails as the dispatcher-mode batch prompt
+// (archive_prompt_disabled / archive_prompt_max_entries); failures degrade
+// silently to no summary.
+func (tb *ToolBuilder) archiveSummaries(ctx context.Context, files []db.FileEntry) map[uint]string {
+	if tb.cfg.ArchivePromptDisabled {
+		return nil
+	}
+	maxNames := tb.cfg.ArchivePromptMaxEntries
+	if maxNames <= 0 {
+		maxNames = 6
+	}
+	var out map[uint]string
+	opened := 0
+	for _, f := range files {
+		if opened >= harnessArchiveHintsPerPull {
+			break
+		}
+		kind := archiveKind(f.Name)
+		if kind != "zip" && kind != "tar" && kind != "tar.gz" {
+			continue
+		}
+		opened++
+		hint, err := computeArchiveHint(ctx, tb.fs, fsProtocolLabel(tb.fs), f.OriginalPath, f.Size, kind, maxNames)
+		if err != nil || hint == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[uint]string)
+		}
+		out[f.ID] = hint
+	}
+	return out
+}
+
+// fsProtocolLabel maps an FS instance to its backend label (only used for
+// the FTP archive-degradation notice text).
+func fsProtocolLabel(fsys remotefs.RemoteFS) string {
+	switch fsys.(type) {
+	case *remotefs.NFSFS:
+		return "nfs"
+	case *remotefs.FTPFS:
+		return "ftp"
+	case *remotefs.SMBFS:
+		return "smb"
+	case *remotefs.SFTPFS:
+		return "sftp"
+	case *remotefs.LocalFS:
+		return "local"
+	}
+	return ""
+}
+
 // archiveHints computes prompt hints for the archive files in one loose-file
 // batch. Remote read cost: a few tail seeks per zip; a bounded header stream
 // per tar. Disabled via archive_prompt_disabled, width via
@@ -99,7 +179,7 @@ func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS,
 		if kind != "zip" && kind != "tar" && kind != "tar.gz" {
 			continue
 		}
-		hint, err := a.archiveHint(ctx, fsys, f, kind, maxNames)
+		hint, err := computeArchiveHint(ctx, fsys, a.fsCfg.Protocol, f.OriginalPath, f.Size, kind, maxNames)
 		if err != nil || hint == "" {
 			continue
 		}
@@ -109,21 +189,4 @@ func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS,
 		hints[f.ID] = hint
 	}
 	return hints
-}
-
-func (a *AutoTagAgent) archiveHint(ctx context.Context, fsys remotefs.RemoteFS, f db.FileEntry, kind string, maxNames int) (string, error) {
-	rc, err := fsys.ReadFile(ctx, f.OriginalPath)
-	if err != nil {
-		return "", err
-	}
-	defer rc.Close()
-	if kind == "zip" {
-		ra, size, _, cleanup, err := resolveArchiveReaderAt(rc, f.Size, maxDocumentReadBytes, a.fsCfg.Protocol)
-		if err != nil {
-			return "", err
-		}
-		defer cleanup()
-		return zipHint(ra, size, maxNames)
-	}
-	return tarHint(rc, kind == "tar.gz", maxNames)
 }

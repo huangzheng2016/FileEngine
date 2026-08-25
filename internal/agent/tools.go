@@ -42,6 +42,9 @@ type FileItem struct {
 	Tagged       bool   `json:"tagged"`
 	NewPath      string `json:"new_path,omitempty"`
 	ChildCount   int    `json:"child_count,omitempty"`
+	// ArchiveSummary is the one-line listing hint for archive files (only
+	// populated on harness untagged pulls — see ToolBuilder.archiveSummaries).
+	ArchiveSummary string `json:"archive_summary,omitempty"`
 }
 
 type GetFileInfoInput struct {
@@ -510,6 +513,16 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 			Tagged:       f.Tagged,
 			NewPath:      f.NewPath,
 			ChildCount:   f.ChildCount,
+		}
+	}
+	if isPull && total > 0 {
+		// Harness pulls carry the same archive listing summaries the batch
+		// prompt promises (bounded per pull — see archiveSummaries).
+		summaries := tb.archiveSummaries(ctx, files)
+		for i, f := range files {
+			if s := summaries[f.ID]; s != "" {
+				items[i].ArchiveSummary = s
+			}
 		}
 	}
 

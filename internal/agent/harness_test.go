@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
+	"FileEngine/internal/remotefs"
 )
 
 // Harness pull semantics: list_files with tagged=false under a harness
@@ -72,6 +75,69 @@ func TestBuildHarnessPrompt(t *testing.T) {
 	for _, want := range []string{"循环", "tagged=false", "mark_tagged", "total=0", "分类体系"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("harness prompt missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// Harness untagged pulls inject archive listing summaries into the returned
+// rows (the prompt's "已附包内目录摘要" promise) — archives only, bounded,
+// silent on failure, and off with archive_prompt_disabled.
+func TestListFilesHarnessArchiveSummary(t *testing.T) {
+	dir := t.TempDir()
+	zipData, _ := makeZip(t, []string{"proj/", "proj/main.go", "proj/go.mod"})
+	if err := os.WriteFile(filepath.Join(dir, "proj.zip"), zipData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "note.txt"), []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	lfs, err := remotefs.NewLocalFS(dir)
+	if err != nil {
+		t.Fatalf("NewLocalFS: %v", err)
+	}
+	repo := setupToolTestRepo(t)
+	seedFile(t, repo, 1, "proj.zip", "file")
+	seedFile(t, repo, 1, "note.txt", "file")
+	// Scanned rows carry real sizes; the zip reader needs the true length.
+	repo.DB().Model(&db.FileEntry{}).Where("scan_session_id = 1 AND original_path = 'proj.zip'").Update("size", int64(len(zipData)))
+
+	var counter int32
+	tb := NewToolBuilder(repo, lfs, 1, 1, NewLogger(repo, 1), config.AgentConfig{}, &db.ScanSession{}, false).
+		withHarness(0, 1, &counter)
+	falseVal := false
+	out, err := tb.listFiles(context.Background(), &ListFilesInput{FileType: "file", Tagged: &falseVal, Limit: 10})
+	if err != nil {
+		t.Fatalf("listFiles: %v", err)
+	}
+	var zipItem, txtItem *FileItem
+	for i := range out.Files {
+		switch out.Files[i].Name {
+		case "proj.zip":
+			zipItem = &out.Files[i]
+		case "note.txt":
+			txtItem = &out.Files[i]
+		}
+	}
+	if zipItem == nil || txtItem == nil {
+		t.Fatalf("expected both rows: %+v", out.Files)
+	}
+	if !strings.Contains(zipItem.ArchiveSummary, "zip 压缩包，共 3 个条目") {
+		t.Fatalf("zip row must carry the listing summary: %+v", zipItem)
+	}
+	if txtItem.ArchiveSummary != "" {
+		t.Fatalf("non-archive row must have no summary: %+v", txtItem)
+	}
+
+	// Disabled via guardrail → no summaries.
+	tb2 := NewToolBuilder(repo, lfs, 1, 1, NewLogger(repo, 1), config.AgentConfig{ArchivePromptDisabled: true}, &db.ScanSession{}, false).
+		withHarness(0, 1, &counter)
+	out2, err := tb2.listFiles(context.Background(), &ListFilesInput{FileType: "file", Tagged: &falseVal, Limit: 10})
+	if err != nil {
+		t.Fatalf("listFiles 2: %v", err)
+	}
+	for _, it := range out2.Files {
+		if it.ArchiveSummary != "" {
+			t.Fatalf("archive_prompt_disabled must suppress summaries: %+v", it)
 		}
 	}
 }
