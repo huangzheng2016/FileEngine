@@ -65,6 +65,7 @@ export interface ScanSession {
   allow_read_file: boolean
   allow_auto_category: boolean
   allow_vision: boolean
+  allow_script: boolean
   exclude_category_dirs: boolean
   filter_mode: string
   filter_dirs: string

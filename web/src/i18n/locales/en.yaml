@@ -135,6 +135,11 @@ filesystems:
   password: Password
   keyPath: Key Path
   keepPassword: Leave empty to keep current
+  capsLocal: "Full support: random access; archive listing & entry reads"
+  capsSmb: "Full support: random access; archive listing & entry reads (recommended for NAS)"
+  capsSftp: "Full support: random access; archive listing & entry reads"
+  capsNfs: "Limited: no native random access (Seek adapter); archives work"
+  capsFtp: "Limited: no random access — archives over 32MB unavailable; use only as a fallback"
   deleteConfirm: Delete this filesystem?
   testConn: Test Connection
   connOk: Connection OK
@@ -179,6 +184,9 @@ tasks:
   allowVision: Allow Vision
   allowVisionHint: Let the agent inspect image contents; the model must also have vision enabled
   allowVisionPatchFailed: "Session created, but enabling vision failed: {error}"
+  allowScript: Allow Batch Scripting
+  allowScriptHint: Let the agent run sandboxed scripts for bulk queries and classification (on by default)
+  allowScriptPatchFailed: "Session created, but disabling scripting failed: {error}"
   visionOn: Vision
   excludeCategoryDirs: Exclude Category Dirs
   excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files

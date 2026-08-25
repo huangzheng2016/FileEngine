@@ -214,6 +214,11 @@
           <p class="form-field__hint">{{ $t('tasks.allowVisionHint') }}</p>
         </div>
         <div class="form-field">
+          <label class="form-field__label">{{ $t('tasks.allowScript') }}</label>
+          <div><el-switch v-model="newScan.allowScript" /></div>
+          <p class="form-field__hint">{{ $t('tasks.allowScriptHint') }}</p>
+        </div>
+        <div class="form-field">
           <label class="form-field__label">{{ $t('tasks.excludeCategoryDirs') }}</label>
           <div><el-switch v-model="newScan.excludeCategoryDirs" /></div>
           <p class="form-field__hint">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
@@ -286,6 +291,11 @@
           <p class="form-field__hint">{{ $t('tasks.allowVisionHint') }}</p>
         </div>
         <div class="form-field">
+          <label class="form-field__label">{{ $t('tasks.allowScript') }}</label>
+          <div><el-switch v-model="sessionSettings.allow_script" /></div>
+          <p class="form-field__hint">{{ $t('tasks.allowScriptHint') }}</p>
+        </div>
+        <div class="form-field">
           <label class="form-field__label">{{ $t('tasks.excludeCategoryDirs') }}</label>
           <div><el-switch v-model="sessionSettings.exclude_category_dirs" /></div>
           <p class="form-field__hint">{{ $t('tasks.excludeCategoryDirsHint') }}</p>
@@ -336,12 +346,12 @@ const highlightBatch = ref<number | null>(null)
 const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
 const showNewDialog = ref(false)
-const newScan = ref<{ filesystemId: number; scanPath: string; modelProviderId: number | null; allowVision: boolean; excludeCategoryDirs: boolean; filterMode: string; filterDirs: string }>({ filesystemId: 0, scanPath: '', modelProviderId: null, allowVision: false, excludeCategoryDirs: false, filterMode: 'blacklist', filterDirs: '' })
+const newScan = ref<{ filesystemId: number; scanPath: string; modelProviderId: number | null; allowVision: boolean; allowScript: boolean; excludeCategoryDirs: boolean; filterMode: string; filterDirs: string }>({ filesystemId: 0, scanPath: '', modelProviderId: null, allowVision: false, allowScript: true, excludeCategoryDirs: false, filterMode: 'blacklist', filterDirs: '' })
 const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
-const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, allow_vision: false, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
+const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, allow_vision: false, allow_script: true, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
 const validating = ref(false)
 const validationResult = ref<ValidationResult | null>(null)
 const statsVisible = ref(false)
@@ -679,6 +689,7 @@ function openSettings(s: ScanSession) {
     allow_read_file: s.allow_read_file,
     allow_auto_category: s.allow_auto_category,
     allow_vision: s.allow_vision,
+    allow_script: s.allow_script,
     exclude_category_dirs: s.exclude_category_dirs,
     filter_mode: s.filter_mode || 'blacklist',
     filter_dirs: s.filter_dirs || '',
@@ -704,6 +715,7 @@ function openNewScanDialog() {
     scanPath: '',
     modelProviderId: modelProviders.value.length > 0 ? modelProviders.value[0].id : null,
     allowVision: false,
+    allowScript: true,
     excludeCategoryDirs: false,
     filterMode: 'blacklist',
     filterDirs: '',
@@ -722,6 +734,15 @@ async function handleNewScan() {
     } catch (e: any) {
       // Session IS created at this point — warn instead of failing silently.
       ElMessage.warning(t('tasks.allowVisionPatchFailed', { error: e.response?.data?.error || e.message }))
+    }
+  }
+  // allow_script is the mirror image: the backend defaults it ON, so patch
+  // only when the user explicitly opted out.
+  if (!newScan.value.allowScript) {
+    try {
+      await updateSessionConfig(res.data.id, { allow_script: false })
+    } catch (e: any) {
+      ElMessage.warning(t('tasks.allowScriptPatchFailed', { error: e.response?.data?.error || e.message }))
     }
   }
   ElMessage.success(t('tasks.scanStarted'))

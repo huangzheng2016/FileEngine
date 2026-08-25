@@ -40,11 +40,19 @@ type AgentConfig struct {
 	VisionMaxImagesPerBatch int    `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
 	VisionImageMaxPx        int    `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
 	VisionMaxImageBytes     int    `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
+	// BatchSize is the number of loose files per agent batch. It must move
+	// together with MaxStep: each file costs ≥2 tool calls (set_target +
+	// mark_tagged) plus exploration steps, so keep MaxStep ≈ 3× BatchSize —
+	// raising BatchSize without MaxStep strands batches mid-run (silently
+	// untagged files), the reverse just wastes headroom.
 	BatchSize               int    `yaml:"batch_size" json:"batch_size"`
 	Concurrency             int    `yaml:"concurrency" json:"concurrency"`
 	MaxFileReadSize         int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	// ArchiveEntryMaxSize caps which archive entries read_file will extract
+	// inline via the path::entry syntax (larger entries are listing-only).
+	ArchiveEntryMaxSize     int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
 	MaxRetries              int    `yaml:"max_retries" json:"max_retries"`
-	MaxStep                 int    `yaml:"max_step" json:"max_step"`
+	MaxStep                 int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; ≈3× BatchSize (see above)
 	InstructMaxStep         int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt            string `yaml:"system_prompt" json:"system_prompt"`
 	InstructSystemPrompt    string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
@@ -119,7 +127,7 @@ func setDefaults(cfg *Config) {
 		cfg.Database.DSN = "fileengine.db"
 	}
 	if cfg.Agent.BatchSize == 0 {
-		cfg.Agent.BatchSize = 10
+		cfg.Agent.BatchSize = 50
 	}
 	if cfg.Agent.Concurrency == 0 {
 		cfg.Agent.Concurrency = 1
@@ -127,11 +135,14 @@ func setDefaults(cfg *Config) {
 	if cfg.Agent.MaxFileReadSize == 0 {
 		cfg.Agent.MaxFileReadSize = 102400
 	}
+	if cfg.Agent.ArchiveEntryMaxSize == 0 {
+		cfg.Agent.ArchiveEntryMaxSize = 64 * 1024
+	}
 	if cfg.Agent.MaxRetries == 0 {
 		cfg.Agent.MaxRetries = 3
 	}
 	if cfg.Agent.MaxStep == 0 {
-		cfg.Agent.MaxStep = 50
+		cfg.Agent.MaxStep = 150
 	}
 	if cfg.Agent.InstructMaxStep == 0 {
 		cfg.Agent.InstructMaxStep = 30

@@ -78,7 +78,7 @@ type UpdateDescriptionOutput struct {
 }
 
 type MarkTaggedInput struct {
-	Path string `json:"path" jsonschema_description:"Original path of the directory to mark as tagged (children are also marked)"`
+	Path string `json:"path" jsonschema_description:"Original path of the file or directory to mark as tagged (a directory's children are also marked)"`
 }
 
 type MarkTaggedOutput struct {
@@ -199,7 +199,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build get_file_info: %w", err)
 	}
 
-	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
+	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
 	if err != nil {
 		return nil, fmt.Errorf("build read_file: %w", err)
 	}
@@ -209,7 +209,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build update_description: %w", err)
 	}
 
-	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
+	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
 	if err != nil {
 		return nil, fmt.Errorf("build mark_tagged: %w", err)
 	}
@@ -297,7 +297,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
+	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	allTools = append(allTools, deleteCat)
 
 	if tb.session.AllowReadFile {
-		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
+		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
 		if err != nil {
 			return nil, err
 		}
@@ -464,51 +464,171 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 }
 
 func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*ReadFileOutput, error) {
+	// Archive entry syntax: "path/to/archive.zip::entry/inside.txt". Split
+	// first; the filesystem-facing part is validated like every other path.
+	archivePath, entryName, hasEntry := strings.Cut(input.Path, "::")
+	if err := ValidateFSPath(archivePath); err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	if hasEntry && entryName == "" {
+		return nil, fmt.Errorf("empty archive entry name in %q", input.Path)
+	}
 
 	maxSize := tb.cfg.MaxFileReadSize
 	if maxSize <= 0 {
 		maxSize = 102400
 	}
 
-	reader, err := tb.fs.ReadFile(ctx, normalizePath(input.Path))
+	ext := documentExt(archivePath)
+	arch := archiveKind(archivePath)
+	if hasEntry && arch == "" {
+		return nil, fmt.Errorf("entry syntax (::) is only valid for zip/tar archives: %q", input.Path)
+	}
+
+	if arch != "" {
+		return tb.readArchive(ctx, input, archivePath, entryName, arch, maxSize)
+	}
+
+	// Document formats (pdf/docx/xlsx/pptx) must be parsed whole — zip
+	// central directories and PDF xref tables live at the end of the file —
+	// so they get a larger read budget; the extracted text is still capped
+	// to maxSize runes. Everything else stays on the text path.
+	readCap := int64(maxSize) + 1
+	if ext != "" {
+		readCap = maxDocumentReadBytes + 1
+	}
+
+	reader, err := tb.fs.ReadFile(ctx, normalizePath(archivePath))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read file: %w", err)
 	}
 	defer reader.Close()
-
-	// First, peek at the first 1KB to detect binary content before allocating large buffer
-	peekBuf := make([]byte, 1024)
-	peekN, err := io.ReadFull(reader, peekBuf)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	data, err := io.ReadAll(io.LimitReader(reader, readCap))
+	if err != nil {
 		return nil, fmt.Errorf("read error: %w", err)
 	}
-	if peekN > 0 && !isTextContent(string(peekBuf[:peekN])) {
+
+	if ext != "" {
+		out, err := extractDocument(archivePath, data, maxSize)
+		if err != nil {
+			return nil, err
+		}
+		tb.logger.LogToolCall("read_file", input, out)
+		return out, nil
+	}
+
+	// Peek at the first 1KB to detect binary content.
+	peek := data
+	if len(peek) > 1024 {
+		peek = peek[:1024]
+	}
+	if len(peek) > 0 && !isTextContent(string(peek)) {
 		out := &ReadFileOutput{Content: "[binary file - content not displayable]", Truncated: false}
 		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
-	// Read remaining content up to maxSize
-	buf := make([]byte, maxSize+1)
-	copy(buf, peekBuf[:peekN])
-	remaining := maxSize + 1 - peekN
-	if remaining > 0 {
-		n, err := io.ReadFull(reader, buf[peekN:peekN+remaining])
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, fmt.Errorf("read error: %w", err)
-		}
-		peekN += n
-	}
-
-	truncated := peekN > maxSize
+	truncated := len(data) > maxSize
 	if truncated {
-		peekN = maxSize
+		data = data[:maxSize]
 	}
 
-	content := string(buf[:peekN])
-	out := &ReadFileOutput{Content: content, Truncated: truncated}
+	out := &ReadFileOutput{Content: string(data), Truncated: truncated}
 	tb.logger.LogToolCall("read_file", input, out)
 	return out, nil
+}
+
+// readArchive handles zip/tar/tar.gz files: a capped listing of the archive's
+// directory, or one entry's text via the path::entry syntax. rar/7z are
+// explicitly unsupported. zip needs random access (central directory at the
+// end of the file); how that is served per backend is in
+// resolveArchiveReaderAt — stream-only backends beyond the download cap get
+// an explicit degradation notice, never a silent retry.
+func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, archivePath, entryName, kind string, maxChars int) (*ReadFileOutput, error) {
+	log := func(out *ReadFileOutput) (*ReadFileOutput, error) {
+		tb.logger.LogToolCall("read_file", input, out)
+		return out, nil
+	}
+
+	if kind == "rar" || kind == "7z" {
+		return log(&ReadFileOutput{Content: fmt.Sprintf("[unsupported archive format: .%s — supported: zip, tar, tar.gz/tgz]", kind)})
+	}
+
+	maxEntry := int64(tb.cfg.ArchiveEntryMaxSize)
+	if maxEntry <= 0 {
+		maxEntry = defaultArchiveEntryMaxSize
+	}
+
+	rc, err := tb.fs.ReadFile(ctx, normalizePath(archivePath))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read file: %w", err)
+	}
+
+	if kind == "tar" || kind == "tar.gz" {
+		defer rc.Close()
+		gz := kind == "tar.gz"
+		if entryName != "" {
+			out, err := readTarEntry(rc, gz, entryName, maxEntry)
+			if err != nil {
+				return nil, err
+			}
+			return log(out)
+		}
+		listing, err := listTarArchive(rc, gz)
+		if err != nil {
+			return nil, fmt.Errorf("list tar archive: %w", err)
+		}
+		content, cut := capRunes(listing, maxChars)
+		return log(&ReadFileOutput{Content: content, Truncated: cut})
+	}
+
+	// zip: random access required. Entry reads are gated on the archive size
+	// ("包整体过大时只列目录"), listing is not — the central directory alone
+	// is cheap on random-access backends.
+	size := int64(-1)
+	if st, serr := tb.fs.Stat(ctx, normalizePath(archivePath)); serr == nil {
+		size = st.Size
+	}
+	if entryName != "" && size > maxDocumentReadBytes {
+		rc.Close()
+		return log(&ReadFileOutput{Content: fmt.Sprintf("[archive too large (%s over the %d MB limit): entry reads are disabled — listing only]",
+			humanBytes(size), maxDocumentReadBytes/(1<<20))})
+	}
+	ra, actualSize, notice, cleanup, err := resolveArchiveReaderAt(rc, size, maxDocumentReadBytes, tb.session.Protocol)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if notice != "" {
+		return log(&ReadFileOutput{Content: notice})
+	}
+	if entryName != "" {
+		out, err := readZipEntry(ra, actualSize, entryName, maxEntry)
+		if err != nil {
+			return nil, err
+		}
+		return log(out)
+	}
+	listing, err := listZipArchive(ra, actualSize)
+	if err != nil {
+		return nil, fmt.Errorf("list zip archive: %w", err)
+	}
+	content, cut := capRunes(listing, maxChars)
+	return log(&ReadFileOutput{Content: content, Truncated: cut})
+}
+
+// capRunes truncates s to maxChars runes, reporting whether it cut anything.
+func capRunes(s string, maxChars int) (string, bool) {
+	if maxChars <= 0 {
+		return s, false
+	}
+	runes := []rune(s)
+	if len(runes) <= maxChars {
+		return s, false
+	}
+	return string(runes[:maxChars]), true
 }
 
 func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescriptionInput) (*UpdateDescriptionOutput, error) {

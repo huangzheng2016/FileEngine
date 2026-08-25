@@ -55,6 +55,21 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	return sb.String(), nil
 }
 
+// untaggedReconciliationSection renders the end-of-run tagging reconciliation:
+// untagged remainders split by entry type. Untagged directories and symlinks
+// are expected deltas — container directories are described but deliberately
+// left untagged so their children can be classified on their own, and symlinks
+// never participate in tagging. Only a non-zero file count signals real
+// misses, which the failure section above then explains.
+func untaggedReconciliationSection(b db.UntaggedBreakdown) string {
+	miss := ""
+	if b.Files > 0 {
+		miss = "；未打标文件不为 0 表示存在漏标，原因见失败批次与日志"
+	}
+	return fmt.Sprintf("\n## 打标对账\n\n- 未打标剩余：文件 %d / 目录 %d / 软链 %d（容器目录与软链属正常差额：容器只描述不打标、软链不参与打标%s）\n",
+		b.Files, b.Directories, b.Symlinks, miss)
+}
+
 // failureReportSection renders the failed-batch section appended to a tagging
 // report: total count plus each batch's target and error. Long failure lists
 // are capped so the report stays readable.

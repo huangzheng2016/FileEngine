@@ -19,7 +19,7 @@ export const getSession = (id: number) =>
 export const deleteSession = (id: number) =>
   api.delete(`/sessions/${id}`)
 
-export const updateSessionConfig = (id: number, data: { allow_read_file?: boolean; allow_auto_category?: boolean; allow_vision?: boolean; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string; model_provider_id?: number }) =>
+export const updateSessionConfig = (id: number, data: { allow_read_file?: boolean; allow_auto_category?: boolean; allow_vision?: boolean; allow_script?: boolean; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string; model_provider_id?: number }) =>
   api.patch<ScanSession>(`/sessions/${id}`, data)
 
 export const rescanSession = (id: number) =>

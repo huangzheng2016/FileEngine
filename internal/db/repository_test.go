@@ -191,3 +191,80 @@ func TestSampleFiles(t *testing.T) {
 		t.Fatalf("SampleFiles n=0: got %v, %v", got, err)
 	}
 }
+
+// CountUntaggedByType splits the untagged remainder by entry type — the
+// reconciliation line depends on directories/symlinks being reported
+// separately from files (only files signal tagging misses).
+func TestCountUntaggedByType(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	entries := []FileEntry{
+		{ScanSessionID: 1, OriginalPath: "in/dir", Name: "dir", FileType: "directory"},
+		{ScanSessionID: 1, OriginalPath: "in/dir2", Name: "dir2", FileType: "directory", Tagged: true},
+		{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/c.txt", Name: "c.txt", FileType: "file", Tagged: true},
+		{ScanSessionID: 1, OriginalPath: "in/link", Name: "link", FileType: "symlink"},
+		// Another session's untagged entries must not leak in.
+		{ScanSessionID: 2, OriginalPath: "in/x.txt", Name: "x.txt", FileType: "file"},
+	}
+	for _, f := range entries {
+		fe := f
+		if err := r.CreateFile(&fe); err != nil {
+			t.Fatalf("create file %s: %v", f.OriginalPath, err)
+		}
+	}
+
+	b, err := r.CountUntaggedByType(1)
+	if err != nil {
+		t.Fatalf("CountUntaggedByType: %v", err)
+	}
+	if b.Directories != 1 || b.Files != 2 || b.Symlinks != 1 {
+		t.Fatalf("breakdown: got %+v, want dirs=1 files=2 symlinks=1", b)
+	}
+	if b.Total() != 4 {
+		t.Fatalf("total: got %d, want 4", b.Total())
+	}
+
+	empty, err := r.CountUntaggedByType(99)
+	if err != nil || empty.Total() != 0 {
+		t.Fatalf("unknown session: got %+v, %v", empty, err)
+	}
+}
+
+// TaggedStatusByIDs backs the loose-file batch re-check: it must report the
+// stored tagged flag per ID (unknown IDs simply absent).
+func TestTaggedStatusByIDs(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	tagged := &FileEntry{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file", Tagged: true}
+	untagged := &FileEntry{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"}
+	for _, f := range []*FileEntry{tagged, untagged} {
+		if err := r.CreateFile(f); err != nil {
+			t.Fatalf("create file: %v", err)
+		}
+	}
+
+	got, err := r.TaggedStatusByIDs([]uint{tagged.ID, untagged.ID})
+	if err != nil {
+		t.Fatalf("TaggedStatusByIDs: %v", err)
+	}
+	if !got[tagged.ID] {
+		t.Fatalf("tagged file reported untagged: %v", got)
+	}
+	if got[untagged.ID] {
+		t.Fatalf("untagged file reported tagged: %v", got)
+	}
+
+	if got, err := r.TaggedStatusByIDs(nil); err != nil || len(got) != 0 {
+		t.Fatalf("empty ids: got %v, %v", got, err)
+	}
+}

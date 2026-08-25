@@ -38,6 +38,7 @@ const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目
 - 文档（.pdf/.docx/.xlsx）→ 按文件名主题关键词归类
 - 数据库/备份（.sql/.sql.gz）→ 归入备份/数据相关分类
 - 配置/密钥（.json/.yaml/.pem）→ 通常属于某个服务或项目
+- **每个散文件处理完必须逐个 mark_tagged**：set_target 不会置 tagged，批内漏标记的文件会被记为失败批次并触发补跑
 
 ## 分类管理
 
@@ -121,7 +122,7 @@ const instructPromptHead = `你是一个文件整理助手。用户选择了一�
 - get_file_info: 获取文件/目录详细信息
 `
 
-const instructReadFileTool = "- read_file: 读取文本文件内容（有大小限制）\n"
+const instructReadFileTool = "- read_file: 读取文件内容（文本按大小截断；PDF/docx/xlsx/pptx 提取文本，.doc 不支持；zip/tar/tar.gz 列目录并可用 path::entry 读包内小文本条目，rar/7z 不支持）\n"
 
 const instructPromptToolsRest = `- update_description: 修改描述
 - mark_tagged: 标记目录为已处理（级联子项）
