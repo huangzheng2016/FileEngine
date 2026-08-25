@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sync"
 	"time"
 
 	"FileEngine/internal/config"
@@ -13,7 +14,12 @@ import (
 	"github.com/jlaffaye/ftp"
 )
 
+// FTPFS serializes control-connection commands with mu: a *ftp.ServerConn is
+// not safe for concurrent use, and eino executes parallel tool calls
+// concurrently. Data transfers (the Retr response stream) run on their own
+// TCP connection and stay parallel; only command/response framing is locked.
 type FTPFS struct {
+	mu       sync.Mutex
 	conn     *ftp.ServerConn
 	basePath string
 }
@@ -59,7 +65,9 @@ func (f *FTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
 	entries, err := f.conn.List(fullPath)
+	f.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +99,9 @@ func (f *FTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
 	entry, err := f.conn.GetEntry(fullPath)
+	f.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -114,11 +124,29 @@ func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
 	resp, err := f.conn.Retr(fullPath)
+	f.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &ftpLockedResponse{mu: &f.mu, r: resp}, nil
+}
+
+// ftpLockedResponse locks only Close: the transfer itself runs on its own
+// data connection (parallel-safe), but closing it reads the completion reply
+// on the shared control connection.
+type ftpLockedResponse struct {
+	mu *sync.Mutex
+	r  *ftp.Response
+}
+
+func (l *ftpLockedResponse) Read(p []byte) (int, error) { return l.r.Read(p) }
+
+func (l *ftpLockedResponse) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.r.Close()
 }
 
 func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
@@ -130,6 +158,8 @@ func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.conn.Rename(srcFull, dstFull)
 }
 
@@ -149,6 +179,8 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.conn.Stor(dstFull, bytes.NewReader(data))
 }
 
@@ -157,6 +189,8 @@ func (f *FTPFS) Delete(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.conn.Delete(fullPath)
 }
 
@@ -165,9 +199,13 @@ func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.conn.MakeDir(fullPath)
 }
 
 func (f *FTPFS) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.conn.Quit()
 }
