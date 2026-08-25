@@ -310,6 +310,52 @@ func (r *Repository) IsFileTagged(sessionID uint, path string) (bool, error) {
 	return f.Tagged, nil
 }
 
+// TaggedStatusByIDs returns the tagged flag for each given file ID. It backs
+// the loose-file batch re-check: a batch can finish successfully while leaving
+// files untagged (set_target does not flip tagged), and such misses must be
+// detectable after the fact.
+func (r *Repository) TaggedStatusByIDs(ids []uint) (map[uint]bool, error) {
+	out := make(map[uint]bool, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []FileEntry
+	if err := r.db.Select("id", "tagged").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, f := range rows {
+		out[f.ID] = f.Tagged
+	}
+	return out, nil
+}
+
+// UntaggedBreakdown splits a session's untagged entries by file type. It feeds
+// the end-of-run reconciliation line and the loose-file re-sweep: untagged
+// directories may be containers deliberately left for their children and
+// symlinks are never tagged — only the file count signals tagging misses.
+type UntaggedBreakdown struct {
+	Directories int64
+	Files       int64
+	Symlinks    int64
+}
+
+// Total returns the total number of untagged entries across all types.
+func (b UntaggedBreakdown) Total() int64 {
+	return b.Directories + b.Files + b.Symlinks
+}
+
+// CountUntaggedByType counts a session's untagged entries split by file type.
+func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, error) {
+	var b UntaggedBreakdown
+	err := r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND tagged = ?", sessionID, false).
+		Select(`SUM(CASE WHEN file_type = 'directory' THEN 1 ELSE 0 END) AS directories,
+			SUM(CASE WHEN file_type = 'file' THEN 1 ELSE 0 END) AS files,
+			SUM(CASE WHEN file_type = 'symlink' THEN 1 ELSE 0 END) AS symlinks`).
+		Scan(&b).Error
+	return b, err
+}
+
 // ClaimDirectory atomically claims an untagged directory for processing by setting its batch_index.
 // Returns true if the claim succeeded (directory was untagged), false if already claimed or tagged.
 func (r *Repository) ClaimDirectory(sessionID uint, path string, batchIndex int) (bool, error) {

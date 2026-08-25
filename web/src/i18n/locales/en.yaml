@@ -179,6 +179,9 @@ tasks:
   allowVision: Allow Vision
   allowVisionHint: Let the agent inspect image contents; the model must also have vision enabled
   allowVisionPatchFailed: "Session created, but enabling vision failed: {error}"
+  allowScript: Allow Batch Scripting
+  allowScriptHint: Let the agent run sandboxed scripts for bulk queries and classification (on by default)
+  allowScriptPatchFailed: "Session created, but disabling scripting failed: {error}"
   visionOn: Vision
   excludeCategoryDirs: Exclude Category Dirs
   excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files

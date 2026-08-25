@@ -34,7 +34,7 @@
             <div class="form-row">
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.batchSize') }}</label>
-                <el-input-number v-model="config.agent.batch_size" :min="1" :max="50" style="width: 100%" />
+                <el-input-number v-model="config.agent.batch_size" :min="1" :max="200" style="width: 100%" />
               </div>
               <div class="form-field">
                 <label class="form-field__label">{{ $t('config.agent.concurrency') }}</label>
@@ -125,7 +125,7 @@ function initEditor(content: string) {
 const config = reactive<Config>({
   server: { port: 8080, host: '0.0.0.0' },
   database: { driver: 'sqlite', dsn: 'fileengine.db' },
-  agent: { batch_size: 10, concurrency: 1, max_file_read_size: 102400, max_retries: 3 },
+  agent: { batch_size: 50, concurrency: 1, max_file_read_size: 102400, max_retries: 3 },
 })
 
 onMounted(async () => {

@@ -133,6 +133,14 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 		report = "自动分类完成"
 	}
 	report += failureReportSection(failures)
+	// Reconciliation: split the untagged remainder by entry type so the
+	// expected deltas (container dirs, symlinks) are distinguishable from
+	// real tagging misses (files).
+	if breakdown, err := o.repo.CountUntaggedByType(o.sessionID); err != nil {
+		log.Printf("orchestrator: untagged reconciliation failed: %v", err)
+	} else {
+		report += untaggedReconciliationSection(breakdown)
+	}
 	return report, nil
 }
 

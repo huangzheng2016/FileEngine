@@ -78,7 +78,7 @@ type UpdateDescriptionOutput struct {
 }
 
 type MarkTaggedInput struct {
-	Path string `json:"path" jsonschema_description:"Original path of the directory to mark as tagged (children are also marked)"`
+	Path string `json:"path" jsonschema_description:"Original path of the file or directory to mark as tagged (a directory's children are also marked)"`
 }
 
 type MarkTaggedOutput struct {
@@ -199,7 +199,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build get_file_info: %w", err)
 	}
 
-	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
+	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本文件按大小截断；PDF/docx/xlsx/pptx 提取文本（页数/字符上限，超大文件拒绝）；.doc 不支持", tb.readFile)
 	if err != nil {
 		return nil, fmt.Errorf("build read_file: %w", err)
 	}
@@ -209,7 +209,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build update_description: %w", err)
 	}
 
-	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
+	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
 	if err != nil {
 		return nil, fmt.Errorf("build mark_tagged: %w", err)
 	}
@@ -297,7 +297,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	markTagged, err := utils.InferTool("mark_tagged", "标记目录为已处理，所有子项也会被标记", tb.markTagged)
+	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	allTools = append(allTools, deleteCat)
 
 	if tb.session.AllowReadFile {
-		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容，仅限文本文件且有大小限制", tb.readFile)
+		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本文件按大小截断；PDF/docx/xlsx/pptx 提取文本（页数/字符上限，超大文件拒绝）；.doc 不支持", tb.readFile)
 		if err != nil {
 			return nil, err
 		}
@@ -464,10 +464,24 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 }
 
 func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*ReadFileOutput, error) {
+	// Same root-confinement rules as every other path-taking tool.
+	if err := ValidateFSPath(input.Path); err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
 
 	maxSize := tb.cfg.MaxFileReadSize
 	if maxSize <= 0 {
 		maxSize = 102400
+	}
+
+	// Document formats (pdf/docx/xlsx/pptx) must be parsed whole — zip
+	// central directories and PDF xref tables live at the end of the file —
+	// so they get a larger read budget; the extracted text is still capped
+	// to maxSize runes. Everything else stays on the text path.
+	ext := documentExt(input.Path)
+	readCap := int64(maxSize) + 1
+	if ext != "" {
+		readCap = maxDocumentReadBytes + 1
 	}
 
 	reader, err := tb.fs.ReadFile(ctx, normalizePath(input.Path))
@@ -475,38 +489,37 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 		return nil, fmt.Errorf("cannot read file: %w", err)
 	}
 	defer reader.Close()
-
-	// First, peek at the first 1KB to detect binary content before allocating large buffer
-	peekBuf := make([]byte, 1024)
-	peekN, err := io.ReadFull(reader, peekBuf)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	data, err := io.ReadAll(io.LimitReader(reader, readCap))
+	if err != nil {
 		return nil, fmt.Errorf("read error: %w", err)
 	}
-	if peekN > 0 && !isTextContent(string(peekBuf[:peekN])) {
+
+	if ext != "" {
+		out, err := extractDocument(input.Path, data, maxSize)
+		if err != nil {
+			return nil, err
+		}
+		tb.logger.LogToolCall("read_file", input, out)
+		return out, nil
+	}
+
+	// Peek at the first 1KB to detect binary content.
+	peek := data
+	if len(peek) > 1024 {
+		peek = peek[:1024]
+	}
+	if len(peek) > 0 && !isTextContent(string(peek)) {
 		out := &ReadFileOutput{Content: "[binary file - content not displayable]", Truncated: false}
 		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
-	// Read remaining content up to maxSize
-	buf := make([]byte, maxSize+1)
-	copy(buf, peekBuf[:peekN])
-	remaining := maxSize + 1 - peekN
-	if remaining > 0 {
-		n, err := io.ReadFull(reader, buf[peekN:peekN+remaining])
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, fmt.Errorf("read error: %w", err)
-		}
-		peekN += n
-	}
-
-	truncated := peekN > maxSize
+	truncated := len(data) > maxSize
 	if truncated {
-		peekN = maxSize
+		data = data[:maxSize]
 	}
 
-	content := string(buf[:peekN])
-	out := &ReadFileOutput{Content: content, Truncated: truncated}
+	out := &ReadFileOutput{Content: string(data), Truncated: truncated}
 	tb.logger.LogToolCall("read_file", input, out)
 	return out, nil
 }

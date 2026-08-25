@@ -208,6 +208,7 @@ type UpdateSessionRequest struct {
 	AllowVision         *bool   `json:"allow_vision"`
 	AllowReadFile       *bool   `json:"allow_read_file"`
 	AllowAutoCategory   *bool   `json:"allow_auto_category"`
+	AllowScript         *bool   `json:"allow_script"`
 	ExcludeCategoryDirs *bool   `json:"exclude_category_dirs"`
 	FilterMode          *string `json:"filter_mode"`
 	FilterDirs          *string `json:"filter_dirs"`
@@ -238,6 +239,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.AllowVision != nil {
 		session.AllowVision = *req.AllowVision
+	}
+	if req.AllowScript != nil {
+		session.AllowScript = *req.AllowScript
 	}
 	if req.ExcludeCategoryDirs != nil {
 		session.ExcludeCategoryDirs = *req.ExcludeCategoryDirs

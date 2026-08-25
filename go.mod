@@ -10,6 +10,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jlaffaye/ftp v0.2.0
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/pkg/sftp v1.13.10
 	github.com/vmware/go-nfs-client v0.0.0-20190605212624-d43b92724c1b
 	golang.org/x/crypto v0.49.0

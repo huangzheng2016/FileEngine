@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -150,11 +151,51 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 		_ = a.repo.RefreshSessionCounts(a.sessionID)
 	}
 
-	// Process remaining untagged files (leaf files not in any directory)
+	// Process remaining untagged files (leaf files not in any directory), then
+	// re-sweep with a fresh cursor: a batch can succeed while leaving files
+	// untagged (set_target does not flip tagged), and the dispatcher's ID
+	// cursor never looks back, so only new passes from ID 0 reach such misses.
+	// Directories are deliberately NOT re-swept — container dirs stay untagged
+	// by design and re-running them would re-tag containers forever.
 	remainingPrompt := systemPromptForSession(config.Get().Agent, a.session)
-	a.processRemainingFiles(ctx, chatModel, remainingPrompt, &batchCounter, filesystemID)
+	runRemainingSweeps(maxRemainingSweeps, func() {
+		a.processRemainingFiles(ctx, chatModel, remainingPrompt, &batchCounter, filesystemID)
+	}, func() (int64, error) {
+		b, err := a.repo.CountUntaggedByType(a.sessionID)
+		return b.Files, err
+	})
 
 	return nil
+}
+
+// maxRemainingSweeps bounds the extra end-of-run sweeps over loose files
+// (beyond the first pass).
+const maxRemainingSweeps = 2
+
+// runRemainingSweeps runs process once, then repeats it up to maxExtra times
+// while countRemaining keeps reporting progress (a strictly decreasing
+// remainder). A round that moves nothing stops the loop — an agent that keeps
+// missing the same files would otherwise be retried forever. Count errors
+// stop the sweeps too; the first pass has already run at that point.
+func runRemainingSweeps(maxExtra int, process func(), countRemaining func() (int64, error)) {
+	process()
+	prev, err := countRemaining()
+	if err != nil {
+		log.Printf("remaining sweep: count failed, skipping re-sweeps: %v", err)
+		return
+	}
+	for i := 0; i < maxExtra && prev > 0; i++ {
+		process()
+		cur, err := countRemaining()
+		if err != nil {
+			log.Printf("remaining sweep: count failed, stopping sweeps: %v", err)
+			return
+		}
+		if cur >= prev {
+			return
+		}
+		prev = cur
+	}
 }
 
 func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-chan db.FileEntry, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
@@ -395,7 +436,53 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
 			tracker.ResetUsage()
 		}
+		// Batch-level re-check: a successful run does not guarantee every file
+		// got mark_tagged — verify against the manifest and record misses.
+		a.recheckBatchTagged(int(batch.batchIdx), batch.files)
 		workerLogger.Flush()
 		a.emitTagProgress(int(batch.batchIdx))
 	}
+}
+
+// recheckBatchTagged verifies that a finished loose-file batch actually
+// tagged every file it was given. set_target alone does not flip tagged, so
+// an agent can return success while leaving files behind; until now such
+// misses were silent (the dispatcher cursor had already passed their IDs).
+// Misses are recorded as batch failures so they surface exactly like hard
+// failures (tagged_partial status + report section), and the end-of-run
+// sweeps give them another pass.
+func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) {
+	ids := make([]uint, len(files))
+	paths := make(map[uint]string, len(files))
+	for i, f := range files {
+		ids[i] = f.ID
+		paths[f.ID] = f.OriginalPath
+	}
+	tagged, err := a.repo.TaggedStatusByIDs(ids)
+	if err != nil {
+		log.Printf("batch %d: tagged re-check failed (misses stay silent): %v", batchIdx, err)
+		return
+	}
+	var missed []string
+	for _, id := range ids {
+		if !tagged[id] {
+			missed = append(missed, paths[id])
+		}
+	}
+	if len(missed) == 0 {
+		return
+	}
+	const maxListed = 5
+	shown := missed
+	suffix := ""
+	if len(missed) > maxListed {
+		shown = missed[:maxListed]
+		suffix = fmt.Sprintf(" 等 %d 个", len(missed))
+	}
+	a.noteFailure(BatchFailure{
+		BatchIndex: batchIdx,
+		Target:     fmt.Sprintf("%d files", len(files)),
+		Err: fmt.Sprintf("agent 完成但未标记 %d/%d 个文件: %s%s",
+			len(missed), len(files), strings.Join(shown, ", "), suffix),
+	})
 }

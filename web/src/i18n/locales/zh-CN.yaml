@@ -179,6 +179,9 @@ tasks:
   allowVision: 允许视觉理解
   allowVisionHint: 允许 Agent 查看图片内容，需模型同时开启视觉能力
   allowVisionPatchFailed: "会话已创建，但视觉开关设置失败：{error}"
+  allowScript: 允许批量脚本
+  allowScriptHint: 允许 Agent 运行沙箱脚本做批量查询和归类（默认开启）
+  allowScriptPatchFailed: "会话已创建，但脚本开关设置失败：{error}"
   visionOn: 视觉
   excludeCategoryDirs: 排除分类目录
   excludeCategoryDirsHint: 扫描时跳过已有分类的目标目录，避免重复处理已整理的文件
