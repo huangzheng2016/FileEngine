@@ -6,6 +6,7 @@ require (
 	github.com/cloudwego/eino v0.9.15
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.25
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
+	github.com/d5/tengo/v2 v2.17.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jlaffaye/ftp v0.2.0

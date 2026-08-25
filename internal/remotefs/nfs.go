@@ -52,15 +52,29 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 	}, nil
 }
 
-func (n *NFSFS) resolve(p string) string {
+// resolve maps a caller path to an export-relative slash path confined to
+// basePath (the sub-path inside the export; the server already confines us to
+// the export itself). Absolute paths must stay inside basePath; ".." and
+// absolute escapes are rejected.
+func (n *NFSFS) resolve(p string) (string, error) {
+	var full string
 	if path.IsAbs(p) {
-		return path.Clean(p)
+		full = path.Clean(p)
+	} else {
+		full = path.Join(n.basePath, p)
 	}
-	return path.Join(n.basePath, p)
+	if err := confineSlashPath(full, n.basePath); err != nil {
+		return "", err
+	}
+	return full, nil
 }
 
 func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
-	entries, err := n.target.ReadDirPlus(n.resolve(p))
+	fullPath, err := n.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := n.target.ReadDirPlus(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +104,10 @@ func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
 }
 
 func (n *NFSFS) Stat(_ context.Context, p string) (*FileInfo, error) {
-	fullPath := n.resolve(p)
+	fullPath, err := n.resolve(p)
+	if err != nil {
+		return nil, err
+	}
 	info, _, err := n.target.Lookup(fullPath)
 	if err != nil {
 		return nil, err
@@ -113,7 +130,11 @@ func (n *NFSFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 }
 
 func (n *NFSFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
-	f, err := n.target.Open(n.resolve(p))
+	fullPath, err := n.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	f, err := n.target.Open(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -125,17 +146,28 @@ func (n *NFSFS) MoveFile(ctx context.Context, src, dst string) error {
 	if err := n.CopyFile(ctx, src, dst); err != nil {
 		return err
 	}
-	return n.target.Remove(n.resolve(src))
+	srcFull, err := n.resolve(src)
+	if err != nil {
+		return err
+	}
+	return n.target.Remove(srcFull)
 }
 
 func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
-	srcFile, err := n.target.Open(n.resolve(src))
+	srcFull, err := n.resolve(src)
+	if err != nil {
+		return err
+	}
+	dstPath, err := n.resolve(dst)
+	if err != nil {
+		return err
+	}
+	srcFile, err := n.target.Open(srcFull)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close()
 
-	dstPath := n.resolve(dst)
 	dstDir := path.Dir(dstPath)
 	n.target.Mkdir(dstDir, 0755)
 
@@ -150,11 +182,19 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 }
 
 func (n *NFSFS) Delete(_ context.Context, p string) error {
-	return n.target.RemoveAll(n.resolve(p))
+	fullPath, err := n.resolve(p)
+	if err != nil {
+		return err
+	}
+	return n.target.RemoveAll(fullPath)
 }
 
 func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
-	_, err := n.target.Mkdir(n.resolve(p), 0755)
+	fullPath, err := n.resolve(p)
+	if err != nil {
+		return err
+	}
+	_, err = n.target.Mkdir(fullPath, 0755)
 	return err
 }
 

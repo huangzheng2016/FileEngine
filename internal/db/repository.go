@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"math/rand/v2"
 
 	"gorm.io/gorm"
 )
@@ -183,7 +184,33 @@ type FileQuery struct {
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
-	tx := r.db.Model(&FileEntry{})
+	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
+
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if q.Page <= 0 {
+		q.Page = 1
+	}
+	if q.PageSize <= 0 {
+		q.PageSize = 50
+	}
+
+	var files []FileEntry
+	query := tx
+	if q.MinID > 0 {
+		query = query.Where("id > ?", q.MinID)
+	}
+	offset := (q.Page - 1) * q.PageSize
+	err := query.Order("file_type ASC, name ASC").Offset(offset).Limit(q.PageSize).Find(&files).Error
+	return files, total, err
+}
+
+// applyFileFilters builds the shared WHERE clause for FileQuery consumers
+// (ListFiles, SampleFiles). Pagination/cursor fields are left to the caller.
+func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	if q.SessionID > 0 {
 		tx = tx.Where("scan_session_id = ?", q.SessionID)
 	}
@@ -209,27 +236,31 @@ func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	if q.Search != "" {
 		tx = tx.Where("name LIKE ?", "%"+q.Search+"%")
 	}
+	return tx
+}
 
-	var total int64
-	if err := tx.Count(&total).Error; err != nil {
-		return nil, 0, err
+// SampleFiles returns up to n randomly chosen files matching the query
+// filters. It plucks matching IDs, shuffles them in Go (keeps the SQL
+// dialect-agnostic — RANDOM()/RAND() differ), then loads and path-sorts the
+// winners so the output reads deterministically.
+func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
+	if n <= 0 {
+		return nil, nil
 	}
-
-	if q.Page <= 0 {
-		q.Page = 1
+	var ids []uint
+	if err := applyFileFilters(r.db.Model(&FileEntry{}), q).Pluck("id", &ids).Error; err != nil {
+		return nil, err
 	}
-	if q.PageSize <= 0 {
-		q.PageSize = 50
+	rand.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
+	if len(ids) > n {
+		ids = ids[:n]
 	}
-
 	var files []FileEntry
-	query := tx
-	if q.MinID > 0 {
-		query = query.Where("id > ?", q.MinID)
+	if len(ids) == 0 {
+		return files, nil
 	}
-	offset := (q.Page - 1) * q.PageSize
-	err := query.Order("file_type ASC, name ASC").Offset(offset).Limit(q.PageSize).Find(&files).Error
-	return files, total, err
+	err := r.db.Where("id IN ?", ids).Order("original_path ASC").Find(&files).Error
+	return files, err
 }
 
 func (r *Repository) UpdateFile(f *FileEntry) error {

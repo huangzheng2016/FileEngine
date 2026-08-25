@@ -8,10 +8,10 @@ import (
 )
 
 // DefaultSystemPrompt is the default autotag prompt for a default session
-// (create_category disabled). systemPromptForSession adapts it to the tools
-// actually registered for the session; a custom Agent.SystemPrompt always
-// wins and is used verbatim.
-var DefaultSystemPrompt = defaultSystemPrompt(false)
+// (create_category disabled, run_script enabled — allow_script defaults on).
+// systemPromptForSession adapts it to the tools actually registered for the
+// session; a custom Agent.SystemPrompt always wins and is used verbatim.
+var DefaultSystemPrompt = defaultSystemPrompt(false, true)
 
 const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目录和文件，将它们归类到用户定义的分类中。
 
@@ -54,6 +54,12 @@ const autoCategoryGuidance = `- **优先使用现有分类**：分类体系要�
 const noAutoCategoryGuidance = `- 不能创建新分类：没有合适的现有分类时归入"未分类"兜底分类
 `
 
+const scriptGuidance = `
+## 批量脚本
+
+需要批量查询或批量归类时（如抽样了解大批文件、对一组文件统一设置目标），优先用 run_script 一次完成，代替逐文件的工具调用。脚本内置 query_files/count_files/get_file_info/get_categories/set_target/set_category/sample_files 等函数，print 输出和 result 返回值随工具结果返回，详见工具描述
+`
+
 const systemPromptTail = `- set_target 传空字符串可清除已有目标
 
 ## 描述规范（200 字符以内）
@@ -71,17 +77,20 @@ const systemPromptTail = `- set_target 传空字符串可清除已有目标
 `
 
 // defaultSystemPrompt builds the default autotag prompt describing only the
-// category-management capabilities the session actually has: the
-// create_category workflow is mentioned only when the tool is registered
-// (ScanSession.AllowAutoCategory), otherwise the prompt steers the agent to
-// the fallback category instead of hallucinating an unavailable tool.
-func defaultSystemPrompt(allowAutoCategory bool) string {
+// capabilities the session actually has: the create_category workflow is
+// mentioned only when the tool is registered (ScanSession.AllowAutoCategory),
+// otherwise the prompt steers the agent to the fallback category; run_script
+// is mentioned only when registered (ScanSession.AllowScript).
+func defaultSystemPrompt(allowAutoCategory, allowScript bool) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptHead)
 	if allowAutoCategory {
 		sb.WriteString(autoCategoryGuidance)
 	} else {
 		sb.WriteString(noAutoCategoryGuidance)
+	}
+	if allowScript {
+		sb.WriteString(scriptGuidance)
 	}
 	sb.WriteString(systemPromptTail)
 	return sb.String()
@@ -93,7 +102,7 @@ func systemPromptForSession(cfg config.AgentConfig, session *db.ScanSession) str
 	if cfg.SystemPrompt != "" {
 		return cfg.SystemPrompt
 	}
-	return defaultSystemPrompt(session.AllowAutoCategory)
+	return defaultSystemPrompt(session.AllowAutoCategory, session.AllowScript)
 }
 
 const instructPromptHead = `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
@@ -123,6 +132,8 @@ const instructPromptToolsRest = `- update_description: 修改描述
 `
 
 const instructCreateCategoryTool = "- create_category: 创建新分类（先 list_categories；分类集有变化或同名/同路径重复会被护栏拒绝；创建成功时若返回 similar_categories 相似参考，请评估归并）\n"
+
+const instructScriptTool = "- run_script: 运行 Tengo 脚本做批量操作（抽样查看、批量查询、批量 set_target/set_category），print 输出和 result 返回值随结果返回\n"
 
 const instructPromptTail = `
 ## 常见操作流程
@@ -177,6 +188,9 @@ func defaultInstructPrompt(session *db.ScanSession) string {
 	sb.WriteString(instructPromptToolsRest)
 	if session.AllowAutoCategory {
 		sb.WriteString(instructCreateCategoryTool)
+	}
+	if session.AllowScript {
+		sb.WriteString(instructScriptTool)
 	}
 	sb.WriteString(instructPromptTail)
 	return sb.String()

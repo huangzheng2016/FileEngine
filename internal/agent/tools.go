@@ -257,6 +257,12 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		allTools = append(allTools, visionTool)
 	}
 
+	if scriptTool, err := tb.buildScriptTool(); err != nil {
+		return nil, err
+	} else if scriptTool != nil {
+		allTools = append(allTools, scriptTool)
+	}
+
 	return allTools, nil
 }
 
@@ -337,6 +343,12 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 		return nil, err
 	} else if visionTool != nil {
 		allTools = append(allTools, visionTool)
+	}
+
+	if scriptTool, err := tb.buildScriptTool(); err != nil {
+		return nil, err
+	} else if scriptTool != nil {
+		allTools = append(allTools, scriptTool)
 	}
 	return allTools, nil
 }
@@ -579,20 +591,31 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 }
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
+	if err := tb.setTargetCore(ctx, input.Path, input.NewPath); err != nil {
+		return nil, err
+	}
+	out := &SetTargetOutput{Success: true}
+	tb.logger.LogToolCall("set_target", input, out)
+	return out, nil
+}
 
+// setTargetCore is the set_target logic shared by the tool handler and the
+// run_script builtin: same validation, same idempotency, same atomic write.
+// Only the tool handler logs; script-internal calls are covered by the single
+// run_script log entry.
+func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) error {
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
-	if err := ValidateFSPath(input.NewPath); err != nil {
-		return nil, fmt.Errorf("invalid new_path: %w", err)
+	if err := ValidateFSPath(newPath); err != nil {
+		return fmt.Errorf("invalid new_path: %w", err)
 	}
 
-	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
+	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(path))
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
+		return fmt.Errorf("file not found: %s", path)
 	}
 
-	newPath := input.NewPath
 	op := ""
 	if newPath != "" {
 		op = "planned"
@@ -600,21 +623,29 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 
 	// Idempotency check: already in target state, skip DB write
 	if f.NewPath == newPath && f.Operation == op {
-		out := &SetTargetOutput{Success: true}
-		tb.logger.LogToolCall("set_target", input, out)
-		return out, nil
+		return nil
 	}
 
-	if err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(input.Path), newPath, op, f.FileType); err != nil {
-		return nil, fmt.Errorf("failed to set target: %w", err)
+	if err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(path), newPath, op, f.FileType); err != nil {
+		return fmt.Errorf("failed to set target: %w", err)
 	}
-
-	out := &SetTargetOutput{Success: true}
-	tb.logger.LogToolCall("set_target", input, out)
-	return out, nil
+	return nil
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
+	out, err := tb.createCategoryCore(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	tb.logger.LogToolCall("create_category", input, out)
+	return out, nil
+}
+
+// createCategoryCore is the create_category logic shared by the tool handler
+// and the run_script builtin: ValidateFSPath, the categoryGuard version
+// fingerprint, and the M14 similarity semantics all live here so a script can
+// never bypass the guard rails. Only the tool handler logs.
+func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
 	// Category paths become new_path prefixes for planned files; apply the
 	// same root-confinement rules as set_target.
@@ -700,7 +731,6 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 	if len(out.SimilarCategories) > 0 {
 		out.Guidance = "提示：存在路径重叠的相似分类（见 similar_categories）。若语义重复，请改用 set_target 把文件归入现有分类（或用 update_category/delete_category 归并）；确认确有必要则无需处理"
 	}
-	tb.logger.LogToolCall("create_category", input, out)
 	return out, nil
 }
 
