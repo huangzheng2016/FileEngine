@@ -80,7 +80,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `processRemainingFiles` has 1000-iteration safety limit to prevent infinite loops
 
 ### Agent Tools
-- 9 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `list_category_files`, `set_target`, `update_category`, `delete_category`
+- 8 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `set_target`, `update_category`, `delete_category`
 - 2 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true)
 - Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`
 - All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
