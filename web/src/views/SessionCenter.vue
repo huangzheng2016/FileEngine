@@ -99,6 +99,7 @@
       <SessionTimeline
         :session-id="current.id"
         :highlight-batch="highlightBatch"
+        :total-tokens-server="current.total_tokens"
         @run-done="refreshSession(current.id)"
         @run-status="refreshSession(current.id)"
       />

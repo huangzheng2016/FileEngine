@@ -252,6 +252,12 @@ logs:
   noLogsHint: Start tagging or an AI instruction and the run will stream here live
   totalTokens: Total Tokens
   batch: "Batch #{index}"
+  batchWithFiles: "Batch #{index} ({count} files)"
+  batchNavPlaceholder: Jump to batch…
+  failed: Failed
+  techDetails: Technical details
+  loadedTokens: "{count} loaded locally"
+  toolRunError: "Tool {tool} failed: {reason} (retried per policy)"
   manualBatch: "Manual #{index}"
   stepCount: "{count} steps"
   input: Input

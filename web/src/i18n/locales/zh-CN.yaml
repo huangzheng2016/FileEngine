@@ -252,6 +252,12 @@ logs:
   noLogsHint: 启动打标或 AI 指令后，运行过程会实时显示在这里
   totalTokens: Token 总计
   batch: "批次 #{index}"
+  batchWithFiles: "批次 #{index}（{count} 个文件）"
+  batchNavPlaceholder: 跳到批次…
+  failed: 失败
+  techDetails: 技术详情
+  loadedTokens: "本地已加载 {count}"
+  toolRunError: "工具 {tool} 运行失败：{reason}（已按策略重试）"
   manualBatch: "手动 #{index}"
   stepCount: "{count} 步"
   input: 输入
