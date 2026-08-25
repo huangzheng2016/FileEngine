@@ -563,7 +563,7 @@ function statusLabel(status: string): string {
 function statusChipClass(status: string): string {
   if (status === 'done' || status === 'tagged') return 'is-live'
   if (status.startsWith('error')) return 'is-danger'
-  if (status === 'scanning' || status === 'tagging' || status === 'executing') return 'is-warning'
+  if (status === 'scanning' || status === 'tagging' || status === 'executing' || status === 'tagged_partial') return 'is-warning'
   return 'is-muted'
 }
 
@@ -577,7 +577,7 @@ function formatSize(bytes: number): string {
 
 // ===== Actions =====
 function canTag(s: ScanSession) {
-  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagging' || s.status.startsWith('error')
+  return s.status === 'scanned' || s.status === 'tagged' || s.status === 'tagged_partial' || s.status === 'tagging' || s.status.startsWith('error')
 }
 
 function canExecute(s: ScanSession) {

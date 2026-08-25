@@ -2,42 +2,14 @@ app:
   tagline: AI File Organizer
 
 nav:
-  dashboard: Dashboard
   files: Files
   filesystems: Filesystems
   tasks: Sessions
   config: Config
   models: Models
   settings: Settings
-
-dashboard:
-  title: Dashboard
-  subtitle: Source → Scan → Tag → Execute — four steps to organized files
-  stepSource: Source
-  stepScan: Scan
-  stepTag: Tag
-  stepExecute: Execute
-  sourceStatus: "Filesystems connected: {count}"
-  sourceEmpty: No filesystems yet — add one first
-  scanStatus: "Scan sessions: {count}"
-  scanEmpty: No scan sessions yet
-  scanActive: Scanning…
-  tagProgress: "Latest session tagged {tagged}/{total}"
-  tagEmpty: Tag after the scan finishes
-  executeStatus: "{planned} planned · {executed} executed"
-  executeEmpty: Plans appear after tagging
-  ctaAddFs: Add Filesystem
-  ctaManageFs: Manage Filesystems
-  ctaNewScan: New Scan
-  ctaTag: Start Tagging
-  ctaReview: Review Results
-  ctaExecute: Start Execute
-  ctaFiles: View Files
-  ctaViewSession: View session →
-  stateDone: Done
-  stateActive: Active
-  stateTodo: To do
-  latestSession: Current Session
+  collapse: Collapse navigation
+  expand: Expand navigation
 
 common:
   save: Save
@@ -201,6 +173,7 @@ tasks:
   status_scanned: Scanned
   status_tagging: Tagging
   status_tagged: Tagged
+  status_tagged_partial: Partial
   status_executing: Executing
   status_done: Done
   statusError: Error
