@@ -115,6 +115,16 @@
           <p class="form-field__hint">{{ $t('models.contextWindowHint') }}</p>
         </div>
         <div class="form-field">
+          <label class="form-field__label">{{ $t('models.reasoningEffort') }}</label>
+          <el-select v-model="form.reasoning_effort">
+            <el-option :label="$t('models.reasoningDefault')" value="" />
+            <el-option label="low" value="low" />
+            <el-option label="medium" value="medium" />
+            <el-option label="high" value="high" />
+          </el-select>
+          <p class="form-field__hint">{{ $t('models.reasoningEffortHint') }}</p>
+        </div>
+        <div class="form-field">
           <label class="form-field__label">{{ $t('models.visionEnabled') }}</label>
           <div>
             <el-switch v-model="form.vision_enabled" />
@@ -153,7 +163,7 @@ const CUSTOM_TIER = -1
 const emptyForm = () => ({
   name: '', provider: 'openai', api_key: '', model: '',
   base_url: '', temperature: 0.1, max_tokens: 4096,
-  context_window: 200_000, vision_enabled: false,
+  context_window: 200_000, vision_enabled: false, reasoning_effort: '',
 })
 const form = ref(emptyForm())
 
@@ -201,6 +211,7 @@ function fillForm(m: ModelProvider, nameSuffix: string) {
     model: m.model, base_url: m.base_url,
     temperature: m.temperature, max_tokens: m.max_tokens,
     context_window: m.context_window || 200_000, vision_enabled: m.vision_enabled,
+    reasoning_effort: m.reasoning_effort || '',
   }
 }
 
@@ -251,7 +262,7 @@ async function handleTest() {
 async function handleTestExisting(m: ModelProvider) {
   testingId.value = m.id
   try {
-    const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens }
+    const data = { name: m.name, provider: m.provider, api_key: '****', model: m.model, base_url: m.base_url, temperature: m.temperature, max_tokens: m.max_tokens, reasoning_effort: m.reasoning_effort || '' }
     const res = await testModelProviderConnection(data)
     if (res.data.success) ElMessage.success(t('models.connOk') + (res.data.reply ? ': ' + res.data.reply : ''))
     else ElMessage.error(t('models.connFail', { error: res.data.error }))

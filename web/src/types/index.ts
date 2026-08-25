@@ -85,6 +85,7 @@ export interface ModelProvider {
   max_tokens: number
   context_window: number
   vision_enabled: boolean
+  reasoning_effort: string
   created_at: string
   updated_at: string
 }

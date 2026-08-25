@@ -303,6 +303,9 @@ models:
   contextCustom: 自定义…
   visionEnabled: 视觉能力
   visionEnabledHint: 模型支持图片输入（会话开启视觉后 Agent 可查看图片）
+  reasoningEffort: 思考强度
+  reasoningEffortHint: OpenAI 兼容接口的 reasoning_effort 透传；默认表示不指定（用模型自身默认）
+  reasoningDefault: 默认
   keepApiKey: 留空保持原密钥
   deleteConfirm: 确定删除该模型？
   testConn: 测试连接

@@ -303,6 +303,9 @@ models:
   contextCustom: Custom…
   visionEnabled: Vision
   visionEnabledHint: Model accepts image input (required before sessions can let the agent view images)
+  reasoningEffort: Reasoning Effort
+  reasoningEffortHint: Passed through to OpenAI-compatible APIs as reasoning_effort; Default means unset (use the model's own default)
+  reasoningDefault: Default
   keepApiKey: Leave empty to keep current
   deleteConfirm: Delete this model provider?
   testConn: Test Connection

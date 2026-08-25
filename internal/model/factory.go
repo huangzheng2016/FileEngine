@@ -13,26 +13,26 @@ import (
 
 // NewChatModelFromProvider creates a model from a DB ModelProvider entity.
 func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
-	return newModel(ctx, p.Provider, p.APIKey, p.Model, p.BaseURL, p.Temperature, p.MaxTokens)
+	return newModel(ctx, p.Provider, p.APIKey, p.Model, p.BaseURL, p.Temperature, p.MaxTokens, p.ReasoningEffort)
 }
 
-func newModel(ctx context.Context, provider, apiKey, modelName, baseURL string, temperature float64, maxTokens int) (model.ChatModel, error) {
+func newModel(ctx context.Context, provider, apiKey, modelName, baseURL string, temperature float64, maxTokens int, reasoningEffort string) (model.ChatModel, error) {
 	switch provider {
 	case "openai":
-		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens)
+		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens, reasoningEffort)
 	case "claude":
 		return newClaudeModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens)
 	case "ollama":
 		if baseURL == "" {
 			baseURL = "http://localhost:11434/v1"
 		}
-		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens)
+		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens, reasoningEffort)
 	default:
 		return nil, fmt.Errorf("unsupported model provider: %s", provider)
 	}
 }
 
-func newOpenAIModel(ctx context.Context, apiKey, modelName, baseURL string, temperature float64, maxTokens int) (model.ChatModel, error) {
+func newOpenAIModel(ctx context.Context, apiKey, modelName, baseURL string, temperature float64, maxTokens int, reasoningEffort string) (model.ChatModel, error) {
 	cfg := &openai.ChatModelConfig{
 		Model:  modelName,
 		APIKey: apiKey,
@@ -44,6 +44,9 @@ func newOpenAIModel(ctx context.Context, apiKey, modelName, baseURL string, temp
 	cfg.Temperature = &temp
 	if maxTokens > 0 {
 		cfg.MaxTokens = &maxTokens
+	}
+	if reasoningEffort != "" {
+		cfg.ReasoningEffort = openai.ReasoningEffortLevel(reasoningEffort)
 	}
 	return openai.NewChatModel(ctx, cfg)
 }
