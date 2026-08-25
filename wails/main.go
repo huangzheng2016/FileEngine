@@ -15,6 +15,9 @@ import (
 //go:embed bin/backend.bin
 var embeddedBackend []byte
 
+// Version is injected at build time via -ldflags "-X main.Version=x.y.z".
+var Version = "dev"
+
 const (
 	backendMinPort      = 45000
 	backendMaxPort      = 55000
@@ -22,24 +25,29 @@ const (
 )
 
 func main() {
-	app := &DesktopApp{readyCh: make(chan struct{})}
+	log.Printf("FileEngine desktop %s", Version)
+	app := &DesktopApp{}
 
-	if err := app.startBackend(); err != nil {
-		log.Fatalf("启动后端失败: %v", err)
-	}
+	// GUI-first: open the window immediately and boot the backend in the
+	// background. Until the reverse proxy is wired up, handleRequest serves
+	// a self-reloading loading page (or an error page if the boot fails),
+	// so startup failures are visible in the window instead of the process
+	// dying silently before any UI appears.
+	go func() {
+		if err := app.startBackend(); err != nil {
+			app.setBackendErr(err)
+			log.Printf("start backend: %v", err)
+		}
+	}()
 
-	select {
-	case <-app.readyCh:
-	case <-time.After(backendReadyTimeout):
-		log.Fatalf("后端启动超时")
-	}
+	windowState := loadWindowState()
 
 	if err := wails.Run(&options.App{
 		Title:     "FileEngine",
-		Width:     1400,
-		Height:    900,
-		MinWidth:  1200,
-		MinHeight: 720,
+		Width:     windowState.Width,
+		Height:    windowState.Height,
+		MinWidth:  minWindowWidth,
+		MinHeight: minWindowHeight,
 		AssetServer: &assetserver.Options{
 			Handler: http.HandlerFunc(app.handleRequest),
 		},
