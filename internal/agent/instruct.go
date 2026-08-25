@@ -54,10 +54,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 		return "", fmt.Errorf("build tools: %w", err)
 	}
 
-	instruction := DefaultInstructPrompt
-	if p := config.Get().Agent.InstructSystemPrompt; p != "" {
-		instruction = p
-	}
+	instruction := instructPromptForSession(config.Get().Agent, a.session)
 
 	agentInst, err := buildADKAgent(ctx, tracker, tools, instruction, config.Get().Agent.InstructMaxStep, a.modelProvider.EffectiveContextWindow())
 	if err != nil {

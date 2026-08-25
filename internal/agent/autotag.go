@@ -17,6 +17,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// BatchFailure records one batch whose agent run failed after all retries.
+type BatchFailure struct {
+	BatchIndex int
+	Target     string // directory path or "N files"
+	Err        string
+}
+
 // AutoTagAgent handles automatic file classification.
 type AutoTagAgent struct {
 	repo          *db.Repository
@@ -24,6 +31,9 @@ type AutoTagAgent struct {
 	modelProvider *db.ModelProvider
 	session       *db.ScanSession
 	sessionID     uint
+
+	mu       sync.Mutex
+	failures []BatchFailure
 }
 
 func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint) *AutoTagAgent {
@@ -34,6 +44,22 @@ func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProv
 		session:       session,
 		sessionID:     sessionID,
 	}
+}
+
+// noteFailure records a failed batch (called from concurrent workers).
+func (a *AutoTagAgent) noteFailure(f BatchFailure) {
+	a.mu.Lock()
+	a.failures = append(a.failures, f)
+	a.mu.Unlock()
+}
+
+// Failures returns a copy of the batch failures collected during the run.
+func (a *AutoTagAgent) Failures() []BatchFailure {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]BatchFailure, len(a.failures))
+	copy(out, a.failures)
+	return out
 }
 
 func (a *AutoTagAgent) Run(ctx context.Context) error {
@@ -76,10 +102,7 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 		if concurrency <= 0 {
 			concurrency = 1
 		}
-		systemPrompt := DefaultSystemPrompt
-		if liveCfg.Agent.SystemPrompt != "" {
-			systemPrompt = liveCfg.Agent.SystemPrompt
-		}
+		systemPrompt := systemPromptForSession(liveCfg.Agent, a.session)
 
 		// Distribute directories by interleaving different parent paths
 		buckets := make(map[string][]db.FileEntry)
@@ -128,10 +151,7 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 	}
 
 	// Process remaining untagged files (leaf files not in any directory)
-	remainingPrompt := DefaultSystemPrompt
-	if p := config.Get().Agent.SystemPrompt; p != "" {
-		remainingPrompt = p
-	}
+	remainingPrompt := systemPromptForSession(config.Get().Agent, a.session)
 	a.processRemainingFiles(ctx, chatModel, remainingPrompt, &batchCounter, filesystemID)
 
 	return nil
@@ -179,7 +199,10 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 
 		workerLogger.EmitBatchStart(dir.OriginalPath)
 
-		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		if err != nil {
+			log.Printf("worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
+		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildDirectoryPrompt(dir, catSummary)
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
@@ -191,6 +214,8 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		label := fmt.Sprintf("worker %d batch %d", workerID, batchIdx)
 		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
+			log.Printf("%s (%s) failed after retries: %v", label, dir.OriginalPath, err)
+			a.noteFailure(BatchFailure{BatchIndex: int(batchIdx), Target: dir.OriginalPath, Err: err.Error()})
 			a.emitTagProgress(int(batchIdx))
 			continue
 		}
@@ -230,7 +255,11 @@ func (a *AutoTagAgent) processRemainingFiles(ctx context.Context, chatModel eino
 		Page:      1,
 		PageSize:  config.Get().Agent.BatchSize,
 	})
-	if err != nil || len(files) == 0 {
+	if err != nil {
+		log.Printf("processRemainingFiles: initial list files failed: %v", err)
+		return
+	}
+	if len(files) == 0 {
 		return
 	}
 
@@ -265,7 +294,11 @@ func (a *AutoTagAgent) processRemainingFiles(ctx context.Context, chatModel eino
 				PageSize:  config.Get().Agent.BatchSize,
 				MinID:     lastMaxID,
 			})
-			if err != nil || len(batch) == 0 {
+			if err != nil {
+				log.Printf("processRemainingFiles: list files failed, stopping dispatch: %v", err)
+				return
+			}
+			if len(batch) == 0 {
 				return
 			}
 			// Advance cursor to the largest ID in this batch
@@ -328,7 +361,10 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 
 		workerLogger.SetBatch(int(batch.batchIdx))
 		workerLogger.EmitBatchStart(fmt.Sprintf("%d files", len(batch.files)))
-		usages, _ := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
+		if err != nil {
+			log.Printf("remaining worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
+		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildBatchPrompt(batch.files, catSummary)
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
@@ -340,6 +376,9 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		label := fmt.Sprintf("remaining worker %d batch %d", workerID, batch.batchIdx)
 		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
+			target := fmt.Sprintf("%d files", len(batch.files))
+			log.Printf("%s (%s) failed after retries: %v", label, target, err)
+			a.noteFailure(BatchFailure{BatchIndex: int(batch.batchIdx), Target: target, Err: err.Error()})
 			a.emitTagProgress(int(batch.batchIdx))
 			continue
 		}

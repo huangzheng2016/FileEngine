@@ -103,24 +103,36 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("auto-tag failed: %w", err)
 	}
 
+	// Surface partial failure: failed batches (retries exhausted) are reflected
+	// in the session status, the run_status message, and the final report.
+	failures := autoTag.Failures()
+
 	// Update session status
 	session, err = o.repo.GetSession(o.sessionID)
 	if err != nil {
 		return "", err
 	}
 	session.Status = "tagged"
+	if len(failures) > 0 {
+		session.Status = "tagged_partial"
+	}
 	if err := o.repo.UpdateSession(session); err != nil {
 		return "", err
 	}
-	o.emitRunStatus(db.PhaseTagging, db.StatusDone, "")
+	doneMsg := ""
+	if len(failures) > 0 {
+		doneMsg = fmt.Sprintf("%d batch(es) failed after retries", len(failures))
+	}
+	o.emitRunStatus(db.PhaseTagging, db.StatusDone, doneMsg)
 
 	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
 	report, err := summary.Run(ctx)
 	if err != nil {
 		log.Printf("orchestrator: summary generation failed: %v", err)
-		return "自动分类完成", nil
+		report = "自动分类完成"
 	}
+	report += failureReportSection(failures)
 	return report, nil
 }
 

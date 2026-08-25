@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"FileEngine/internal/config"
@@ -329,6 +330,34 @@ func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
+// validateFSPath checks that a target/category path is a legal, root-confined
+// slash path. The executor resolves stored paths against the filesystem root
+// (RemoteFS BasePath), so anything that could escape that root is rejected
+// here instead of being written to the DB. Rules:
+//   - "" is allowed for set_target (clears the target); callers reject it for
+//     category paths via their own required-field handling
+//   - no NUL bytes
+//   - no ".." segments (absolute-form paths like "/../etc" would escape the
+//     root on SFTP-style backends that treat leading "/" as host-absolute)
+//   - must name an entry — the bare root ("/", ".") is not a valid target
+func validateFSPath(p string) error {
+	if p == "" {
+		return nil
+	}
+	if strings.ContainsRune(p, 0) {
+		return fmt.Errorf("path %q contains a NUL byte", p)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("path %q contains '..' and could escape the filesystem root", p)
+		}
+	}
+	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
+		return fmt.Errorf("path %q does not name a file or directory", p)
+	}
+	return nil
+}
+
 func ptrStr(s string) *string {
 	return &s
 }
@@ -524,6 +553,13 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 
+	// Validate before any DB access: an illegal target must be rejected
+	// loudly, never written. The executor resolves new_path against the
+	// filesystem root, so anything that could escape it is refused here.
+	if err := validateFSPath(input.NewPath); err != nil {
+		return nil, fmt.Errorf("invalid new_path: %w", err)
+	}
+
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		return nil, fmt.Errorf("file not found: %s", input.Path)
@@ -552,6 +588,15 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
+
+	// Category paths become new_path prefixes for planned files; apply the
+	// same root-confinement rules as set_target.
+	if err := validateFSPath(input.Path); err != nil || input.Path == "" {
+		if err == nil {
+			err = fmt.Errorf("path must not be empty")
+		}
+		return nil, fmt.Errorf("invalid category path: %w", err)
+	}
 
 	cat := &db.Category{
 		FilesystemID:  tb.filesystemID,
@@ -588,6 +633,14 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	// Guard against no-op: at least one field must be provided for update
 	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
 		return nil, fmt.Errorf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name)
+	}
+
+	// A changed category path cascades into planned files' new_path; apply the
+	// same root-confinement rules as set_target.
+	if input.NewPath != "" {
+		if err := validateFSPath(input.NewPath); err != nil {
+			return nil, fmt.Errorf("invalid new_path: %w", err)
+		}
 	}
 
 	oldPath := cat.Path

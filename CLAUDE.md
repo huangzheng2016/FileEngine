@@ -73,10 +73,14 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `mark_tagged` cascades to all descendants via `LIKE` query; also writes `batch_index`
 - `set_target` on a directory cascades: clears all children's targets (outer overrides inner)
 - `set_target` with empty `new_path` clears the target
+- `set_target` validates `new_path` before writing: the path must be a legal, root-confined slash path — no NUL bytes, no `..` segments, not the bare root — illegal targets are rejected with an error, never written. `create_category`/`update_category` apply the same validation to category paths (they become `new_path` prefixes)
 - Before processing each directory, re-checks tagged status (another worker may have cascade-tagged it)
 - Configurable concurrency: each worker gets its own FS connection + ReAct agent instance + token tracker
 - All agent config (concurrency, batch_size, max_retries, system_prompt, agent_timeout) read from live `config.Get()` each iteration — hot-reloadable without restart
-- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s); each attempt has an `agent_timeout` seconds timeout (default 60) that covers an entire agent run — the full ReAct loop of up to `max_step` tool rounds — not a single Generate call
+- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s). `agent_timeout` (seconds) caps one full agent run — the entire ReAct loop of up to `max_step` tool rounds, not a single Generate call; the default (unset or <= 0) is **no timeout** — a run is then bounded only by user stop and `max_step`
+- Batch failures are never silent: after retries are exhausted the batch is logged (a `system` message persisted to `agent_logs` and published to the event stream), counted in `AutoTagAgent.Failures()`, and surfaced three ways — the session status becomes `tagged_partial` instead of `tagged`, the `run_status` done message carries the failed-batch count, and the run report (the `run_done` summary) gets a `## 失败批次` section with each failed batch and its error
+- The category summary injected into each batch prompt (`buildCategorySummary`) lists the **complete** category system of the filesystem — unused categories included — sorted by usage count descending then name; `GetCategoryUsageSummary` counts with `new_path = path OR new_path LIKE path/%` so sibling prefixes (`/photo` vs `/photos2`) don't miscount
+- The default system prompts are assembled per session to match the registered tools (`prompt.go`): the `create_category` workflow is only taught when `AllowAutoCategory` registers it (otherwise the prompt steers to the 未分类 fallback), and the instruct prompt's tool list follows `AllowReadFile` / `AllowAutoCategory`
 - `processRemainingFiles` has 1000-iteration safety limit to prevent infinite loops
 
 ### Agent Tools

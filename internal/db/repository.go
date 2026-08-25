@@ -402,21 +402,26 @@ type CategoryUsage struct {
 	FileCount int64
 }
 
-// GetCategoryUsageSummary returns each category with the count of planned files under its path.
+// GetCategoryUsageSummary returns every category of the filesystem with the
+// count of files planned under its path in the given session. Categories with
+// no planned files are included with a zero count so callers (the agent prompt
+// summary) always see the complete classification system. The count matches
+// new_path == path or new_path under path + "/" exactly, so sibling prefixes
+// ("/photo" vs "/photos2") do not bleed into each other.
 func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) ([]CategoryUsage, error) {
 	cats, err := r.ListCategories(filesystemID)
 	if err != nil {
 		return nil, err
 	}
-	var result []CategoryUsage
+	result := make([]CategoryUsage, 0, len(cats))
 	for _, c := range cats {
 		var count int64
-		r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND new_path LIKE ?", sessionID, c.Path+"%").
-			Count(&count)
-		if count > 0 {
-			result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, FileCount: count})
+		if err := r.db.Model(&FileEntry{}).
+			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?)", sessionID, c.Path, c.Path+"/%").
+			Count(&count).Error; err != nil {
+			return nil, err
 		}
+		result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, FileCount: count})
 	}
 	return result, nil
 }
@@ -632,7 +637,7 @@ func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]Categ
 			Size  int64
 		}
 		r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND new_path LIKE ?", sessionID, c.Path+"%").
+			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?)", sessionID, c.Path, c.Path+"/%").
 			Select("COUNT(*) AS count, COALESCE(SUM(size), 0) AS size").
 			Scan(&stats)
 		if stats.Count > 0 {

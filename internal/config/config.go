@@ -48,8 +48,10 @@ type AgentConfig struct {
 	InstructMaxStep         int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt            string `yaml:"system_prompt" json:"system_prompt"`
 	InstructSystemPrompt    string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
-	MaxCategorySummaryCount int    `yaml:"max_category_summary_count" json:"max_category_summary_count"`
-	AgentTimeout            int    `yaml:"agent_timeout" json:"agent_timeout"`
+	// AgentTimeout caps one full agent run (the whole ReAct loop) in seconds.
+	// <= 0 or unset means no timeout — the default; a run is then bounded only
+	// by user stop and max_step. Set a positive value to enforce an upper bound.
+	AgentTimeout int `yaml:"agent_timeout" json:"agent_timeout"`
 }
 
 var (
@@ -127,12 +129,6 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.InstructMaxStep == 0 {
 		cfg.Agent.InstructMaxStep = 30
-	}
-	if cfg.Agent.MaxCategorySummaryCount == 0 {
-		cfg.Agent.MaxCategorySummaryCount = 20
-	}
-	if cfg.Agent.AgentTimeout == 0 {
-		cfg.Agent.AgentTimeout = 60
 	}
 	if cfg.Agent.VisionMaxImagesPerBatch == 0 {
 		cfg.Agent.VisionMaxImagesPerBatch = 4
