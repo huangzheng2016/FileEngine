@@ -66,3 +66,20 @@ func TestInstructPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatalf("custom instruct prompt override: got %q", custom)
 	}
 }
+
+// The prompts must teach the create_category guard rails explicitly: prefer
+// existing categories, creation is guarded, and a rejection returns the
+// latest list to act on.
+func TestPromptsTeachCreateGuard(t *testing.T) {
+	on := defaultSystemPrompt(true)
+	for _, want := range []string{"优先使用现有分类", "护栏", "最新完整分类列表"} {
+		if !strings.Contains(on, want) {
+			t.Fatalf("auto-category prompt must teach %q", want)
+		}
+	}
+
+	full := defaultInstructPrompt(&db.ScanSession{AllowAutoCategory: true})
+	if !strings.Contains(full, "护栏") {
+		t.Fatal("instruct prompt must mention the create_category guard")
+	}
+}

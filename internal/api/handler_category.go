@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,14 @@ func (s *Server) createCategory(c *gin.Context) {
 		return
 	}
 
+	// Category paths become new_path prefixes when files are planned under
+	// them; enforce the same root-confinement check as the agent tool layer
+	// so the REST API cannot bypass it.
+	if err := agent.ValidateFSPath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
+		return
+	}
+
 	cat := &db.Category{
 		FilesystemID: req.FilesystemID,
 		Name:         req.Name,
@@ -68,6 +77,13 @@ func (s *Server) updateCategory(c *gin.Context) {
 	var req CategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Same root-confinement check as the tool layer: the new path cascades
+	// into planned files' new_path.
+	if err := agent.ValidateFSPath(req.Path); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
 		return
 	}
 
@@ -146,6 +162,12 @@ func (s *Server) importCategories(c *gin.Context) {
 	created := 0
 	skipped := 0
 	for _, item := range items {
+		// Skip entries that the tool layer would also refuse (empty fields or
+		// a path that could escape the filesystem root).
+		if item.Name == "" || item.Path == "" || agent.ValidateFSPath(item.Path) != nil {
+			skipped++
+			continue
+		}
 		if _, err := s.repo.GetCategoryByName(uint(fsID), item.Name); err == nil {
 			skipped++
 			continue

@@ -73,7 +73,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `mark_tagged` cascades to all descendants via `LIKE` query; also writes `batch_index`
 - `set_target` on a directory cascades: clears all children's targets (outer overrides inner)
 - `set_target` with empty `new_path` clears the target
-- `set_target` validates `new_path` before writing: the path must be a legal, root-confined slash path — no NUL bytes, no `..` segments, not the bare root — illegal targets are rejected with an error, never written. `create_category`/`update_category` apply the same validation to category paths (they become `new_path` prefixes)
+- `set_target` validates `new_path` before writing: the path must be a legal, root-confined slash path — no NUL bytes, no `..` segments, not the bare root — illegal targets are rejected with an error, never written. `create_category`/`update_category` apply the same validation to category paths (they become `new_path` prefixes); the check lives in `agent.ValidateFSPath` and the REST category handlers (create/update/import) run it too, so the API cannot bypass the tool layer
 - Before processing each directory, re-checks tagged status (another worker may have cascade-tagged it)
 - Configurable concurrency: each worker gets its own FS connection + ReAct agent instance + token tracker
 - All agent config (concurrency, batch_size, max_retries, system_prompt, agent_timeout) read from live `config.Get()` each iteration — hot-reloadable without restart
@@ -90,6 +90,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `view_image` (`internal/agent/vision.go`) returns multimodal tool results via `utils.InferEnhancedTool` + `schema.ToolResult.Parts` (per-file text note + thumbnail image part); it decodes jpg/jpeg/png/gif server-side, downscales to a thumbnail (area-averaged, stdlib only), and base64-encodes. HEIC/RAW are skipped with a text note. Cost guardrails in `AgentConfig`: `vision_max_images_per_batch` (default 4 per call), `vision_image_max_px` (default 512 long edge), `vision_max_image_bytes` (default 20MB source cap); a hard 50MP decoded-pixel cap (`maxImagePixels`, checked via `DecodeConfig` before allocation) blocks decompression bombs. Per-file problems become text notes, never whole-call errors; base64 never enters `agent_logs` (metadata only) or the event stream (a text stand-in is emitted for multimodal tool results)
 - All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
 - `delete_category` clears planned files under that category and resets `tagged=false` for re-classification
+- `create_category` is guarded to keep the category system lean (`internal/agent/category_guard.go`): a per-worker version fingerprint (count + name set, in-memory only) is recorded whenever the agent receives the category list — the batch-prompt summary or a `list_categories` call. If the live set has changed since (or the agent never saw a list), creation is rejected with the latest complete list and must be re-decided from it; the rejection itself is the re-read, so a retry based on it passes. A similarity check then blocks normalized duplicate names (case-insensitive) and segment-aware path-prefix overlaps, returning the similar categories (name/path/planned-file count) and steering to `set_target`. Successful creations update the snapshot, so back-to-back creations by the same worker are not re-challenged — but anyone else's change forces a re-read
 - Categories have `agent_created` and `agent_editable` flags; agent can only modify/delete `agent_editable=true` categories
 - Instruct mode (`RunInstruct`) has all tools available including `list_files`, `get_file_info`, `mark_tagged`
 - Token tracking: `tokenTrackingModel` wrapper intercepts all LLM Generate and Stream calls (including intermediate ReAct rounds) to accumulate accurate token counts
@@ -173,6 +174,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | Agent tagging loop | `internal/agent/autotag.go` |
 | Instruct mode | `internal/agent/instruct.go` |
 | Agent tools | `internal/agent/tools.go` |
+| create_category guard rails | `internal/agent/category_guard.go` |
 | view_image (vision) tool | `internal/agent/vision.go` |
 | Token tracker | `internal/agent/token_tracker.go` |
 | System prompts | `internal/agent/prompt.go` (+ `prompt_builder.go` for category summaries) |
