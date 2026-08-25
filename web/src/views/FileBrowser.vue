@@ -349,7 +349,7 @@ const columnLabels: Record<string, () => string> = {
 }
 function loadColumnPrefs(): ColumnDef[] {
   try {
-    const saved = JSON.parse(localStorage.getItem('fe_columns') || '[]') as { key: string; visible: boolean }[]
+    const saved = JSON.parse(localStorage.getItem('fe_columns_v2') || '[]') as { key: string; visible: boolean }[]
     if (saved.length > 0) {
       const result: ColumnDef[] = []
       for (const s of saved) {
@@ -370,7 +370,7 @@ function loadColumnPrefs(): ColumnDef[] {
 const allColumns = ref<ColumnDef[]>(loadColumnPrefs())
 const visibleColumns = computed(() => allColumns.value.filter(c => c.visible))
 function saveColumnPrefs() {
-  localStorage.setItem('fe_columns', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
+  localStorage.setItem('fe_columns_v2', JSON.stringify(allColumns.value.map(c => ({ key: c.key, visible: c.visible }))))
 }
 
 const loaded = ref(false)
@@ -408,7 +408,7 @@ function drillDir(row: FileEntry) {
   loadFiles()
 }
 
-// Selection is mirrored into the URL (?fs=N&session=N) so dashboard / session
+// Selection is mirrored into the URL (?fs=N&session=N) so session
 // center CTAs land with the right context preselected.
 onMounted(async () => {
   const res = await listFilesystems()
@@ -716,6 +716,7 @@ async function previewFile(file: FileEntry) {
 /* ===== Single compact toolbar (never wraps) ===== */
 .files-toolbar {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
@@ -728,11 +729,11 @@ async function previewFile(file: FileEntry) {
   flex-shrink: 0;
 }
 
-.tb-fs { width: 210px; }
-.tb-session { width: 170px; }
-.tb-search { width: 200px; }
-.tb-filter { width: 118px; }
-.tb-category { width: 160px; }
+.tb-fs { width: 172px; }
+.tb-session { width: 140px; }
+.tb-search { width: 160px; }
+.tb-filter { width: 100px; }
+.tb-category { width: 132px; }
 .tb-spacer { flex: 1 1 auto; }
 
 /* ===== Body: unified nav + main table ===== */

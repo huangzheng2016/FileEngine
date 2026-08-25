@@ -52,7 +52,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - All icons globally registered from `@element-plus/icons-vue`
 - CodeMirror for prompt editing (One Dark theme + markdown)
 - Colored tags for protocols (SMB/SFTP/FTP/NFS/LOCAL), file types (文件夹/文件), providers (OpenAI/Claude/Ollama), session status (i18n)
-- localStorage for user preferences: `fe_last_fs_id`, `fe_log_order`, `fe_columns`
+- localStorage for user preferences: `fe_last_fs_id`, `fe_log_order`, `fe_columns_v2`
 
 ## Architecture Notes
 
