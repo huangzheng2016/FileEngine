@@ -92,11 +92,13 @@ func (s *Server) startTagging(c *gin.Context) {
 			delete(agents, sessionID)
 			agentMu.Unlock()
 		}()
-		if err := a.RunTagging(c.Request.Context()); err != nil && !errors.Is(err, context.Canceled) {
+		// The request ctx is canceled as soon as this handler returns; background
+		// work runs on context.Background() (Stop() has its own cancelFn).
+		if err := a.RunTagging(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "tagging" {
-				session.Status = "error: " + err.Error()
+				session.Status = db.TruncateStatus("error: " + err.Error())
 				s.repo.UpdateSession(session)
 			}
 		}
@@ -178,7 +180,12 @@ func (s *Server) instructAgent(c *gin.Context) {
 			delete(instructAgents, sessionID)
 			agentMu.Unlock()
 		}()
-		if _, err := a.RunInstruct(c.Request.Context(), files, req.Prompt); err != nil {
+		// The request ctx is canceled as soon as this handler returns; background
+		// work runs on context.Background(). Note: unlike tagging/execute,
+		// instruct has no cancellation path — RunInstruct registers no cancelFn
+		// and the stop route is not wired, so it runs until completion
+		// (bounded by instruct_max_step).
+		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil {
 			log.Printf("instruct session %d failed: %v", sessionID, err)
 		}
 	}()
@@ -339,11 +346,13 @@ func (s *Server) startExecute(c *gin.Context) {
 			execMu.Unlock()
 			fs.Close()
 		}()
-		if err := e.Execute(c.Request.Context(), sessionID, mode); err != nil {
+		// The request ctx is canceled as soon as this handler returns; background
+		// work runs on context.Background() (Stop() has its own cancelFn).
+		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
 			log.Printf("execution session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "executing" {
-				session.Status = "error: " + err.Error()
+				session.Status = db.TruncateStatus("error: " + err.Error())
 				s.repo.UpdateSession(session)
 			}
 		}
