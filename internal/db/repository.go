@@ -267,6 +267,16 @@ func (r *Repository) UpdateFile(f *FileEntry) error {
 	return r.db.Save(f).Error
 }
 
+// UpdateDescription writes only the description column. The tool layer runs
+// concurrently with other tools on the same row (eino executes parallel tool
+// calls), so a full-row Save of a previously loaded struct would clobber
+// concurrent field writes (e.g. a racing set_target's new_path).
+func (r *Repository) UpdateDescription(sessionID uint, path, description string) error {
+	return r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
+		Update("description", description).Error
+}
+
 func (r *Repository) GetUntaggedDirectories(sessionID uint, batchSize int) ([]FileEntry, error) {
 	var dirs []FileEntry
 	err := r.db.Where("scan_session_id = ? AND file_type = 'directory' AND tagged = ?", sessionID, false).

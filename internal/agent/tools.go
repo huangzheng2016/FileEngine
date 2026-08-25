@@ -645,8 +645,10 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 		return out, nil
 	}
 
-	f.Description = input.Description
-	if err := tb.repo.UpdateFile(f); err != nil {
+	// Column-scoped write: a full-row Save of the struct loaded above races
+	// with parallel tool calls on the same row (e.g. set_target) and would
+	// silently restore their fields to stale values.
+	if err := tb.repo.UpdateDescription(tb.sessionID, normalizePath(input.Path), input.Description); err != nil {
 		return nil, err
 	}
 
