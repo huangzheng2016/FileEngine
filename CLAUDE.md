@@ -83,7 +83,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - 8 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `set_target`, `update_category`, `delete_category`
 - 3 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true), `view_image` (when both vision switches are on)
 - Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`; `view_image` is the exception — it requires both `ModelProvider.VisionEnabled` (model can read images) AND `ScanSession.AllowVision` (session opt-in), both defaulting to off
-- `view_image` (`internal/agent/vision.go`) returns multimodal tool results via `utils.InferEnhancedTool` + `schema.ToolResult.Parts` (per-file text note + thumbnail image part); it decodes jpg/jpeg/png/gif server-side, downscales to a thumbnail (area-averaged, stdlib only), and base64-encodes. HEIC/RAW are skipped with a text note. Cost guardrails in `AgentConfig`: `vision_max_images_per_batch` (default 4 per call), `vision_image_max_px` (default 512 long edge), `vision_max_image_bytes` (default 20MB source cap). Per-file problems become text notes, never whole-call errors; base64 never enters `agent_logs` (metadata only) or the event stream (a text stand-in is emitted for multimodal tool results)
+- `view_image` (`internal/agent/vision.go`) returns multimodal tool results via `utils.InferEnhancedTool` + `schema.ToolResult.Parts` (per-file text note + thumbnail image part); it decodes jpg/jpeg/png/gif server-side, downscales to a thumbnail (area-averaged, stdlib only), and base64-encodes. HEIC/RAW are skipped with a text note. Cost guardrails in `AgentConfig`: `vision_max_images_per_batch` (default 4 per call), `vision_image_max_px` (default 512 long edge), `vision_max_image_bytes` (default 20MB source cap); a hard 50MP decoded-pixel cap (`maxImagePixels`, checked via `DecodeConfig` before allocation) blocks decompression bombs. Per-file problems become text notes, never whole-call errors; base64 never enters `agent_logs` (metadata only) or the event stream (a text stand-in is emitted for multimodal tool results)
 - All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
 - `delete_category` clears planned files under that category and resets `tagged=false` for re-classification
 - Categories have `agent_created` and `agent_editable` flags; agent can only modify/delete `agent_editable=true` categories
@@ -105,7 +105,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Factory: `remotefs.NewFromConfig(cfg)` creates the right implementation
 - Each concurrent agent worker creates its own FS connection
 - SMB: `BasePath` is the share name, normalized (backslashes → forward slashes, trimmed)
-- Local: `resolve()` confines every path to `BasePath` — absolute paths are accepted only inside it, `..` escapes are rejected (matches the root semantics of SFTP/SMB)
+- Local: `resolve()` confines every path to `BasePath` — absolute paths are accepted only inside it, `..` escapes are rejected, and symlinks are resolved (nearest existing ancestor for not-yet-existing write targets) so links pointing outside are rejected too (matches the root semantics of SFTP/SMB)
 
 ### Executor
 - Handles both files and directories

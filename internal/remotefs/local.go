@@ -10,7 +10,8 @@ import (
 )
 
 type LocalFS struct {
-	basePath string
+	basePath     string
+	resolvedBase string // basePath with symlinks resolved (macOS /var etc.)
 }
 
 func NewLocalFS(basePath string) (*LocalFS, error) {
@@ -21,13 +22,46 @@ func NewLocalFS(basePath string) (*LocalFS, error) {
 	if _, err := os.Stat(abs); err != nil {
 		return nil, fmt.Errorf("base path not accessible: %w", err)
 	}
-	return &LocalFS{basePath: abs}, nil
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base path: %w", err)
+	}
+	return &LocalFS{basePath: abs, resolvedBase: resolved}, nil
+}
+
+// withinBase reports whether path is lexically contained in base.
+func withinBase(path, base string) bool {
+	rel, err := filepath.Rel(base, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveExisting resolves symlinks for path; when path does not exist (write
+// destinations), it resolves the nearest existing ancestor and re-appends the
+// remainder.
+func resolveExisting(path string) (string, error) {
+	var suffix []string
+	p := path
+	for {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved, nil
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(p))
+		p = parent
+	}
 }
 
 // resolve maps a caller path to a host path under basePath. Absolute paths are
 // accepted only when they stay inside basePath; anything escaping basePath
-// (absolute or via "..") is rejected, matching the root semantics of the
-// SFTP/SMB implementations.
+// (absolute, via "..", or via a symlink pointing outside) is rejected,
+// matching the root semantics of the SFTP/SMB implementations.
 func (l *LocalFS) resolve(path string) (string, error) {
 	full := path
 	if filepath.IsAbs(full) {
@@ -35,9 +69,18 @@ func (l *LocalFS) resolve(path string) (string, error) {
 	} else {
 		full = filepath.Join(l.basePath, full)
 	}
-	rel, err := filepath.Rel(l.basePath, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !withinBase(full, l.basePath) {
 		return "", fmt.Errorf("path %q escapes base path %q", path, l.basePath)
+	}
+	// Lexical containment is not enough: a symlink inside the base may point
+	// outside. Resolve the nearest existing ancestor (the target itself may
+	// not exist yet for write destinations) and re-check containment.
+	resolved, err := resolveExisting(full)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", path, err)
+	}
+	if !withinBase(resolved, l.resolvedBase) {
+		return "", fmt.Errorf("path %q escapes base path %q via symlink", path, l.basePath)
 	}
 	return full, nil
 }

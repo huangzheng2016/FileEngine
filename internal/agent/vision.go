@@ -30,6 +30,12 @@ const (
 // detail ≈ 85 + 170*tiles (512px → ~255). 400 covers the worst case.
 const estimatedTokensPerImagePart = 400
 
+// maxImagePixels caps decoded dimensions. image.Decode allocates by header
+// size, so a small compressed file can still be a decompression bomb
+// (a 50K×50K solid PNG is KBs on disk but ~10GB decoded). 50MP ≈ 200MB RGBA
+// worst case, transient.
+const maxImagePixels = 50_000_000
+
 type ViewImageInput struct {
 	Paths []string `json:"paths" jsonschema_description:"Image file paths to view (original_path from list_files). Supported: jpg/jpeg/png/gif. HEIC/RAW are skipped."`
 }
@@ -161,12 +167,21 @@ func (tb *ToolBuilder) loadThumbnail(ctx context.Context, path, format string, m
 		return nil, "", 0, 0, 0, 0, fmt.Errorf("too large: over %d bytes", maxBytes)
 	}
 
-	img, format, err := image.Decode(bytes.NewReader(raw))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
 		return nil, "", 0, 0, 0, 0, fmt.Errorf("decode failed: %w", err)
 	}
-	b := img.Bounds()
-	origW, origH = b.Dx(), b.Dy()
+	// Decompression-bomb guard: check header dimensions before Decode
+	// allocates by them (also keeps the area-average accumulator safe).
+	if pixels := int64(cfg.Width) * int64(cfg.Height); cfg.Width <= 0 || cfg.Height <= 0 || pixels > maxImagePixels {
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("dimensions too large: %dx%d (limit %d pixels)", cfg.Width, cfg.Height, maxImagePixels)
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("decode failed: %w", err)
+	}
+	origW, origH = cfg.Width, cfg.Height
 
 	thumb := downscaleToFit(img, maxPx)
 	tbnd := thumb.Bounds()

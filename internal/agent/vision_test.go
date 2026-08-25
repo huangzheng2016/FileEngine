@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -379,5 +382,54 @@ func TestRunADKOnceEnhancedToolResultPlaceholder(t *testing.T) {
 	}
 	if strings.Contains(p.Output, "aW1n") {
 		t.Fatalf("base64 payload leaked into event stream: %q", p.Output)
+	}
+}
+
+// pngBombStream builds a minimal PNG stream (signature + IHDR + empty IDAT +
+// IEND) advertising w×h dimensions: a few dozen bytes on disk, gigabytes once
+// decoded — the classic decompression bomb.
+func pngBombStream(w, h uint32) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	chunk := func(typ string, data []byte) {
+		var ln [4]byte
+		binary.BigEndian.PutUint32(ln[:], uint32(len(data)))
+		buf.Write(ln[:])
+		buf.WriteString(typ)
+		buf.Write(data)
+		var crcBuf [4]byte
+		binary.BigEndian.PutUint32(crcBuf[:], crc32.ChecksumIEEE(append([]byte(typ), data...)))
+		buf.Write(crcBuf[:])
+	}
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], w)
+	binary.BigEndian.PutUint32(ihdr[4:8], h)
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // truecolor
+	chunk("IHDR", ihdr)
+	chunk("IDAT", nil)
+	chunk("IEND", nil)
+	return buf.Bytes()
+}
+
+// A tiny compressed file advertising huge dimensions must be rejected by the
+// pixel cap before Decode allocates (decompression bomb / OOM guard).
+func TestViewImageRejectsPixelBomb(t *testing.T) {
+	dir := t.TempDir()
+	// 60000x60000 = 3.6GP, far over the 50MP cap, compressed to ~70 bytes.
+	if err := os.WriteFile(filepath.Join(dir, "bomb.png"), pngBombStream(60000, 60000), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tb := newVisionToolBuilder(t, dir, config.AgentConfig{})
+	res, err := tb.viewImage(context.Background(), &ViewImageInput{Paths: []string{"bomb.png"}})
+	if err != nil {
+		t.Fatalf("viewImage: %v", err)
+	}
+	if n := len(imageParts(res)); n != 0 {
+		t.Fatalf("bomb produced %d image parts, want 0", n)
+	}
+	if notes := textParts(res); !strings.Contains(notes, "dimensions too large") {
+		t.Fatalf("expected 'dimensions too large' note, got %q", notes)
 	}
 }
