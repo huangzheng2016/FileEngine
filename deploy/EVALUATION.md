@@ -5,7 +5,7 @@
 ## 1. 环境（业主可直接使用）
 
 - 访问地址：**http://localhost:18090**（容器 `fileengine-test`，`deploy/` 下 `docker compose up -d` 随时拉起；数据全部保留在 `deploy/data/`）
-- 预置内容：NFS 文件系统（100.100.255.x，经 Tailscale）、SMB 文件系统（同 NAS 双协议互验）、kimi-k3 模型提供方（temperature=1、reasoning_effort 可配）
+- 预置内容：NFS 文件系统（fnOS NAS，经 Tailscale 地址访问）、SMB 文件系统（同 NAS 双协议互验）、kimi-k3 模型提供方（temperature=1、reasoning_effort 可配）
 - 查看数据：
   - SQLite DB（只读）：`python3 -c "import sqlite3; c=sqlite3.connect('file:deploy/data/fileengine.db?mode=ro',uri=True); ..."`，关键表 `file_entries / scan_sessions / categories / agent_logs`
   - 运行日志：`docker compose logs -f`
