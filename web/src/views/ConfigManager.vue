@@ -1,65 +1,82 @@
 <template>
-  <el-card>
-    <template #header><span>{{ $t('config.title') }}</span></template>
-    <el-tabs v-model="activeTab">
-      <el-tab-pane :label="$t('config.tabs.database')" name="database">
-        <el-form :model="config.database" label-width="140px" style="max-width: 600px">
-          <el-form-item :label="$t('config.database.driver')">
-            <el-select v-model="config.database.driver">
-              <el-option label="SQLite" value="sqlite" />
-              <el-option label="MySQL" value="mysql" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="$t('config.database.dsn')">
-            <el-input v-model="config.database.dsn" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
+  <section class="page-card">
+    <header class="page-header">
+      <div class="page-titles">
+        <span class="page-eyebrow">FileEngine</span>
+        <h2 class="page-heading">{{ $t('config.title') }}</h2>
+        <p class="page-sub">{{ $t('config.subtitle') }}</p>
+      </div>
+    </header>
 
-      <el-tab-pane :label="$t('config.tabs.agent')" name="agent">
-        <el-form :model="config.agent" label-width="160px" style="max-width: 600px">
-          <el-form-item :label="$t('config.agent.batchSize')">
-            <el-input-number v-model="config.agent.batch_size" :min="1" :max="50" />
-          </el-form-item>
-          <el-form-item :label="$t('config.agent.concurrency')">
-            <el-input-number v-model="config.agent.concurrency" :min="1" :max="20" />
-          </el-form-item>
-          <el-form-item :label="$t('config.agent.maxFileReadSize')">
-            <el-input-number v-model="config.agent.max_file_read_size" :min="1024" :step="1024" />
-          </el-form-item>
-          <el-form-item :label="$t('config.agent.maxRetries')">
-            <el-input-number v-model="config.agent.max_retries" :min="0" :max="10" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
+    <div class="page-body">
+      <el-tabs v-model="activeTab">
+        <el-tab-pane :label="$t('config.tabs.database')" name="database">
+          <div class="form-stack" style="max-width: 560px">
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('config.database.driver') }}</label>
+              <el-select v-model="config.database.driver">
+                <el-option label="SQLite" value="sqlite" />
+                <el-option label="MySQL" value="mysql" />
+              </el-select>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('config.database.dsn') }}</label>
+              <el-input v-model="config.database.dsn" />
+            </div>
+            <div>
+              <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
+            </div>
+          </div>
+        </el-tab-pane>
 
-      <el-tab-pane :label="$t('config.tabs.prompt')" name="prompt">
-        <div style="max-width: 900px">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-            <span style="font-size: 14px; color: #606266">
-              <el-tag v-if="promptCustom" type="warning" size="small">{{ $t('config.prompt.customLabel') }}</el-tag>
-              <el-tag v-else type="info" size="small">{{ $t('config.prompt.defaultLabel') }}</el-tag>
-            </span>
-            <el-button v-if="promptCustom" text type="primary" @click="handleResetPrompt">
-              {{ $t('config.prompt.resetDefault') }}
-            </el-button>
+        <el-tab-pane :label="$t('config.tabs.agent')" name="agent">
+          <div class="form-stack" style="max-width: 560px">
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-field__label">{{ $t('config.agent.batchSize') }}</label>
+                <el-input-number v-model="config.agent.batch_size" :min="1" :max="50" style="width: 100%" />
+              </div>
+              <div class="form-field">
+                <label class="form-field__label">{{ $t('config.agent.concurrency') }}</label>
+                <el-input-number v-model="config.agent.concurrency" :min="1" :max="20" style="width: 100%" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field">
+                <label class="form-field__label">{{ $t('config.agent.maxFileReadSize') }}</label>
+                <el-input-number v-model="config.agent.max_file_read_size" :min="1024" :step="1024" style="width: 100%" />
+              </div>
+              <div class="form-field">
+                <label class="form-field__label">{{ $t('config.agent.maxRetries') }}</label>
+                <el-input-number v-model="config.agent.max_retries" :min="0" :max="10" style="width: 100%" />
+              </div>
+            </div>
+            <div>
+              <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
+            </div>
           </div>
-          <div ref="editorContainer" style="border: 1px solid #dcdfe6; border-radius: 4px; overflow: hidden; min-height: 400px"></div>
-          <div style="margin-top: 12px; text-align: right">
-            <el-button type="primary" @click="handleSavePrompt" :loading="savingPrompt">
-              {{ $t('config.prompt.savePrompt') }}
-            </el-button>
+        </el-tab-pane>
+
+        <el-tab-pane :label="$t('config.tabs.prompt')" name="prompt">
+          <div class="form-stack" style="max-width: 900px">
+            <div style="display: flex; justify-content: space-between; align-items: center">
+              <span v-if="promptCustom" class="status-chip is-warning">{{ $t('config.prompt.customLabel') }}</span>
+              <span v-else class="status-chip is-muted">{{ $t('config.prompt.defaultLabel') }}</span>
+              <button v-if="promptCustom" class="link-button" @click="handleResetPrompt">
+                {{ $t('config.prompt.resetDefault') }}
+              </button>
+            </div>
+            <div ref="editorContainer" class="prompt-editor"></div>
+            <div style="text-align: right">
+              <el-button type="primary" @click="handleSavePrompt" :loading="savingPrompt">
+                {{ $t('config.prompt.savePrompt') }}
+              </el-button>
+            </div>
           </div>
-        </div>
-      </el-tab-pane>
-    </el-tabs>
-  </el-card>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -155,3 +172,13 @@ function handleResetPrompt() {
   initEditor(promptDefault.value)
 }
 </script>
+
+<style scoped>
+.prompt-editor {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  min-height: 400px;
+  background: var(--surface-soft);
+}
+</style>

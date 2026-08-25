@@ -1,75 +1,65 @@
-<template>
-  <el-container style="height: 100vh">
-    <el-header style="background: #545c64; display: flex; align-items: center; padding: 0 20px">
-      <h2 style="color: #fff; margin: 0; margin-right: 40px">FileEngine</h2>
-      <el-menu mode="horizontal" :router="true" :default-active="route.path"
-        background-color="#545c64" text-color="#fff" active-text-color="#ffd04b"
-        style="border-bottom: none; flex: 1">
-        <el-menu-item index="/files">
-          <el-icon><FolderOpened /></el-icon>
-          <span>{{ $t('nav.files') }}</span>
-        </el-menu-item>
-        <el-menu-item index="/filesystems">
-          <el-icon><Connection /></el-icon>
-          <span>{{ $t('nav.filesystems') }}</span>
-        </el-menu-item>
-        <el-menu-item index="/models">
-          <el-icon><Cpu /></el-icon>
-          <span>{{ $t('nav.models') }}</span>
-        </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><Monitor /></el-icon>
-          <span>{{ $t('nav.tasks') }}</span>
-        </el-menu-item>
-        <el-menu-item index="/logs">
-          <el-icon><Document /></el-icon>
-          <span>{{ $t('nav.logs') }}</span>
-        </el-menu-item>
-        <el-menu-item index="/config">
-          <el-icon><Setting /></el-icon>
-          <span>{{ $t('nav.config') }}</span>
-        </el-menu-item>
-      </el-menu>
-      <el-dropdown @command="switchLang" trigger="click">
-        <span style="color: #fff; cursor: pointer; display: flex; align-items: center; gap: 4px; font-size: 14px">
-          <el-icon><SwitchFilled /></el-icon>
-          {{ currentLangLabel }}
-        </span>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="zh-CN" :disabled="locale === 'zh-CN'">中文</el-dropdown-item>
-            <el-dropdown-item command="en" :disabled="locale === 'en'">English</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </el-header>
-    <el-main style="padding: 20px; overflow: auto">
-      <router-view />
-    </el-main>
-  </el-container>
-</template>
-
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { setLocale } from './i18n'
-import { SwitchFilled } from '@element-plus/icons-vue'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import en from 'element-plus/es/locale/lang/en'
+import MainLayout from './layouts/MainLayout.vue'
 
-const route = useRoute()
 const { locale } = useI18n()
 
-const currentLangLabel = computed(() => locale.value === 'zh-CN' ? '中文' : 'EN')
+// Element Plus locale follows the i18n locale reactively — no page reload needed.
+const elLocale = computed(() => (locale.value === 'zh-CN' ? zhCn : en))
 
-function switchLang(lang: string) {
-  setLocale(lang)
-  // Reload to re-init Element Plus locale
-  window.location.reload()
-}
+onMounted(() => {
+  const saved = localStorage.getItem('fe_theme')
+  if (saved === 'dark') {
+    document.documentElement.classList.add('dark')
+  }
+})
 </script>
 
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-.el-header { height: 60px !important; }
+<template>
+  <el-config-provider :locale="elLocale">
+    <div class="ambient-shell">
+      <div class="ambient"></div>
+      <div class="grain"></div>
+      <MainLayout />
+    </div>
+  </el-config-provider>
+</template>
+
+<style scoped>
+.ambient-shell {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 12%, var(--ambient-blue), transparent 42%),
+    radial-gradient(circle at 85% 8%, var(--ambient-orange), transparent 36%),
+    linear-gradient(160deg, var(--ambient-base-start) 0%, var(--ambient-base-end) 60%, var(--app-bg) 100%);
+  transition: background 0.4s var(--ease-spring);
+}
+
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 180px 180px;
+  mix-blend-mode: soft-light;
+}
+
+:root.dark .grain {
+  opacity: 0.035;
+}
 </style>

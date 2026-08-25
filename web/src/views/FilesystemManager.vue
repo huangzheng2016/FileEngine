@@ -1,74 +1,115 @@
 <template>
-  <el-card>
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>{{ $t('filesystems.title') }}</span>
-        <el-button type="primary" @click="openDialog()">{{ $t('filesystems.addFs') }}</el-button>
+  <section class="page-card">
+    <header class="page-header">
+      <div class="page-titles">
+        <span class="page-eyebrow">FileEngine</span>
+        <h2 class="page-heading">{{ $t('filesystems.title') }}</h2>
+        <p class="page-sub">{{ $t('filesystems.subtitle') }}</p>
       </div>
-    </template>
-    <el-table :data="filesystems" style="width: 100%">
-      <el-table-column prop="name" :label="$t('common.name')" width="160" />
-      <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="100">
-        <template #default="{ row }">
-          <el-tag :type="protocolTagType(row.protocol)" size="small" effect="dark">{{ row.protocol.toUpperCase() }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="base_path" :label="$t('filesystems.basePath')" width="250" show-overflow-tooltip />
-      <el-table-column prop="host" :label="$t('filesystems.host')" width="160" />
-      <el-table-column prop="description" :label="$t('common.description')" min-width="250" show-overflow-tooltip />
-      <el-table-column :label="$t('common.actions')" width="160" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+      <div class="page-actions">
+        <el-button type="primary" @click="openDialog()">
+          <el-icon style="margin-right: 4px"><Plus /></el-icon>{{ $t('filesystems.addFs') }}
+        </el-button>
+      </div>
+    </header>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? $t('filesystems.editFs') : $t('filesystems.addFs')" width="550px">
-      <el-form :model="form" label-width="120px">
-        <el-form-item :label="$t('common.name')">
-          <el-input v-model="form.name" />
-        </el-form-item>
-        <el-form-item :label="$t('common.description')">
-          <el-input v-model="form.description" type="textarea" :rows="2" />
-        </el-form-item>
-        <el-form-item :label="$t('filesystems.protocol')">
-          <el-select v-model="form.protocol">
-            <el-option label="Local" value="local" />
-            <el-option label="SFTP" value="sftp" />
-            <el-option label="FTP" value="ftp" />
-            <el-option label="SMB" value="smb" />
-            <el-option label="NFS" value="nfs" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('filesystems.basePath')">
-          <el-input v-model="form.base_path" placeholder="/" />
-        </el-form-item>
-        <template v-if="form.protocol !== 'local'">
-          <el-form-item :label="$t('filesystems.host')">
-            <el-input v-model="form.host" />
-          </el-form-item>
-          <el-form-item :label="$t('filesystems.port')">
-            <el-input-number v-model="form.port" :min="0" />
-          </el-form-item>
-          <el-form-item :label="$t('filesystems.username')">
-            <el-input v-model="form.username" />
-          </el-form-item>
-          <el-form-item :label="$t('filesystems.password')">
-            <el-input v-model="form.password" type="password" show-password :placeholder="editingId ? $t('filesystems.keepPassword') : ''" />
-          </el-form-item>
-          <el-form-item v-if="form.protocol === 'sftp'" :label="$t('filesystems.keyPath')">
-            <el-input v-model="form.key_path" />
-          </el-form-item>
+    <div class="page-body">
+      <el-table :data="filesystems" v-loading="loading" style="width: 100%">
+        <el-table-column prop="name" :label="$t('common.name')" width="160">
+          <template #default="{ row }"><span class="cell-phone">{{ row.name }}</span></template>
+        </el-table-column>
+        <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="110">
+          <template #default="{ row }">
+            <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="base_path" :label="$t('filesystems.basePath')" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }"><code class="cell-mono">{{ row.base_path }}</code></template>
+        </el-table-column>
+        <el-table-column prop="host" :label="$t('filesystems.host')" width="160" show-overflow-tooltip>
+          <template #default="{ row }"><span class="cell-time">{{ row.host || '-' }}</span></template>
+        </el-table-column>
+        <el-table-column prop="description" :label="$t('common.description')" min-width="200" show-overflow-tooltip />
+        <el-table-column :label="$t('common.actions')" width="160" fixed="right">
+          <template #default="{ row }">
+            <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
+            <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state-card empty-state-card--inline">
+            <div class="empty-state-card__icon">
+              <el-icon :size="24"><Connection /></el-icon>
+            </div>
+            <div class="empty-state-card__text">
+              <h4 class="empty-state-card__title">{{ $t('filesystems.title') }}</h4>
+              <p class="empty-state-card__sub">{{ $t('filesystems.subtitle') }}</p>
+            </div>
+          </div>
         </template>
-      </el-form>
+      </el-table>
+    </div>
+
+    <el-dialog append-to-body v-model="dialogVisible" :title="editingId ? $t('filesystems.editFs') : $t('filesystems.addFs')" width="550px">
+      <div class="form-stack">
+        <div class="form-field">
+          <label class="form-field__label is-required">{{ $t('common.name') }}</label>
+          <el-input v-model="form.name" />
+        </div>
+        <div class="form-field">
+          <label class="form-field__label">{{ $t('common.description') }}</label>
+          <el-input v-model="form.description" type="textarea" :rows="2" />
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('filesystems.protocol') }}</label>
+            <el-select v-model="form.protocol">
+              <el-option label="Local" value="local" />
+              <el-option label="SFTP" value="sftp" />
+              <el-option label="FTP" value="ftp" />
+              <el-option label="SMB" value="smb" />
+              <el-option label="NFS" value="nfs" />
+            </el-select>
+          </div>
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('filesystems.basePath') }}</label>
+            <el-input v-model="form.base_path" placeholder="/" />
+          </div>
+        </div>
+        <template v-if="form.protocol !== 'local'">
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('filesystems.host') }}</label>
+              <el-input v-model="form.host" />
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('filesystems.port') }}</label>
+              <el-input-number v-model="form.port" :min="0" style="width: 100%" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('filesystems.username') }}</label>
+              <el-input v-model="form.username" />
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('filesystems.password') }}</label>
+              <el-input v-model="form.password" type="password" show-password :placeholder="editingId ? $t('filesystems.keepPassword') : ''" />
+            </div>
+          </div>
+          <div v-if="form.protocol === 'sftp'" class="form-field">
+            <label class="form-field__label">{{ $t('filesystems.keyPath') }}</label>
+            <el-input v-model="form.key_path" />
+          </div>
+        </template>
+      </div>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ $t('common.cancel') }}</el-button>
         <el-button type="success" @click="handleTestConn" :loading="testingConn">{{ $t('filesystems.testConn') }}</el-button>
         <el-button type="primary" @click="handleSave">{{ $t('common.save') }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -77,9 +118,11 @@ import { useI18n } from 'vue-i18n'
 import { listFilesystems, createFilesystem, updateFilesystem, deleteFilesystem, testFilesystemConnection } from '../api'
 import type { Filesystem } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Connection } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const filesystems = ref<Filesystem[]>([])
+const loading = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const testingConn = ref(false)
@@ -102,16 +145,21 @@ watch(() => form.value.protocol, (protocol, oldProtocol) => {
   }
 })
 
-function protocolTagType(protocol: string): '' | 'success' | 'warning' | 'info' | 'danger' {
-  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
-    local: 'info', sftp: 'success', ftp: '', smb: 'warning', nfs: 'danger'
+function protocolChipClass(protocol: string): string {
+  const map: Record<string, string> = {
+    local: 'is-muted', sftp: 'is-live', ftp: 'is-accent', smb: 'is-warning', nfs: 'is-danger'
   }
-  return map[protocol] || 'info'
+  return map[protocol] || 'is-muted'
 }
 
 async function load() {
-  const res = await listFilesystems()
-  filesystems.value = res.data
+  loading.value = true
+  try {
+    const res = await listFilesystems()
+    filesystems.value = res.data
+  } finally {
+    loading.value = false
+  }
 }
 
 function openDialog(fs?: Filesystem) {

@@ -1,8 +1,11 @@
+app:
+  tagline: AI 文件整理
+
 nav:
   files: 文件浏览
   filesystems: 文件系统
   tasks: 任务监控
-  logs: Agent 日志
+  logs: Agent 运行
   config: 系统配置
   models: 模型管理
 
@@ -28,6 +31,7 @@ common:
   deleted: 已删除
   saved: 已保存
   created: 已创建
+  refresh: 刷新
 
 files:
   title: 文件浏览器
@@ -58,29 +62,22 @@ files:
   columns: 列设置
   plannedPath: 规划路径
   executedAt: 执行记录
-  detail: 文件详情
   saveChanges: 保存修改
   originalPath: 原始路径
   modTime: 修改时间
-  permissions: 权限
-  depth: 层级
   descriptionPlaceholder: 输入描述...
   newPathPlaceholder: 新路径
   preview: 预览
-  previewTitle: 文件预览
   instruct: AI 指令
   instructTitle: AI 批量操作
   instructPrompt: 输入指令（如：把这些文件移到软件分类、修改描述为...）
   instructSelected: "已选择 {count} 个文件"
-  instructRunning: 执行中...
   instructStarted: AI 指令已提交，后台执行中
-  instructDone: AI 指令执行完成
   previewNotSupported: 该文件类型不支持预览
   previewTooLarge: 文件过大，不支持预览（最大 1MB）
   previewLoading: 加载中...
 
 categories:
-  title: 分类管理
   addCategory: 添加分类
   editCategory: 编辑分类
   structure: 组织结构
@@ -97,6 +94,7 @@ categories:
 
 filesystems:
   title: 文件系统管理
+  subtitle: 管理本地与远程文件来源
   addFs: 添加文件系统
   editFs: 编辑文件系统
   protocol: 协议
@@ -114,6 +112,7 @@ filesystems:
 
 tasks:
   title: 扫描会话
+  subtitle: 扫描、打标与执行的总控台
   newScan: 新建扫描
   filesystem: 文件系统
   selectFs: 选择一个文件系统
@@ -147,6 +146,9 @@ tasks:
   allowReadFileHint: Agent 可以读取文件内容进行分析
   allowAutoCategory: 允许自动创建分类
   allowAutoCategoryHint: Agent 遇到无法归类的文件时可自动新建分类
+  allowVision: 允许视觉理解
+  allowVisionHint: 允许 Agent 查看图片内容，需模型同时开启视觉能力
+  visionOn: 视觉
   excludeCategoryDirs: 排除分类目录
   excludeCategoryDirsHint: 扫描时跳过已有分类的目标目录，避免重复处理已整理的文件
   filterMode: 目录过滤模式
@@ -163,7 +165,6 @@ tasks:
   status_executing: 执行中
   status_done: 已完成
   statusError: 错误
-  rootPathRequired: 请填写扫描根路径
   executionPlans: 执行计划
   planName: 名称
   planOp: 操作
@@ -189,74 +190,65 @@ tasks:
   fileCount: 文件数
   totalSizeLabel: 总大小
   noStats: 暂无统计数据
+  noSessions: 还没有扫描会话
+  noSessionsHint: 新建一个扫描，开始整理你的文件
+  tokensPerFile: "{count}/文件"
+  tokensPerMB: "{count}/MB"
+  viewRun: 运行详情
 
 config:
   title: 系统配置
+  subtitle: 数据库、Agent 与提示词
   saveConfig: 保存配置
   configSaved: 配置已保存
   saveFailed: 保存失败
   tabs:
-    model: 模型配置
     database: 数据库
     agent: Agent 设置
     prompt: 提示词
-  model:
-    provider: 模型提供商
-    apiKey: API 密钥
-    modelName: 模型名称
-    baseUrl: API 地址
-    temperature: 温度
-    maxTokens: 最大 Token 数
-    testModel: 测试模型
-    testOk: 模型连接成功
-    testFail: "模型测试失败: {error}"
   database:
     driver: 数据库驱动
     dsn: 连接字符串
-
   agent:
     batchSize: 散文件每批数量
     concurrency: 目录并行工作线程
     maxFileReadSize: 最大文件读取大小
     maxRetries: 最大重试次数
-    allowAutoCategory: 允许自动创建分类
-    allowAutoCategoryHint: 开启后 Agent 遇到无法归类的文件时可自动新建分类
   prompt:
     customLabel: 自定义
     defaultLabel: 默认
     resetDefault: 恢复默认
-    placeholder: 在此输入 Agent 系统提示词...
     savePrompt: 保存提示词
     promptSaved: 提示词已保存
 
 logs:
-  title: Agent 日志
-  session: 会话
-  allBatches: 全部轮次
-  orderAsc: 正序
-  orderDesc: 倒序
-  roleFilter: 角色筛选
+  title: Agent 运行
+  subtitle: 实时跟踪每一次 Agent 运行的步骤
+  selectSession: 选择会话
+  noSessions: 暂无扫描会话
+  noSessionsHint: 请先在任务监控中创建扫描
   live: 实时
-  history: 历史
-  totalTokens: "Token 总计: {count}"
-  system: 系统
-  user: 用户
-  assistant: 助手
-  tool: 工具
-  batch: "轮次 #{index}"
+  reconnecting: 连接中断，重连中…
+  loadEarlier: 加载更早的记录
+  noLogs: 该会话还没有运行记录
+  noLogsHint: 启动打标或 AI 指令后，运行过程会实时显示在这里
+  totalTokens: Token 总计
+  batch: "批次 #{index}"
   manualBatch: "手动 #{index}"
-  tokens: "{count} tokens"
+  stepCount: "{count} 步"
   input: 输入
   output: 输出
-  expand: 展开
-  collapse: 收起
-
-language:
-  zh: 中文
-  en: English
+  toolRunning: 执行中
+  toolOk: 成功
+  toolFailed: 失败
+  roleUser: 用户
+  roleAssistant: 助手
+  roleSystem: 系统
+  scrollToLatest: 回到底部
 
 models:
   title: 模型管理
+  subtitle: Agent 使用的大模型接入配置
   addModel: 添加模型
   editModel: 编辑模型
   provider: 供应商
@@ -265,6 +257,11 @@ models:
   baseUrl: API 地址
   temperature: 温度
   maxTokens: 最大 Token 数
+  contextWindow: 上下文窗口
+  contextWindowHint: 驱动历史压缩阈值，按模型实际上下文选择
+  contextCustom: 自定义…
+  visionEnabled: 视觉能力
+  visionEnabledHint: 模型支持图片输入（会话开启视觉后 Agent 可查看图片）
   keepApiKey: 留空保持原密钥
   deleteConfirm: 确定删除该模型？
   testConn: 测试连接

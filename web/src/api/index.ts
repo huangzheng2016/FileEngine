@@ -7,7 +7,7 @@ const api = axios.create({
 })
 
 // Sessions
-export const createSession = (data: { filesystem_id: number; scan_path?: string; model_provider_id?: number; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string }) =>
+export const createSession = (data: { filesystem_id: number; scan_path?: string; model_provider_id?: number | null; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string }) =>
   api.post<ScanSession>('/sessions', data)
 
 export const listSessions = (filesystemId?: number) =>
@@ -19,7 +19,7 @@ export const getSession = (id: number) =>
 export const deleteSession = (id: number) =>
   api.delete(`/sessions/${id}`)
 
-export const updateSessionConfig = (id: number, data: { allow_read_file?: boolean; allow_auto_category?: boolean; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string }) =>
+export const updateSessionConfig = (id: number, data: { allow_read_file?: boolean; allow_auto_category?: boolean; allow_vision?: boolean; exclude_category_dirs?: boolean; filter_mode?: string; filter_dirs?: string; model_provider_id?: number }) =>
   api.patch<ScanSession>(`/sessions/${id}`, data)
 
 export const rescanSession = (id: number) =>
@@ -142,6 +142,11 @@ export const listLogs = (params: Record<string, any>) =>
 
 export const listBatches = (sessionId: number, page: number = 1, pageSize: number = 50) =>
   api.get<{ batches: { batch_index: number; created_at: string }[]; total: number }>('/logs/batches', { params: { session_id: sessionId, page, page_size: pageSize } })
+
+// SSE run-event stream — consume with `new EventSource(sessionEventsUrl(id))`.
+// Frame: `event: <type>\ndata: <json>\n\n` + `: ping` heartbeats; no replay,
+// refetch /logs on reconnect to fill gaps.
+export const sessionEventsUrl = (id: number) => `/api/v1/sessions/${id}/events/stream`
 
 // Prompt
 export const getPrompt = () =>
