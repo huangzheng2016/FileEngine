@@ -441,9 +441,14 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 		if err != nil {
 			return nil, err
 		}
-		files, total, err := tb.repo.ListFiles(filter.toFileQuery(tb.sessionID))
+		q := filter.toFileQuery(tb.sessionID)
+		isPull := tb.harnessShard(&q)
+		files, total, err := tb.repo.ListFiles(q)
 		if err != nil {
 			return scriptError(err), nil
+		}
+		if isPull && total > 0 {
+			tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
 		}
 		items := make([]interface{}, len(files))
 		for i, f := range files {

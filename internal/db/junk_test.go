@@ -70,3 +70,40 @@ func TestMarkJunkEntries(t *testing.T) {
 		t.Errorf("second pass: n=%d err=%v, want 0/nil", n, err)
 	}
 }
+
+// IDMod sharding splits a result set deterministically and disjointly.
+func TestListFilesIDModSharding(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+	for _, p := range []string{"a/1", "a/2", "a/3", "a/4", "a/5"} {
+		fe := &FileEntry{ScanSessionID: 1, OriginalPath: p, Name: p, FileType: "file"}
+		if err := r.CreateFile(fe); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	falseVal := false
+	var totals [2]int64
+	seen := map[uint]bool{}
+	for rem := 0; rem < 2; rem++ {
+		files, total, err := r.ListFiles(FileQuery{SessionID: 1, Tagged: &falseVal, Page: 1, PageSize: 10, IDMod: 2, IDModRem: rem})
+		if err != nil {
+			t.Fatalf("shard %d: %v", rem, err)
+		}
+		totals[rem] = total
+		for _, f := range files {
+			if seen[f.ID] {
+				t.Fatalf("row %d in both shards", f.ID)
+			}
+			seen[f.ID] = true
+			if int(f.ID%2) != rem {
+				t.Fatalf("row %d in wrong shard %d", f.ID, rem)
+			}
+		}
+	}
+	if totals[0]+totals[1] != 5 {
+		t.Fatalf("shards cover %d rows, want 5", totals[0]+totals[1])
+	}
+}

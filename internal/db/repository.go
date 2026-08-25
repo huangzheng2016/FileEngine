@@ -181,6 +181,11 @@ type FileQuery struct {
 	Page         int
 	PageSize     int
 	MinID        uint // cursor-based pagination: only return rows with id > MinID
+	// IDMod/IDModRem shard the result set deterministically by primary key
+	// (id % IDMod = IDModRem); harness workers pull disjoint shards of the
+	// untagged queue this way. IDMod <= 1 disables sharding.
+	IDMod    int
+	IDModRem int
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
@@ -235,6 +240,9 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	}
 	if q.Search != "" {
 		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
+	}
+	if q.IDMod > 1 {
+		tx = tx.Where("id % ? = ?", q.IDMod, q.IDModRem)
 	}
 	return tx
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -195,6 +196,49 @@ type ToolBuilder struct {
 	// guard remembers the category-set snapshot this worker's agent last saw
 	// and backs the create_category guard rails (see category_guard.go).
 	guard categoryGuard
+	// harness, when non-nil, marks this builder as belonging to a continuous
+	// (long-run) worker: untagged pulls (list_files / query_files with
+	// tagged=false) are auto-sharded by id % numWorkers = workerID so
+	// concurrent harness workers never see each other's files, and every
+	// such pull rolls a fresh batch (batch_start + logger batch switch) so
+	// the SSE timeline keeps its per-batch grouping.
+	harness *harnessContext
+}
+
+type harnessContext struct {
+	workerID     int
+	numWorkers   int
+	batchCounter *int32
+}
+
+// withHarness marks the builder as a continuous worker's toolset.
+func (tb *ToolBuilder) withHarness(workerID, numWorkers int, batchCounter *int32) *ToolBuilder {
+	tb.harness = &harnessContext{workerID: workerID, numWorkers: numWorkers, batchCounter: batchCounter}
+	return tb
+}
+
+// harnessShard applies harness semantics to an untagged file query before it
+// runs: shard it to this worker so concurrent harness workers never see each
+// other's files. Returns true when the query is an untagged pull under an
+// active harness — the caller then rolls a new batch once the pull comes
+// back non-empty (harnessEmitBatch).
+func (tb *ToolBuilder) harnessShard(q *db.FileQuery) bool {
+	if tb.harness == nil || q.Tagged == nil || *q.Tagged {
+		return false
+	}
+	if tb.harness.numWorkers > 1 {
+		q.IDMod, q.IDModRem = tb.harness.numWorkers, tb.harness.workerID
+	}
+	return true
+}
+
+func (tb *ToolBuilder) harnessEmitBatch(label string) {
+	if tb.harness == nil {
+		return
+	}
+	batchIdx := atomic.AddInt32(tb.harness.batchCounter, 1)
+	tb.logger.SetBatch(int(batchIdx))
+	tb.logger.EmitBatchStart(label)
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -439,9 +483,15 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		q.CategoryPath = &input.CategoryPath
 	}
 
+	isPull := tb.harnessShard(&q)
 	files, total, err := tb.repo.ListFiles(q)
 	if err != nil {
 		return nil, err
+	}
+	if isPull && total > 0 {
+		// A fresh untagged pull in a continuous run = a new batch on the
+		// SSE timeline (emitted before the tool log so it groups correctly).
+		tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
 	}
 
 	items := make([]FileItem, len(files))

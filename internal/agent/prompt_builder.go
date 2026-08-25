@@ -50,6 +50,19 @@ func buildDirectoryPrompt(dir db.FileEntry, categorySummary string) string {
 	return sb.String()
 }
 
+// buildHarnessPrompt is the continuous worker's kickoff message: loop
+// pull → classify → mark → pull until the untagged queue is empty. The
+// system auto-shards untagged pulls across workers and rolls a new timeline
+// batch on each pull, so the agent only ever sees its own shard.
+func buildHarnessPrompt(categorySummary string) string {
+	return `持续处理本会话所有未打标的散文件，循环"拉取 → 归类 → 标记 → 再拉"，直到没有剩余：
+
+1. 用 list_files(file_type="file", tagged=false, limit=200) 拉取下一批未打标文件（系统自动分片，你只会拿到属于本 worker 的文件；每拉一批时间线上就是一个新批次）
+2. 逐个判断归类（规则同系统提示）：优先归入现有分类；压缩包参考文件名与归档摘要，需要内容时用 read_file 或 "路径::条目"；大批量同类文件优先用 run_script 一次脚本批量 set_category + mark_tagged
+3. 每个处理过的文件都必须 mark_tagged（工具或脚本内建函数）——set_target/set_category 不会置 tagged，漏标会被系统记为失败
+4. 回到第 1 步再拉；当 list_files 返回 files 为空（total=0）时结束，输出一段总结：新建了哪些分类、各归入多少、有何遗留与原因
+` + categorySummary
+}
 func buildBatchPrompt(entries []db.FileEntry, categorySummary string, hints map[uint]string) string {
 	var sb strings.Builder
 	sb.WriteString("处理以下散文件：\n\n")

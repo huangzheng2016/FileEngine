@@ -77,6 +77,16 @@ type AgentConfig struct {
 	// when false (default) such entries are marked tagged without an agent
 	// batch — no tokens spent — and reported in the run reconciliation.
 	JunkFilterDisabled bool `yaml:"junk_filter_disabled" json:"junk_filter_disabled"`
+	// HarnessDisabled switches the loose-file pass back to the per-batch
+	// dispatcher. By default (false) each worker runs ONE long continuous
+	// agent run that pulls the next untagged batch itself (list_files /
+	// query_files with tagged=false, auto-sharded by id % workers) until the
+	// queue is empty — knowledge carries across batches inside one run, with
+	// the reduction/summarization middlewares bounding context.
+	HarnessDisabled bool `yaml:"harness_disabled" json:"harness_disabled"`
+	// HarnessMaxStep bounds tool-call rounds of one continuous run (default
+	// 2000 — steps scale with total files, not with a single batch).
+	HarnessMaxStep int `yaml:"harness_max_step" json:"harness_max_step"`
 	// ArchivePromptDisabled turns off archive content hints in loose-file
 	// batch prompts. When false (default), zip/tar files get a one-line
 	// listing summary (kind + entry count + first few names) so the agent
@@ -191,5 +201,8 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.ArchivePromptMaxEntries == 0 {
 		cfg.Agent.ArchivePromptMaxEntries = 6
+	}
+	if cfg.Agent.HarnessMaxStep == 0 {
+		cfg.Agent.HarnessMaxStep = 2000
 	}
 }
