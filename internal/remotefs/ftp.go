@@ -124,29 +124,37 @@ func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Hold the control-connection lock for the whole transfer: jlaffaye/ftp
+	// interleaves the 226 completion reply on the control connection, so any
+	// other command issued between Retr and Close would read a stale reply
+	// and desync the stream. Transfers serialize — same posture as NFS.
 	f.mu.Lock()
 	resp, err := f.conn.Retr(fullPath)
-	f.mu.Unlock()
 	if err != nil {
+		f.mu.Unlock()
 		return nil, err
 	}
 	return &ftpLockedResponse{mu: &f.mu, r: resp}, nil
 }
 
-// ftpLockedResponse locks only Close: the transfer itself runs on its own
-// data connection (parallel-safe), but closing it reads the completion reply
-// on the shared control connection.
+// ftpLockedResponse holds the control-connection mutex from Retr until
+// Close (once). Read itself needs no per-call locking — the lock is already
+// held for the transfer's lifetime.
 type ftpLockedResponse struct {
-	mu *sync.Mutex
-	r  *ftp.Response
+	mu   *sync.Mutex
+	r    *ftp.Response
+	once sync.Once
 }
 
 func (l *ftpLockedResponse) Read(p []byte) (int, error) { return l.r.Read(p) }
 
 func (l *ftpLockedResponse) Close() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.r.Close()
+	var err error
+	l.once.Do(func() {
+		err = l.r.Close()
+		l.mu.Unlock()
+	})
+	return err
 }
 
 func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
@@ -168,9 +176,10 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
-
 	data, err := io.ReadAll(reader)
+	// Close BEFORE Stor: ReadFile holds the control-connection lock for the
+	// transfer's lifetime; Stor needs it too (Close is idempotent).
+	_ = reader.Close()
 	if err != nil {
 		return err
 	}
