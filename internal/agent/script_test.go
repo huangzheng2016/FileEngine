@@ -392,13 +392,16 @@ func TestScriptAllocGuard(t *testing.T) {
 
 // --- stdlib trimming ---
 
-// Dangerous modules are not registered: os (exec/env/file/process) and fmt
-// (process stdout) must be unavailable, as must tengo's file import.
+// Dangerous modules are not registered: os (exec/env/file/process), fmt
+// (process stdout) and times (its sleep blocks inside a VM builtin where the
+// timeout's abort flag cannot interrupt it) must be unavailable, as must
+// tengo's file import.
 func TestScriptDangerousModulesUnavailable(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	dangerous := []string{
 		`os := import("os")`,
 		`f := import("fmt")`,
+		`t := import("times")`, // times.sleep would bypass script_timeout
 		`e := import("enum2")`,         // unknown module
 		`x := import("./local.tengo")`, // file import stays disabled
 		`x := import("/etc/passwd")`,   // ditto, absolute
@@ -416,7 +419,6 @@ func TestScriptWhitelistedModulesWork(t *testing.T) {
 	out := mustRunScript(t, tb, `
 text := import("text")
 math := import("math")
-times := import("times")
 json := import("json")
 base64 := import("base64")
 hex := import("hex")
@@ -426,7 +428,6 @@ doubled := enum.map([1, 2, 3], func(_, v) { return v * 2 })
 result = {
 	upper: text.to_upper("abc"),
 	sqrt: math.sqrt(16.0),
-	now_is_time: is_time(times.now()),
 	encoded: string(json.encode({a: 1})),
 	b64: base64.encode("hi"),
 	hexed: hex.encode("hi"),
@@ -436,7 +437,7 @@ result = {
 	v := resultValue(t, out)
 	if v["upper"] != "ABC" || v["sqrt"] != 4.0 || v["encoded"] != `{"a":1}` ||
 		v["b64"] != "aGk=" || v["hexed"] != "6869" || v["rand_ok"] != true ||
-		v["now_is_time"] != true || v["mapped"] != 4.0 {
+		v["mapped"] != 4.0 {
 		t.Fatalf("whitelisted modules: %+v", v)
 	}
 }

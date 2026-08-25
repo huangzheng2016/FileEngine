@@ -19,15 +19,18 @@ import (
 // queries and bulk category operations without one tool round-trip per file.
 //
 // Security model:
-//   - stdlib is trimmed to pure-function modules (text/math/times/json/
-//     base64/hex/rand/enum); os (exec/env/file/process) and fmt (writes to the
-//     process stdout) are NOT registered, and tengo file import stays disabled
+//   - stdlib is trimmed to pure-function modules (text/math/json/base64/hex/
+//     rand/enum); os (exec/env/file/process) and fmt (writes to the process
+//     stdout) are NOT registered, and tengo file import stays disabled.
+//     times is excluded too: its sleep() blocks inside a VM builtin, and the
+//     abort flag behind RunContext is only checked between VM instructions —
+//     a sleeping script cannot be interrupted, bypassing script_timeout
 //   - scripts have no I/O at all: every data access goes through the builtin
 //     functions below, which reuse the tool layer's repository calls and
 //     guard rails (ValidateFSPath, categoryGuard, M14 similarity semantics)
 //   - each run is bounded by script_max_size (source), script_timeout
 //     (wall clock, independent of the unlimited-by-default agent run timeout),
-//     scriptMaxAllocs (object allocations, a memory guard) and
+//     scriptMaxAllocs (object allocations — NOT bytes, see its comment) and
 //     script_max_result_size (print output and return value, each)
 //   - tengo's RunContext recovers VM panics into errors, so a panicking
 //     script cannot take the worker down
@@ -45,16 +48,23 @@ type RunScriptOutput struct {
 
 // Fixed script limits (the configurable ones live in AgentConfig).
 const (
-	// scriptMaxAllocs caps tengo object allocations per run. Together with the
-	// wall-clock timeout this bounds memory abuse (e.g. string-concat loops);
-	// 4M allocations comfortably fits legitimate bulk queries (capped by
-	// scriptQueryMax per call) while stopping runaway scripts.
+	// scriptMaxAllocs caps tengo object allocations per run. It counts
+	// allocations, NOT bytes: it stops many-small-object runaways (each
+	// allocation-producing op decrements the counter), which comfortably
+	// covers legitimate bulk queries (capped by scriptQueryMax per call).
+	// It does NOT stop exponential-growth bombs: `x += x` doubles memory
+	// each round with a single allocation per round, and one giant copy
+	// cannot be interrupted mid-instruction — Go's out-of-memory is a fatal
+	// error, not a recoverable panic, so the process would die inside the
+	// timeout window. That residual availability risk is accepted (tengo has
+	// no byte-level memory cap; real containment would need a subprocess
+	// with rlimits) and documented in CLAUDE.md.
 	scriptMaxAllocs     = 4_000_000
 	scriptQueryDefault  = 200  // default query_files limit
 	scriptQueryMax      = 1000 // hard cap on query_files limit
 	scriptSampleDefault = 10   // default sample_files count
 	scriptSampleMax     = 200  // hard cap on sample_files count
-	scriptStdlibModules = "text, math, times, json, base64, hex, rand, enum"
+	scriptStdlibModules = "text, math, json, base64, hex, rand, enum"
 )
 
 // scriptLimits resolves the configurable guardrails with the same fallbacks
