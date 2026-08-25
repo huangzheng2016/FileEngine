@@ -1,8 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/dashboard' },
-  { path: '/dashboard', name: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: 'nav.dashboard' } },
+  { path: '/', redirect: '/tasks' },
   { path: '/tasks', name: 'tasks', component: () => import('../views/SessionCenter.vue'), meta: { title: 'nav.tasks' } },
   // Deep-link compat: /logs?session=X&batch=Y lands on the session center.
   { path: '/logs', redirect: (to: any) => ({ name: 'tasks', query: to.query }) },
