@@ -75,6 +75,20 @@ func untaggedReconciliationSection(b db.UntaggedBreakdown, ignored int64) string
 		b.Files, b.Directories, b.Symlinks, miss, junk)
 }
 
+// emptyCategoryPruneSection records the AI-created empty categories pruned at
+// run end ("建了不用" — created but never used). Empty input renders nothing.
+func emptyCategoryPruneSection(pruned []string) string {
+	if len(pruned) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\n## 空分类清理（%d）\n\n", len(pruned)))
+	for _, p := range pruned {
+		sb.WriteString(fmt.Sprintf("- %s：AI 创建但零归入，已自动删除\n", p))
+	}
+	return sb.String()
+}
+
 // failureReportSection renders the failed-batch section appended to a tagging
 // report: total count plus each batch's target and error. Long failure lists
 // are capped so the report stays readable.

@@ -125,6 +125,11 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	}
 	o.emitRunStatus(db.PhaseTagging, db.StatusDone, doneMsg)
 
+	// "建了不用" discipline, enforced at run end (never mid-run — a category
+	// created by an earlier batch may still be filled by a later one):
+	// AI-created categories with zero planned files are pruned and recorded.
+	pruned := o.pruneEmptyAgentCategories()
+
 	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
 	report, err := summary.Run(ctx)
@@ -133,6 +138,7 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 		report = "自动分类完成"
 	}
 	report += failureReportSection(failures)
+	report += emptyCategoryPruneSection(pruned)
 	// Reconciliation: split the untagged remainder by entry type so the
 	// expected deltas (container dirs, symlinks) are distinguishable from
 	// real tagging misses (files); junk-filter ignores are reported too.
@@ -146,6 +152,40 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 		report += untaggedReconciliationSection(breakdown, ignored)
 	}
 	return report, nil
+}
+
+// pruneEmptyAgentCategories deletes AI-created categories that ended the run
+// with zero planned files and returns their "name (path)" labels for the
+// report. User-created categories (agent_created=false) and non-empty ones
+// are never touched. Runs at run end only: categories created mid-run may
+// still be filled by later batches.
+func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
+	usages, err := o.repo.GetCategoryUsageSummary(o.session.FilesystemID, o.sessionID)
+	if err != nil {
+		log.Printf("orchestrator: empty-category prune, usage summary failed: %v", err)
+		return nil
+	}
+	countByPath := make(map[string]int64, len(usages))
+	for _, u := range usages {
+		countByPath[u.Path] = u.FileCount
+	}
+	cats, err := o.repo.ListCategories(o.session.FilesystemID)
+	if err != nil {
+		log.Printf("orchestrator: empty-category prune, list failed: %v", err)
+		return nil
+	}
+	var pruned []string
+	for _, c := range cats {
+		if !c.AgentCreated || countByPath[c.Path] > 0 {
+			continue
+		}
+		if err := o.repo.DeleteCategory(c.ID); err != nil {
+			log.Printf("orchestrator: delete empty agent category %q failed: %v", c.Name, err)
+			continue
+		}
+		pruned = append(pruned, fmt.Sprintf("%s (%s)", c.Name, c.Path))
+	}
+	return pruned
 }
 
 func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
