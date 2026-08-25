@@ -1,0 +1,423 @@
+/*
+ * danceinbox-style — Element Plus theme override
+ *
+ * Import order in your app entry MATTERS:
+ *   import 'element-plus/dist/index.css'    // 1. Element Plus default
+ *   import '@/styles/tokens.css'             // 2. design tokens
+ *   import '@/styles/element-plus-override.css'  // 3. this file (LAST)
+ *
+ * The default Element Plus primary color is #409EFF. This file remaps
+ * all Element Plus variables to the danceinbox token system.
+ *
+ * Requires Element Plus >= 2.5 (the `.el-select__wrapper` selector exists
+ * since 2.5; on older pinned versions select styling silently does not apply).
+ */
+
+:root {
+  /* ===== Colors ===== */
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 75%, #ffffff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 55%, #ffffff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 35%, #ffffff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 22%, #ffffff);
+  --el-color-primary-light-9: var(--accent-soft);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 88%, #000000);
+
+  --el-color-success: var(--success);
+  --el-color-success-light-9: var(--success-soft);
+  --el-color-warning: var(--warning);
+  --el-color-warning-light-9: var(--warning-soft);
+  --el-color-danger: var(--danger);
+  --el-color-danger-light-9: var(--danger-soft);
+  --el-color-error: var(--danger);
+  --el-color-info: var(--ctp-overlay1);
+  --el-color-info-light-9: var(--surface-muted);
+
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-text-color-secondary: var(--text-muted);
+  --el-text-color-placeholder: var(--text-muted);
+  --el-text-color-disabled: var(--text-muted);
+
+  --el-bg-color: var(--surface-strong);
+  --el-bg-color-page: transparent;
+  --el-bg-color-overlay: var(--surface-strong);
+  --el-fill-color: var(--surface-soft);
+  --el-fill-color-light: var(--surface-elevated);
+  --el-fill-color-blank: var(--surface-elevated);
+
+  --el-border-color: var(--border-soft);
+  --el-border-color-light: var(--border-soft);
+  --el-border-color-lighter: var(--border-soft);
+  --el-border-color-extra-light: var(--border-soft);
+  --el-border-color-dark: var(--border-strong);
+  --el-border-color-darker: var(--border-strong);
+  --el-border-radius-base: var(--radius-sm);
+  --el-border-radius-small: var(--radius-xs);
+  --el-border-radius-round: var(--radius-pill);
+
+  --el-font-family: var(--font-display);
+  --el-box-shadow: var(--shadow-soft);
+  --el-box-shadow-light: var(--shadow-soft);
+  --el-box-shadow-dark: var(--shadow-floating);
+
+  --el-mask-color: var(--overlay-mask);
+  --el-transition-duration: var(--duration-fast);
+  --el-transition-duration-fast: var(--duration-fast);
+  --el-transition-function-ease-in-out-bezier: var(--ease-spring);
+}
+
+/* ===== Button: pill + spring ===== */
+.el-button {
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0 18px;
+  height: 40px; /* matches .primary-button / .ghost-button / .text-input / .select-input */
+  transition: all var(--duration-fast) var(--ease-spring);
+  border-color: var(--border-soft);
+}
+
+.el-button:not(.el-button--primary):hover {
+  transform: translateY(-1px);
+}
+
+.el-button:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Primary matches components/buttons.md: solid accent at rest, color-mix
+   darken on hover, NO glow shadow. Only ghost/danger/icon variants lift. */
+.el-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--inner-highlight);
+}
+
+.el-button--primary:hover {
+  background: var(--el-color-primary-dark-2);
+  border-color: var(--el-color-primary-dark-2);
+  box-shadow: var(--inner-highlight);
+}
+
+.el-button--primary.is-plain {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--floating-border);
+  box-shadow: none;
+}
+
+.el-button--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.el-button--danger.is-plain {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.el-button.is-link {
+  background: transparent;
+  height: auto;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+}
+
+/* ===== Input / Select / DatePicker: pill ===== */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--radius-pill);
+  background: var(--input-bg);
+  box-shadow: 0 0 0 1px var(--border-soft) inset;
+  padding: 0 16px;
+  min-height: 40px; /* matches the custom control snippets */
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.el-textarea__inner {
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  min-height: 80px;
+  font-family: var(--font-display);
+}
+
+.el-input__wrapper:hover,
+.el-select__wrapper:hover {
+  background: var(--input-bg-hover);
+  box-shadow: 0 0 0 1px var(--border-strong) inset;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  background: var(--input-bg-hover);
+  box-shadow: 0 0 0 1px var(--accent) inset,
+              0 0 0 4px var(--accent-soft);
+}
+
+.el-input__inner,
+.el-textarea__inner {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+}
+
+/* ===== Card ===== */
+.el-card {
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-soft), var(--inner-highlight);
+  backdrop-filter: blur(14px);
+}
+
+.el-card__header {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 18px 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.el-card__body {
+  padding: 24px;
+}
+
+/* ===== Table ===== */
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-border-color: var(--border-soft);
+  --el-table-header-bg-color: var(--surface-soft);
+  --el-table-header-text-color: var(--text-secondary);
+  --el-table-row-hover-bg-color: var(--accent-soft);
+  --el-table-text-color: var(--text-primary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--surface-soft) !important;
+}
+
+.el-table td.el-table__cell {
+  border-bottom-color: var(--border-soft);
+}
+
+/* ===== Tag (used as fallback for status chip when needed) ===== */
+.el-tag {
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0 12px;
+  height: 24px;
+  line-height: 22px;
+  border: 1px solid transparent;
+}
+
+.el-tag--success {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.el-tag--warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
+.el-tag--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.el-tag--info {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  border-color: var(--border-soft);
+}
+
+/* ===== Dialog ===== */
+.el-dialog {
+  border-radius: var(--radius-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-dialog), var(--inner-highlight);
+  backdrop-filter: blur(20px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.el-dialog__header {
+  padding: 22px 24px 12px;
+  margin: 0;
+}
+
+.el-dialog__title {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.el-dialog__body {
+  padding: 12px 24px 8px;
+  color: var(--text-secondary);
+}
+
+.el-dialog__footer {
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.el-overlay {
+  background: var(--overlay-mask);
+  backdrop-filter: blur(4px);
+}
+
+/* ===== Drawer ===== */
+.el-drawer {
+  background: var(--surface-strong);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid var(--border-soft);
+}
+
+.el-drawer__header {
+  padding: 20px 24px;
+  margin: 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-weight: 700;
+}
+
+/* ===== Menu ===== */
+.el-menu {
+  background: transparent !important;
+  border-right: none !important;
+}
+
+.el-menu-item,
+.el-sub-menu__title {
+  border-radius: var(--radius-sm);
+  margin: 2px 12px;
+  font-weight: 500;
+  height: 40px;
+  line-height: 40px;
+  transition: all var(--duration-fast) var(--ease-spring);
+  border-left: 3px solid transparent;
+}
+
+.el-menu-item:hover,
+.el-sub-menu__title:hover {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.el-menu-item.is-active {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ===== Pagination ===== */
+.el-pagination {
+  font-family: var(--font-display);
+  --el-pagination-bg-color: var(--input-bg);
+  --el-pagination-button-bg-color: var(--input-bg);
+  --el-pagination-hover-color: var(--accent);
+}
+
+.el-pagination.is-background .el-pager li,
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next {
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.el-pagination.is-background .el-pager li.is-active {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* ===== Message / MessageBox / Notification ===== */
+.el-message {
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(14px);
+}
+
+.el-notification {
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(14px);
+}
+
+/* ===== Switch ===== */
+.el-switch__core {
+  border-radius: var(--radius-pill);
+}
+
+/* ===== Checkbox / Radio ===== */
+.el-checkbox__inner,
+.el-radio__inner {
+  border-radius: var(--radius-xs);
+  border-color: var(--border-strong);
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.el-radio__inner {
+  border-radius: 50%;
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-radio__input.is-checked .el-radio__inner {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ===== Popper (select dropdown / popover / picker panel) ===== */
+/* Teleported to <body>: still under :root, so vars apply — but EP gives them
+   no backdrop blur/styling of their own. Without this they are a translucent
+   smear over page content (surface-strong is 92% alpha). */
+.el-select-dropdown,
+.el-popper.is-light {
+  background: var(--surface-strong);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(20px);
+}
+
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover {
+  background: var(--accent-soft);
+}
+
+.el-select-dropdown__item.is-selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ===== Dark-mode tint corrections =====
+   The light-N tints above mix toward WHITE for light mode. EP's dark scheme
+   mixes toward black; without this block, disabled/hover states go pale in dark mode. */
+:root.dark {
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 75%, #000000);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 55%, #000000);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 35%, #000000);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 22%, #000000);
+}

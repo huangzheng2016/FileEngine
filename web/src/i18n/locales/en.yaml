@@ -1,10 +1,43 @@
+app:
+  tagline: AI File Organizer
+
 nav:
+  dashboard: Dashboard
   files: Files
   filesystems: Filesystems
-  tasks: Tasks
-  logs: Agent Logs
+  tasks: Sessions
   config: Config
   models: Models
+  settings: Settings
+
+dashboard:
+  title: Dashboard
+  subtitle: Source → Scan → Tag → Execute — four steps to organized files
+  stepSource: Source
+  stepScan: Scan
+  stepTag: Tag
+  stepExecute: Execute
+  sourceStatus: "Filesystems connected: {count}"
+  sourceEmpty: No filesystems yet — add one first
+  scanStatus: "Scan sessions: {count}"
+  scanEmpty: No scan sessions yet
+  scanActive: Scanning…
+  tagProgress: "Latest session tagged {tagged}/{total}"
+  tagEmpty: Tag after the scan finishes
+  executeStatus: "{planned} planned · {executed} executed"
+  executeEmpty: Plans appear after tagging
+  ctaAddFs: Add Filesystem
+  ctaManageFs: Manage Filesystems
+  ctaNewScan: New Scan
+  ctaTag: Start Tagging
+  ctaReview: Review Results
+  ctaExecute: Start Execute
+  ctaFiles: View Files
+  ctaViewSession: View session →
+  stateDone: Done
+  stateActive: Active
+  stateTodo: To do
+  latestSession: Current Session
 
 common:
   save: Save
@@ -28,6 +61,7 @@ common:
   deleted: Deleted
   saved: Saved
   created: Created
+  refresh: Refresh
 
 files:
   title: File Browser
@@ -58,29 +92,22 @@ files:
   columns: Columns
   plannedPath: Planned Path
   executedAt: Executed
-  detail: File Detail
   saveChanges: Save Changes
   originalPath: Path
   modTime: Modified
-  permissions: Permissions
-  depth: Depth
   descriptionPlaceholder: Enter description...
   newPathPlaceholder: New path
   preview: Preview
-  previewTitle: File Preview
   instruct: AI Instruct
   instructTitle: AI Batch Operation
   instructPrompt: Enter instruction (e.g., move these to software category, update descriptions...)
   instructSelected: "{count} files selected"
-  instructRunning: Running...
   instructStarted: AI instruction submitted, running in background
-  instructDone: AI instruction completed
   previewNotSupported: Preview not supported for this file type
   previewTooLarge: File too large for preview (max 1MB)
   previewLoading: Loading...
 
 categories:
-  title: Category Management
   addCategory: Add Category
   editCategory: Edit Category
   structure: Structure
@@ -97,6 +124,7 @@ categories:
 
 filesystems:
   title: Filesystem Management
+  subtitle: Local and remote file sources
   addFs: Add Filesystem
   editFs: Edit Filesystem
   protocol: Protocol
@@ -113,7 +141,8 @@ filesystems:
   connFail: "Connection failed: {error}"
 
 tasks:
-  title: Scan Sessions
+  title: Session Center
+  subtitle: "One session per screen: status, progress and run timeline"
   newScan: New Scan
   filesystem: Filesystem
   selectFs: Select a filesystem
@@ -147,6 +176,10 @@ tasks:
   allowReadFileHint: Agent can read file contents for analysis
   allowAutoCategory: Allow Auto-Create Categories
   allowAutoCategoryHint: Agent can create new categories automatically
+  allowVision: Allow Vision
+  allowVisionHint: Let the agent inspect image contents; the model must also have vision enabled
+  allowVisionPatchFailed: "Session created, but enabling vision failed: {error}"
+  visionOn: Vision
   excludeCategoryDirs: Exclude Category Dirs
   excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files
   filterMode: Directory Filter Mode
@@ -163,7 +196,6 @@ tasks:
   status_executing: Executing
   status_done: Done
   statusError: Error
-  rootPathRequired: Root path is required
   executionPlans: Execution Plans
   planName: Name
   planOp: Op
@@ -189,27 +221,29 @@ tasks:
   fileCount: Files
   totalSizeLabel: Total Size
   noStats: No statistics available
+  noSessions: No scan sessions yet
+  noSessionsHint: Create a scan to start organizing your files
+  tokensPerFile: "{count}/file"
+  tokensPerMB: "{count}/MB"
+  selectHint: Pick a session on the left, or start a new scan
+  goReview: Review Results
+  goExecute: Start Execute
+  goTag: Start Tagging
+  guideScanned: "Scan finished — {count} files. Next: tag them."
+  guideTagged: "Tagging finished — {count} plans ready to execute."
+  guideDone: "Execution finished — {count} operations processed."
+  guideError: "Last run failed: {status}"
 
 config:
   title: Configuration
+  subtitle: Database, agent and prompt settings
   saveConfig: Save Configuration
   configSaved: Configuration saved
   saveFailed: Save failed
   tabs:
-    model: Model
     database: Database
     agent: Agent
     prompt: Prompt
-  model:
-    provider: Provider
-    apiKey: API Key
-    modelName: Model
-    baseUrl: Base URL
-    temperature: Temperature
-    maxTokens: Max Tokens
-    testModel: Test Model
-    testOk: Model connection OK
-    testFail: "Model test failed: {error}"
   database:
     driver: Driver
     dsn: DSN
@@ -218,44 +252,36 @@ config:
     concurrency: Directory Worker Threads
     maxFileReadSize: Max File Read Size
     maxRetries: Max Retries
-    allowAutoCategory: Allow Auto-Create Categories
-    allowAutoCategoryHint: When enabled, Agent can create new categories for files that don't fit existing ones
   prompt:
     customLabel: Custom
     defaultLabel: Default
     resetDefault: Reset to Default
-    placeholder: Enter Agent system prompt...
     savePrompt: Save Prompt
     promptSaved: Prompt saved
 
 logs:
-  title: Agent Logs
-  session: Session
-  allBatches: All Batches
-  orderAsc: Ascending
-  orderDesc: Descending
-  roleFilter: Role
   live: Live
-  history: History
-  totalTokens: "Total tokens: {count}"
-  system: System
-  user: User
-  assistant: Assistant
-  tool: Tool
+  reconnecting: Connection lost, reconnecting…
+  loadEarlier: Load earlier entries
+  noLogs: No run records for this session yet
+  noLogsHint: Start tagging or an AI instruction and the run will stream here live
+  totalTokens: Total Tokens
   batch: "Batch #{index}"
   manualBatch: "Manual #{index}"
-  tokens: "{count} tokens"
+  stepCount: "{count} steps"
   input: Input
   output: Output
-  expand: Expand
-  collapse: Collapse
-
-language:
-  zh: 中文
-  en: English
+  toolRunning: Running
+  toolOk: OK
+  toolFailed: Failed
+  roleUser: User
+  roleAssistant: Assistant
+  roleSystem: System
+  scrollToLatest: Back to bottom
 
 models:
   title: Model Providers
+  subtitle: LLM connections used by the agent
   addModel: Add Model
   editModel: Edit Model
   provider: Provider
@@ -264,6 +290,11 @@ models:
   baseUrl: Base URL
   temperature: Temperature
   maxTokens: Max Tokens
+  contextWindow: Context Window
+  contextWindowHint: Drives history compaction thresholds; match the model's real context size
+  contextCustom: Custom…
+  visionEnabled: Vision
+  visionEnabledHint: Model accepts image input (required before sessions can let the agent view images)
   keepApiKey: Leave empty to keep current
   deleteConfirm: Delete this model provider?
   testConn: Test Connection

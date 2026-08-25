@@ -64,6 +64,7 @@ export interface ScanSession {
   total_tokens: number
   allow_read_file: boolean
   allow_auto_category: boolean
+  allow_vision: boolean
   exclude_category_dirs: boolean
   filter_mode: string
   filter_dirs: string
@@ -81,6 +82,8 @@ export interface ModelProvider {
   base_url: string
   temperature: number
   max_tokens: number
+  context_window: number
+  vision_enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -170,3 +173,79 @@ export interface CategoryExportItem {
   structure?: string
   description?: string
 }
+
+// ===== Session Event Stream (SSE) — mirrors internal/db/events.go payloads =====
+// Live channel: GET /api/v1/sessions/:id/events/stream (EventSource).
+// History stays in GET /logs; the stream carries only new events.
+
+export type RunPhase = 'tagging' | 'instruct' | 'executing'
+export type RunStatus = 'started' | 'done' | 'error' | 'stopped'
+
+export interface RunStatusEvent {
+  session_id: number
+  phase: RunPhase
+  status: RunStatus
+  message?: string
+}
+
+export interface BatchStartEvent {
+  session_id: number
+  batch_index: number
+  label: string
+}
+
+export interface MessageEvent {
+  session_id: number
+  batch_index: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+}
+
+export interface ToolCallEvent {
+  session_id: number
+  batch_index: number
+  tool_name: string
+  input: string
+}
+
+export interface ToolResultEvent {
+  session_id: number
+  batch_index: number
+  tool_name: string
+  output: string
+  ok: boolean
+}
+
+export interface ProgressEvent {
+  session_id: number
+  phase: RunPhase
+  total: number
+  tagged?: number
+  planned?: number
+  success?: number
+  failed?: number
+  skipped?: number
+  batch_index?: number
+}
+
+export interface RunDoneEvent {
+  session_id: number
+  phase: RunPhase
+  status: 'done' | 'error' | 'stopped'
+  summary?: string
+}
+
+export interface SessionEventMap {
+  run_status: RunStatusEvent
+  batch_start: BatchStartEvent
+  message: MessageEvent
+  tool_call: ToolCallEvent
+  tool_result: ToolResultEvent
+  progress: ProgressEvent
+  run_done: RunDoneEvent
+}
+
+export type SessionEventType = keyof SessionEventMap

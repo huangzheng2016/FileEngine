@@ -1,97 +1,193 @@
 <template>
-  <el-card>
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>{{ $t('models.title') }}</span>
-        <el-button type="primary" @click="openDialog()">{{ $t('models.addModel') }}</el-button>
+  <section class="page-card">
+    <header class="page-header">
+      <div class="page-titles">
+        <span class="page-eyebrow">FileEngine</span>
+        <h2 class="page-heading">{{ $t('models.title') }}</h2>
+        <p class="page-sub">{{ $t('models.subtitle') }}</p>
       </div>
-    </template>
-    <el-table :data="providers" style="width: 100%">
-      <el-table-column prop="name" :label="$t('common.name')" width="160" />
-      <el-table-column prop="provider" :label="$t('models.provider')" width="100">
-        <template #default="{ row }">
-          <el-tag :type="providerTagType(row.provider)" size="small" effect="dark">{{ providerLabel(row.provider) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="model" :label="$t('models.modelName')" width="250" show-overflow-tooltip />
-      <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="250" show-overflow-tooltip />
-      <el-table-column :label="$t('common.actions')" width="300" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
-          <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
-          <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+      <div class="page-actions">
+        <el-button type="primary" @click="openDialog()">
+          <el-icon style="margin-right: 4px"><Plus /></el-icon>{{ $t('models.addModel') }}
+        </el-button>
+      </div>
+    </header>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? $t('models.editModel') : $t('models.addModel')" width="550px">
-      <el-form :model="form" label-width="120px">
-        <el-form-item :label="$t('common.name')">
-          <el-input v-model="form.name" />
-        </el-form-item>
-        <el-form-item :label="$t('models.provider')">
-          <el-select v-model="form.provider">
-            <el-option label="OpenAI" value="openai" />
-            <el-option label="Claude" value="claude" />
-            <el-option label="Ollama" value="ollama" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('models.apiKey')">
+    <div class="page-body">
+      <el-table :data="providers" v-loading="loading" style="width: 100%">
+        <el-table-column prop="name" :label="$t('common.name')" width="150">
+          <template #default="{ row }"><span class="cell-phone">{{ row.name }}</span></template>
+        </el-table-column>
+        <el-table-column prop="provider" :label="$t('models.provider')" width="110">
+          <template #default="{ row }">
+            <span class="status-chip" :class="providerChipClass(row.provider)">{{ providerLabel(row.provider) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="model" :label="$t('models.modelName')" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }"><code class="cell-mono">{{ row.model }}</code></template>
+        </el-table-column>
+        <el-table-column :label="$t('models.contextWindow')" width="120" align="center">
+          <template #default="{ row }">
+            <span class="metric-chip"><span class="metric-value">{{ formatWindow(row.context_window) }}</span></span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('models.visionEnabled')" width="90" align="center">
+          <template #default="{ row }">
+            <span v-if="row.vision_enabled" class="status-chip is-live"><span class="status-dot"></span>{{ $t('common.yes') }}</span>
+            <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }"><span class="cell-time">{{ row.base_url || '-' }}</span></template>
+        </el-table-column>
+        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
+            <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
+            <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state-card empty-state-card--inline">
+            <div class="empty-state-card__icon">
+              <el-icon :size="24"><Cpu /></el-icon>
+            </div>
+            <div class="empty-state-card__text">
+              <h4 class="empty-state-card__title">{{ $t('models.title') }}</h4>
+              <p class="empty-state-card__sub">{{ $t('models.subtitle') }}</p>
+            </div>
+          </div>
+        </template>
+      </el-table>
+    </div>
+
+    <el-dialog append-to-body v-model="dialogVisible" :title="editingId ? $t('models.editModel') : $t('models.addModel')" width="560px">
+      <div class="form-stack">
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-field__label is-required">{{ $t('common.name') }}</label>
+            <el-input v-model="form.name" />
+          </div>
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('models.provider') }}</label>
+            <el-select v-model="form.provider">
+              <el-option label="OpenAI" value="openai" />
+              <el-option label="Claude" value="claude" />
+              <el-option label="Ollama" value="ollama" />
+            </el-select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-field__label">{{ $t('models.apiKey') }}</label>
           <el-input v-model="form.api_key" type="password" show-password :placeholder="editingId ? $t('models.keepApiKey') : ''" />
-        </el-form-item>
-        <el-form-item :label="$t('models.modelName')">
+        </div>
+        <div class="form-field">
+          <label class="form-field__label is-required">{{ $t('models.modelName') }}</label>
           <el-input v-model="form.model" placeholder="gpt-4o / claude-sonnet-4-20250514" />
-        </el-form-item>
-        <el-form-item :label="$t('models.baseUrl')">
+        </div>
+        <div class="form-field">
+          <label class="form-field__label">{{ $t('models.baseUrl') }}</label>
           <el-input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
-        </el-form-item>
-        <el-form-item :label="$t('models.temperature')">
-          <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" />
-        </el-form-item>
-        <el-form-item :label="$t('models.maxTokens')">
-          <el-input-number v-model="form.max_tokens" :min="0" :step="256" />
-        </el-form-item>
-      </el-form>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('models.temperature') }}</label>
+            <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" style="width: 100%" />
+          </div>
+          <div class="form-field">
+            <label class="form-field__label">{{ $t('models.maxTokens') }}</label>
+            <el-input-number v-model="form.max_tokens" :min="0" :step="256" style="width: 100%" />
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-field__label">{{ $t('models.contextWindow') }}</label>
+          <el-select v-model="contextTier">
+            <el-option v-for="tier in contextTiers" :key="tier" :label="formatWindow(tier)" :value="tier" />
+            <el-option :label="$t('models.contextCustom')" :value="CUSTOM_TIER" />
+          </el-select>
+          <el-input-number
+            v-if="contextTier === CUSTOM_TIER"
+            v-model="form.context_window"
+            :min="1000"
+            :step="10000"
+            style="width: 100%" />
+          <p class="form-field__hint">{{ $t('models.contextWindowHint') }}</p>
+        </div>
+        <div class="form-field">
+          <label class="form-field__label">{{ $t('models.visionEnabled') }}</label>
+          <div>
+            <el-switch v-model="form.vision_enabled" />
+          </div>
+          <p class="form-field__hint">{{ $t('models.visionEnabledHint') }}</p>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ $t('common.cancel') }}</el-button>
         <el-button type="success" @click="handleTest" :loading="testing">{{ $t('models.testConn') }}</el-button>
         <el-button type="primary" @click="handleSave">{{ $t('common.save') }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider, testModelProviderConnection } from '../api'
 import type { ModelProvider } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Cpu, CopyDocument } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const providers = ref<ModelProvider[]>([])
+const loading = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const testing = ref(false)
 const testingId = ref<number | null>(null)
-const form = ref({
+
+const contextTiers = [200_000, 256_000, 500_000, 900_000, 1_000_000]
+const CUSTOM_TIER = -1
+
+const emptyForm = () => ({
   name: '', provider: 'openai', api_key: '', model: '',
   base_url: '', temperature: 0.1, max_tokens: 4096,
+  context_window: 200_000, vision_enabled: false,
 })
+const form = ref(emptyForm())
+
+// Tier dropdown value: the tier itself when it matches, otherwise the custom sentinel.
+const contextTier = computed({
+  get: () => (contextTiers.includes(form.value.context_window) ? form.value.context_window : CUSTOM_TIER),
+  set: (v: number) => {
+    if (v !== CUSTOM_TIER) form.value.context_window = v
+    else if (contextTiers.includes(form.value.context_window)) form.value.context_window = 300_000
+  },
+})
+
+function formatWindow(n: number): string {
+  if (!n) return '-'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}K`
+  return String(n)
+}
 
 onMounted(() => load())
 
 async function load() {
-  const res = await listModelProviders()
-  providers.value = res.data
+  loading.value = true
+  try {
+    const res = await listModelProviders()
+    providers.value = res.data
+  } finally {
+    loading.value = false
+  }
 }
 
-function providerTagType(p: string): '' | 'success' | 'warning' | 'info' | 'danger' {
-  const map: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
-    openai: 'success', claude: 'warning', ollama: 'info'
-  }
-  return map[p] || 'info'
+function providerChipClass(p: string): string {
+  const map: Record<string, string> = { openai: 'is-live', claude: 'is-warning', ollama: 'is-muted' }
+  return map[p] || 'is-accent'
 }
 
 function providerLabel(p: string): string {
@@ -99,17 +195,22 @@ function providerLabel(p: string): string {
   return map[p] || p
 }
 
+function fillForm(m: ModelProvider, nameSuffix: string) {
+  return {
+    name: m.name + nameSuffix, provider: m.provider, api_key: '',
+    model: m.model, base_url: m.base_url,
+    temperature: m.temperature, max_tokens: m.max_tokens,
+    context_window: m.context_window || 200_000, vision_enabled: m.vision_enabled,
+  }
+}
+
 function openDialog(m?: ModelProvider) {
   if (m) {
     editingId.value = m.id
-    form.value = {
-      name: m.name, provider: m.provider, api_key: '',
-      model: m.model, base_url: m.base_url,
-      temperature: m.temperature, max_tokens: m.max_tokens,
-    }
+    form.value = fillForm(m, '')
   } else {
     editingId.value = null
-    form.value = { name: '', provider: 'openai', api_key: '', model: '', base_url: '', temperature: 0.1, max_tokens: 4096 }
+    form.value = emptyForm()
   }
   dialogVisible.value = true
 }
@@ -163,11 +264,7 @@ async function handleTestExisting(m: ModelProvider) {
 
 function handleDuplicate(m: ModelProvider) {
   editingId.value = null
-  form.value = {
-    name: m.name + ' (copy)', provider: m.provider, api_key: '',
-    model: m.model, base_url: m.base_url,
-    temperature: m.temperature, max_tokens: m.max_tokens,
-  }
+  form.value = fillForm(m, ' (copy)')
   dialogVisible.value = true
 }
 </script>
