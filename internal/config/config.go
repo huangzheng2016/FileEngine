@@ -44,11 +44,13 @@ type AgentConfig struct {
 	VisionMaxImagesPerBatch int `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
 	VisionImageMaxPx        int `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
 	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
-	// BatchSize is the number of loose files per agent batch. It must move
-	// together with MaxStep: each file costs ≥2 tool calls (set_target +
-	// mark_tagged) plus exploration steps, so keep MaxStep ≈ 3× BatchSize —
-	// raising BatchSize without MaxStep strands batches mid-run (silently
-	// untagged files), the reverse just wastes headroom.
+	// BatchSize is the number of loose files per agent batch (default 200,
+	// capped at 500). With the script bulk workflow (run_script: query_files →
+	// batch set_category → mark_tagged loop) step count no longer scales with
+	// files per batch, so large batches fit comfortably in the context window;
+	// the prompt steers agents to that workflow for big batches. The per-file
+	// fallback still costs ≥2 tool calls per file — batches it leaves behind
+	// are caught by recheckBatchTagged and the end-of-run sweeps.
 	BatchSize       int `yaml:"batch_size" json:"batch_size"`
 	Concurrency     int `yaml:"concurrency" json:"concurrency"`
 	MaxFileReadSize int `yaml:"max_file_read_size" json:"max_file_read_size"`
@@ -56,7 +58,7 @@ type AgentConfig struct {
 	// inline via the path::entry syntax (larger entries are listing-only).
 	ArchiveEntryMaxSize  int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
 	MaxRetries           int    `yaml:"max_retries" json:"max_retries"`
-	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; ≈3× BatchSize (see above)
+	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
 	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
 	InstructSystemPrompt string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
@@ -146,7 +148,10 @@ func setDefaults(cfg *Config) {
 		}
 	}
 	if cfg.Agent.BatchSize == 0 {
-		cfg.Agent.BatchSize = 50
+		cfg.Agent.BatchSize = 200
+	}
+	if cfg.Agent.BatchSize > 500 {
+		cfg.Agent.BatchSize = 500
 	}
 	if cfg.Agent.Concurrency == 0 {
 		cfg.Agent.Concurrency = 1

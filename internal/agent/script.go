@@ -100,6 +100,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - count_files({同上过滤条件}) → 整数
 - get_file_info(path) → 文件详情 map；找不到返回 error 值
 - get_categories() → 分类数组（name/path/structure/description/agent_editable）
+- mark_tagged(path) → true；标记文件/目录为已处理（目录级联子项）。批量流程收尾必须对每个处理过的文件调用
 - set_target(path, new_path) → true；new_path 传 "" 清除目标。与工具同样校验路径合法性
 - set_category(path, category_name) → true；把文件归入指定分类（目标=分类路径+文件名）
 - create_category(name, path, description) → 分类 map；受与 create_category 工具完全相同的护栏约束（需先 get_categories；同名/同路径拒绝）%s
@@ -261,6 +262,7 @@ func (tb *ToolBuilder) scriptBuiltins(ctx context.Context) map[string]*tengo.Use
 		"sample_files":    {Name: "sample_files", Value: tb.scriptSampleFiles(ctx)},
 		"get_file_info":   {Name: "get_file_info", Value: tb.scriptGetFileInfo(ctx)},
 		"get_categories":  {Name: "get_categories", Value: tb.scriptGetCategories(ctx)},
+		"mark_tagged":     {Name: "mark_tagged", Value: tb.scriptMarkTagged(ctx)},
 		"set_target":      {Name: "set_target", Value: tb.scriptSetTarget(ctx)},
 		"set_category":    {Name: "set_category", Value: tb.scriptSetCategory(ctx)},
 		"rename_category": {Name: "rename_category", Value: tb.scriptRenameCategory(ctx)},
@@ -560,6 +562,29 @@ func (tb *ToolBuilder) scriptGetCategories(ctx context.Context) tengo.CallableFu
 }
 
 // --- mutating builtins (reuse the tool core logic) ---
+
+func (tb *ToolBuilder) scriptMarkTagged(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("mark_tagged", args, 1, 1); err != nil {
+			return nil, err
+		}
+		p, err := scriptStringArg("mark_tagged", "path", args[0])
+		if err != nil {
+			return nil, err
+		}
+		f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(p))
+		if err != nil {
+			return scriptError(fmt.Errorf("file not found: %s", p)), nil
+		}
+		if f.Tagged {
+			return tengo.TrueValue, nil
+		}
+		if err := tb.repo.MarkTaggedAtomic(tb.sessionID, normalizePath(p), tb.logger.GetBatch()); err != nil {
+			return scriptError(err), nil
+		}
+		return tengo.TrueValue, nil
+	}
+}
 
 func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {

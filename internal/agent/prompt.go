@@ -39,7 +39,7 @@ const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目
 - 数据库/备份（.sql/.sql.gz）→ 归入备份/数据相关分类
 - 配置/密钥（.json/.yaml/.pem）→ 通常属于某个服务或项目
 - 压缩包：批次行已附包内目录摘要（条目数 + 部分条目名），优先据此判断归类；需要更深入时用 read_file 的 "路径::条目" 语法读包内文本条目；rar/7z/旧版 .doc 不支持读取，不要尝试
-- **每个散文件处理完必须逐个 mark_tagged**：set_target 不会置 tagged，批内漏标记的文件会被记为失败批次并触发补跑
+- **每个散文件处理完必须逐个 mark_tagged**：set_target/set_category 不会置 tagged，批内漏标记的文件会被记为失败批次并触发补跑（脚本批量模式下用 mark_tagged 内置函数逐个收尾）
 
 ## 分类管理
 
@@ -59,7 +59,7 @@ const noAutoCategoryGuidance = `- 不能创建新分类：没有合适的现有�
 const scriptGuidance = `
 ## 批量脚本
 
-需要批量查询或批量归类时（如抽样了解大批文件、对一组文件统一设置目标），优先用 run_script 一次完成，代替逐文件的工具调用。脚本内置 query_files/count_files/get_file_info/get_categories/set_target/set_category/sample_files 等函数，print 输出和 result 返回值随工具结果返回，详见工具描述
+需要批量查询或批量归类时（如抽样了解大批文件、对一组文件统一设置目标），优先用 run_script 一次完成，代替逐文件的工具调用。**大批量散文件（约 20 个以上）的标准流程**：query_files 拉清单 → 按名称/描述/归档摘要在脚本内判断，循环批量 set_category → 再循环 mark_tagged 收尾 → print 统计——一两个工具调用处理一整批，避免每文件 2 次调用撞上步数上限。脚本内置 query_files/count_files/get_file_info/get_categories/set_target/set_category/mark_tagged/sample_files 等函数，print 输出和 result 返回值随工具结果返回，详见工具描述
 `
 
 const systemPromptTail = `- set_target 传空字符串可清除已有目标

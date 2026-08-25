@@ -243,6 +243,23 @@ result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 	}
 }
 
+func TestScriptMarkTaggedBuiltin(t *testing.T) {
+	tb, repo := scriptTestBuilder(t, nil)
+	out := mustRunScript(t, tb, `
+ok := mark_tagged("incoming/photo1.jpg")
+again := mark_tagged("incoming/photo1.jpg")
+missing := mark_tagged("nope/x.jpg")
+result = {ok: ok, again: again, missing_err: is_error(missing)}`)
+	v := resultValue(t, out)
+	if v["ok"] != true || v["again"] != true || v["missing_err"] != true {
+		t.Fatalf("mark_tagged outcomes: %+v", v)
+	}
+	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
+	if !f.Tagged {
+		t.Fatalf("mark_tagged must flip tagged: %+v", f)
+	}
+}
+
 func TestScriptSetCategoryBuiltin(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
@@ -401,7 +418,7 @@ func TestScriptDangerousModulesUnavailable(t *testing.T) {
 	dangerous := []string{
 		`os := import("os")`,
 		`f := import("fmt")`,
-		`t := import("times")`, // times.sleep would bypass script_timeout
+		`t := import("times")`,         // times.sleep would bypass script_timeout
 		`e := import("enum2")`,         // unknown module
 		`x := import("./local.tengo")`, // file import stays disabled
 		`x := import("/etc/passwd")`,   // ditto, absolute
