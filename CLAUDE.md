@@ -76,11 +76,11 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Before processing each directory, re-checks tagged status (another worker may have cascade-tagged it)
 - Configurable concurrency: each worker gets its own FS connection + ReAct agent instance + token tracker
 - All agent config (concurrency, batch_size, max_retries, system_prompt) read from live `config.Get()` each iteration — hot-reloadable without restart
-- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s), 60s timeout per Generate call
+- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s); each attempt has a 60s timeout (hardcoded in `runADKWithRetry`; the `agent_timeout` config field is currently unused) that covers an entire agent run — the full ReAct loop of up to `max_step` tool rounds — not a single Generate call
 - `processRemainingFiles` has 1000-iteration safety limit to prevent infinite loops
 
 ### Agent Tools
-- 8 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `list_category_files`, `set_target`, `update_category`, `delete_category`
+- 9 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `list_category_files`, `set_target`, `update_category`, `delete_category`
 - 2 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true)
 - Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`
 - All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
@@ -118,8 +118,9 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Key indexes: `idx_uniq_session_path`, `idx_session_type_tagged_depth`, `idx_session_parent`, `idx_session_op_exec`
 
 ### Eino Framework
-- Agent: `react.NewAgent()` creates a ReAct agent
-- Model: `react.AgentConfig.Model` takes `model.ChatModel`
+- Agent: `adk.NewChatModelAgent()` creates a ReAct agent (see `internal/agent/adk.go`); executed via `adk.Runner`, `MaxIterations` caps the tool-call rounds per run
+- Middleware chain (in order): `patchtoolcalls` (repairs dangling tool calls) → `reduction` (clears old tool outputs past 75% of the model context window) → `summarization` (official eino middleware; LLM-summarizes history past 90% of the window, sharing the same token estimator)
+- Model: `adk.ChatModelAgentConfig.Model` takes `model.ChatModel` (eino-ext openai/claude factories in `internal/model/factory.go`)
 - Tools: `utils.InferTool(name, desc, func)` auto-generates JSON schema from Go struct tags
 - Struct tags: `json:"field_name" jsonschema_description:"description for LLM"`
 - `model.ChatModel` is thread-safe for concurrent use
@@ -139,10 +140,14 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | DB models + indexes | `internal/db/models.go` |
 | DB init + SQLite opts | `internal/db/db.go` |
 | All DB queries | `internal/db/repository.go` |
-| Agent tagging loop | `internal/agent/agent.go` (RunTagging) |
+| Agent entry / lifecycle (Stop, running state) | `internal/agent/agent.go` |
+| Agent construction + middleware chain | `internal/agent/adk.go` (buildADKAgent) |
+| Orchestrator (routes autotag/instruct) | `internal/agent/orchestrator.go` |
+| Agent tagging loop | `internal/agent/autotag.go` |
+| Instruct mode | `internal/agent/instruct.go` |
 | Agent tools | `internal/agent/tools.go` |
 | Token tracker | `internal/agent/token_tracker.go` |
-| System prompt | `internal/agent/prompt.go` |
+| System prompts | `internal/agent/prompt.go` (+ `prompt_builder.go` for category summaries) |
 | LLM factory | `internal/model/factory.go` |
 | FS interface | `internal/remotefs/interface.go` |
 | Executor | `internal/executor/executor.go` |
