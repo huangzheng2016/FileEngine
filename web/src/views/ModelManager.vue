@@ -40,12 +40,14 @@
         <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><span class="cell-time">{{ row.base_url || '-' }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="handleTestExisting(row)" :loading="testingId === row.id">{{ $t('models.testConn') }}</el-button>
-            <el-button size="small" @click="handleDuplicate(row)"><el-icon><CopyDocument /></el-icon></el-button>
-            <el-button size="small" @click="openDialog(row)">{{ $t('common.edit') }}</el-button>
-            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">{{ $t('common.delete') }}</el-button>
+            <div class="table-actions">
+              <button class="link-button" :disabled="testingId === row.id" @click="handleTestExisting(row)">{{ $t('models.testConn') }}</button>
+              <button class="link-button" @click="handleDuplicate(row)">{{ $t('common.copy') }}</button>
+              <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
+              <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -147,7 +149,7 @@ import { useI18n } from 'vue-i18n'
 import { listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider, testModelProviderConnection } from '../api'
 import type { ModelProvider } from '../types'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Cpu, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Cpu } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const providers = ref<ModelProvider[]>([])

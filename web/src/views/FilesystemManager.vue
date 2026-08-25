@@ -30,10 +30,12 @@
           <template #default="{ row }"><span class="cell-time">{{ row.host || '-' }}</span></template>
         </el-table-column>
         <el-table-column prop="description" :label="$t('common.description')" min-width="200" show-overflow-tooltip />
-        <el-table-column :label="$t('common.actions')" width="160" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="140" fixed="right">
           <template #default="{ row }">
-            <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
-            <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            <div class="table-actions">
+              <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>
+              <button class="link-button is-danger" @click="handleDelete(row.id)">{{ $t('common.delete') }}</button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>

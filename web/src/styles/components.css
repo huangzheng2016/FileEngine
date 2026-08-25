@@ -293,6 +293,14 @@
   background: var(--danger-soft);
 }
 
+/* Single-row table action group: text buttons, fixed gap, no wrapping. */
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 .filter-tabs {
   display: flex;
   gap: 4px;

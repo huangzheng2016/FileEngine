@@ -726,10 +726,14 @@ async function previewFile(file: FileEntry) {
 
 .cat-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   margin-bottom: 8px;
+}
+
+.cat-actions .el-button {
+  margin-left: 0;
 }
 
 .cat-list {
