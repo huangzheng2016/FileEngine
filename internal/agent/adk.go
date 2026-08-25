@@ -10,15 +10,13 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/patchtoolcalls"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
+	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
-
-	"github.com/huangzheng2016/KnowCompact/compact"
-	einocompact "github.com/huangzheng2016/KnowCompact/eino"
 )
 
 func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, modelMaxTokens int) (*adk.ChatModelAgent, error) {
@@ -34,30 +32,11 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 		modelMaxTokens = 128_000
 	}
 	clearThreshold := int64(float64(modelMaxTokens) * 0.75)
-	compactThreshold := int(float64(modelMaxTokens) * 0.90)
 
 	reduceCfg := &reduction.Config{
 		SkipTruncation: true,
 		TokenCounter: func(_ context.Context, msgs []adk.Message, tools []*schema.ToolInfo) (int64, error) {
-			var tokens int64
-			for _, msg := range msgs {
-				if msg == nil {
-					continue
-				}
-				// Improved token estimation: ASCII ≈ 4 chars/token, CJK ≈ 1.5 chars/token
-				tokens += estimateTokens(msg.Content)
-				if msg.Role == schema.Assistant {
-					for _, tc := range msg.ToolCalls {
-						tokens += estimateTokens(tc.Function.Name)
-						tokens += estimateTokens(tc.Function.Arguments)
-					}
-				}
-			}
-			for _, t := range tools {
-				text, _ := json.Marshal(t)
-				tokens += estimateTokens(string(text))
-			}
-			return tokens, nil
+			return countTokens(msgs, tools), nil
 		},
 		MaxTokensForClear:         clearThreshold,
 		ClearRetentionSuffixLimit: 2,
@@ -67,10 +46,22 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 		return nil, fmt.Errorf("create reduction middleware: %w", err)
 	}
 
-	// 3. compact: 上下文压缩（KnowCompact）
-	compactCfg := compact.DefaultCompactionConfig()
-	compactor := einocompact.NewDefaultCompactorWithEinoModel(compactCfg, model, "agent-model")
-	compactMw := einocompact.NewCompactMiddleware(compactor, compactThreshold)
+	// 3. summarization: 上下文压缩（eino 官方摘要中间件）
+	// 触发阈值取模型上下文窗口的 90%，与 reduction 共用同一 token 估算。
+	compactTrigger := int(float64(modelMaxTokens) * 0.90)
+	if compactTrigger < 1 {
+		compactTrigger = 1
+	}
+	summaryMw, err := summarization.New(ctx, &summarization.Config{
+		Model: model,
+		TokenCounter: func(_ context.Context, input *summarization.TokenCounterInput) (int, error) {
+			return int(countTokens(input.Messages, input.Tools)), nil
+		},
+		Trigger: &summarization.TriggerCondition{ContextTokens: compactTrigger},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create summarization middleware: %w", err)
+	}
 
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "fileengine-agent",
@@ -83,7 +74,7 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 		Handlers: []adk.ChatModelAgentMiddleware{
 			patchMw,
 			reduceMw,
-			compactMw,
+			summaryMw,
 		},
 	})
 	if err != nil {
@@ -104,6 +95,28 @@ func estimateTokens(s string) int64 {
 		}
 	}
 	return int64(float64(ascii)/4.0 + float64(nonAscii)/1.5)
+}
+
+// countTokens estimates the total tokens of messages and tool definitions.
+func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
+	var tokens int64
+	for _, msg := range msgs {
+		if msg == nil {
+			continue
+		}
+		tokens += estimateTokens(msg.Content)
+		if msg.Role == schema.Assistant {
+			for _, tc := range msg.ToolCalls {
+				tokens += estimateTokens(tc.Function.Name)
+				tokens += estimateTokens(tc.Function.Arguments)
+			}
+		}
+	}
+	for _, t := range tools {
+		text, _ := json.Marshal(t)
+		tokens += estimateTokens(string(text))
+	}
+	return tokens
 }
 
 func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
