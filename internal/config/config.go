@@ -41,25 +41,25 @@ type RemoteFSConfig struct {
 type AgentConfig struct {
 	// Vision cost guardrails for the view_image tool (only reachable when both
 	// ModelProvider.VisionEnabled and ScanSession.AllowVision are on).
-	VisionMaxImagesPerBatch int    `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
-	VisionImageMaxPx        int    `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
-	VisionMaxImageBytes     int    `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
+	VisionMaxImagesPerBatch int `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
+	VisionImageMaxPx        int `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
+	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
 	// BatchSize is the number of loose files per agent batch. It must move
 	// together with MaxStep: each file costs ≥2 tool calls (set_target +
 	// mark_tagged) plus exploration steps, so keep MaxStep ≈ 3× BatchSize —
 	// raising BatchSize without MaxStep strands batches mid-run (silently
 	// untagged files), the reverse just wastes headroom.
-	BatchSize               int    `yaml:"batch_size" json:"batch_size"`
-	Concurrency             int    `yaml:"concurrency" json:"concurrency"`
-	MaxFileReadSize         int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	BatchSize       int `yaml:"batch_size" json:"batch_size"`
+	Concurrency     int `yaml:"concurrency" json:"concurrency"`
+	MaxFileReadSize int `yaml:"max_file_read_size" json:"max_file_read_size"`
 	// ArchiveEntryMaxSize caps which archive entries read_file will extract
 	// inline via the path::entry syntax (larger entries are listing-only).
-	ArchiveEntryMaxSize     int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
-	MaxRetries              int    `yaml:"max_retries" json:"max_retries"`
-	MaxStep                 int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; ≈3× BatchSize (see above)
-	InstructMaxStep         int    `yaml:"instruct_max_step" json:"instruct_max_step"`
-	SystemPrompt            string `yaml:"system_prompt" json:"system_prompt"`
-	InstructSystemPrompt    string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
+	ArchiveEntryMaxSize  int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
+	MaxRetries           int    `yaml:"max_retries" json:"max_retries"`
+	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; ≈3× BatchSize (see above)
+	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
+	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
+	InstructSystemPrompt string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
 	// AgentTimeout caps one full agent run (the whole ReAct loop) in seconds.
 	// <= 0 or unset means no timeout — the default; a run is then bounded only
 	// by user stop and max_step. Set a positive value to enforce an upper bound.
@@ -67,14 +67,20 @@ type AgentConfig struct {
 	// run_script guardrails (only reachable when ScanSession.AllowScript is on).
 	// ScriptTimeout is per script execution and deliberately independent of
 	// AgentTimeout: agent runs are unlimited by default, scripts never are.
-	ScriptMaxSize       int  `yaml:"script_max_size" json:"script_max_size"`               // max script source bytes
-	ScriptTimeout       int  `yaml:"script_timeout" json:"script_timeout"`                 // seconds per script run
-	ScriptMaxResultSize int  `yaml:"script_max_result_size" json:"script_max_result_size"` // max bytes of print output and of return value, each
+	ScriptMaxSize       int `yaml:"script_max_size" json:"script_max_size"`               // max script source bytes
+	ScriptTimeout       int `yaml:"script_timeout" json:"script_timeout"`                 // seconds per script run
+	ScriptMaxResultSize int `yaml:"script_max_result_size" json:"script_max_result_size"` // max bytes of print output and of return value, each
 	// JunkFilterDisabled turns off the default system-junk auto-ignore
 	// (.DS_Store/Thumbs.db/desktop.ini/._*/@eaDir/__MACOSX/$RECYCLE.BIN …):
 	// when false (default) such entries are marked tagged without an agent
 	// batch — no tokens spent — and reported in the run reconciliation.
 	JunkFilterDisabled bool `yaml:"junk_filter_disabled" json:"junk_filter_disabled"`
+	// ArchivePromptDisabled turns off archive content hints in loose-file
+	// batch prompts. When false (default), zip/tar files get a one-line
+	// listing summary (kind + entry count + first few names) so the agent
+	// classifies them without read_file calls.
+	ArchivePromptDisabled   bool `yaml:"archive_prompt_disabled" json:"archive_prompt_disabled"`
+	ArchivePromptMaxEntries int  `yaml:"archive_prompt_max_entries" json:"archive_prompt_max_entries"` // names per hint, default 6
 }
 
 var (
@@ -177,5 +183,8 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.ScriptMaxResultSize == 0 {
 		cfg.Agent.ScriptMaxResultSize = 32 * 1024
+	}
+	if cfg.Agent.ArchivePromptMaxEntries == 0 {
+		cfg.Agent.ArchivePromptMaxEntries = 6
 	}
 }

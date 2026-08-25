@@ -427,7 +427,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			toolBuilder.noteCategoryUsages(usages)
 		}
 		catSummary := buildCategorySummary(usages)
-		userMsg := buildBatchPrompt(batch.files, catSummary)
+		userMsg := buildBatchPrompt(batch.files, catSummary, a.archiveHints(ctx, workerFS, batch.files, config.Get().Agent))
 		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
 
 		messages := []*schema.Message{

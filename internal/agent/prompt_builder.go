@@ -50,7 +50,7 @@ func buildDirectoryPrompt(dir db.FileEntry, categorySummary string) string {
 	return sb.String()
 }
 
-func buildBatchPrompt(entries []db.FileEntry, categorySummary string) string {
+func buildBatchPrompt(entries []db.FileEntry, categorySummary string, hints map[uint]string) string {
 	var sb strings.Builder
 	sb.WriteString("处理以下散文件：\n\n")
 	for i, e := range entries {
@@ -58,6 +58,9 @@ func buildBatchPrompt(entries []db.FileEntry, categorySummary string) string {
 			i+1, e.OriginalPath, e.FileType, e.Size))
 		if e.Description != "" {
 			sb.WriteString(fmt.Sprintf("   描述: %s\n", e.Description))
+		}
+		if h := hints[e.ID]; h != "" {
+			sb.WriteString(fmt.Sprintf("   内容摘要: %s\n", h))
 		}
 		sb.WriteString("\n")
 	}
