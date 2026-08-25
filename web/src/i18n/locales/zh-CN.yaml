@@ -42,10 +42,16 @@ files:
   addFsNow: 去添加
   noSession: 该文件系统还没有扫描会话，请先在任务监控中创建扫描
   categoryManagement: 分类管理
+  manageCategories: 管理分类
+  navDirs: 目录
+  navCats: 分类
   noCategories: 暂无分类
   categoryFilter: 分类筛选
-  categorized: 已分类
-  uncategorized: 未分类
+  categorized: 已归入分类
+  uncategorized: 未归类（无分类）
+  containerDir: 容器目录 · 不规划
+  noCategoryYet: 未归类
+  unprocessed: 未处理
   directoryTree: 目录树
   session: 会话
   searchPlaceholder: 搜索文件...

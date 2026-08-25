@@ -42,10 +42,16 @@ files:
   addFsNow: Add Now
   noSession: No scan sessions for this filesystem, create one in Tasks first
   categoryManagement: Categories
+  manageCategories: Manage categories
+  navDirs: Dirs
+  navCats: Categories
   noCategories: No categories yet
   categoryFilter: Category
-  categorized: Categorized
-  uncategorized: Uncategorized
+  categorized: Has category
+  uncategorized: No category
+  containerDir: Container · not planned
+  noCategoryYet: Not categorized
+  unprocessed: Unprocessed
   directoryTree: Directory Tree
   session: Session
   searchPlaceholder: Search files...
