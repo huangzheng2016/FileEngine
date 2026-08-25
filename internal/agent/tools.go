@@ -118,6 +118,20 @@ type CreateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	// SimilarCategories lists fuzzy lookalikes found after a successful
+	// creation (path overlap/containment) — reference info for the model to
+	// judge whether a merge is warranted; empty when there are none.
+	SimilarCategories []SimilarCategoryItem `json:"similar_categories,omitempty"`
+	Guidance          string                `json:"guidance,omitempty"`
+}
+
+// SimilarCategoryItem is one fuzzy-similar existing category attached to a
+// successful create_category result.
+type SimilarCategoryItem struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	FileCount int64  `json:"file_count"`
+	Reason    string `json:"reason"`
 }
 
 type UpdateCategoryInput struct {
@@ -230,7 +244,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化、或与现有分类同名（含大小写变体）/路径重叠时会被拒绝，并返回最新列表或相似分类参考", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化会被拒绝并返回最新列表；同名（含大小写变体）或同路径的重复创建会被拒绝。创建成功时若存在路径重叠的相似分类，返回值会附 similar_categories 参考，请评估是否归并", tb.createCategory)
 		if err != nil {
 			return nil, fmt.Errorf("build create_category: %w", err)
 		}
@@ -312,7 +326,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；与现有分类相似会被拒绝", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；同名（含大小写变体）或同路径的重复会被拒绝；创建成功时可能附 similar_categories 相似参考，请评估归并", tb.createCategory)
 		if err != nil {
 			return nil, err
 		}
@@ -637,16 +651,19 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 		return nil, fmt.Errorf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
 	}
 
-	// Similarity guard: keep the category system lean — a normalized duplicate
-	// name (case variants included) or a path-prefix overlap means an existing
-	// category should be used instead. Truly novel categories pass untouched.
-	if sims := findSimilarCategories(usages, input.Name, input.Path); len(sims) > 0 {
+	// Similarity guard, two classes: objective duplicates (normalized identical
+	// name or path) are hard-rejected with the existing category as reference;
+	// fuzzy lookalikes (path containment/prefix overlap) never block — the
+	// creation proceeds and they are attached to the result as reference info
+	// so the model itself can judge whether to merge.
+	hard, soft := findSimilarCategories(usages, input.Name, input.Path)
+	if len(hard) > 0 {
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("已存在相似分类，拒绝创建 %q (%s)：\n", input.Name, input.Path))
-		for _, s := range sims {
+		sb.WriteString(fmt.Sprintf("已存在相同分类（名称或路径重复），拒绝创建 %q (%s)：\n", input.Name, input.Path))
+		for _, s := range hard {
 			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项（%s）\n", s.usage.Name, s.usage.Path, s.usage.FileCount, s.reason))
 		}
-		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不重叠的名称和路径")
+		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不同的名称和路径")
 		return nil, errors.New(sb.String())
 	}
 
@@ -672,6 +689,17 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 	tb.guard.note(append(names, cat.Name))
 
 	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
+	for _, s := range soft {
+		out.SimilarCategories = append(out.SimilarCategories, SimilarCategoryItem{
+			Name:      s.usage.Name,
+			Path:      s.usage.Path,
+			FileCount: s.usage.FileCount,
+			Reason:    s.reason,
+		})
+	}
+	if len(out.SimilarCategories) > 0 {
+		out.Guidance = "提示：存在路径重叠的相似分类（见 similar_categories）。若语义重复，请改用 set_target 把文件归入现有分类（或用 update_category/delete_category 归并）；确认确有必要则无需处理"
+	}
 	tb.logger.LogToolCall("create_category", input, out)
 	return out, nil
 }

@@ -82,24 +82,30 @@ type similarCategory struct {
 	reason string
 }
 
-// findSimilarCategories returns existing categories that make creating
-// (name, path) a bad idea: a normalized duplicate name (case variants
-// included) or a path-prefix overlap in either direction.
-func findSimilarCategories(usages []db.CategoryUsage, name, path string) []similarCategory {
+// findSimilarCategories splits existing categories related to (name, path)
+// into two hit classes:
+//   - hard: objective duplicates — a normalized identical name (trim +
+//     case-fold) or a normalized identical path. Creation must be refused.
+//   - soft: fuzzy lookalikes — a segment-aware path-prefix overlap in either
+//     direction (containment) that is not already a hard hit. Creation
+//     proceeds; these ride along as reference info for the model to judge.
+func findSimilarCategories(usages []db.CategoryUsage, name, path string) (hard, soft []similarCategory) {
 	nName := normalizeCategoryName(name)
 	nPath := normalizeCategoryPath(path)
-	var out []similarCategory
 	for _, u := range usages {
-		nameHit := nName != "" && normalizeCategoryName(u.Name) == nName
-		pathHit := categoryPathsOverlap(nPath, normalizeCategoryPath(u.Path))
-		if !nameHit && !pathHit {
+		uName := normalizeCategoryName(u.Name)
+		uPath := normalizeCategoryPath(u.Path)
+		if nName != "" && uName == nName {
+			hard = append(hard, similarCategory{usage: u, reason: "名称相同（忽略大小写）"})
 			continue
 		}
-		reason := "路径重叠"
-		if nameHit {
-			reason = "名称相同（忽略大小写）"
+		if nPath != "" && uPath == nPath {
+			hard = append(hard, similarCategory{usage: u, reason: "路径相同"})
+			continue
 		}
-		out = append(out, similarCategory{usage: u, reason: reason})
+		if categoryPathsOverlap(nPath, uPath) {
+			soft = append(soft, similarCategory{usage: u, reason: "路径重叠"})
+		}
 	}
-	return out
+	return hard, soft
 }

@@ -47,7 +47,7 @@ const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目
 
 const autoCategoryGuidance = `- **优先使用现有分类**：分类体系要精简，能归入现有分类就不要新建
 - **创建新分类前必须 list_categories**：检查是否已有同名/同路径/语义相似的分类 → 有则直接用，无则创建
-- create_category 受护栏校验：分类列表自你上次查看后发生变化（或你尚未查看过）会被拒绝，并返回最新完整分类列表 —— 必须基于最新列表重新决定后再试；与现有分类同名（含大小写变体）或路径重叠也会被拒，被拒后改用现有分类（set_target）
+- create_category 受护栏校验：分类列表自你上次查看后发生变化（或你尚未查看过）会被拒绝，并返回最新完整分类列表 —— 必须基于最新列表重新决定后再试；与现有分类同名（含大小写变体）或同路径的重复创建也会被拒，被拒后改用现有分类（set_target）；创建成功时若返回值提示存在相似分类（similar_categories），请评估是否与现有分类归并
 - 创建后必须立即 set_target 使用，不要创建了不用
 `
 
@@ -122,7 +122,7 @@ const instructPromptToolsRest = `- update_description: 修改描述
 - delete_category: 删除分类（清除该分类下所有文件的规划，允许重新分类）
 `
 
-const instructCreateCategoryTool = "- create_category: 创建新分类（先 list_categories；分类集有变化或与现有分类相似会被护栏拒绝，按返回的最新列表/参考信息行动）\n"
+const instructCreateCategoryTool = "- create_category: 创建新分类（先 list_categories；分类集有变化或同名/同路径重复会被护栏拒绝；创建成功时若返回 similar_categories 相似参考，请评估归并）\n"
 
 const instructPromptTail = `
 ## 常见操作流程

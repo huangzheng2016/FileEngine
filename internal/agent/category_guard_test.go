@@ -86,10 +86,10 @@ func TestListCategoriesPrimesVersionGuard(t *testing.T) {
 	}
 }
 
-// Similarity guard: normalized duplicate names, case variants and path-prefix
-// overlaps are rejected with reference info (similar name/path/file count)
-// steering to set_target; a truly novel category is untouched.
-func TestCreateCategorySimilarityGuard(t *testing.T) {
+// Similarity guard, hard class: objective duplicates — a normalized identical
+// name (case variants included) or a normalized identical path — are rejected
+// with reference info (name/path/file count) steering to set_target.
+func TestCreateCategorySimilarityHardReject(t *testing.T) {
 	repo, tb := setupGuardTest(t)
 	ctx := context.Background()
 
@@ -109,36 +109,89 @@ func TestCreateCategorySimilarityGuard(t *testing.T) {
 		in   CreateCategoryInput
 		want string
 	}{
-		{"normalized same name", CreateCategoryInput{Name: "Photos", Path: "/different"}, "Photos"},
-		{"case variant", CreateCategoryInput{Name: "photos", Path: "/elsewhere"}, "Photos"},
-		{"new path under existing", CreateCategoryInput{Name: "2024相册", Path: "/photos/2024"}, "/photos"},
-		{"existing path under new", CreateCategoryInput{Name: "图片库", Path: "/photos"}, "/photos"},
+		{"normalized same name", CreateCategoryInput{Name: "Photos", Path: "/different"}, "名称相同"},
+		{"case variant name", CreateCategoryInput{Name: "photos", Path: "/elsewhere"}, "名称相同"},
+		{"exact same path", CreateCategoryInput{Name: "新相册", Path: "/photos"}, "路径相同"},
+		{"normalized same path", CreateCategoryInput{Name: "另一相册", Path: "/PHOTOS"}, "路径相同"},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tb.createCategory(ctx, &tc.in)
 			if err == nil {
-				t.Fatalf("create %+v: got nil, want similarity rejection", tc.in)
+				t.Fatalf("create %+v: got nil, want duplicate rejection", tc.in)
 			}
-			if !strings.Contains(err.Error(), "相似分类") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("rejection lacks reference info (%q): %v", tc.want, err)
+			if !strings.Contains(err.Error(), "拒绝创建") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("rejection lacks duplicate reference (%q): %v", tc.want, err)
 			}
-			if !strings.Contains(err.Error(), "已归入 1 项") || !strings.Contains(err.Error(), "set_target") {
-				t.Fatalf("rejection lacks file count / set_target guidance: %v", err)
+			if !strings.Contains(err.Error(), "Photos") || !strings.Contains(err.Error(), "已归入 1 项") || !strings.Contains(err.Error(), "set_target") {
+				t.Fatalf("rejection lacks name/file-count/set_target reference: %v", err)
 			}
 		})
 	}
 	if cats, _ := repo.ListCategories(7); len(cats) != 1 {
-		t.Fatalf("similarity rejections must write nothing, got %d categories", len(cats))
+		t.Fatalf("duplicate rejections must write nothing, got %d categories", len(cats))
+	}
+}
+
+// Similarity guard, soft class: fuzzy lookalikes (path containment/prefix
+// overlap in either direction) must NOT block — the creation succeeds and the
+// result carries a similar_categories reference list plus merge guidance.
+// Truly novel categories succeed with no reference attached.
+func TestCreateCategorySimilaritySoftReference(t *testing.T) {
+	repo, tb := setupGuardTest(t)
+	ctx := context.Background()
+
+	mustCreateCategory(t, repo, 7, "Photos", "/photos")
+	mustCreateCategory(t, repo, 7, "工作文档", "/docs/work")
+	seedFile(t, repo, 1, "incoming/a.jpg", "file")
+	if err := repo.SetTargetAtomic(1, "incoming/a.jpg", "/photos/a.jpg", "planned", "file"); err != nil {
+		t.Fatalf("set target: %v", err)
+	}
+	if _, err := tb.listCategories(ctx, &ListCategoriesInput{}); err != nil {
+		t.Fatalf("listCategories: %v", err)
 	}
 
-	// Sibling prefix that only shares bytes ("photos2" vs "photos") and a
-	// genuinely new name/path are novel — both pass.
-	if _, err := tb.createCategory(ctx, &CreateCategoryInput{Name: "音乐", Path: "/music"}); err != nil {
+	// New path contained by an existing one (/photos/2025 under /photos).
+	out, err := tb.createCategory(ctx, &CreateCategoryInput{Name: "2025相册", Path: "/photos/2025"})
+	if err != nil {
+		t.Fatalf("contained path must be created, got rejection: %v", err)
+	}
+	if len(out.SimilarCategories) != 1 || out.SimilarCategories[0].Name != "Photos" ||
+		out.SimilarCategories[0].Path != "/photos" || out.SimilarCategories[0].FileCount != 1 ||
+		out.SimilarCategories[0].Reason == "" {
+		t.Fatalf("contained create must carry similar reference: %+v", out.SimilarCategories)
+	}
+	if !strings.Contains(out.Guidance, "set_target") {
+		t.Fatalf("guidance must steer to set_target merge: %q", out.Guidance)
+	}
+	if _, err := repo.GetCategoryByName(7, "2025相册"); err != nil {
+		t.Fatalf("soft-similar category must exist in DB: %v", err)
+	}
+
+	// Reverse containment: the new path contains an existing one (/docs over /docs/work).
+	out, err = tb.createCategory(ctx, &CreateCategoryInput{Name: "文档", Path: "/docs"})
+	if err != nil {
+		t.Fatalf("containing path must be created, got rejection: %v", err)
+	}
+	if len(out.SimilarCategories) != 1 || out.SimilarCategories[0].Name != "工作文档" {
+		t.Fatalf("containing create must reference the contained category: %+v", out.SimilarCategories)
+	}
+
+	// Novel name+path and sibling-byte-prefix path (photos2 vs photos): no
+	// reference attached at all.
+	out, err = tb.createCategory(ctx, &CreateCategoryInput{Name: "音乐", Path: "/music"})
+	if err != nil {
 		t.Fatalf("novel category: %v", err)
 	}
-	if _, err := tb.createCategory(ctx, &CreateCategoryInput{Name: "备份", Path: "/photos2"}); err != nil {
+	if len(out.SimilarCategories) != 0 || out.Guidance != "" {
+		t.Fatalf("novel create must carry no reference: %+v", out)
+	}
+	out, err = tb.createCategory(ctx, &CreateCategoryInput{Name: "备份", Path: "/photos2"})
+	if err != nil {
 		t.Fatalf("sibling-prefix path must not count as overlap: %v", err)
+	}
+	if len(out.SimilarCategories) != 0 {
+		t.Fatalf("sibling prefix must not produce a reference: %+v", out.SimilarCategories)
 	}
 }
 

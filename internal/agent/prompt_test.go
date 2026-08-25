@@ -68,11 +68,11 @@ func TestInstructPromptMatchesToolAvailability(t *testing.T) {
 }
 
 // The prompts must teach the create_category guard rails explicitly: prefer
-// existing categories, creation is guarded, and a rejection returns the
-// latest list to act on.
+// existing categories, creation is guarded, a rejection returns the latest
+// list to act on, and fuzzy-similar hits come back as merge hints.
 func TestPromptsTeachCreateGuard(t *testing.T) {
 	on := defaultSystemPrompt(true)
-	for _, want := range []string{"优先使用现有分类", "护栏", "最新完整分类列表"} {
+	for _, want := range []string{"优先使用现有分类", "护栏", "最新完整分类列表", "归并"} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("auto-category prompt must teach %q", want)
 		}
