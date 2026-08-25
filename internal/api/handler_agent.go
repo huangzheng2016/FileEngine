@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"FileEngine/internal/agent"
 	"FileEngine/internal/config"
@@ -94,13 +95,20 @@ func (s *Server) startTagging(c *gin.Context) {
 		}()
 		// The request ctx is canceled as soon as this handler returns; background
 		// work runs on context.Background() (Stop() has its own cancelFn).
-		if err := a.RunTagging(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+		report, err := a.RunTagging(context.Background())
+		switch {
+		case err == nil:
+			publishRunDone(sessionID, db.PhaseTagging, db.StatusDone, report)
+		case errors.Is(err, context.Canceled):
+			publishRunDone(sessionID, db.PhaseTagging, db.StatusStopped, "")
+		default:
 			log.Printf("tagging session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "tagging" {
 				session.Status = db.TruncateStatus("error: " + err.Error())
 				s.repo.UpdateSession(session)
 			}
+			publishRunDone(sessionID, db.PhaseTagging, db.StatusError, err.Error())
 		}
 	}()
 
@@ -184,8 +192,15 @@ func (s *Server) instructAgent(c *gin.Context) {
 		// work runs on context.Background() (Stop() has its own cancelFn,
 		// registered by RunInstruct like RunTagging). User-initiated stops
 		// surface as context.Canceled and are not failures.
-		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil && !errors.Is(err, context.Canceled) {
+		resp, err := a.RunInstruct(context.Background(), files, req.Prompt)
+		switch {
+		case err == nil:
+			publishRunDone(sessionID, db.PhaseInstruct, db.StatusDone, resp)
+		case errors.Is(err, context.Canceled):
+			publishRunDone(sessionID, db.PhaseInstruct, db.StatusStopped, "")
+		default:
 			log.Printf("instruct session %d failed: %v", sessionID, err)
+			publishRunDone(sessionID, db.PhaseInstruct, db.StatusError, err.Error())
 		}
 	}()
 
@@ -345,15 +360,52 @@ func (s *Server) startExecute(c *gin.Context) {
 			execMu.Unlock()
 			fs.Close()
 		}()
+		publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStarted, "")
+
+		// Bridge executor progress onto the session bus: the executor keeps
+		// in-memory counters only, so poll them while it runs.
+		progressDone := make(chan struct{})
+		defer close(progressDone)
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					publishExecProgress(sessionID, e.Progress())
+				}
+			}
+		}()
+
 		// The request ctx is canceled as soon as this handler returns; background
 		// work runs on context.Background() (Stop() has its own cancelFn).
-		if err := e.Execute(context.Background(), sessionID, mode); err != nil {
+		err := e.Execute(context.Background(), sessionID, mode)
+		publishExecProgress(sessionID, e.Progress()) // final counters
+		switch {
+		case err == nil:
+			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusDone, "")
+			publishRunDone(sessionID, db.PhaseExecuting, db.StatusDone, "")
+		case errors.Is(err, context.Canceled):
+			// User-initiated stop: not a failure — restore the pre-execution
+			// status (mirrors the tagging path) instead of "error: ...".
+			session, _ := s.repo.GetSession(sessionID)
+			if session != nil && session.Status == "executing" {
+				session.Status = "tagged"
+				s.repo.UpdateSession(session)
+			}
+			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStopped, "")
+			publishRunDone(sessionID, db.PhaseExecuting, db.StatusStopped, "")
+		default:
 			log.Printf("execution session %d failed: %v", sessionID, err)
 			session, _ := s.repo.GetSession(sessionID)
 			if session != nil && session.Status == "executing" {
 				session.Status = db.TruncateStatus("error: " + err.Error())
 				s.repo.UpdateSession(session)
 			}
+			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
+			publishRunDone(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
 		}
 	}()
 
@@ -404,6 +456,18 @@ func (s *Server) executeStatus(c *gin.Context) {
 		result["skipped"] = progress.Skipped
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// publishExecProgress emits a progress event with the executor's counters.
+func publishExecProgress(sessionID uint, p executor.ExecuteResult) {
+	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: sessionID, Payload: db.ProgressPayload{
+		SessionID: sessionID,
+		Phase:     db.PhaseExecuting,
+		Total:     p.Total,
+		Success:   p.Success,
+		Failed:    p.Failed,
+		Skipped:   p.Skipped,
+	}})
 }
 
 func (s *Server) getPlans(c *gin.Context) {

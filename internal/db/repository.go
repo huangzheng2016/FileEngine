@@ -111,6 +111,39 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 	return r.db.Save(&session).Error
 }
 
+// SessionProgress holds read-only progress counters for live progress events.
+type SessionProgress struct {
+	Total    int
+	Tagged   int
+	Planned  int
+	Executed int
+}
+
+// GetSessionProgress returns the session's file counters without writing the
+// session row. Unlike RefreshSessionCounts it is read-only, so concurrent
+// agent workers can call it after every batch without risking a lost update
+// on the session Status field.
+func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
+	var counts struct {
+		Total    int64
+		Tagged   int64
+		Planned  int64
+		Executed int64
+	}
+	err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).
+		Select(`COUNT(*) AS total,
+			SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END) AS tagged,
+			SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END) AS planned,
+			SUM(CASE WHEN executed = ? THEN 1 ELSE 0 END) AS executed`, true, true).
+		Scan(&counts).Error
+	return SessionProgress{
+		Total:    int(counts.Total),
+		Tagged:   int(counts.Tagged),
+		Planned:  int(counts.Planned),
+		Executed: int(counts.Executed),
+	}, err
+}
+
 // ============ FileEntry ============
 
 func (r *Repository) CreateFile(f *FileEntry) error {

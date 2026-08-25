@@ -73,6 +73,8 @@ func (a *DesktopApp) proxySSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// Propagate the SSE accept header so the backend sees a faithful request.
+	req.Header.Set("Accept", "text/event-stream")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -83,6 +85,7 @@ func (a *DesktopApp) proxySSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 4096)
 	for {

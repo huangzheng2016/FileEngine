@@ -17,7 +17,6 @@ type Logger struct {
 	batch     int
 	buffer    []*db.AgentLog
 	mu        sync.Mutex
-	listeners []chan *db.AgentLog
 }
 
 func NewLogger(repo *db.Repository, sessionID uint) *Logger {
@@ -40,26 +39,6 @@ func (l *Logger) GetBatch() int {
 	return l.batch
 }
 
-func (l *Logger) Subscribe() chan *db.AgentLog {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	ch := make(chan *db.AgentLog, 100)
-	l.listeners = append(l.listeners, ch)
-	return ch
-}
-
-func (l *Logger) Unsubscribe(ch chan *db.AgentLog) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for i, listener := range l.listeners {
-		if listener == ch {
-			l.listeners = append(l.listeners[:i], l.listeners[i+1:]...)
-			close(ch)
-			return
-		}
-	}
-}
-
 func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens, totalTokens int) {
 	l.mu.Lock()
 	batch := l.batch
@@ -76,6 +55,57 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 		CreatedAt:        time.Now(),
 	}
 	l.save(log)
+	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
+		SessionID:        l.sessionID,
+		BatchIndex:       batch,
+		Role:             role,
+		Content:          content,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
+	}})
+}
+
+// EmitMessage publishes a transient message event without persisting it.
+// Used for intermediate assistant steps; the final assistant message of a run
+// goes through LogMessage (persisted + published, with token counts).
+func (l *Logger) EmitMessage(role, content string) {
+	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
+		SessionID:  l.sessionID,
+		BatchIndex: l.GetBatch(),
+		Role:       role,
+		Content:    content,
+	}})
+}
+
+// EmitBatchStart announces the logger's current batch on the session bus.
+func (l *Logger) EmitBatchStart(label string) {
+	db.PublishEvent(db.Event{Type: db.EventBatchStart, SessionID: l.sessionID, Payload: db.BatchStartPayload{
+		SessionID:  l.sessionID,
+		BatchIndex: l.GetBatch(),
+		Label:      label,
+	}})
+}
+
+// EmitToolCall publishes one model-requested tool invocation.
+func (l *Logger) EmitToolCall(toolName, input string) {
+	db.PublishEvent(db.Event{Type: db.EventToolCall, SessionID: l.sessionID, Payload: db.ToolCallPayload{
+		SessionID:  l.sessionID,
+		BatchIndex: l.GetBatch(),
+		ToolName:   toolName,
+		Input:      input,
+	}})
+}
+
+// EmitToolResult publishes one tool execution result.
+func (l *Logger) EmitToolResult(toolName, output string, ok bool) {
+	db.PublishEvent(db.Event{Type: db.EventToolResult, SessionID: l.sessionID, Payload: db.ToolResultPayload{
+		SessionID:  l.sessionID,
+		BatchIndex: l.GetBatch(),
+		ToolName:   toolName,
+		Output:     output,
+		OK:         ok,
+	}})
 }
 
 func (l *Logger) LogToolCall(toolName string, input, output interface{}) {
@@ -102,23 +132,7 @@ func (l *Logger) save(entry *db.AgentLog) {
 	l.mu.Lock()
 	l.buffer = append(l.buffer, entry)
 	shouldFlush := len(l.buffer) >= logBufferSize
-	// Copy listeners for broadcast
-	listeners := make([]chan *db.AgentLog, len(l.listeners))
-	copy(listeners, l.listeners)
 	l.mu.Unlock()
-
-	// Broadcast to WebSocket listeners immediately (in-memory, no contention)
-	// Use recover() to prevent panic if a listener was unsubscribed (channel closed)
-	// between the slice copy and the send.
-	for _, ch := range listeners {
-		func() {
-			defer func() { recover() }()
-			select {
-			case ch <- entry:
-			default:
-			}
-		}()
-	}
 
 	if shouldFlush {
 		l.Flush()

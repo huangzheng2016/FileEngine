@@ -81,6 +81,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 	sb.WriteString("\n请使用工具执行用户的指令。")
 
 	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
+	a.logger.EmitBatchStart("instruct")
 	userMsg := sb.String()
 	a.logger.LogMessage("user", userMsg, 0, 0, 0)
 

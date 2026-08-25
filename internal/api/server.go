@@ -97,7 +97,9 @@ func (s *Server) setupRouter() {
 		// Logs
 		api.GET("/logs", s.listLogs)
 		api.GET("/logs/batches", s.listBatches)
-		api.GET("/logs/stream", s.streamLogs)
+
+		// Session event stream (SSE): live agent run events
+		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 	}
 
 	// Serve frontend static files

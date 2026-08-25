@@ -111,6 +111,21 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `recursiveCopy` walks source tree, creates subdirectories via `MkdirAll`, copies each file
 - Mode (`copy` or `move`) passed via API query param, overrides per-file operation
 
+### Session Event Stream (SSE)
+- **Endpoint**: `GET /api/v1/sessions/:id/events/stream` — SSE stream of live agent run events for one session. History stays in `GET /logs` (agent_logs persistence is unchanged); the stream only carries new events.
+- **Bus**: `internal/db/events.go` — session-scoped in-memory event bus living in the `db` package so every producer (agent Logger, ADK event loop, orchestrator, API handlers) can publish without import cycles. `db.PublishEvent` broadcasts with non-blocking sends (slow consumers drop events; refetch `/logs` to fill gaps); subscriber channels are never closed by the bus.
+- **Frame format**: `event: <type>\ndata: <json payload>\n\n`, plus `: ping` comment heartbeats every 25s. Consume with `EventSource`; there is no last-event-id replay — on reconnect, refetch history from `/logs`.
+- **Wails desktop**: `wails/app.go` `proxySSE` already forwards any request with `Accept: text/event-stream` to the backend with chunked flushing — it works with this endpoint as-is.
+- **Event types and payloads** (`phase`: `tagging` / `instruct` / `executing`):
+  - `run_status` — `{session_id, phase, status, message?}`; status: `started` / `done` / `error` / `stopped` (user stop). Mirrors `ScanSession.Status` transitions; emitted by the orchestrator (tagging/instruct) and API handlers (executing).
+  - `batch_start` — `{session_id, batch_index, label}`; one agent batch begins (label: directory path, "N files", or "instruct").
+  - `message` — `{session_id, batch_index, role, content, prompt_tokens?, completion_tokens?, total_tokens?}`; role: `user` / `assistant` / `system`. Persisted messages (user prompts, final assistant answers with token counts, system errors) also land in `agent_logs`; intermediate assistant reasoning steps are stream-only (no tokens, not persisted).
+  - `tool_call` — `{session_id, batch_index, tool_name, input}`; `input` is the raw JSON arguments from the model.
+  - `tool_result` — `{session_id, batch_index, tool_name, output, ok}`; `output` is the tool's JSON output. `agent_logs` keeps the combined input+output row per tool call; the stream emits separate call/result events from the ADK event loop (`runADKOnce`).
+  - `progress` — `{session_id, phase, total, tagged?, planned?, success?, failed?, skipped?, batch_index?}`; tagging fills total/tagged/planned (+batch_index) after every finished batch; executing fills total/success/failed/skipped (1s poll bridge over `Executor.Progress()` while it runs, plus final counters).
+  - `run_done` — `{session_id, phase, status, summary?}`; exactly-once terminal event of a run (status: `done` / `error` / `stopped`; `summary` carries the tagging report / instruct response).
+- The old WebSocket endpoint `GET /logs/stream` was removed — its broadcast source never reached tagging workers or instruct runs (dead live channel). Use the SSE stream instead.
+
 ### Database
 - SQLite (default) or MySQL, configured in `config.yaml`
 - SQLite optimized: WAL mode, busy_timeout=30s, _txlock=immediate, MaxOpenConns=1 (single writer), mmap_size=256MB
@@ -120,6 +135,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 
 ### Eino Framework
 - Agent: `adk.NewChatModelAgent()` creates a ReAct agent (see `internal/agent/adk.go`); executed via `adk.Runner`, `MaxIterations` caps the tool-call rounds per run
+- `runADKOnce` forwards every ADK `AgentEvent` to the session event bus as step-level events (intermediate assistant `message` / `tool_call` / `tool_result`); the final assistant message is logged by the caller with token usage. Token-level streaming (`EnableStreaming`) is intentionally off — phase 2 candidate for instruct only
 - Middleware chain (in order): `patchtoolcalls` (repairs dangling tool calls) → `reduction` (clears old tool outputs past 75% of the model context window) → `summarization` (official eino middleware; LLM-summarizes history past 90% of the window, sharing the same token estimator). The context window comes from `ModelProvider.EffectiveContextWindow()` — never from `max_tokens`
 - Model: `adk.ChatModelAgentConfig.Model` takes `model.ChatModel` (eino-ext openai/claude factories in `internal/model/factory.go`)
 - Tools: `utils.InferTool(name, desc, func)` auto-generates JSON schema from Go struct tags
@@ -141,6 +157,8 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | DB models + indexes | `internal/db/models.go` |
 | DB init + SQLite opts | `internal/db/db.go` |
 | All DB queries | `internal/db/repository.go` |
+| Session event bus + SSE protocol types | `internal/db/events.go` |
+| SSE endpoint + run event helpers | `internal/api/handler_events.go` |
 | Agent entry / lifecycle (Stop, running state) | `internal/agent/agent.go` |
 | Agent construction + middleware chain | `internal/agent/adk.go` (buildADKAgent) |
 | Orchestrator (routes autotag/instruct) | `internal/agent/orchestrator.go` |
