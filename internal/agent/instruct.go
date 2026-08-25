@@ -48,7 +48,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 
 	filesystemID := a.session.FilesystemID
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, config.Get().Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, a.logger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tools, err := toolBuilder.BuildInstructTools()
 	if err != nil {
 		return "", fmt.Errorf("build tools: %w", err)

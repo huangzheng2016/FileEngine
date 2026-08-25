@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type LocalFS struct {
-	basePath string
+	basePath     string
+	resolvedBase string // basePath with symlinks resolved (macOS /var etc.)
 }
 
 func NewLocalFS(basePath string) (*LocalFS, error) {
@@ -20,18 +22,74 @@ func NewLocalFS(basePath string) (*LocalFS, error) {
 	if _, err := os.Stat(abs); err != nil {
 		return nil, fmt.Errorf("base path not accessible: %w", err)
 	}
-	return &LocalFS{basePath: abs}, nil
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base path: %w", err)
+	}
+	return &LocalFS{basePath: abs, resolvedBase: resolved}, nil
 }
 
-func (l *LocalFS) resolve(path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
+// withinBase reports whether path is lexically contained in base.
+func withinBase(path, base string) bool {
+	rel, err := filepath.Rel(base, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveExisting resolves symlinks for path; when path does not exist (write
+// destinations), it resolves the nearest existing ancestor and re-appends the
+// remainder.
+func resolveExisting(path string) (string, error) {
+	var suffix []string
+	p := path
+	for {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved, nil
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(p))
+		p = parent
 	}
-	return filepath.Join(l.basePath, path)
+}
+
+// resolve maps a caller path to a host path under basePath. Absolute paths are
+// accepted only when they stay inside basePath; anything escaping basePath
+// (absolute, via "..", or via a symlink pointing outside) is rejected,
+// matching the root semantics of the SFTP/SMB implementations.
+func (l *LocalFS) resolve(path string) (string, error) {
+	full := path
+	if filepath.IsAbs(full) {
+		full = filepath.Clean(full)
+	} else {
+		full = filepath.Join(l.basePath, full)
+	}
+	if !withinBase(full, l.basePath) {
+		return "", fmt.Errorf("path %q escapes base path %q", path, l.basePath)
+	}
+	// Lexical containment is not enough: a symlink inside the base may point
+	// outside. Resolve the nearest existing ancestor (the target itself may
+	// not exist yet for write destinations) and re-check containment.
+	resolved, err := resolveExisting(full)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", path, err)
+	}
+	if !withinBase(resolved, l.resolvedBase) {
+		return "", fmt.Errorf("path %q escapes base path %q via symlink", path, l.basePath)
+	}
+	return full, nil
 }
 
 func (l *LocalFS) List(_ context.Context, path string) ([]FileInfo, error) {
-	fullPath := l.resolve(path)
+	fullPath, err := l.resolve(path)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
 		return nil, err
@@ -63,7 +121,10 @@ func (l *LocalFS) List(_ context.Context, path string) ([]FileInfo, error) {
 }
 
 func (l *LocalFS) Stat(_ context.Context, path string) (*FileInfo, error) {
-	fullPath := l.resolve(path)
+	fullPath, err := l.resolve(path)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return nil, err
@@ -86,13 +147,22 @@ func (l *LocalFS) Stat(_ context.Context, path string) (*FileInfo, error) {
 }
 
 func (l *LocalFS) ReadFile(_ context.Context, path string) (io.ReadCloser, error) {
-	fullPath := l.resolve(path)
+	fullPath, err := l.resolve(path)
+	if err != nil {
+		return nil, err
+	}
 	return os.Open(fullPath)
 }
 
 func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
-	srcPath := l.resolve(src)
-	dstPath := l.resolve(dst)
+	srcPath, err := l.resolve(src)
+	if err != nil {
+		return err
+	}
+	dstPath, err := l.resolve(dst)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return err
 	}
@@ -100,8 +170,14 @@ func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
 }
 
 func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
-	srcPath := l.resolve(src)
-	dstPath := l.resolve(dst)
+	srcPath, err := l.resolve(src)
+	if err != nil {
+		return err
+	}
+	dstPath, err := l.resolve(dst)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return err
 	}
@@ -123,12 +199,19 @@ func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
 }
 
 func (l *LocalFS) Delete(_ context.Context, p string) error {
-	fullPath := l.resolve(p)
+	fullPath, err := l.resolve(p)
+	if err != nil {
+		return err
+	}
 	return os.RemoveAll(fullPath)
 }
 
 func (l *LocalFS) MkdirAll(_ context.Context, path string) error {
-	return os.MkdirAll(l.resolve(path), 0755)
+	fullPath, err := l.resolve(path)
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(fullPath, 0755)
 }
 
 func (l *LocalFS) Close() error {

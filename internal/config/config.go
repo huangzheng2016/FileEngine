@@ -35,6 +35,11 @@ type RemoteFSConfig struct {
 }
 
 type AgentConfig struct {
+	// Vision cost guardrails for the view_image tool (only reachable when both
+	// ModelProvider.VisionEnabled and ScanSession.AllowVision are on).
+	VisionMaxImagesPerBatch int    `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
+	VisionImageMaxPx        int    `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
+	VisionMaxImageBytes     int    `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
 	BatchSize               int    `yaml:"batch_size" json:"batch_size"`
 	Concurrency             int    `yaml:"concurrency" json:"concurrency"`
 	MaxFileReadSize         int    `yaml:"max_file_read_size" json:"max_file_read_size"`
@@ -128,5 +133,14 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.AgentTimeout == 0 {
 		cfg.Agent.AgentTimeout = 60
+	}
+	if cfg.Agent.VisionMaxImagesPerBatch == 0 {
+		cfg.Agent.VisionMaxImagesPerBatch = 4
+	}
+	if cfg.Agent.VisionImageMaxPx == 0 {
+		cfg.Agent.VisionImageMaxPx = 512
+	}
+	if cfg.Agent.VisionMaxImageBytes == 0 {
+		cfg.Agent.VisionMaxImageBytes = 20 * 1024 * 1024
 	}
 }

@@ -107,6 +107,17 @@ func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 			continue
 		}
 		tokens += estimateTokens(msg.Content)
+		// Multimodal parts (e.g. view_image tool results): text parts are
+		// estimated as text; image parts use a flat per-image estimate since
+		// provider billing is dimension-based, not base64-length-based.
+		for _, part := range msg.UserInputMultiContent {
+			switch part.Type {
+			case schema.ChatMessagePartTypeText:
+				tokens += estimateTokens(part.Text)
+			case schema.ChatMessagePartTypeImageURL:
+				tokens += estimatedTokensPerImagePart
+			}
+		}
 		if msg.Role == schema.Assistant {
 			for _, tc := range msg.ToolCalls {
 				tokens += estimateTokens(tc.Function.Name)
@@ -212,7 +223,13 @@ func runADKOnce(ctx context.Context, agent *adk.ChatModelAgent, messages []*sche
 				}
 			}
 		case schema.Tool:
-			logger.EmitToolResult(mo.ToolName, msg.Content, true)
+			output := msg.Content
+			// Enhanced tools (view_image) return multimodal parts with empty
+			// Content; emit a text stand-in so the event stream stays readable.
+			if output == "" && len(msg.UserInputMultiContent) > 0 {
+				output = describeMessageParts(msg.UserInputMultiContent)
+			}
+			logger.EmitToolResult(mo.ToolName, output, true)
 		}
 	}
 	return lastAssistantMsg, nil
