@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"FileEngine/internal/config"
@@ -12,6 +13,17 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// testNASHost is the hardcoded owner-LAN test NAS used by the integration
+// test below; requireTestNAS skips it off that network.
+const testNASHost = "test-nas.invalid"
+
+func requireTestNAS(t *testing.T) {
+	t.Helper()
+	if _, err := net.LookupHost(testNASHost); err != nil {
+		t.Skipf("test NAS %q not resolvable on this network: %v", testNASHost, err)
+	}
+}
 
 func setupTestDB(t *testing.T) *db.Repository {
 	t.Helper()
@@ -28,9 +40,10 @@ func setupTestDB(t *testing.T) *db.Repository {
 }
 
 func TestExecutor_CopyDir_SMB(t *testing.T) {
+	requireTestNAS(t)
 	repo := setupTestDB(t)
 	fs, err := remotefs.NewSMBFS(config.RemoteFSConfig{
-		Host: "test-nas.invalid", Username: "test", Password: "not-a-real-password", BasePath: "test",
+		Host: testNASHost, Username: "test", Password: "not-a-real-password", BasePath: "test",
 	})
 	if err != nil {
 		t.Fatalf("NewSMBFS: %v", err)
