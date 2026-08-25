@@ -37,14 +37,27 @@ func (m *tokenTrackingModel) Stream(ctx context.Context, input []*schema.Message
 	if err != nil {
 		return nil, err
 	}
-	// Usage (when the provider reports it) rides on a final frame; count every
-	// frame that carries it so streamed calls are not missed.
+	// Providers may emit usage on multiple frames per call with cumulative
+	// counters (e.g. claude ext: message_start + message_delta). Track per-call
+	// state in this closure and add only the delta so cumulative frames are
+	// never double counted.
+	var lastPrompt, lastCompletion, lastTotal int64
 	return schema.StreamReaderWithConvert(sr, func(msg *schema.Message) (*schema.Message, error) {
 		if msg != nil && msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
 			u := msg.ResponseMeta.Usage
-			atomic.AddInt64(&m.promptTokens, int64(u.PromptTokens))
-			atomic.AddInt64(&m.completionTokens, int64(u.CompletionTokens))
-			atomic.AddInt64(&m.totalTokens, int64(u.TotalTokens))
+			p, c, t := int64(u.PromptTokens), int64(u.CompletionTokens), int64(u.TotalTokens)
+			if p > lastPrompt {
+				atomic.AddInt64(&m.promptTokens, p-lastPrompt)
+				lastPrompt = p
+			}
+			if c > lastCompletion {
+				atomic.AddInt64(&m.completionTokens, c-lastCompletion)
+				lastCompletion = c
+			}
+			if t > lastTotal {
+				atomic.AddInt64(&m.totalTokens, t-lastTotal)
+				lastTotal = t
+			}
 		}
 		return msg, nil
 	}), nil

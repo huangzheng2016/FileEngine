@@ -112,3 +112,34 @@ func TestModelProviderContextWindowCompat(t *testing.T) {
 		t.Fatalf("get context_window: got %v, want %d", v, db.DefaultContextWindow)
 	}
 }
+
+// Non-positive context_window must be rejected on update as well as create,
+// and must leave the stored value untouched.
+func TestModelProviderUpdateRejectsNonPositiveContextWindow(t *testing.T) {
+	s := setupModelTestServer(t)
+
+	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
+		"name": "cw", "provider": "openai", "model": "gpt-4o", "context_window": 256000,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create: code %d, resp %v", code, created)
+	}
+
+	for _, v := range []int{0, -5} {
+		code, _ = doModelRequest(t, s, http.MethodPut, "/api/v1/models/1", map[string]any{
+			"name": "cw", "provider": "openai", "model": "gpt-4o", "context_window": v,
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("update context_window=%d: got code %d, want 400", v, code)
+		}
+	}
+
+	// Stored value unchanged after rejected updates.
+	code, got := doModelRequest(t, s, http.MethodGet, "/api/v1/models/1", nil)
+	if code != http.StatusOK {
+		t.Fatalf("get: code %d", code)
+	}
+	if v := got["context_window"]; v != float64(256000) {
+		t.Fatalf("stored context_window after rejected updates: got %v, want 256000", v)
+	}
+}

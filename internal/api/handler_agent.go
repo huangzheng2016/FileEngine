@@ -182,8 +182,9 @@ func (s *Server) instructAgent(c *gin.Context) {
 		}()
 		// The request ctx is canceled as soon as this handler returns; background
 		// work runs on context.Background() (Stop() has its own cancelFn,
-		// registered by RunInstruct like RunTagging).
-		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil {
+		// registered by RunInstruct like RunTagging). User-initiated stops
+		// surface as context.Canceled and are not failures.
+		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("instruct session %d failed: %v", sessionID, err)
 		}
 	}()
