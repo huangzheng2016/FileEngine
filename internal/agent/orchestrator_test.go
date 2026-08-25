@@ -33,7 +33,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 	mk("未分类", "/uncategorized", false) // fallback, empty → kept
 
 	seedFile(t, repo, session.ID, "in/a.tar.gz", "file")
-	if err := repo.SetTargetAtomic(session.ID, "in/a.tar.gz", "/website/a.tar.gz", "planned", "file"); err != nil {
+	if _, err := repo.SetTargetAtomic(session.ID, "in/a.tar.gz", "/website/a.tar.gz", "planned", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 

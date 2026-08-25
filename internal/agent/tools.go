@@ -110,6 +110,11 @@ type SetTargetInput struct {
 type SetTargetOutput struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+	// ClearedChildren reports how many already-planned descendants the
+	// directory cascade overrode (outer target wins over inner). Non-zero
+	// means finer child classifications were just discarded.
+	ClearedChildren int64  `json:"cleared_children,omitempty"`
+	Guidance        string `json:"guidance,omitempty"`
 }
 
 type CreateCategoryInput struct {
@@ -789,7 +794,8 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 }
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
-	if err := tb.setTargetCore(ctx, input.Path, input.NewPath); err != nil {
+	cleared, err := tb.setTargetCore(ctx, input.Path, input.NewPath)
+	if err != nil {
 		var rj *rejectError
 		if errors.As(err, &rj) {
 			out := &SetTargetOutput{Error: rj.msg}
@@ -799,6 +805,10 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		return nil, err
 	}
 	out := &SetTargetOutput{Success: true}
+	if cleared > 0 {
+		out.ClearedChildren = cleared
+		out.Guidance = fmt.Sprintf("已级联覆盖并清除 %d 个子项的既有规划路径（外层目标覆盖内层）。若这些子项需要更细的独立归类，请对它们重新 set_target；若本目录就应作为整体归类，则无需处理", cleared)
+	}
 	tb.logger.LogToolCall("set_target", input, out)
 	return out, nil
 }
@@ -806,18 +816,18 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 // setTargetCore is the set_target logic shared by the tool handler and the
 // run_script builtin: same validation, same idempotency, same atomic write.
 // Only the tool handler logs; script-internal calls are covered by the single
-// run_script log entry.
-func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) error {
+// run_script log entry. Returns how many planned children the cascade cleared.
+func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) (int64, error) {
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
 	if err := ValidateFSPath(newPath); err != nil {
-		return rejectf("invalid new_path: %v", err)
+		return 0, rejectf("invalid new_path: %v", err)
 	}
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(path))
 	if err != nil {
-		return rejectf("file not found: %s", path)
+		return 0, rejectf("file not found: %s", path)
 	}
 
 	op := ""
@@ -827,13 +837,14 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 
 	// Idempotency check: already in target state, skip DB write
 	if f.NewPath == newPath && f.Operation == op {
-		return nil
+		return 0, nil
 	}
 
-	if err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(path), newPath, op, f.FileType); err != nil {
-		return fmt.Errorf("failed to set target: %w", err)
+	cleared, err := tb.repo.SetTargetAtomic(tb.sessionID, normalizePath(path), newPath, op, f.FileType)
+	if err != nil {
+		return 0, fmt.Errorf("failed to set target: %w", err)
 	}
-	return nil
+	return cleared, nil
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {

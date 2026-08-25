@@ -25,7 +25,7 @@ func TestUpdateDescriptionColumnScoped(t *testing.T) {
 	}
 
 	// A racing set_target commits first.
-	if err := r.SetTargetAtomic(1, "cam/dir", "/surveillance-recordings/dir", "planned", "directory"); err != nil {
+	if _, err := r.SetTargetAtomic(1, "cam/dir", "/surveillance-recordings/dir", "planned", "directory"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	// The description write must only touch its own column.

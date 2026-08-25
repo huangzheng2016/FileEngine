@@ -156,3 +156,28 @@ func TestCategoryPathValidation(t *testing.T) {
 		t.Fatalf("updateCategory valid: %v", err)
 	}
 }
+
+// set_target on a directory cascade-clears planned children — the tool result
+// must surface that consequence (cleared_children + guidance) so the agent
+// can re-decide instead of silently discarding finer classifications.
+func TestSetTargetCascadeClearWarning(t *testing.T) {
+	repo := setupToolTestRepo(t)
+	seedFile(t, repo, 1, "db", "directory")
+	seedFile(t, repo, 1, "db/azure", "directory")
+	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{}, false)
+
+	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db/azure", NewPath: "/backups/database/azure"}); err != nil {
+		t.Fatalf("child set: %v", err)
+	}
+	out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db", NewPath: "/backups/database"})
+	if err != nil {
+		t.Fatalf("parent set: %v", err)
+	}
+	if out.ClearedChildren != 1 || !strings.Contains(out.Guidance, "覆盖") {
+		t.Fatalf("cascade clear must be reported: %+v", out)
+	}
+	f, _ := repo.GetFileByPath(1, "db/azure")
+	if f.NewPath != "" {
+		t.Fatalf("child target must be cascade-cleared, got %q", f.NewPath)
+	}
+}

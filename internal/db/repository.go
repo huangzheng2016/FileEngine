@@ -413,20 +413,26 @@ func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) erro
 }
 
 // SetTargetAtomic atomically sets a file's target and clears children's targets (for directories) within a transaction.
-func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// It returns how many already-planned children the cascade cleared (outer
+// overrides inner) so the caller can surface that consequence to the agent.
+func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) (int64, error) {
+	var cleared int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&FileEntry{}).
 			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
 			Updates(map[string]interface{}{"new_path": newPath, "operation": operation}).Error; err != nil {
 			return err
 		}
 		if fileType == "directory" && newPath != "" {
-			return tx.Model(&FileEntry{}).
+			res := tx.Model(&FileEntry{}).
 				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(path)).
-				Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
+				Updates(map[string]interface{}{"new_path": "", "operation": ""})
+			cleared = res.RowsAffected
+			return res.Error
 		}
 		return nil
 	})
+	return cleared, err
 }
 
 // MarkJunkEntries auto-ignores well-known system junk before tagging: files

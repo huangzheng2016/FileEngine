@@ -604,7 +604,7 @@ func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 		if err != nil {
 			return nil, err
 		}
-		if err := tb.setTargetCore(ctx, p, np); err != nil {
+		if _, err := tb.setTargetCore(ctx, p, np); err != nil {
 			return scriptError(err), nil
 		}
 		return tengo.TrueValue, nil
@@ -633,7 +633,7 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 			return scriptError(fmt.Errorf("file not found: %s", p)), nil
 		}
 		target := strings.TrimSuffix(cat.Path, "/") + "/" + f.Name
-		if err := tb.setTargetCore(ctx, p, target); err != nil {
+		if _, err := tb.setTargetCore(ctx, p, target); err != nil {
 			return scriptError(err), nil
 		}
 		return tengo.TrueValue, nil
