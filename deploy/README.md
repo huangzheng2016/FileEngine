@@ -58,3 +58,10 @@ rm -rf data && docker compose up -d --build && ./bootstrap.sh   # 完全重置
 - 真实密钥只在 `.env`（gitignored，权限 600）；`bootstrap.sh` 在宿主机读取后
   直接调 API 写入 DB，密钥**不进容器环境变量**（`docker inspect` 看不到）。
 - 提交前 `git status` 核实：`.env`、`data/`、`*.db*` 均不出现。
+
+## 数据调研（环境全部保留）
+
+- 效果评估与修复清单：见 `EVALUATION.md`
+- DB 只读查询：`python3 -c "import sqlite3; c=sqlite3.connect('file:data/fileengine.db?mode=ro',uri=True); ..."`
+- SSE 事件流：`./sse-watch.sh <session_id> run.sse.log`；实测原始流与 UI 验收截图在 `runs/`（gitignored）
+- 重跑打标：UI 会话中心"打标"按钮（tagged/tagged_partial 均可，幂等只补未打标项）
