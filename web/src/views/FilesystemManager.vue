@@ -70,6 +70,7 @@
               <el-option label="SMB" value="smb" />
               <el-option label="NFS" value="nfs" />
             </el-select>
+            <p class="form-field__hint">{{ protocolCapsHint }}</p>
           </div>
           <div class="form-field">
             <label class="form-field__label">{{ $t('filesystems.basePath') }}</label>
@@ -113,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listFilesystems, createFilesystem, updateFilesystem, deleteFilesystem, testFilesystemConnection } from '../api'
 import type { Filesystem } from '../types'
@@ -151,6 +152,17 @@ function protocolChipClass(protocol: string): string {
   }
   return map[protocol] || 'is-muted'
 }
+
+// Per-protocol capability hint (random access / archive support), matching
+// the backend matrix documented in CLAUDE.md.
+const protocolCapsHint = computed(() => {
+  const keys: Record<string, string> = {
+    local: 'filesystems.capsLocal', sftp: 'filesystems.capsSftp', smb: 'filesystems.capsSmb',
+    nfs: 'filesystems.capsNfs', ftp: 'filesystems.capsFtp',
+  }
+  const key = keys[form.value.protocol]
+  return key ? t(key) : ''
+})
 
 async function load() {
   loading.value = true

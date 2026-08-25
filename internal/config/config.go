@@ -48,6 +48,9 @@ type AgentConfig struct {
 	BatchSize               int    `yaml:"batch_size" json:"batch_size"`
 	Concurrency             int    `yaml:"concurrency" json:"concurrency"`
 	MaxFileReadSize         int    `yaml:"max_file_read_size" json:"max_file_read_size"`
+	// ArchiveEntryMaxSize caps which archive entries read_file will extract
+	// inline via the path::entry syntax (larger entries are listing-only).
+	ArchiveEntryMaxSize     int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
 	MaxRetries              int    `yaml:"max_retries" json:"max_retries"`
 	MaxStep                 int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; ≈3× BatchSize (see above)
 	InstructMaxStep         int    `yaml:"instruct_max_step" json:"instruct_max_step"`
@@ -131,6 +134,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.MaxFileReadSize == 0 {
 		cfg.Agent.MaxFileReadSize = 102400
+	}
+	if cfg.Agent.ArchiveEntryMaxSize == 0 {
+		cfg.Agent.ArchiveEntryMaxSize = 64 * 1024
 	}
 	if cfg.Agent.MaxRetries == 0 {
 		cfg.Agent.MaxRetries = 3

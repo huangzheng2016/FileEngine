@@ -122,7 +122,7 @@ const instructPromptHead = `你是一个文件整理助手。用户选择了一�
 - get_file_info: 获取文件/目录详细信息
 `
 
-const instructReadFileTool = "- read_file: 读取文件内容（文本按大小截断；PDF/docx/xlsx/pptx 提取文本，.doc 不支持）\n"
+const instructReadFileTool = "- read_file: 读取文件内容（文本按大小截断；PDF/docx/xlsx/pptx 提取文本，.doc 不支持；zip/tar/tar.gz 列目录并可用 path::entry 读包内小文本条目，rar/7z 不支持）\n"
 
 const instructPromptToolsRest = `- update_description: 修改描述
 - mark_tagged: 标记目录为已处理（级联子项）

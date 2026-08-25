@@ -135,6 +135,11 @@ filesystems:
   password: 密码
   keyPath: 密钥路径
   keepPassword: 留空保持原密码
+  capsLocal: 完整支持：随机访问，压缩包可列目录/读条目
+  capsSmb: 完整支持：随机访问，压缩包可列目录/读条目（NAS 推荐）
+  capsSftp: 完整支持：随机访问，压缩包可列目录/读条目
+  capsNfs: 受限：无原生随机访问（Seek 适配），压缩包可用
+  capsFtp: 受限：不支持随机访问，>32MB 压缩包不可用；仅建议作兜底
   deleteConfirm: 确定删除该文件系统？
   testConn: 测试连接
   connOk: 连接成功
