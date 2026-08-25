@@ -39,12 +39,38 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	sb.WriteString(fmt.Sprintf("- 已执行: %d\n", session.ExecutedOps))
 	sb.WriteString("\n")
 
-	if len(usages) > 0 {
+	var used []db.CategoryUsage
+	for _, u := range usages {
+		if u.FileCount > 0 {
+			used = append(used, u)
+		}
+	}
+	if len(used) > 0 {
 		sb.WriteString("## 分类统计\n\n")
-		for _, u := range usages {
+		for _, u := range used {
 			sb.WriteString(fmt.Sprintf("- **%s** (`%s`): %d 项\n", u.Name, u.Path, u.FileCount))
 		}
 	}
 
 	return sb.String(), nil
+}
+
+// failureReportSection renders the failed-batch section appended to a tagging
+// report: total count plus each batch's target and error. Long failure lists
+// are capped so the report stays readable.
+func failureReportSection(failures []BatchFailure) string {
+	if len(failures) == 0 {
+		return ""
+	}
+	const maxListed = 20
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("\n## 失败批次（%d）\n\n", len(failures)))
+	for i, f := range failures {
+		if i >= maxListed {
+			sb.WriteString(fmt.Sprintf("- … 其余 %d 个批次从略，详见日志\n", len(failures)-maxListed))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("- 批次 %d（%s）: %s\n", f.BatchIndex, f.Target, f.Err))
+	}
+	return sb.String()
 }

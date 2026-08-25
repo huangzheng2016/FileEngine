@@ -2,27 +2,35 @@ package agent
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
+// buildCategorySummary renders the complete category system for the agent
+// prompt: every category is listed (used and unused alike) so the agent never
+// plans against a partial view. Entries are sorted by usage descending then
+// name ascending, keeping the most relevant categories at the top when the
+// list is long. usages is sorted in place.
 func buildCategorySummary(usages []db.CategoryUsage) string {
 	if len(usages) == 0 {
 		return ""
 	}
-	maxCategories := config.Get().Agent.MaxCategorySummaryCount
-	if maxCategories <= 0 {
-		maxCategories = 20
-	}
-	if len(usages) > maxCategories {
-		usages = usages[:maxCategories]
-	}
+	sort.SliceStable(usages, func(i, j int) bool {
+		if usages[i].FileCount != usages[j].FileCount {
+			return usages[i].FileCount > usages[j].FileCount
+		}
+		return usages[i].Name < usages[j].Name
+	})
 	var sb strings.Builder
-	sb.WriteString("\n## 当前分类使用情况\n")
+	sb.WriteString("\n## 分类体系（完整列表，含已归入计数）\n")
 	for _, u := range usages {
-		sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项\n", u.Name, u.Path, u.FileCount))
+		if u.FileCount > 0 {
+			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项\n", u.Name, u.Path, u.FileCount))
+		} else {
+			sb.WriteString(fmt.Sprintf("- %s (%s)\n", u.Name, u.Path))
+		}
 	}
 	return sb.String()
 }

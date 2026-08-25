@@ -78,7 +78,7 @@ type ScanSession struct {
 	ScanPath            string    `gorm:"size:1024" json:"scan_path"`
 	RootPath            string    `gorm:"size:1024" json:"root_path"`
 	Protocol            string    `gorm:"size:32" json:"protocol"`
-	Status              string    `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/executing/done/error:... (error strings truncated via TruncateStatus)
+	Status              string    `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/tagged_partial/executing/done/error:... (error strings truncated via TruncateStatus)
 	TotalFiles          int       `json:"total_files"`
 	TaggedFiles         int       `json:"tagged_files"`
 	PlannedOps          int       `json:"planned_ops"`

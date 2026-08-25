@@ -1,7 +1,19 @@
 package agent
 
-// DefaultSystemPrompt is used when no custom prompt is configured.
-const DefaultSystemPrompt = `你是一个文件整理 AI Agent。任务是分析目录和文件，将它们归类到用户定义的分类中。
+import (
+	"strings"
+
+	"FileEngine/internal/config"
+	"FileEngine/internal/db"
+)
+
+// DefaultSystemPrompt is the default autotag prompt for a default session
+// (create_category disabled). systemPromptForSession adapts it to the tools
+// actually registered for the session; a custom Agent.SystemPrompt always
+// wins and is used verbatim.
+var DefaultSystemPrompt = defaultSystemPrompt(false)
+
+const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目录和文件，将它们归类到用户定义的分类中。
 
 ## 核心原则
 
@@ -31,9 +43,16 @@ const DefaultSystemPrompt = `你是一个文件整理 AI Agent。任务是分析
 
 - 新路径必须位于用户定义的分类路径下；不适合的归入"未分类"兜底分类
 - 只有 agent_editable=true 的分类才能被修改/删除
-- **创建新分类前必须 list_categories**：检查是否已有同名/同路径/语义相似的分类 → 有则直接用，无则创建
+`
+
+const autoCategoryGuidance = `- **创建新分类前必须 list_categories**：检查是否已有同名/同路径/语义相似的分类 → 有则直接用，无则创建
 - 创建后必须立即 set_target 使用，不要创建了不用
-- set_target 传空字符串可清除已有目标
+`
+
+const noAutoCategoryGuidance = `- 不能创建新分类：没有合适的现有分类时归入"未分类"兜底分类
+`
+
+const systemPromptTail = `- set_target 传空字符串可清除已有目标
 
 ## 描述规范（200 字符以内）
 
@@ -49,8 +68,33 @@ const DefaultSystemPrompt = `你是一个文件整理 AI Agent。任务是分析
 - 对同一目录的操作尽量连续完成
 `
 
-// DefaultInstructPrompt is used for user-directed instruct mode.
-const DefaultInstructPrompt = `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
+// defaultSystemPrompt builds the default autotag prompt describing only the
+// category-management capabilities the session actually has: the
+// create_category workflow is mentioned only when the tool is registered
+// (ScanSession.AllowAutoCategory), otherwise the prompt steers the agent to
+// the fallback category instead of hallucinating an unavailable tool.
+func defaultSystemPrompt(allowAutoCategory bool) string {
+	var sb strings.Builder
+	sb.WriteString(systemPromptHead)
+	if allowAutoCategory {
+		sb.WriteString(autoCategoryGuidance)
+	} else {
+		sb.WriteString(noAutoCategoryGuidance)
+	}
+	sb.WriteString(systemPromptTail)
+	return sb.String()
+}
+
+// systemPromptForSession returns the configured autotag prompt, or the
+// default adapted to the session's registered tools.
+func systemPromptForSession(cfg config.AgentConfig, session *db.ScanSession) string {
+	if cfg.SystemPrompt != "" {
+		return cfg.SystemPrompt
+	}
+	return defaultSystemPrompt(session.AllowAutoCategory)
+}
+
+const instructPromptHead = `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
 
 ## 重要：主动理解用户意图
 
@@ -64,14 +108,21 @@ const DefaultInstructPrompt = `你是一个文件整理助手。用户选择了�
 
 - list_files: 列出目录内容（探索子目录时必用），可用 category_path 过滤某分类下已规划的文件
 - get_file_info: 获取文件/目录详细信息
-- update_description: 修改描述
+`
+
+const instructReadFileTool = "- read_file: 读取文本文件内容（有大小限制）\n"
+
+const instructPromptToolsRest = `- update_description: 修改描述
 - mark_tagged: 标记目录为已处理（级联子项）
 - set_target: 设置目标路径（传空字符串清除已有目标）
 - list_categories: 查看所有分类
 - update_category: 修改分类（路径变更会级联更新文件）
 - delete_category: 删除分类（清除该分类下所有文件的规划，允许重新分类）
-- create_category: 创建新分类（如果可用）
+`
 
+const instructCreateCategoryTool = "- create_category: 创建新分类\n"
+
+const instructPromptTail = `
 ## 常见操作流程
 
 ### 拆分目录
@@ -112,3 +163,28 @@ const DefaultInstructPrompt = `你是一个文件整理助手。用户选择了�
 3. 根据内容对不同子目录 set_target 到不同分类
 4. mark_tagged 标记已处理
 `
+
+// defaultInstructPrompt builds the instruct prompt whose tool list matches
+// the tools BuildInstructTools actually registers for the session.
+func defaultInstructPrompt(session *db.ScanSession) string {
+	var sb strings.Builder
+	sb.WriteString(instructPromptHead)
+	if session.AllowReadFile {
+		sb.WriteString(instructReadFileTool)
+	}
+	sb.WriteString(instructPromptToolsRest)
+	if session.AllowAutoCategory {
+		sb.WriteString(instructCreateCategoryTool)
+	}
+	sb.WriteString(instructPromptTail)
+	return sb.String()
+}
+
+// instructPromptForSession returns the configured instruct prompt, or the
+// default adapted to the session's registered tools.
+func instructPromptForSession(cfg config.AgentConfig, session *db.ScanSession) string {
+	if cfg.InstructSystemPrompt != "" {
+		return cfg.InstructSystemPrompt
+	}
+	return defaultInstructPrompt(session)
+}

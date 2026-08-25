@@ -135,17 +135,27 @@ func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 // agentRunTimeout returns the per-attempt timeout for one full agent run
 // (the entire ReAct loop of up to max_step tool rounds, not a single Generate
 // call). It reads the live config so agent_timeout is hot-reloadable.
+// A configured value <= 0 (the default) means no timeout: the run is bounded
+// only by the caller's context (user stop) and max_step.
 func agentRunTimeout() time.Duration {
 	secs := config.Get().Agent.AgentTimeout
 	if secs <= 0 {
-		secs = 60
+		return 0
 	}
 	return time.Duration(secs) * time.Second
 }
 
+// withRunTimeout wraps ctx with the configured per-run timeout, or returns ctx
+// unchanged when agent_timeout is disabled (<= 0, the default).
+func withRunTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if timeout := agentRunTimeout(); timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return ctx, func() {}
+}
+
 func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
-	timeout := agentRunTimeout()
-	callCtx, callCancel := context.WithTimeout(ctx, timeout)
+	callCtx, callCancel := withRunTimeout(ctx)
 	defer callCancel()
 
 	tracker.ResetUsage()
@@ -164,7 +174,7 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 		}
 		log.Printf("%s retry %d/%d: %v", label, retry, maxRetries, err)
 		time.Sleep(time.Duration(retry) * 2 * time.Second)
-		retryCtx, retryCancel := context.WithTimeout(ctx, timeout)
+		retryCtx, retryCancel := withRunTimeout(ctx)
 		tracker.ResetUsage()
 		result, err = runADKOnce(retryCtx, agent, messages, logger)
 		retryCancel()
