@@ -150,17 +150,22 @@ type ToolBuilder struct {
 	logger       *Logger
 	cfg          config.AgentConfig
 	session      *db.ScanSession
+	// modelVisionEnabled is the model-level vision switch
+	// (ModelProvider.VisionEnabled); view_image is registered only when it and
+	// ScanSession.AllowVision are both on.
+	modelVisionEnabled bool
 }
 
-func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession) *ToolBuilder {
+func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
 	return &ToolBuilder{
-		repo:         repo,
-		fs:           fs,
-		sessionID:    sessionID,
-		filesystemID: filesystemID,
-		logger:       logger,
-		cfg:          cfg,
-		session:      session,
+		repo:               repo,
+		fs:                 fs,
+		sessionID:          sessionID,
+		filesystemID:       filesystemID,
+		logger:             logger,
+		cfg:                cfg,
+		session:            session,
+		modelVisionEnabled: modelVisionEnabled,
 	}
 }
 
@@ -227,7 +232,30 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		allTools = append(allTools, createCat)
 	}
 
+	if visionTool, err := tb.buildVisionTool(); err != nil {
+		return nil, err
+	} else if visionTool != nil {
+		allTools = append(allTools, visionTool)
+	}
+
 	return allTools, nil
+}
+
+// buildVisionTool returns the view_image tool when both vision switches are on
+// (model-level ModelProvider.VisionEnabled ∩ session-level AllowVision), or
+// (nil, nil) when gated off. Default state is off in both places, so the tool
+// is absent unless explicitly enabled.
+func (tb *ToolBuilder) buildVisionTool() (tool.BaseTool, error) {
+	if !tb.modelVisionEnabled || !tb.session.AllowVision {
+		return nil, nil
+	}
+	maxImages, maxPx, maxBytes := tb.visionLimits()
+	desc := fmt.Sprintf("查看图片文件内容，返回缩略图（长边%dpx）。每次最多%d张，支持 jpg/jpeg/png/gif；HEIC/RAW 不支持会跳过；单文件超过%dMB拒绝。仅在确实需要确认图片内容时使用", maxPx, maxImages, maxBytes/(1024*1024))
+	viewImage, err := utils.InferEnhancedTool("view_image", desc, tb.viewImage)
+	if err != nil {
+		return nil, fmt.Errorf("build view_image: %w", err)
+	}
+	return viewImage, nil
 }
 
 // BuildInstructTools returns tools for user-directed instruct mode.
@@ -284,6 +312,12 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 			return nil, err
 		}
 		allTools = append(allTools, createCat)
+	}
+
+	if visionTool, err := tb.buildVisionTool(); err != nil {
+		return nil, err
+	} else if visionTool != nil {
+		allTools = append(allTools, visionTool)
 	}
 	return allTools, nil
 }

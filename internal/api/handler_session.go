@@ -33,6 +33,11 @@ func scanRootPath(scanPath string) string {
 // startScan launches a background goroutine that connects to the filesystem and scans.
 // This is the single place where scan logic lives — used by both createSession and rescanSession.
 func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig) {
+	// Scan on a copy: the caller may still be serializing its own struct into
+	// the HTTP response while the goroutine mutates status fields — sharing
+	// the pointer is a data race.
+	sess := *session
+	session = &sess
 	// Parse filter dirs from newline-separated string
 	filterMode := session.FilterMode
 	if filterMode == "" {
@@ -123,6 +128,7 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
+		AllowVision:         false,
 		FilesystemID:        filesystem.ID,
 		ScanPath:            req.ScanPath,
 		RootPath:            scanRootPath(req.ScanPath),
@@ -199,6 +205,7 @@ func (s *Server) deleteSession(c *gin.Context) {
 }
 
 type UpdateSessionRequest struct {
+	AllowVision         *bool   `json:"allow_vision"`
 	AllowReadFile       *bool   `json:"allow_read_file"`
 	AllowAutoCategory   *bool   `json:"allow_auto_category"`
 	ExcludeCategoryDirs *bool   `json:"exclude_category_dirs"`
@@ -228,6 +235,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.AllowAutoCategory != nil {
 		session.AllowAutoCategory = *req.AllowAutoCategory
+	}
+	if req.AllowVision != nil {
+		session.AllowVision = *req.AllowVision
 	}
 	if req.ExcludeCategoryDirs != nil {
 		session.ExcludeCategoryDirs = *req.ExcludeCategoryDirs

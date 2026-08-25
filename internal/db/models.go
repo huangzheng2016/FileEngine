@@ -89,6 +89,7 @@ type ScanSession struct {
 	TotalTokens         int       `json:"total_tokens"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory   bool      `gorm:"default:false" json:"allow_auto_category"`
+	AllowVision         bool      `gorm:"default:false" json:"allow_vision"` // session-level switch; view_image requires ModelProvider.VisionEnabled too
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
@@ -105,8 +106,9 @@ type ModelProvider struct {
 	Model         string    `gorm:"size:256" json:"model"`
 	BaseURL       string    `gorm:"size:512" json:"base_url"`
 	Temperature   float64   `json:"temperature"`
-	MaxTokens     int       `json:"max_tokens"`     // output completion cap passed to the LLM API
-	ContextWindow int       `json:"context_window"` // model context window in tokens (drives compaction thresholds)
+	MaxTokens     int       `json:"max_tokens"`                          // output completion cap passed to the LLM API
+	ContextWindow int       `json:"context_window"`                      // model context window in tokens (drives compaction thresholds)
+	VisionEnabled bool      `gorm:"default:false" json:"vision_enabled"` // model can read images (gates the view_image tool)
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

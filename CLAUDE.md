@@ -28,7 +28,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 ### Design Principles
 - **No backward compatibility** — Do not add legacy fallbacks, compatibility shims, or migration paths. Old data/config formats are not supported. If a schema changes, the old version is simply dropped.
 - **No over-engineering** — Don't add feature flags, version negotiation, or graceful degradation for removed features. If something is removed, delete it completely with no trace.
-- **Single source of truth** — Each piece of data lives in one place. Filesystem connections are in the `Filesystem` DB table. Model providers are in the `ModelProvider` DB table. Categories are scoped to filesystems. Per-session agent config (allow_read_file, allow_auto_category, model_provider_id) lives on `ScanSession`.
+- **Single source of truth** — Each piece of data lives in one place. Filesystem connections are in the `Filesystem` DB table. Model providers are in the `ModelProvider` DB table. Categories are scoped to filesystems. Per-session agent config (allow_read_file, allow_auto_category, allow_vision, model_provider_id) lives on `ScanSession`.
 
 ### Go
 - Module path: `FileEngine` (not a URL-style path)
@@ -81,8 +81,9 @@ cd web && npm run build && cd .. && go build -o fileengine .
 
 ### Agent Tools
 - 8 always-on tools: `list_files`, `get_file_info`, `update_description`, `mark_tagged`, `list_categories`, `set_target`, `update_category`, `delete_category`
-- 2 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true)
-- Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`
+- 3 conditional tools: `read_file` (when `allow_read_file` is true), `create_category` (when `allow_auto_category` is true), `view_image` (when both vision switches are on)
+- Tool availability is per-session, configured via `ScanSession.AllowReadFile` / `AllowAutoCategory`; `view_image` is the exception — it requires both `ModelProvider.VisionEnabled` (model can read images) AND `ScanSession.AllowVision` (session opt-in), both defaulting to off
+- `view_image` (`internal/agent/vision.go`) returns multimodal tool results via `utils.InferEnhancedTool` + `schema.ToolResult.Parts` (per-file text note + thumbnail image part); it decodes jpg/jpeg/png/gif server-side, downscales to a thumbnail (area-averaged, stdlib only), and base64-encodes. HEIC/RAW are skipped with a text note. Cost guardrails in `AgentConfig`: `vision_max_images_per_batch` (default 4 per call), `vision_image_max_px` (default 512 long edge), `vision_max_image_bytes` (default 20MB source cap). Per-file problems become text notes, never whole-call errors; base64 never enters `agent_logs` (metadata only) or the event stream (a text stand-in is emitted for multimodal tool results)
 - All tool path inputs are normalized via `normalizePath()` (strips leading `/`)
 - `delete_category` clears planned files under that category and resets `tagged=false` for re-classification
 - Categories have `agent_created` and `agent_editable` flags; agent can only modify/delete `agent_editable=true` categories
@@ -90,8 +91,9 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Token tracking: `tokenTrackingModel` wrapper intercepts all LLM Generate and Stream calls (including intermediate ReAct rounds) to accumulate accurate token counts
 
 ### Model Providers
-- `ModelProvider` DB entity stores multiple LLM configurations (name, provider, api_key, model, base_url, temperature, max_tokens, context_window)
+- `ModelProvider` DB entity stores multiple LLM configurations (name, provider, api_key, model, base_url, temperature, max_tokens, context_window, vision_enabled)
 - `max_tokens` is the output completion cap passed to the LLM API; `context_window` is the model's context window in tokens — it alone drives the reduction/summarization thresholds in `buildADKAgent`. Suggested tiers 200K/256K/500K/900K/1M, custom values accepted; unset/legacy rows fall back to `db.DefaultContextWindow` (200K), backfilled on DB init
+- `vision_enabled` (default false) marks a model as image-capable; it is the model-level half of the two-level vision switch gating `view_image` (see Agent Tools)
 - Supports OpenAI (via `eino-ext/components/model/openai`), Claude (native via `eino-ext/components/model/claude`), Ollama (via OpenAI-compatible endpoint)
 - Each `ScanSession` has `ModelProviderID` — can use a different model per scan
 - `model.NewChatModelFromProvider()` creates model from DB entity
@@ -103,6 +105,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Factory: `remotefs.NewFromConfig(cfg)` creates the right implementation
 - Each concurrent agent worker creates its own FS connection
 - SMB: `BasePath` is the share name, normalized (backslashes → forward slashes, trimmed)
+- Local: `resolve()` confines every path to `BasePath` — absolute paths are accepted only inside it, `..` escapes are rejected (matches the root semantics of SFTP/SMB)
 
 ### Executor
 - Handles both files and directories
@@ -137,11 +140,12 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Agent: `adk.NewChatModelAgent()` creates a ReAct agent (see `internal/agent/adk.go`); executed via `adk.Runner`, `MaxIterations` caps the tool-call rounds per run
 - `runADKOnce` forwards every ADK `AgentEvent` to the session event bus as step-level events (intermediate assistant `message` / `tool_call` / `tool_result`); the final assistant message is logged by the caller with token usage. Token-level streaming (`EnableStreaming`) is intentionally off — phase 2 candidate for instruct only
 - Middleware chain (in order): `patchtoolcalls` (repairs dangling tool calls) → `reduction` (clears old tool outputs past 75% of the model context window) → `summarization` (official eino middleware; LLM-summarizes history past 90% of the window, sharing the same token estimator). The context window comes from `ModelProvider.EffectiveContextWindow()` — never from `max_tokens`
+- The shared token estimator (`countTokens`) counts text plus multimodal parts: text parts as text, image parts at a flat per-image estimate (`estimatedTokensPerImagePart`) since provider image billing is dimension-based, not base64-length-based
 - Model: `adk.ChatModelAgentConfig.Model` takes `model.ChatModel` (eino-ext openai/claude factories in `internal/model/factory.go`)
-- Tools: `utils.InferTool(name, desc, func)` auto-generates JSON schema from Go struct tags
+- Tools: `utils.InferTool(name, desc, func)` auto-generates JSON schema from Go struct tags; multimodal tool results use `utils.InferEnhancedTool` returning `*schema.ToolResult` (eino converts it to a tool message with `UserInputMultiContent` — supported by both the claude and openai model extensions at the locked versions)
 - Struct tags: `json:"field_name" jsonschema_description:"description for LLM"`
 - `model.ChatModel` is thread-safe for concurrent use
-- Tool builder `NewToolBuilder(repo, fs, sessionID, filesystemID, logger, cfg)`
+- Tool builder `NewToolBuilder(repo, fs, sessionID, filesystemID, logger, cfg, session, modelVisionEnabled)`
 
 ### Frontend Embedding
 - `embed.go` uses `//go:embed all:web/dist` to embed the built frontend
@@ -165,6 +169,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | Agent tagging loop | `internal/agent/autotag.go` |
 | Instruct mode | `internal/agent/instruct.go` |
 | Agent tools | `internal/agent/tools.go` |
+| view_image (vision) tool | `internal/agent/vision.go` |
 | Token tracker | `internal/agent/token_tracker.go` |
 | System prompts | `internal/agent/prompt.go` (+ `prompt_builder.go` for category summaries) |
 | LLM factory | `internal/model/factory.go` |

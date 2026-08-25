@@ -13,6 +13,7 @@ import (
 )
 
 type ModelProviderResponse struct {
+	VisionEnabled bool    `json:"vision_enabled"`
 	ID            uint    `json:"id"`
 	Name          string  `json:"name"`
 	Provider      string  `json:"provider"`
@@ -30,6 +31,7 @@ func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 		ID: m.ID, Name: m.Name, Provider: m.Provider, Model: m.Model,
 		BaseURL: m.BaseURL, Temperature: m.Temperature, MaxTokens: m.MaxTokens,
 		ContextWindow: m.EffectiveContextWindow(),
+		VisionEnabled: m.VisionEnabled,
 		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:     m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -59,6 +61,9 @@ type ModelProviderRequest struct {
 	// ContextWindow is optional and additive: old clients omit it (nil),
 	// new clients may pass a tier (200K/256K/500K/900K/1M) or a custom value.
 	ContextWindow *int `json:"context_window"`
+	// VisionEnabled is additive like context_window: absent (nil) means
+	// "not provided" — create defaults to false, update keeps the stored value.
+	VisionEnabled *bool `json:"vision_enabled"`
 }
 
 // resolveContextWindow validates an optional context_window value. Lenient by
@@ -89,6 +94,9 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		Model: req.Model, BaseURL: req.BaseURL,
 		Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 		ContextWindow: contextWindow,
+	}
+	if req.VisionEnabled != nil {
+		m.VisionEnabled = *req.VisionEnabled
 	}
 	if err := s.repo.CreateModelProvider(m); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -142,6 +150,9 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 			return
 		}
 		m.ContextWindow = contextWindow
+	}
+	if req.VisionEnabled != nil {
+		m.VisionEnabled = *req.VisionEnabled
 	}
 	if req.APIKey != "" && req.APIKey != "****" {
 		m.APIKey = req.APIKey

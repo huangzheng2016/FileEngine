@@ -148,7 +148,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 	workerLogger := NewLogger(a.repo, a.sessionID)
 	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		log.Printf("worker %d: failed to build tools: %v", workerID, err)
@@ -306,7 +306,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 	workerLogger := NewLogger(a.repo, a.sessionID)
 	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
-	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session)
+	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tools, err := toolBuilder.BuildTools()
 	if err != nil {
 		log.Printf("remaining worker %d: failed to build tools: %v", workerID, err)
