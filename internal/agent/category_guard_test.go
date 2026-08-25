@@ -31,11 +31,14 @@ func TestCreateCategoryVersionGuard(t *testing.T) {
 	repo, tb := setupGuardTest(t)
 	ctx := context.Background()
 
-	// Never saw any list -> rejected, and the rejection shows the current
-	// (here: empty) state plus instructions.
-	_, err := tb.createCategory(ctx, &CreateCategoryInput{Name: "音乐", Path: "/music"})
-	if err == nil || !strings.Contains(err.Error(), "尚未查看") {
-		t.Fatalf("first create without snapshot: got %v, want stale-version rejection", err)
+	// Never saw any list -> rejected (success=false result, non-fatal), and
+	// the rejection shows the current (here: empty) state plus instructions.
+	out, err := tb.createCategory(ctx, &CreateCategoryInput{Name: "音乐", Path: "/music"})
+	if err != nil {
+		t.Fatalf("guard rejection must not abort the run: %v", err)
+	}
+	if out.Success || !strings.Contains(out.Error, "尚未查看") {
+		t.Fatalf("first create without snapshot: got %+v, want stale-version rejection", out)
 	}
 	if cats, _ := repo.ListCategories(7); len(cats) != 0 {
 		t.Fatalf("rejected create must write nothing, got %d categories", len(cats))
@@ -53,14 +56,17 @@ func TestCreateCategoryVersionGuard(t *testing.T) {
 
 	// An external change (another worker / the user) invalidates the snapshot.
 	mustCreateCategory(t, repo, 7, "文档", "/docs")
-	_, err = tb.createCategory(ctx, &CreateCategoryInput{Name: "图片", Path: "/pictures"})
-	if err == nil || !strings.Contains(err.Error(), "已变化") {
-		t.Fatalf("create after external change: got %v, want stale-version rejection", err)
+	out, err = tb.createCategory(ctx, &CreateCategoryInput{Name: "图片", Path: "/pictures"})
+	if err != nil {
+		t.Fatalf("guard rejection must not abort the run: %v", err)
+	}
+	if out.Success || !strings.Contains(out.Error, "已变化") {
+		t.Fatalf("create after external change: got %+v, want stale-version rejection", out)
 	}
 	// The rejection must carry the latest complete list — including the
 	// externally added category — so the agent can re-decide from it.
-	if !strings.Contains(err.Error(), "文档") || !strings.Contains(err.Error(), "/docs") {
-		t.Fatalf("rejection must include latest full list, got: %v", err)
+	if !strings.Contains(out.Error, "文档") || !strings.Contains(out.Error, "/docs") {
+		t.Fatalf("rejection must include latest full list, got: %v", out.Error)
 	}
 	if _, err := repo.GetCategoryByName(7, "图片"); err == nil {
 		t.Fatal("rejected create must write nothing")
@@ -116,15 +122,18 @@ func TestCreateCategorySimilarityHardReject(t *testing.T) {
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tb.createCategory(ctx, &tc.in)
-			if err == nil {
-				t.Fatalf("create %+v: got nil, want duplicate rejection", tc.in)
+			out, err := tb.createCategory(ctx, &tc.in)
+			if err != nil {
+				t.Fatalf("duplicate rejection must not abort the run: %v", err)
 			}
-			if !strings.Contains(err.Error(), "拒绝创建") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("rejection lacks duplicate reference (%q): %v", tc.want, err)
+			if out.Success {
+				t.Fatalf("create %+v: got success, want duplicate rejection", tc.in)
 			}
-			if !strings.Contains(err.Error(), "Photos") || !strings.Contains(err.Error(), "已归入 1 项") || !strings.Contains(err.Error(), "set_target") {
-				t.Fatalf("rejection lacks name/file-count/set_target reference: %v", err)
+			if !strings.Contains(out.Error, "拒绝创建") || !strings.Contains(out.Error, tc.want) {
+				t.Fatalf("rejection lacks duplicate reference (%q): %v", tc.want, out.Error)
+			}
+			if !strings.Contains(out.Error, "Photos") || !strings.Contains(out.Error, "已归入 1 项") || !strings.Contains(out.Error, "set_target") {
+				t.Fatalf("rejection lacks name/file-count/set_target reference: %v", out.Error)
 			}
 		})
 	}

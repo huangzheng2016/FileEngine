@@ -79,12 +79,12 @@ func TestSetTargetRejectsIllegalPaths(t *testing.T) {
 
 	bad := []string{"/", "..", "../escape", "/../etc/passwd", "/organized/../../escape"}
 	for _, p := range bad {
-		_, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: p})
-		if err == nil {
-			t.Fatalf("setTarget new_path=%q: got nil error, want rejection", p)
+		out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: p})
+		if err != nil {
+			t.Fatalf("setTarget new_path=%q: rejection must be a non-fatal result, got run error: %v", p, err)
 		}
-		if !strings.Contains(err.Error(), "invalid new_path") {
-			t.Fatalf("setTarget new_path=%q: error %v lacks 'invalid new_path'", p, err)
+		if out.Success || !strings.Contains(out.Error, "invalid new_path") {
+			t.Fatalf("setTarget new_path=%q: got %+v, want invalid-path rejection", p, out)
 		}
 	}
 
@@ -127,11 +127,11 @@ func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
 
-	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err == nil {
-		t.Fatal("createCategory with escaping path: got nil error, want rejection")
+	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err != nil || out.Success {
+		t.Fatalf("createCategory with escaping path: got %+v, %v — want non-fatal rejection", out, err)
 	}
-	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err == nil {
-		t.Fatal("createCategory with empty path: got nil error, want rejection")
+	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err != nil || out.Success {
+		t.Fatalf("createCategory with empty path: got %+v, %v — want non-fatal rejection", out, err)
 	}
 	// The version guard only lets create_category run against a list the agent
 	// has just seen — prime it via list_categories.
@@ -142,8 +142,8 @@ func TestCategoryPathValidation(t *testing.T) {
 		t.Fatalf("createCategory valid: %v", err)
 	}
 
-	if _, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/a/../../b"}); err == nil {
-		t.Fatal("updateCategory with escaping new_path: got nil error, want rejection")
+	if out, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/a/../../b"}); err != nil || out.Success {
+		t.Fatalf("updateCategory with escaping new_path: got %+v, %v — want non-fatal rejection", out, err)
 	}
 	cat, err := repo.GetCategoryByName(7, "Good")
 	if err != nil {

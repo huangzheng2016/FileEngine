@@ -74,7 +74,8 @@ type UpdateDescriptionInput struct {
 }
 
 type UpdateDescriptionOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type MarkTaggedInput struct {
@@ -82,7 +83,8 @@ type MarkTaggedInput struct {
 }
 
 type MarkTaggedOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type ListCategoriesInput struct{}
@@ -105,7 +107,8 @@ type SetTargetInput struct {
 }
 
 type SetTargetOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 type CreateCategoryInput struct {
@@ -118,6 +121,10 @@ type CreateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	// Error carries an agent-recoverable rejection (guard rails, duplicates,
+	// invalid input) with guidance for the next decision; Success is false.
+	// System failures still abort the run as Go errors.
+	Error string `json:"error,omitempty"`
 	// SimilarCategories lists fuzzy lookalikes found after a successful
 	// creation (path overlap/containment) — reference info for the model to
 	// judge whether a merge is warranted; empty when there are none.
@@ -146,6 +153,7 @@ type UpdateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
+	Error   string `json:"error,omitempty"`
 }
 
 type DeleteCategoryInput struct {
@@ -153,7 +161,21 @@ type DeleteCategoryInput struct {
 }
 
 type DeleteCategoryOutput struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// rejectError marks agent-recoverable tool rejections: the model can fix its
+// input (guard-rail rejection, duplicate, not-found, invalid argument) and
+// continue, so tool handlers report these as success=false results instead of
+// aborting the whole agent run — eino makes any tool error fatal to the ReAct
+// loop. System failures (DB/FS errors) stay ordinary fatal errors.
+type rejectError struct{ msg string }
+
+func (e *rejectError) Error() string { return e.msg }
+
+func rejectf(format string, args ...interface{}) error {
+	return &rejectError{msg: fmt.Sprintf(format, args...)}
 }
 
 // ============ Tool Builder ============
@@ -635,7 +657,9 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
+		out := &UpdateDescriptionOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
+		tb.logger.LogToolCall("update_description", input, out)
+		return out, nil
 	}
 
 	// Idempotency check: description already matches
@@ -661,7 +685,9 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", input.Path)
+		out := &MarkTaggedOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
+		tb.logger.LogToolCall("mark_tagged", input, out)
+		return out, nil
 	}
 
 	// Idempotency check: already tagged, skip DB write
@@ -714,6 +740,12 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 	if err := tb.setTargetCore(ctx, input.Path, input.NewPath); err != nil {
+		var rj *rejectError
+		if errors.As(err, &rj) {
+			out := &SetTargetOutput{Error: rj.msg}
+			tb.logger.LogToolCall("set_target", input, out)
+			return out, nil
+		}
 		return nil, err
 	}
 	out := &SetTargetOutput{Success: true}
@@ -730,12 +762,12 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
 	if err := ValidateFSPath(newPath); err != nil {
-		return fmt.Errorf("invalid new_path: %w", err)
+		return rejectf("invalid new_path: %v", err)
 	}
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(path))
 	if err != nil {
-		return fmt.Errorf("file not found: %s", path)
+		return rejectf("file not found: %s", path)
 	}
 
 	op := ""
@@ -757,6 +789,15 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 	out, err := tb.createCategoryCore(ctx, input)
 	if err != nil {
+		// Guard rejections are guidance, not failure: hand them to the model
+		// as a success=false result so the run continues and the next
+		// decision is made from the rejection's reference info.
+		var rj *rejectError
+		if errors.As(err, &rj) {
+			out := &CreateCategoryOutput{Error: rj.msg}
+			tb.logger.LogToolCall("create_category", input, out)
+			return out, nil
+		}
 		return nil, err
 	}
 	tb.logger.LogToolCall("create_category", input, out)
@@ -775,7 +816,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
 		}
-		return nil, fmt.Errorf("invalid category path: %w", err)
+		return nil, rejectf("invalid category path: %v", err)
 	}
 
 	// Fresh category state feeds both guard rails below (and its per-category
@@ -801,7 +842,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		if list == "" {
 			list = "（当前没有任何分类）"
 		}
-		return nil, fmt.Errorf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
+		return nil, rejectf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
 	}
 
 	// Similarity guard, two classes: objective duplicates (normalized identical
@@ -817,7 +858,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项（%s）\n", s.usage.Name, s.usage.Path, s.usage.FileCount, s.reason))
 		}
 		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不同的名称和路径")
-		return nil, errors.New(sb.String())
+		return nil, rejectf("%s", sb.String())
 	}
 
 	cat := &db.Category{
@@ -833,7 +874,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, fmt.Errorf("create category: %w", err)
 	}
 	if !created {
-		return nil, fmt.Errorf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
+		return nil, rejectf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
 	}
 
 	// The agent knows the post-create set (its snapshot plus its own
@@ -858,25 +899,31 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 
 func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategoryInput) (*UpdateCategoryOutput, error) {
 
+	reject := func(msg string) (*UpdateCategoryOutput, error) {
+		out := &UpdateCategoryOutput{Error: msg}
+		tb.logger.LogToolCall("update_category", input, out)
+		return out, nil
+	}
+
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("category not found: %s", input.Name)
+		return reject(fmt.Sprintf("category not found: %s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return nil, fmt.Errorf("category '%s' is not editable by agent (user-managed)", input.Name)
+		return reject(fmt.Sprintf("category '%s' is not editable by agent (user-managed)", input.Name))
 	}
 
 	// Guard against no-op: at least one field must be provided for update
 	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
-		return nil, fmt.Errorf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name)
+		return reject(fmt.Sprintf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name))
 	}
 
 	// A changed category path cascades into planned files' new_path; apply the
 	// same root-confinement rules as set_target.
 	if input.NewPath != "" {
 		if err := ValidateFSPath(input.NewPath); err != nil {
-			return nil, fmt.Errorf("invalid new_path: %w", err)
+			return reject(fmt.Sprintf("invalid new_path: %v", err))
 		}
 	}
 
@@ -905,13 +952,19 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
 
+	reject := func(msg string) (*DeleteCategoryOutput, error) {
+		out := &DeleteCategoryOutput{Error: msg}
+		tb.logger.LogToolCall("delete_category", input, out)
+		return out, nil
+	}
+
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return nil, fmt.Errorf("category not found: %s", input.Name)
+		return reject(fmt.Sprintf("category not found: %s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return nil, fmt.Errorf("category '%s' is not deletable by agent (user-managed)", input.Name)
+		return reject(fmt.Sprintf("category '%s' is not deletable by agent (user-managed)", input.Name))
 	}
 
 	// Clear all planned files under this category and reset tagged for re-classification
