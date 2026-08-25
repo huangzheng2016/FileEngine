@@ -155,7 +155,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		return
 	}
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.MaxTokens)
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow())
 	if err != nil {
 		log.Printf("worker %d: failed to create agent: %v", workerID, err)
 		return
@@ -293,7 +293,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		return
 	}
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.MaxTokens)
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow())
 	if err != nil {
 		log.Printf("remaining worker %d: failed to create agent: %v", workerID, err)
 		return

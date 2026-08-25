@@ -14,7 +14,7 @@ import (
 type RequestType string
 
 const (
-	RequestAutoTag RequestType = "autotag"
+	RequestAutoTag  RequestType = "autotag"
 	RequestInstruct RequestType = "instruct"
 )
 

@@ -89,6 +89,23 @@ func (a *Agent) RunTagging(ctx context.Context) error {
 
 // RunInstruct delegates to InstructAgent for user-directed operations.
 func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return "", fmt.Errorf("agent is already running")
+	}
+	a.running = true
+	ctx, cancel := context.WithCancel(ctx)
+	a.cancelFn = cancel
+	a.mu.Unlock()
+
+	defer func() {
+		a.mu.Lock()
+		a.running = false
+		a.cancelFn = nil
+		a.mu.Unlock()
+	}()
+
 	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)
 	return orch.Run(ctx, OrchestratorRequest{
 		Type:       RequestInstruct,

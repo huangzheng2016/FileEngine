@@ -63,7 +63,21 @@ func Init(cfg config.DatabaseConfig) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Backfill context_window for providers created before the field existed
+	// (max_tokens was previously misused as the window; it now only caps output).
+	if err := backfillContextWindow(DB); err != nil {
+		return fmt.Errorf("failed to backfill context_window: %w", err)
+	}
+
 	return nil
+}
+
+// backfillContextWindow sets the default context window on provider rows that
+// predate the context_window column (NULL / non-positive values).
+func backfillContextWindow(db *gorm.DB) error {
+	return db.Model(&ModelProvider{}).
+		Where("context_window IS NULL OR context_window <= 0").
+		Update("context_window", DefaultContextWindow).Error
 }
 
 func GetDB() *gorm.DB {

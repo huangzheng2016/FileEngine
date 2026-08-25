@@ -33,7 +33,34 @@ func (m *tokenTrackingModel) Generate(ctx context.Context, input []*schema.Messa
 }
 
 func (m *tokenTrackingModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
-	return m.inner.Stream(ctx, input, opts...)
+	sr, err := m.inner.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	// Providers may emit usage on multiple frames per call with cumulative
+	// counters (e.g. claude ext: message_start + message_delta). Track per-call
+	// state in this closure and add only the delta so cumulative frames are
+	// never double counted.
+	var lastPrompt, lastCompletion, lastTotal int64
+	return schema.StreamReaderWithConvert(sr, func(msg *schema.Message) (*schema.Message, error) {
+		if msg != nil && msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
+			u := msg.ResponseMeta.Usage
+			p, c, t := int64(u.PromptTokens), int64(u.CompletionTokens), int64(u.TotalTokens)
+			if p > lastPrompt {
+				atomic.AddInt64(&m.promptTokens, p-lastPrompt)
+				lastPrompt = p
+			}
+			if c > lastCompletion {
+				atomic.AddInt64(&m.completionTokens, c-lastCompletion)
+				lastCompletion = c
+			}
+			if t > lastTotal {
+				atomic.AddInt64(&m.totalTokens, t-lastTotal)
+				lastTotal = t
+			}
+		}
+		return msg, nil
+	}), nil
 }
 
 func (m *tokenTrackingModel) BindTools(tools []*schema.ToolInfo) error {

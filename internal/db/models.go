@@ -98,16 +98,30 @@ type ScanSession struct {
 }
 
 type ModelProvider struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;size:256" json:"name"`
-	Provider    string    `gorm:"size:32" json:"provider"` // openai / claude / ollama
-	APIKey      string    `gorm:"size:512" json:"-"`
-	Model       string    `gorm:"size:256" json:"model"`
-	BaseURL     string    `gorm:"size:512" json:"base_url"`
-	Temperature float64   `json:"temperature"`
-	MaxTokens   int       `json:"max_tokens"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Name          string    `gorm:"uniqueIndex;size:256" json:"name"`
+	Provider      string    `gorm:"size:32" json:"provider"` // openai / claude / ollama
+	APIKey        string    `gorm:"size:512" json:"-"`
+	Model         string    `gorm:"size:256" json:"model"`
+	BaseURL       string    `gorm:"size:512" json:"base_url"`
+	Temperature   float64   `json:"temperature"`
+	MaxTokens     int       `json:"max_tokens"`     // output completion cap passed to the LLM API
+	ContextWindow int       `json:"context_window"` // model context window in tokens (drives compaction thresholds)
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// DefaultContextWindow is the fallback context window (tokens) used when a
+// ModelProvider does not specify one. It matches the smallest suggested tier
+// (200K); common tiers are 200K/256K/500K/900K/1M, custom values allowed.
+const DefaultContextWindow = 200_000
+
+// EffectiveContextWindow returns the configured context window or the default.
+func (p *ModelProvider) EffectiveContextWindow() int {
+	if p.ContextWindow > 0 {
+		return p.ContextWindow
+	}
+	return DefaultContextWindow
 }
 
 type AgentLog struct {

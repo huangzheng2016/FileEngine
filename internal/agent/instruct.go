@@ -59,7 +59,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 		instruction = p
 	}
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, instruction, config.Get().Agent.InstructMaxStep, a.modelProvider.MaxTokens)
+	agentInst, err := buildADKAgent(ctx, tracker, tools, instruction, config.Get().Agent.InstructMaxStep, a.modelProvider.EffectiveContextWindow())
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
