@@ -231,10 +231,10 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 		}
 	}
 	if q.CategoryPath != nil {
-		tx = tx.Where("new_path LIKE ?", *q.CategoryPath+"%")
+		tx = tx.Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(*q.CategoryPath)+"%")
 	}
 	if q.Search != "" {
-		tx = tx.Where("name LIKE ?", "%"+q.Search+"%")
+		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
 	}
 	return tx
 }
@@ -370,7 +370,7 @@ func (r *Repository) ClaimDirectory(sessionID uint, path string, batchIndex int)
 
 func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string, batchIndex int) error {
 	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND original_path LIKE ?", sessionID, parentPath+"/%").
+		Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(parentPath)).
 		Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
 }
 
@@ -383,14 +383,14 @@ func (r *Repository) MarkTaggedAtomic(sessionID uint, path string, batchIndex in
 			return err
 		}
 		return tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND original_path LIKE ?", sessionID, path+"/%").
+			Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(path)).
 			Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
 	})
 }
 
 func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) error {
 	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND original_path LIKE ? AND operation != ''", sessionID, parentPath+"/%").
+		Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(parentPath)).
 		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
 }
 
@@ -404,7 +404,7 @@ func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string
 		}
 		if fileType == "directory" && newPath != "" {
 			return tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND original_path LIKE ? AND operation != ''", sessionID, path+"/%").
+				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(path)).
 				Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
 		}
 		return nil
@@ -414,9 +414,8 @@ func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
 // whose new_path falls under the given category path, across all sessions of a filesystem.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {
-	prefix := categoryPath + "/"
 	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND (new_path = ? OR new_path LIKE ?)", filesystemID, categoryPath, prefix+"%").
+		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", filesystemID, categoryPath, childPathPattern(categoryPath)).
 		Updates(map[string]interface{}{"new_path": "", "operation": "", "tagged": false}).Error
 }
 
@@ -494,7 +493,7 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	for _, c := range cats {
 		var count int64
 		if err := r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?)", sessionID, c.Path, c.Path+"/%").
+			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", sessionID, c.Path, childPathPattern(c.Path)).
 			Count(&count).Error; err != nil {
 			return nil, err
 		}
@@ -516,7 +515,7 @@ func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
 	if oldPath != "" && oldPath != c.Path {
 		// Update all files whose new_path starts with oldPath
 		return r.db.Model(&FileEntry{}).
-			Where("new_path LIKE ?", oldPath+"%").
+			Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(oldPath)+"%").
 			Update("new_path", gorm.Expr("REPLACE(new_path, ?, ?)", oldPath, c.Path)).Error
 	}
 	return nil
@@ -714,7 +713,7 @@ func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]Categ
 			Size  int64
 		}
 		r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?)", sessionID, c.Path, c.Path+"/%").
+			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", sessionID, c.Path, childPathPattern(c.Path)).
 			Select("COUNT(*) AS count, COALESCE(SUM(size), 0) AS size").
 			Scan(&stats)
 		if stats.Count > 0 {

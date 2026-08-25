@@ -19,6 +19,10 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
+	// Driver selects the SQL dialect: "sqlite" (default), "mysql" or
+	// "postgres". The DSN format follows the driver: a file path for SQLite,
+	// a go-sql-driver DSN for MySQL, a libpq keyword/value string (or
+	// postgres:// URL) for PostgreSQL.
 	Driver string `yaml:"driver" json:"driver"`
 	DSN    string `yaml:"dsn" json:"dsn"`
 }
@@ -124,7 +128,11 @@ func setDefaults(cfg *Config) {
 		cfg.Database.Driver = "sqlite"
 	}
 	if cfg.Database.DSN == "" {
-		cfg.Database.DSN = "fileengine.db"
+		if cfg.Database.Driver == "postgres" {
+			cfg.Database.DSN = "host=localhost port=5432 user=postgres dbname=fileengine sslmode=disable"
+		} else {
+			cfg.Database.DSN = "fileengine.db"
+		}
 	}
 	if cfg.Agent.BatchSize == 0 {
 		cfg.Agent.BatchSize = 50
