@@ -312,7 +312,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { listSessions, getSession, createSession, deleteSession, rescanSession, updateSessionConfig, startTagging, stopTagging, startExecute, stopExecute, getPlans, exportPlansCSV, validatePlans, getSessionStats, listFilesystems, listModelProviders } from '../api'
@@ -368,6 +368,18 @@ onMounted(async () => {
   if (route.query.new === '1') {
     openNewScanDialog()
     router.replace({ query: { ...route.query, new: undefined } })
+  }
+})
+
+// Deep links re-applied while already mounted (e.g. /logs?session&batch
+// redirecting onto an active /tasks view — review P2-3).
+watch(() => [route.query.session, route.query.batch], ([qSession, qBatch]) => {
+  const sessId = Number(qSession)
+  if (sessId && sessId !== selectedId.value && sessions.value.find(s => s.id === sessId)) {
+    selectedId.value = sessId
+  }
+  if (qBatch != null) {
+    highlightBatch.value = Number(qBatch)
   }
 })
 
@@ -441,6 +453,9 @@ async function refreshSession(id: number) {
   try {
     const res = await getSession(id)
     patchRow(res.data)
+    // A run reaching its terminal state lands here via run_done — reconcile
+    // streams so the finished session's EventSource is closed (review P2-1).
+    syncStreams()
   } catch { /* session may be gone */ }
 }
 
@@ -702,7 +717,12 @@ async function handleNewScan() {
   // CreateSessionRequest has no allow_vision field (backend defaults it off);
   // patch it on only when the user explicitly opted in.
   if (newScan.value.allowVision) {
-    await updateSessionConfig(res.data.id, { allow_vision: true })
+    try {
+      await updateSessionConfig(res.data.id, { allow_vision: true })
+    } catch (e: any) {
+      // Session IS created at this point — warn instead of failing silently.
+      ElMessage.warning(t('tasks.allowVisionPatchFailed', { error: e.response?.data?.error || e.message }))
+    }
   }
   ElMessage.success(t('tasks.scanStarted'))
   showNewDialog.value = false

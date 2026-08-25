@@ -12,6 +12,11 @@ type Handler<T extends SessionEventType> = (payload: SessionEventMap[T]) => void
  *   after every reconnect. There is no last-event-id replay, so subscribers
  *   should refetch /logs inside onOpen to fill gaps.
  * - The stream only carries new events; history stays in GET /logs.
+ *
+ * Lifecycle contract: register handlers ONCE per instance (on/onOpen/onError
+ * append to a list that open() re-attaches to each fresh EventSource), then
+ * call open(id) as often as needed to re-point at a session. Registering the
+ * same handler again stacks it — every event then fires N times.
  */
 export class SessionEventStream {
   private es: EventSource | null = null

@@ -178,6 +178,7 @@ tasks:
   allowAutoCategoryHint: Agent can create new categories automatically
   allowVision: Allow Vision
   allowVisionHint: Let the agent inspect image contents; the model must also have vision enabled
+  allowVisionPatchFailed: "Session created, but enabling vision failed: {error}"
   visionOn: Vision
   excludeCategoryDirs: Exclude Category Dirs
   excludeCategoryDirsHint: Skip category target directories during scan to avoid reprocessing organized files

@@ -216,6 +216,58 @@ const displayGroups = computed<BatchGroup[]>(() => {
 const totalTokens = computed(() => displayGroups.value.reduce((sum, g) => sum + g.tokenSum, 0))
 
 // ===== Lifecycle =====
+// Handlers are registered ONCE per stream instance — open(id) only re-points
+// the EventSource URL. Re-registering on every init() stacked 7 callbacks per
+// session switch and rendered every live event N times (review P1-1).
+stream
+  .onOpen(() => {
+    // First open follows the initial history load; later (re)opens mean we
+    // may have missed events — no replay exists, so refetch history.
+    if (skipFirstOpen) { skipFirstOpen = false; return }
+    scheduleHistoryReload()
+  })
+  .on('batch_start', (e) => {
+    liveLabels.set(e.batch_index, e.label)
+    liveBatches.add(e.batch_index)
+    if (!liveSteps.has(e.batch_index)) liveSteps.set(e.batch_index, [])
+    collapsedMap.set(e.batch_index, false)
+    afterAppend()
+  })
+  .on('message', (e) => {
+    pushLive(e.batch_index, {
+      kind: 'message', key: nextKey(), role: e.role, content: e.content,
+      prompt_tokens: e.prompt_tokens, completion_tokens: e.completion_tokens,
+      total_tokens: e.total_tokens, time: new Date().toISOString(),
+    })
+  })
+  .on('tool_call', (e) => {
+    pushLive(e.batch_index, {
+      kind: 'tool', key: nextKey(), tool_name: e.tool_name, input: e.input, pending: true,
+      time: new Date().toISOString(),
+    })
+  })
+  .on('tool_result', (e) => {
+    const steps = liveSteps.get(e.batch_index)
+    const pending = steps?.filter(s => s.kind === 'tool' && s.pending && s.tool_name === e.tool_name).pop() as ToolStep | undefined
+    if (pending) {
+      pending.output = e.output
+      pending.ok = e.ok
+      pending.pending = false
+    } else {
+      pushLive(e.batch_index, {
+        kind: 'tool', key: nextKey(), tool_name: e.tool_name, output: e.output, ok: e.ok,
+        time: new Date().toISOString(),
+      })
+    }
+    afterAppend()
+  })
+  .on('run_status', () => emit('runStatus'))
+  .on('run_done', () => {
+    // Terminal event: persisted rows (with token counts) are now complete.
+    emit('runDone')
+    scheduleHistoryReload()
+  })
+
 onMounted(async () => {
   if (!props.sessionId) return
   await init()
@@ -227,11 +279,19 @@ watch(() => props.sessionId, async (id, oldId) => {
   await init()
 })
 
+// Deep links can re-point the batch while the component stays mounted.
+watch(() => props.highlightBatch, async (bi) => {
+  if (bi != null) await revealBatch(bi)
+})
+
 onUnmounted(() => {
   if (historyReloadTimer) clearTimeout(historyReloadTimer)
 })
 
 async function init() {
+  // Drop any pending history refill from the previous session — it would
+  // fire with the NEW sessionId and wipe its live steps (review P2-2).
+  if (historyReloadTimer) { clearTimeout(historyReloadTimer); historyReloadTimer = null }
   stream.close()
   histLogs.value = []
   liveSteps.clear()
@@ -300,54 +360,6 @@ async function revealBatch(bi: number) {
 
 function openStream() {
   if (!props.sessionId) return
-  stream
-    .onOpen(() => {
-      // First open follows the initial history load; later (re)opens mean we
-      // may have missed events — no replay exists, so refetch history.
-      if (skipFirstOpen) { skipFirstOpen = false; return }
-      scheduleHistoryReload()
-    })
-    .on('batch_start', (e) => {
-      liveLabels.set(e.batch_index, e.label)
-      liveBatches.add(e.batch_index)
-      if (!liveSteps.has(e.batch_index)) liveSteps.set(e.batch_index, [])
-      collapsedMap.set(e.batch_index, false)
-      afterAppend()
-    })
-    .on('message', (e) => {
-      pushLive(e.batch_index, {
-        kind: 'message', key: nextKey(), role: e.role, content: e.content,
-        prompt_tokens: e.prompt_tokens, completion_tokens: e.completion_tokens,
-        total_tokens: e.total_tokens, time: new Date().toISOString(),
-      })
-    })
-    .on('tool_call', (e) => {
-      pushLive(e.batch_index, {
-        kind: 'tool', key: nextKey(), tool_name: e.tool_name, input: e.input, pending: true,
-        time: new Date().toISOString(),
-      })
-    })
-    .on('tool_result', (e) => {
-      const steps = liveSteps.get(e.batch_index)
-      const pending = steps?.filter(s => s.kind === 'tool' && s.pending && s.tool_name === e.tool_name).pop() as ToolStep | undefined
-      if (pending) {
-        pending.output = e.output
-        pending.ok = e.ok
-        pending.pending = false
-      } else {
-        pushLive(e.batch_index, {
-          kind: 'tool', key: nextKey(), tool_name: e.tool_name, output: e.output, ok: e.ok,
-          time: new Date().toISOString(),
-        })
-      }
-      afterAppend()
-    })
-    .on('run_status', () => emit('runStatus'))
-    .on('run_done', () => {
-      // Terminal event: persisted rows (with token counts) are now complete.
-      emit('runDone')
-      scheduleHistoryReload()
-    })
   stream.open(props.sessionId)
 }
 
