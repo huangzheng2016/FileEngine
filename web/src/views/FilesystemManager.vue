@@ -20,7 +20,9 @@
         </el-table-column>
         <el-table-column prop="protocol" :label="$t('filesystems.protocol')" width="110">
           <template #default="{ row }">
-            <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+            <el-tooltip :content="protocolCapsText(row.protocol)" placement="top">
+              <span class="status-chip" :class="protocolChipClass(row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="base_path" :label="$t('filesystems.basePath')" min-width="220" show-overflow-tooltip>
@@ -157,14 +159,15 @@ function protocolChipClass(protocol: string): string {
 
 // Per-protocol capability hint (random access / archive support), matching
 // the backend matrix documented in CLAUDE.md.
-const protocolCapsHint = computed(() => {
-  const keys: Record<string, string> = {
-    local: 'filesystems.capsLocal', sftp: 'filesystems.capsSftp', smb: 'filesystems.capsSmb',
-    nfs: 'filesystems.capsNfs', ftp: 'filesystems.capsFtp',
-  }
-  const key = keys[form.value.protocol]
+const capsKeys: Record<string, string> = {
+  local: 'filesystems.capsLocal', sftp: 'filesystems.capsSftp', smb: 'filesystems.capsSmb',
+  nfs: 'filesystems.capsNfs', ftp: 'filesystems.capsFtp',
+}
+function protocolCapsText(protocol: string): string {
+  const key = capsKeys[protocol]
   return key ? t(key) : ''
-})
+}
+const protocolCapsHint = computed(() => protocolCapsText(form.value.protocol))
 
 async function load() {
   loading.value = true

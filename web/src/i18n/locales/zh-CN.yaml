@@ -237,11 +237,16 @@ config:
   database:
     driver: 数据库驱动
     dsn: 连接字符串
+    dangerWarning: 修改数据库配置会影响全部数据存储；错误配置会导致服务不可用，修改前请备份数据
   agent:
     batchSize: 散文件每批数量
     concurrency: 目录并行工作线程
     maxFileReadSize: 最大文件读取大小
     maxRetries: 最大重试次数
+    batchSizeHint: 每批散文件数（默认 200，上限 500）；脚本批量模式下步数与文件数解耦
+    concurrencyHint: 打标工作线程数（每线程独立连接与 token 统计，建议 ≤10）
+    maxFileReadSizeHint: read_file 单次读取上限，单位字节（默认 102400 = 100KB）
+    maxRetriesHint: 批次失败后的自动重试次数（线性退避 2s/4s/6s）
   prompt:
     customLabel: 自定义
     defaultLabel: 默认

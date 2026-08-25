@@ -239,11 +239,16 @@ config:
   database:
     driver: Driver
     dsn: DSN
+    dangerWarning: Database settings affect all stored data; a bad value makes the service unusable — back up first
   agent:
     batchSize: Loose Files per Batch
     concurrency: Directory Worker Threads
     maxFileReadSize: Max File Read Size
     maxRetries: Max Retries
+    batchSizeHint: Loose files per batch (default 200, cap 500); script bulk mode decouples steps from file count
+    concurrencyHint: Tagging worker threads (own connection + token tracker each; <=10 recommended)
+    maxFileReadSizeHint: Per-call read cap of read_file, in bytes (default 102400 = 100KB)
+    maxRetriesHint: Auto retries per failed batch (linear backoff 2s/4s/6s)
   prompt:
     customLabel: Custom
     defaultLabel: Default
