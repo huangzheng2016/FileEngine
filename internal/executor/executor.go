@@ -22,10 +22,10 @@ type PlanItem struct {
 }
 
 type ExecuteResult struct {
-	Total    int `json:"total"`
-	Success  int `json:"success"`
-	Failed   int `json:"failed"`
-	Skipped  int `json:"skipped"`
+	Total   int `json:"total"`
+	Success int `json:"success"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
 }
 
 type Executor struct {

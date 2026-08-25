@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,23 +13,25 @@ import (
 )
 
 type ModelProviderResponse struct {
-	ID          uint    `json:"id"`
-	Name        string  `json:"name"`
-	Provider    string  `json:"provider"`
-	Model       string  `json:"model"`
-	BaseURL     string  `json:"base_url"`
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID            uint    `json:"id"`
+	Name          string  `json:"name"`
+	Provider      string  `json:"provider"`
+	Model         string  `json:"model"`
+	BaseURL       string  `json:"base_url"`
+	Temperature   float64 `json:"temperature"`
+	MaxTokens     int     `json:"max_tokens"`
+	ContextWindow int     `json:"context_window"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 	return ModelProviderResponse{
 		ID: m.ID, Name: m.Name, Provider: m.Provider, Model: m.Model,
 		BaseURL: m.BaseURL, Temperature: m.Temperature, MaxTokens: m.MaxTokens,
-		CreatedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ContextWindow: m.EffectiveContextWindow(),
+		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 
@@ -53,6 +56,21 @@ type ModelProviderRequest struct {
 	BaseURL     string  `json:"base_url"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
+	// ContextWindow is optional and additive: old clients omit it (nil),
+	// new clients may pass a tier (200K/256K/500K/900K/1M) or a custom value.
+	ContextWindow *int `json:"context_window"`
+}
+
+// resolveContextWindow validates an optional context_window value. Lenient by
+// design: any positive token count is accepted (tiers are UI suggestions).
+func resolveContextWindow(v *int, fallback int) (int, error) {
+	if v == nil {
+		return fallback, nil
+	}
+	if *v <= 0 {
+		return 0, fmt.Errorf("context_window must be a positive token count")
+	}
+	return *v, nil
 }
 
 func (s *Server) createModelProvider(c *gin.Context) {
@@ -61,10 +79,16 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	contextWindow, err := resolveContextWindow(req.ContextWindow, db.DefaultContextWindow)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	m := &db.ModelProvider{
 		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
 		Model: req.Model, BaseURL: req.BaseURL,
 		Temperature: req.Temperature, MaxTokens: req.MaxTokens,
+		ContextWindow: contextWindow,
 	}
 	if err := s.repo.CreateModelProvider(m); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -109,6 +133,16 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 	m.BaseURL = req.BaseURL
 	m.Temperature = req.Temperature
 	m.MaxTokens = req.MaxTokens
+	// context_window is additive: absent (nil) keeps the stored value so old
+	// clients doing full-form updates never clobber it.
+	if req.ContextWindow != nil {
+		contextWindow, err := resolveContextWindow(req.ContextWindow, m.ContextWindow)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		m.ContextWindow = contextWindow
+	}
 	if req.APIKey != "" && req.APIKey != "****" {
 		m.APIKey = req.APIKey
 	}

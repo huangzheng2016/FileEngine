@@ -33,7 +33,21 @@ func (m *tokenTrackingModel) Generate(ctx context.Context, input []*schema.Messa
 }
 
 func (m *tokenTrackingModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
-	return m.inner.Stream(ctx, input, opts...)
+	sr, err := m.inner.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	// Usage (when the provider reports it) rides on a final frame; count every
+	// frame that carries it so streamed calls are not missed.
+	return schema.StreamReaderWithConvert(sr, func(msg *schema.Message) (*schema.Message, error) {
+		if msg != nil && msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
+			u := msg.ResponseMeta.Usage
+			atomic.AddInt64(&m.promptTokens, int64(u.PromptTokens))
+			atomic.AddInt64(&m.completionTokens, int64(u.CompletionTokens))
+			atomic.AddInt64(&m.totalTokens, int64(u.TotalTokens))
+		}
+		return msg, nil
+	}), nil
 }
 
 func (m *tokenTrackingModel) BindTools(tools []*schema.ToolInfo) error {

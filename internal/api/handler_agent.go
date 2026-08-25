@@ -181,10 +181,8 @@ func (s *Server) instructAgent(c *gin.Context) {
 			agentMu.Unlock()
 		}()
 		// The request ctx is canceled as soon as this handler returns; background
-		// work runs on context.Background(). Note: unlike tagging/execute,
-		// instruct has no cancellation path — RunInstruct registers no cancelFn
-		// and the stop route is not wired, so it runs until completion
-		// (bounded by instruct_max_step).
+		// work runs on context.Background() (Stop() has its own cancelFn,
+		// registered by RunInstruct like RunTagging).
 		if _, err := a.RunInstruct(context.Background(), files, req.Prompt); err != nil {
 			log.Printf("instruct session %d failed: %v", sessionID, err)
 		}

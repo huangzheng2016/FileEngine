@@ -488,7 +488,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 	return out, nil
 }
 
-
 func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))

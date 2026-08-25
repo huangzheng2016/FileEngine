@@ -75,8 +75,8 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `set_target` with empty `new_path` clears the target
 - Before processing each directory, re-checks tagged status (another worker may have cascade-tagged it)
 - Configurable concurrency: each worker gets its own FS connection + ReAct agent instance + token tracker
-- All agent config (concurrency, batch_size, max_retries, system_prompt) read from live `config.Get()` each iteration — hot-reloadable without restart
-- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s); each attempt has a 60s timeout (hardcoded in `runADKWithRetry`; the `agent_timeout` config field is currently unused) that covers an entire agent run — the full ReAct loop of up to `max_step` tool rounds — not a single Generate call
+- All agent config (concurrency, batch_size, max_retries, system_prompt, agent_timeout) read from live `config.Get()` each iteration — hot-reloadable without restart
+- Retry on failure: up to `max_retries` with linear backoff (2s, 4s, 6s); each attempt has an `agent_timeout` seconds timeout (default 60) that covers an entire agent run — the full ReAct loop of up to `max_step` tool rounds — not a single Generate call
 - `processRemainingFiles` has 1000-iteration safety limit to prevent infinite loops
 
 ### Agent Tools
@@ -87,10 +87,11 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - `delete_category` clears planned files under that category and resets `tagged=false` for re-classification
 - Categories have `agent_created` and `agent_editable` flags; agent can only modify/delete `agent_editable=true` categories
 - Instruct mode (`RunInstruct`) has all tools available including `list_files`, `get_file_info`, `mark_tagged`
-- Token tracking: `tokenTrackingModel` wrapper intercepts all LLM Generate calls (including intermediate ReAct rounds) to accumulate accurate token counts
+- Token tracking: `tokenTrackingModel` wrapper intercepts all LLM Generate and Stream calls (including intermediate ReAct rounds) to accumulate accurate token counts
 
 ### Model Providers
-- `ModelProvider` DB entity stores multiple LLM configurations (name, provider, api_key, model, base_url, temperature, max_tokens)
+- `ModelProvider` DB entity stores multiple LLM configurations (name, provider, api_key, model, base_url, temperature, max_tokens, context_window)
+- `max_tokens` is the output completion cap passed to the LLM API; `context_window` is the model's context window in tokens — it alone drives the reduction/summarization thresholds in `buildADKAgent`. Suggested tiers 200K/256K/500K/900K/1M, custom values accepted; unset/legacy rows fall back to `db.DefaultContextWindow` (200K), backfilled on DB init
 - Supports OpenAI (via `eino-ext/components/model/openai`), Claude (native via `eino-ext/components/model/claude`), Ollama (via OpenAI-compatible endpoint)
 - Each `ScanSession` has `ModelProviderID` — can use a different model per scan
 - `model.NewChatModelFromProvider()` creates model from DB entity
@@ -119,7 +120,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 
 ### Eino Framework
 - Agent: `adk.NewChatModelAgent()` creates a ReAct agent (see `internal/agent/adk.go`); executed via `adk.Runner`, `MaxIterations` caps the tool-call rounds per run
-- Middleware chain (in order): `patchtoolcalls` (repairs dangling tool calls) → `reduction` (clears old tool outputs past 75% of the model context window) → `summarization` (official eino middleware; LLM-summarizes history past 90% of the window, sharing the same token estimator)
+- Middleware chain (in order): `patchtoolcalls` (repairs dangling tool calls) → `reduction` (clears old tool outputs past 75% of the model context window) → `summarization` (official eino middleware; LLM-summarizes history past 90% of the window, sharing the same token estimator). The context window comes from `ModelProvider.EffectiveContextWindow()` — never from `max_tokens`
 - Model: `adk.ChatModelAgentConfig.Model` takes `model.ChatModel` (eino-ext openai/claude factories in `internal/model/factory.go`)
 - Tools: `utils.InferTool(name, desc, func)` auto-generates JSON schema from Go struct tags
 - Struct tags: `json:"field_name" jsonschema_description:"description for LLM"`

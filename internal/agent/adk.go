@@ -17,9 +17,10 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
+	"FileEngine/internal/db"
 )
 
-func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, modelMaxTokens int) (*adk.ChatModelAgent, error) {
+func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int) (*adk.ChatModelAgent, error) {
 	// 1. patchtoolcalls: 修补悬空 ToolCall
 	patchMw, err := patchtoolcalls.New(ctx, nil)
 	if err != nil {
@@ -28,10 +29,10 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 
 	// 2. reduction: 工具结果截断与清理
 	// Dynamic thresholds based on model's context window
-	if modelMaxTokens <= 0 {
-		modelMaxTokens = 128_000
+	if contextWindow <= 0 {
+		contextWindow = db.DefaultContextWindow
 	}
-	clearThreshold := int64(float64(modelMaxTokens) * 0.75)
+	clearThreshold := int64(float64(contextWindow) * 0.75)
 
 	reduceCfg := &reduction.Config{
 		SkipTruncation: true,
@@ -48,7 +49,7 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 
 	// 3. summarization: 上下文压缩（eino 官方摘要中间件）
 	// 触发阈值取模型上下文窗口的 90%，与 reduction 共用同一 token 估算。
-	compactTrigger := int(float64(modelMaxTokens) * 0.90)
+	compactTrigger := int(float64(contextWindow) * 0.90)
 	if compactTrigger < 1 {
 		compactTrigger = 1
 	}
@@ -119,8 +120,20 @@ func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 	return tokens
 }
 
+// agentRunTimeout returns the per-attempt timeout for one full agent run
+// (the entire ReAct loop of up to max_step tool rounds, not a single Generate
+// call). It reads the live config so agent_timeout is hot-reloadable.
+func agentRunTimeout() time.Duration {
+	secs := config.Get().Agent.AgentTimeout
+	if secs <= 0 {
+		secs = 60
+	}
+	return time.Duration(secs) * time.Second
+}
+
 func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
-	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+	timeout := agentRunTimeout()
+	callCtx, callCancel := context.WithTimeout(ctx, timeout)
 	defer callCancel()
 
 	tracker.ResetUsage()
@@ -139,7 +152,7 @@ func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []
 		}
 		log.Printf("%s retry %d/%d: %v", label, retry, maxRetries, err)
 		time.Sleep(time.Duration(retry) * 2 * time.Second)
-		retryCtx, retryCancel := context.WithTimeout(ctx, 60*time.Second)
+		retryCtx, retryCancel := context.WithTimeout(ctx, timeout)
 		tracker.ResetUsage()
 		result, err = runADKOnce(retryCtx, agent, messages)
 		retryCancel()

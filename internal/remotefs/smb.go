@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"path"
+	"strconv"
 	"strings"
 
 	"FileEngine/internal/config"
@@ -26,7 +27,7 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 		port = 445
 	}
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Host, port))
+	conn, err := net.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(port)))
 	if err != nil {
 		return nil, fmt.Errorf("smb connect: %w", err)
 	}
