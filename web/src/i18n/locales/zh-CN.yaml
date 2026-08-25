@@ -14,8 +14,6 @@ nav:
 common:
   save: 保存
   copy: 复制
-  yes: 是
-  no: 否
   cancel: 取消
   delete: 删除
   edit: 编辑
@@ -31,8 +29,6 @@ common:
   size: 大小
   status: 状态
   description: 描述
-  yes: 是
-  no: 否
   deleted: 已删除
   saved: 已保存
   created: 已创建

@@ -14,8 +14,6 @@ nav:
 common:
   save: Save
   copy: Copy
-  yes: Yes
-  no: No
   cancel: Cancel
   delete: Delete
   edit: Edit
@@ -31,8 +29,8 @@ common:
   size: Size
   status: Status
   description: Description
-  yes: "Yes"
-  no: "No"
+  'yes': "Yes"
+  'no': "No"
   deleted: Deleted
   saved: Saved
   created: Created
