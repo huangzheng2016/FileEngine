@@ -28,13 +28,14 @@ import (
 const backendLogMaxBytes = 5 << 20 // 5 MiB
 
 type DesktopApp struct {
-	mu          sync.RWMutex
-	backendCmd  *exec.Cmd
-	backendDone chan struct{}
-	backendPort int
-	backendErr  error
-	proxy       *httputil.ReverseProxy
-	ctx         context.Context
+	mu           sync.RWMutex
+	backendCmd   *exec.Cmd
+	backendDone  chan struct{}
+	backendPort  int
+	backendErr   error
+	proxy        *httputil.ReverseProxy
+	ctx          context.Context
+	shuttingDown bool
 }
 
 func (a *DesktopApp) onStartup(ctx context.Context) {
@@ -58,12 +59,17 @@ func (a *DesktopApp) setBackendErr(err error) {
 
 func (a *DesktopApp) onShutdown(ctx context.Context) {
 	a.saveWindowState(ctx)
+	a.mu.Lock()
+	a.shuttingDown = true
+	a.mu.Unlock()
 	a.stopBackend()
 }
 
 // stopBackend asks the backend to terminate gracefully, then force-kills it
-// after a grace period. The exit watcher goroutine started in startBackend
-// closes backendDone, so no double Wait happens here.
+// after a grace period. It is safe to call multiple times and while the
+// backend is still in its health-check window: the exit watcher goroutine
+// started in startBackend is the only caller of cmd.Wait and closes
+// backendDone, so there is no double Wait and repeated calls return fast.
 func (a *DesktopApp) stopBackend() {
 	a.mu.RLock()
 	cmd := a.backendCmd
@@ -214,28 +220,49 @@ func (a *DesktopApp) startBackend() error {
 		return fmt.Errorf("start backend: %w", err)
 	}
 
-	if err := waitForBackend(port); err != nil {
+	// Register the backend (and its reaper) immediately after Start, before
+	// the health check: if the window is closed while waitForBackend is
+	// still polling, onShutdown/stopBackend must find the child and kill it
+	// instead of leaving an orphan behind.
+	done := make(chan struct{})
+	a.mu.Lock()
+	a.backendCmd = cmd
+	a.backendDone = done
+	shuttingDown := a.shuttingDown
+	a.mu.Unlock()
+	a.watchBackend(cmd, done, logFile)
+
+	if shuttingDown {
+		// onShutdown already ran before this child existed; kill it now,
+		// the watcher reaps it and closes the log file.
 		_ = cmd.Process.Kill()
-		go func() {
-			_ = cmd.Wait()
-			if logFile != nil {
-				_ = logFile.Close()
-			}
-		}()
+		return errors.New("backend startup aborted: application is shutting down")
+	}
+
+	if err := waitForBackend(port); err != nil {
+		// The watcher owns cmd.Wait and reaps the killed child.
+		_ = cmd.Process.Kill()
 		return fmt.Errorf("%w (backend log: %s)", err, logPath)
 	}
 
 	targetURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	done := make(chan struct{})
 
 	a.mu.Lock()
-	a.backendCmd = cmd
-	a.backendDone = done
 	a.backendPort = port
 	a.proxy = proxy
 	a.mu.Unlock()
 
+	return nil
+}
+
+// watchBackend reaps the backend process exactly once: it is the only caller
+// of cmd.Wait, closes the log file, and closes done (which stopBackend waits
+// on). When a fully started backend (proxy wired up) dies on its own, the
+// error is surfaced via backendErr and the app quits; exits before that
+// point are reported by startBackend itself, and exits during shutdown are
+// expected — neither needs the error page or a Quit call.
+func (a *DesktopApp) watchBackend(cmd *exec.Cmd, done chan struct{}, logFile *os.File) {
 	go func() {
 		waitErr := cmd.Wait()
 		if logFile != nil {
@@ -247,16 +274,19 @@ func (a *DesktopApp) startBackend() error {
 			exitErr = errors.New("backend exited unexpectedly with status 0")
 		}
 		a.mu.Lock()
-		a.backendErr = exitErr
-		a.proxy = nil
+		running := a.proxy != nil
+		if running {
+			a.backendErr = exitErr
+			a.proxy = nil
+		}
 		a.mu.Unlock()
 		log.Printf("fileengine backend exited: %v", waitErr)
-		if ctx := a.appCtx(); ctx != nil {
-			wailsRuntime.Quit(ctx)
+		if running {
+			if ctx := a.appCtx(); ctx != nil {
+				wailsRuntime.Quit(ctx)
+			}
 		}
 	}()
-
-	return nil
 }
 
 // ensureBackendBinary installs the embedded backend binary at target,
@@ -362,16 +392,35 @@ func resolveBackendPort(configPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	lines[idx] = fmt.Sprintf("  port: %d", newPort)
+	lines[idx] = replacePortValue(lines[idx], newPort)
 	tmp := configPath + ".tmp"
 	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return 0, err
+	}
+	// Keep the original file mode (e.g. 0o600 when the config holds
+	// credentials) instead of widening it to the WriteFile default.
+	if st, statErr := os.Stat(configPath); statErr == nil {
+		_ = os.Chmod(tmp, st.Mode().Perm())
 	}
 	if err := os.Rename(tmp, configPath); err != nil {
 		_ = os.Remove(tmp)
 		return 0, err
 	}
 	return newPort, nil
+}
+
+// replacePortValue rewrites the port value on a server.port line while
+// preserving the original leading whitespace and any trailing inline
+// comment, so the rewritten file keeps its indentation style and stays
+// parseable.
+func replacePortValue(line string, port int) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	leading := line[:len(line)-len(trimmed)]
+	comment := ""
+	if i := strings.Index(trimmed, "#"); i >= 0 {
+		comment = " " + strings.TrimSpace(trimmed[i:])
+	}
+	return fmt.Sprintf("%sport: %d%s", leading, port, comment)
 }
 
 // findServerPortLine scans block-style YAML lines for the server.port entry

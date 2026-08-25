@@ -60,4 +60,10 @@ func main() {
 	}); err != nil {
 		log.Fatalf("Wails error: %v", err)
 	}
+
+	// Belt and braces: if the window was closed while the backend was still
+	// starting (onShutdown ran before the child was registered, or never
+	// ran at all), make sure no orphan process survives main's exit.
+	// stopBackend is idempotent and returns fast when already done.
+	app.stopBackend()
 }

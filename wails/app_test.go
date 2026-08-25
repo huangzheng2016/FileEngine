@@ -9,11 +9,15 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -278,6 +282,112 @@ func TestFindServerPortLine(t *testing.T) {
 	if idx, port := findServerPortLine(lines); idx != -1 || port != 0 {
 		t.Fatalf("idx=%d port=%d, want -1/0", idx, port)
 	}
+}
+
+func TestReplacePortValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"  port: 45001", "  port: 45002"},
+		{"    port: 45001", "    port: 45002"},
+		{"\tport: 45001", "\tport: 45002"},
+		{"  port: 45001 # primary", "  port: 45002 # primary"},
+		{"    port: 45001    # primary port", "    port: 45002 # primary port"},
+	}
+	for _, c := range cases {
+		if got := replacePortValue(c.in, 45002); got != c.want {
+			t.Errorf("replacePortValue(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestResolveBackendPortPreservesIndentCommentAndMode(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	_, busyStr, _ := net.SplitHostPort(ln.Addr().String())
+
+	// 4-space indentation, inline comment on the port line, tightened mode.
+	custom := "server:\n    port: " + busyStr + " # primary port\n    host: 127.0.0.1\nagent:\n    batch_size: 42\n"
+	if err := os.WriteFile(configPath, []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	port, err := resolveBackendPort(configPath)
+	if err != nil {
+		t.Fatalf("busy port: %v", err)
+	}
+	if fmt.Sprint(port) == busyStr {
+		t.Fatal("busy port was not replaced")
+	}
+
+	data, _ := os.ReadFile(configPath)
+	want := "    port: " + fmt.Sprint(port) + " # primary port"
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("indent/comment not preserved, want line %q in:\n%s", want, data)
+	}
+
+	// The rewritten file must still parse as YAML with consistent indent.
+	var parsed struct {
+		Server struct {
+			Port int `yaml:"port"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("rewritten config no longer parses: %v\n%s", err, data)
+	}
+	if parsed.Server.Port != port {
+		t.Fatalf("parsed port = %d, want %d", parsed.Server.Port, port)
+	}
+
+	st, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o, want 600", st.Mode().Perm())
+	}
+}
+
+func TestStopBackendKillsChildAndIsIdempotent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sleep and SIGTERM")
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	done := make(chan struct{})
+	app := &DesktopApp{backendCmd: cmd, backendDone: done}
+	app.watchBackend(cmd, done, nil)
+
+	app.stopBackend()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("backend child not stopped within 5s")
+	}
+
+	// Second call (as issued after wails.Run returns) must not block or panic.
+	finished := make(chan struct{})
+	go func() {
+		app.stopBackend()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("second stopBackend call blocked")
+	}
+}
+
+func TestStopBackendNoBackend(t *testing.T) {
+	app := &DesktopApp{}
+	app.stopBackend() // must be a no-op, not a panic
+	app.stopBackend()
 }
 
 func TestLoadWindowState(t *testing.T) {
