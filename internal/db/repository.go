@@ -481,6 +481,19 @@ func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
 	return n, err
 }
 
+// CountPlannedByTargetPath counts planned files under a category path across
+// ALL sessions of a filesystem — the filesystem-level usage view. The
+// empty-category prune must use this (not the per-session summary): a
+// category filled by an earlier run shows zero in the current session yet is
+// genuinely in use (multi-session rescan workflows).
+func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath string) (int64, error) {
+	var n int64
+	err := r.db.Model(&FileEntry{}).
+		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND operation != '' AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", filesystemID, categoryPath, childPathPattern(categoryPath)).
+		Count(&n).Error
+	return n, err
+}
+
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
 // whose new_path falls under the given category path, across all sessions of a filesystem.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {

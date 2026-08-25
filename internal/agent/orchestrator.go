@@ -159,16 +159,13 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 // report. User-created categories (agent_created=false) and non-empty ones
 // are never touched. Runs at run end only: categories created mid-run may
 // still be filled by later batches.
+//
+// Emptiness is judged FILESYSTEM-WIDE (all sessions), not per-session:
+// categories are filesystem-level shared resources — in a rescan workflow
+// (new session + exclude_category_dirs) a category created and filled by an
+// earlier run has zero plans in the current session, and pruning it would
+// destroy still-referenced organization metadata.
 func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
-	usages, err := o.repo.GetCategoryUsageSummary(o.session.FilesystemID, o.sessionID)
-	if err != nil {
-		log.Printf("orchestrator: empty-category prune, usage summary failed: %v", err)
-		return nil
-	}
-	countByPath := make(map[string]int64, len(usages))
-	for _, u := range usages {
-		countByPath[u.Path] = u.FileCount
-	}
 	cats, err := o.repo.ListCategories(o.session.FilesystemID)
 	if err != nil {
 		log.Printf("orchestrator: empty-category prune, list failed: %v", err)
@@ -176,7 +173,15 @@ func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
 	}
 	var pruned []string
 	for _, c := range cats {
-		if !c.AgentCreated || countByPath[c.Path] > 0 {
+		if !c.AgentCreated {
+			continue
+		}
+		n, err := o.repo.CountPlannedByTargetPath(o.session.FilesystemID, c.Path)
+		if err != nil {
+			log.Printf("orchestrator: empty-category prune, count for %q failed: %v", c.Name, err)
+			continue
+		}
+		if n > 0 {
 			continue
 		}
 		if err := o.repo.DeleteCategory(c.ID); err != nil {
