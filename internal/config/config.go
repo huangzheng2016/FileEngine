@@ -52,6 +52,12 @@ type AgentConfig struct {
 	// <= 0 or unset means no timeout — the default; a run is then bounded only
 	// by user stop and max_step. Set a positive value to enforce an upper bound.
 	AgentTimeout int `yaml:"agent_timeout" json:"agent_timeout"`
+	// run_script guardrails (only reachable when ScanSession.AllowScript is on).
+	// ScriptTimeout is per script execution and deliberately independent of
+	// AgentTimeout: agent runs are unlimited by default, scripts never are.
+	ScriptMaxSize       int `yaml:"script_max_size" json:"script_max_size"`               // max script source bytes
+	ScriptTimeout       int `yaml:"script_timeout" json:"script_timeout"`                 // seconds per script run
+	ScriptMaxResultSize int `yaml:"script_max_result_size" json:"script_max_result_size"` // max bytes of print output and of return value, each
 }
 
 var (
@@ -138,5 +144,14 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.VisionMaxImageBytes == 0 {
 		cfg.Agent.VisionMaxImageBytes = 20 * 1024 * 1024
+	}
+	if cfg.Agent.ScriptMaxSize == 0 {
+		cfg.Agent.ScriptMaxSize = 16 * 1024
+	}
+	if cfg.Agent.ScriptTimeout == 0 {
+		cfg.Agent.ScriptTimeout = 10
+	}
+	if cfg.Agent.ScriptMaxResultSize == 0 {
+		cfg.Agent.ScriptMaxResultSize = 32 * 1024
 	}
 }

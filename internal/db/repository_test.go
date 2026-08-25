@@ -88,3 +88,106 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		t.Fatal("stats must not include unused categories")
 	}
 }
+
+// allow_script defaults ON: a session created without touching the field must
+// read back AllowScript=true (the GORM default tag omits the zero value from
+// the INSERT, so the DB default applies).
+func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	fs := &Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
+	if err := r.CreateFilesystem(fs); err != nil {
+		t.Fatalf("create filesystem: %v", err)
+	}
+	session := &ScanSession{FilesystemID: fs.ID, Status: "scanning"}
+	if err := r.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	reloaded, err := r.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if !reloaded.AllowScript {
+		t.Fatal("AllowScript must default to true for a session created without setting it")
+	}
+
+	// An explicit false persists (the session switch can be turned off).
+	reloaded.AllowScript = false
+	if err := r.UpdateSession(reloaded); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	again, err := r.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if again.AllowScript {
+		t.Fatal("explicit AllowScript=false must persist")
+	}
+}
+
+// SampleFiles returns a random subset bounded by n, honoring the query
+// filters, and never invents rows.
+func TestSampleFiles(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := NewRepository(DB)
+
+	for _, f := range []FileEntry{
+		{ScanSessionID: 1, OriginalPath: "in/a.jpg", ParentPath: "in", Name: "a.jpg", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/b.jpg", ParentPath: "in", Name: "b.jpg", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/c.jpg", ParentPath: "in", Name: "c.jpg", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in/d.jpg", ParentPath: "in", Name: "d.jpg", FileType: "file"},
+		{ScanSessionID: 1, OriginalPath: "in", ParentPath: "", Name: "in", FileType: "directory"},
+		{ScanSessionID: 2, OriginalPath: "other/x.jpg", ParentPath: "other", Name: "x.jpg", FileType: "file"},
+	} {
+		fe := f
+		if err := r.CreateFile(&fe); err != nil {
+			t.Fatalf("create file %s: %v", f.OriginalPath, err)
+		}
+	}
+
+	parent := "in"
+	// n above the match count returns every match (all session-1 "in" files).
+	all, err := r.SampleFiles(FileQuery{SessionID: 1, ParentPath: &parent, FileType: "file"}, 50)
+	if err != nil {
+		t.Fatalf("SampleFiles: %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("SampleFiles n>matches: got %d, want 4", len(all))
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i-1].OriginalPath > all[i].OriginalPath {
+			t.Fatalf("SampleFiles output must be path-sorted: %v", all)
+		}
+	}
+
+	// n caps the subset; every winner matches the filters and session.
+	some, err := r.SampleFiles(FileQuery{SessionID: 1, ParentPath: &parent}, 2)
+	if err != nil {
+		t.Fatalf("SampleFiles: %v", err)
+	}
+	if len(some) != 2 {
+		t.Fatalf("SampleFiles n=2: got %d", len(some))
+	}
+	for _, f := range some {
+		if f.ScanSessionID != 1 || f.ParentPath != "in" {
+			t.Fatalf("sampled row violates filters: %+v", f)
+		}
+	}
+
+	// No matches → empty, not an error.
+	none, err := r.SampleFiles(FileQuery{SessionID: 99}, 5)
+	if err != nil || len(none) != 0 {
+		t.Fatalf("SampleFiles no matches: got %v, %v", none, err)
+	}
+	if got, err := r.SampleFiles(FileQuery{SessionID: 1}, 0); err != nil || got != nil {
+		t.Fatalf("SampleFiles n=0: got %v, %v", got, err)
+	}
+}

@@ -39,15 +39,27 @@ func NewFTPFS(cfg config.RemoteFSConfig) (*FTPFS, error) {
 	return &FTPFS{conn: conn, basePath: cfg.BasePath}, nil
 }
 
-func (f *FTPFS) resolve(p string) string {
+// resolve maps a caller path to a host slash path confined to basePath
+// (absolute paths must stay inside it; ".." escapes are rejected).
+func (f *FTPFS) resolve(p string) (string, error) {
+	var full string
 	if path.IsAbs(p) {
-		return path.Clean(p)
+		full = path.Clean(p)
+	} else {
+		full = path.Join(f.basePath, p)
 	}
-	return path.Join(f.basePath, p)
+	if err := confineSlashPath(full, f.basePath); err != nil {
+		return "", err
+	}
+	return full, nil
 }
 
 func (f *FTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
-	entries, err := f.conn.List(f.resolve(p))
+	fullPath, err := f.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := f.conn.List(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +87,11 @@ func (f *FTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
 }
 
 func (f *FTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
-	entry, err := f.conn.GetEntry(f.resolve(p))
+	fullPath, err := f.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := f.conn.GetEntry(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +110,11 @@ func (f *FTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 }
 
 func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
-	resp, err := f.conn.Retr(f.resolve(p))
+	fullPath, err := f.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := f.conn.Retr(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +122,15 @@ func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 }
 
 func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
-	return f.conn.Rename(f.resolve(src), f.resolve(dst))
+	srcFull, err := f.resolve(src)
+	if err != nil {
+		return err
+	}
+	dstFull, err := f.resolve(dst)
+	if err != nil {
+		return err
+	}
+	return f.conn.Rename(srcFull, dstFull)
 }
 
 func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
@@ -117,15 +145,27 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 		return err
 	}
 
-	return f.conn.Stor(f.resolve(dst), bytes.NewReader(data))
+	dstFull, err := f.resolve(dst)
+	if err != nil {
+		return err
+	}
+	return f.conn.Stor(dstFull, bytes.NewReader(data))
 }
 
 func (f *FTPFS) Delete(_ context.Context, p string) error {
-	return f.conn.Delete(f.resolve(p))
+	fullPath, err := f.resolve(p)
+	if err != nil {
+		return err
+	}
+	return f.conn.Delete(fullPath)
 }
 
 func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
-	return f.conn.MakeDir(f.resolve(p))
+	fullPath, err := f.resolve(p)
+	if err != nil {
+		return err
+	}
+	return f.conn.MakeDir(fullPath)
 }
 
 func (f *FTPFS) Close() error {

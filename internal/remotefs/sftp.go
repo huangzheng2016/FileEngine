@@ -65,15 +65,27 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	}, nil
 }
 
-func (s *SFTPFS) resolve(p string) string {
+// resolve maps a caller path to a host slash path and confines it to
+// basePath: absolute paths are accepted only inside basePath, and ".." or
+// absolute escapes are rejected (matches LocalFS.resolve's lexical check).
+func (s *SFTPFS) resolve(p string) (string, error) {
+	var full string
 	if path.IsAbs(p) {
-		return path.Clean(p)
+		full = path.Clean(p)
+	} else {
+		full = path.Join(s.basePath, p)
 	}
-	return path.Join(s.basePath, p)
+	if err := confineSlashPath(full, s.basePath); err != nil {
+		return "", err
+	}
+	return full, nil
 }
 
 func (s *SFTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
-	fullPath := s.resolve(p)
+	fullPath, err := s.resolve(p)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := s.client.ReadDir(fullPath)
 	if err != nil {
 		return nil, err
@@ -100,7 +112,10 @@ func (s *SFTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
 }
 
 func (s *SFTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
-	fullPath := s.resolve(p)
+	fullPath, err := s.resolve(p)
+	if err != nil {
+		return nil, err
+	}
 	info, err := s.client.Stat(fullPath)
 	if err != nil {
 		return nil, err
@@ -128,20 +143,37 @@ func (s *SFTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 }
 
 func (s *SFTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
-	return s.client.Open(s.resolve(p))
+	fullPath, err := s.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.Open(fullPath)
 }
 
 func (s *SFTPFS) MoveFile(ctx context.Context, src, dst string) error {
-	dstFull := s.resolve(dst)
+	dstFull, err := s.resolve(dst)
+	if err != nil {
+		return err
+	}
+	srcFull, err := s.resolve(src)
+	if err != nil {
+		return err
+	}
 	if err := s.client.MkdirAll(path.Dir(dstFull)); err != nil {
 		return err
 	}
-	return s.client.Rename(s.resolve(src), dstFull)
+	return s.client.Rename(srcFull, dstFull)
 }
 
 func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
-	srcFull := s.resolve(src)
-	dstFull := s.resolve(dst)
+	srcFull, err := s.resolve(src)
+	if err != nil {
+		return err
+	}
+	dstFull, err := s.resolve(dst)
+	if err != nil {
+		return err
+	}
 
 	if err := s.client.MkdirAll(path.Dir(dstFull)); err != nil {
 		return err
@@ -164,11 +196,19 @@ func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
 }
 
 func (s *SFTPFS) Delete(_ context.Context, p string) error {
-	return s.client.RemoveAll(s.resolve(p))
+	fullPath, err := s.resolve(p)
+	if err != nil {
+		return err
+	}
+	return s.client.RemoveAll(fullPath)
 }
 
 func (s *SFTPFS) MkdirAll(_ context.Context, p string) error {
-	return s.client.MkdirAll(s.resolve(p))
+	fullPath, err := s.resolve(p)
+	if err != nil {
+		return err
+	}
+	return s.client.MkdirAll(fullPath)
 }
 
 func (s *SFTPFS) Close() error {
