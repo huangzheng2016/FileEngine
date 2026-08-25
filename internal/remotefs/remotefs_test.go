@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -81,20 +82,35 @@ func TestSFTP_ListRoot(t *testing.T) {
 }
 
 // testNFSHost exports "/fs/1000/nfs" as a whole (fnOS style), which exercises
-// the deep-export MNT probe in NewNFSFS.
-const testNFSHost = "192.168.1.x"
+// the deep-export MNT probe in NewNFSFS. The address comes from
+// FILEENGINE_TEST_NFS_HOST so no LAN address lives in the repo; it falls back
+// to the owner-LAN test NAS hostname and skips when unreachable.
+func testNFSHost(t *testing.T) string {
+	t.Helper()
+	if h := os.Getenv("FILEENGINE_TEST_NFS_HOST"); h != "" {
+		return h
+	}
+	return testHost
+}
+
+// dialTestNFS skips the test when the NFS server is unreachable.
+func dialTestNFS(t *testing.T) {
+	t.Helper()
+	host := testNFSHost(t)
+	conn, err := net.DialTimeout("tcp", host+":2049", 2*time.Second)
+	if err != nil {
+		t.Skipf("test NFS server %q not reachable on this network: %v", host, err)
+	}
+	conn.Close()
+}
 
 // TestNFS_ConcurrentReads hammers one NFSFS with parallel Open+Read calls —
 // the access pattern of eino's parallel tool execution. The underlying
 // rpc.Client is a single non-multiplexed stream; without serialization this
 // fails with "xid did not match".
 func TestNFS_ConcurrentReads(t *testing.T) {
-	conn, err := net.DialTimeout("tcp", testNFSHost+":2049", 2*time.Second)
-	if err != nil {
-		t.Skipf("test NFS server %q not reachable on this network: %v", testNFSHost, err)
-	}
-	conn.Close()
-	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost, BasePath: "/fs/1000/nfs"})
+	dialTestNFS(t)
+	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost(t), BasePath: "/fs/1000/nfs"})
 	if err != nil {
 		t.Fatalf("NewNFSFS: %v", err)
 	}
@@ -147,12 +163,8 @@ func TestNFS_ConcurrentReads(t *testing.T) {
 // TestNFS_DeepExport verifies mounting an export whose path is deeper than
 // one segment: NewNFSFS must discover "/fs/1000/nfs" itself is the export.
 func TestNFS_DeepExport(t *testing.T) {
-	conn, err := net.DialTimeout("tcp", testNFSHost+":2049", 2*time.Second)
-	if err != nil {
-		t.Skipf("test NFS server %q not reachable on this network: %v", testNFSHost, err)
-	}
-	conn.Close()
-	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost, BasePath: "/fs/1000/nfs"})
+	dialTestNFS(t)
+	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost(t), BasePath: "/fs/1000/nfs"})
 	if err != nil {
 		t.Fatalf("NewNFSFS: %v", err)
 	}
