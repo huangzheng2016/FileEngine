@@ -355,6 +355,12 @@ function switchLang(lang: string) {
               transform var(--duration-base) var(--ease-spring);
 }
 
+/* The leaving view disappears at once (no stacking, no stuck transition);
+   only the entering view fades in. */
+.page-fade-leave-active {
+  display: none;
+}
+
 .page-fade-enter-from {
   opacity: 0;
   transform: translateY(8px);

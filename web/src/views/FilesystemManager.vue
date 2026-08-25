@@ -30,7 +30,7 @@
           <template #default="{ row }"><span class="cell-time">{{ row.host || '-' }}</span></template>
         </el-table-column>
         <el-table-column prop="description" :label="$t('common.description')" min-width="200" show-overflow-tooltip />
-        <el-table-column :label="$t('common.actions')" width="140" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="140" >
           <template #default="{ row }">
             <div class="table-actions">
               <button class="link-button" @click="openDialog(row)">{{ $t('common.edit') }}</button>

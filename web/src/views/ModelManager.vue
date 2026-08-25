@@ -15,10 +15,10 @@
 
     <div class="page-body">
       <el-table :data="providers" v-loading="loading" style="width: 100%">
-        <el-table-column prop="name" :label="$t('common.name')" width="150">
+        <el-table-column prop="name" :label="$t('common.name')" width="120">
           <template #default="{ row }"><span class="cell-phone">{{ row.name }}</span></template>
         </el-table-column>
-        <el-table-column prop="provider" :label="$t('models.provider')" width="110">
+        <el-table-column prop="provider" :label="$t('models.provider')" width="90">
           <template #default="{ row }">
             <span class="status-chip" :class="providerChipClass(row.provider)">{{ providerLabel(row.provider) }}</span>
           </template>
@@ -26,21 +26,21 @@
         <el-table-column prop="model" :label="$t('models.modelName')" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><code class="cell-mono">{{ row.model }}</code></template>
         </el-table-column>
-        <el-table-column :label="$t('models.contextWindow')" width="120" align="center">
+        <el-table-column :label="$t('models.contextWindow')" width="100" align="center">
           <template #default="{ row }">
             <span class="metric-chip"><span class="metric-value">{{ formatWindow(row.context_window) }}</span></span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('models.visionEnabled')" width="90" align="center">
+        <el-table-column :label="$t('models.visionEnabled')" width="80" align="center">
           <template #default="{ row }">
             <span v-if="row.vision_enabled" class="status-chip is-live"><span class="status-dot"></span>{{ $t('common.yes') }}</span>
             <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="base_url" :label="$t('models.baseUrl')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }"><span class="cell-time">{{ row.base_url || '-' }}</span></template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="220" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="220" >
           <template #default="{ row }">
             <div class="table-actions">
               <button class="link-button" :disabled="testingId === row.id" @click="handleTestExisting(row)">{{ $t('models.testConn') }}</button>

@@ -13,6 +13,7 @@ nav:
 
 common:
   save: Save
+  copy: Copy
   cancel: Cancel
   delete: Delete
   edit: Edit
