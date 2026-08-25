@@ -106,6 +106,9 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - rename_category(name, new_name) → true；仅 agent_editable 的分类可改
 - sample_files(n) 或 sample_files({过滤条件}, n) → 随机抽取至多 n 个文件（默认 %d，上限 %d），用于抽样了解大批文件
 
+文件记录的字段（query_files/sample_files/get_file_info 返回的 map）：original_path, name, size, file_type, tagged, description?, new_path?, child_count?（带 ? 的字段为空时不出现；访问不存在的字段得到 undefined）
+标准库模块需 import 后使用，如 json := import("json")
+
 约定：
 - 失败的内置函数返回 error 值，用 is_error(x) 判断，不会中断脚本（参数形状错误会直接报运行时错误）
 - print(...) 输出、脚本返回值分别限 %d 字节；脚本源码限 %d 字节；单次运行限 %d 秒，超时中止
