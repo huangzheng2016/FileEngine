@@ -168,8 +168,10 @@ func (tb *ToolBuilder) executeScript(ctx context.Context, src string, timeout ti
 	}
 
 	// The return-value contract: the script assigns a global named `result`.
-	// Pre-declare it as undefined so both `result := ...` and `result = ...`
-	// work; an untouched (still undefined) result is skipped after the run.
+	// Pre-declare it as undefined — scripts must therefore assign with `=`
+	// (`result := ...` redeclares the predeclared global and fails
+	// compilation); an untouched (still undefined) result is skipped after
+	// the run.
 	if err := s.Add("result", tengo.UndefinedValue); err != nil {
 		return nil, err
 	}
