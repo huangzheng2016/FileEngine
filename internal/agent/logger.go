@@ -14,19 +14,31 @@ const logBufferSize = 20
 type Logger struct {
 	repo      *db.Repository
 	sessionID uint
+	workerID  int
 	batch     int
 	buffer    []*db.AgentLog
 	mu        sync.Mutex
 }
 
-func NewLogger(repo *db.Repository, sessionID uint) *Logger {
+// NewLogger creates a session-scoped logger for one agent worker lane.
+// workerID lands in every SSE payload and persisted row so the frontend can
+// render per-worker lanes; single-worker runs (instruct) pass 0.
+func NewLogger(repo *db.Repository, sessionID uint, workerID int) *Logger {
 	return &Logger{
 		repo:      repo,
 		sessionID: sessionID,
+		workerID:  workerID,
 		buffer:    make([]*db.AgentLog, 0, logBufferSize),
 	}
 }
 
+func (l *Logger) WorkerID() int {
+	return l.workerID
+}
+
+// SetBatch moves the internal batch cursor (persisted as agent_logs.batch_index
+// and stamped onto file_entries by mark_tagged). It is no longer exposed on
+// the event stream — lanes replaced batch grouping there.
 func (l *Logger) SetBatch(batch int) {
 	l.mu.Lock()
 	l.batch = batch
@@ -47,6 +59,7 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 	log := &db.AgentLog{
 		ScanSessionID:    l.sessionID,
 		BatchIndex:       batch,
+		WorkerID:         l.workerID,
 		Role:             role,
 		Content:          content,
 		PromptTokens:     promptTokens,
@@ -57,7 +70,7 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 	l.save(log)
 	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
 		SessionID:        l.sessionID,
-		BatchIndex:       batch,
+		WorkerID:         l.workerID,
 		Role:             role,
 		Content:          content,
 		PromptTokens:     promptTokens,
@@ -71,40 +84,57 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 // goes through LogMessage (persisted + published, with token counts).
 func (l *Logger) EmitMessage(role, content string) {
 	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
-		SessionID:  l.sessionID,
-		BatchIndex: l.GetBatch(),
-		Role:       role,
-		Content:    content,
+		SessionID: l.sessionID,
+		WorkerID:  l.workerID,
+		Role:      role,
+		Content:   content,
 	}})
 }
 
-// EmitBatchStart announces the logger's current batch on the session bus.
-func (l *Logger) EmitBatchStart(label string) {
-	db.PublishEvent(db.Event{Type: db.EventBatchStart, SessionID: l.sessionID, Payload: db.BatchStartPayload{
-		SessionID:  l.sessionID,
-		BatchIndex: l.GetBatch(),
-		Label:      label,
+// EmitPullBegin announces this worker starting one work unit (directory,
+// loose-file pull, instruct run) on the session bus. count is the number of
+// files pulled (0 for directory/instruct units); cursor is the starting
+// cursor (smallest file id of a loose-file pull).
+func (l *Logger) EmitPullBegin(label string, count int, cursor uint) {
+	db.PublishEvent(db.Event{Type: db.EventPullBegin, SessionID: l.sessionID, Payload: db.PullBeginPayload{
+		SessionID: l.sessionID,
+		WorkerID:  l.workerID,
+		Label:     label,
+		Count:     count,
+		Cursor:    cursor,
+	}})
+}
+
+// EmitPullDone settles this worker's current work unit: tagged files
+// classified, failed files missed or failed outright.
+func (l *Logger) EmitPullDone(label string, tagged, failed int) {
+	db.PublishEvent(db.Event{Type: db.EventPullDone, SessionID: l.sessionID, Payload: db.PullDonePayload{
+		SessionID: l.sessionID,
+		WorkerID:  l.workerID,
+		Label:     label,
+		Tagged:    tagged,
+		Failed:    failed,
 	}})
 }
 
 // EmitToolCall publishes one model-requested tool invocation.
 func (l *Logger) EmitToolCall(toolName, input string) {
 	db.PublishEvent(db.Event{Type: db.EventToolCall, SessionID: l.sessionID, Payload: db.ToolCallPayload{
-		SessionID:  l.sessionID,
-		BatchIndex: l.GetBatch(),
-		ToolName:   toolName,
-		Input:      input,
+		SessionID: l.sessionID,
+		WorkerID:  l.workerID,
+		ToolName:  toolName,
+		Input:     input,
 	}})
 }
 
 // EmitToolResult publishes one tool execution result.
 func (l *Logger) EmitToolResult(toolName, output string, ok bool) {
 	db.PublishEvent(db.Event{Type: db.EventToolResult, SessionID: l.sessionID, Payload: db.ToolResultPayload{
-		SessionID:  l.sessionID,
-		BatchIndex: l.GetBatch(),
-		ToolName:   toolName,
-		Output:     output,
-		OK:         ok,
+		SessionID: l.sessionID,
+		WorkerID:  l.workerID,
+		ToolName:  toolName,
+		Output:    output,
+		OK:        ok,
 	}})
 }
 
@@ -119,6 +149,7 @@ func (l *Logger) LogToolCall(toolName string, input, output interface{}) {
 	log := &db.AgentLog{
 		ScanSessionID: l.sessionID,
 		BatchIndex:    batch,
+		WorkerID:      l.workerID,
 		Role:          "tool",
 		ToolName:      toolName,
 		ToolInput:     string(inputJSON),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -208,8 +209,8 @@ type ToolBuilder struct {
 	// (long-run) worker: untagged pulls (list_files / query_files with
 	// tagged=false) are auto-sharded by id % numWorkers = workerID so
 	// concurrent harness workers never see each other's files, and every
-	// such pull rolls a fresh batch (batch_start + logger batch switch) so
-	// the SSE timeline keeps its per-batch grouping.
+	// such pull rolls a fresh pull on the worker's lane (pull_done for the
+	// previous pull + pull_begin for the new one).
 	harness *harnessContext
 }
 
@@ -217,6 +218,11 @@ type harnessContext struct {
 	workerID     int
 	numWorkers   int
 	batchCounter *int32
+	// lastPull remembers the most recent non-empty untagged pull (file ids
+	// and label) so the next pull — or harnessSettlePull at run end — can
+	// close it out with a pull_done event (tagged/missed settlement).
+	lastPullIDs   []uint
+	lastPullLabel string
 }
 
 // withHarness marks the builder as a continuous worker's toolset.
@@ -228,8 +234,8 @@ func (tb *ToolBuilder) withHarness(workerID, numWorkers int, batchCounter *int32
 // harnessShard applies harness semantics to an untagged file query before it
 // runs: shard it to this worker so concurrent harness workers never see each
 // other's files. Returns true when the query is an untagged pull under an
-// active harness — the caller then rolls a new batch once the pull comes
-// back non-empty (harnessEmitBatch).
+// active harness — the caller then rolls a new pull once the query comes
+// back non-empty (harnessNotePull).
 func (tb *ToolBuilder) harnessShard(q *db.FileQuery) bool {
 	if tb.harness == nil || q.Tagged == nil || *q.Tagged {
 		return false
@@ -240,13 +246,48 @@ func (tb *ToolBuilder) harnessShard(q *db.FileQuery) bool {
 	return true
 }
 
-func (tb *ToolBuilder) harnessEmitBatch(label string) {
-	if tb.harness == nil {
+// harnessNotePull rolls a fresh pull for a non-empty untagged pull in a
+// continuous run: settles the previous pull (pull_done), advances the
+// internal batch cursor, and announces the new pull (pull_begin).
+func (tb *ToolBuilder) harnessNotePull(label string, files []db.FileEntry) {
+	if tb.harness == nil || len(files) == 0 {
 		return
 	}
+	tb.harnessSettlePull()
 	batchIdx := atomic.AddInt32(tb.harness.batchCounter, 1)
 	tb.logger.SetBatch(int(batchIdx))
-	tb.logger.EmitBatchStart(label)
+	ids := make([]uint, len(files))
+	for i, f := range files {
+		ids[i] = f.ID
+	}
+	tb.logger.EmitPullBegin(label, len(files), minFileID(files))
+	tb.harness.lastPullIDs = ids
+	tb.harness.lastPullLabel = label
+}
+
+// harnessSettlePull closes out the last open pull with a pull_done event:
+// files tagged since the pull count as classified, the rest as missed.
+// Called before each new pull and once at run end (the agent's tool stream
+// is sequential, so by the next pull the previous one has been processed).
+func (tb *ToolBuilder) harnessSettlePull() {
+	if tb.harness == nil || len(tb.harness.lastPullIDs) == 0 {
+		return
+	}
+	ids := tb.harness.lastPullIDs
+	label := tb.harness.lastPullLabel
+	tb.harness.lastPullIDs = nil
+	tagged, err := tb.repo.TaggedStatusByIDs(ids)
+	if err != nil {
+		log.Printf("harness worker %d: pull settle failed, pull_done skipped: %v", tb.harness.workerID, err)
+		return
+	}
+	taggedCount := 0
+	for _, id := range ids {
+		if tagged[id] {
+			taggedCount++
+		}
+	}
+	tb.logger.EmitPullDone(label, taggedCount, len(ids)-taggedCount)
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -497,9 +538,9 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		return nil, err
 	}
 	if isPull && total > 0 {
-		// A fresh untagged pull in a continuous run = a new batch on the
-		// SSE timeline (emitted before the tool log so it groups correctly).
-		tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
+		// A fresh untagged pull in a continuous run rolls a new pull on the
+		// worker's lane (emitted before the tool log so it orders correctly).
+		tb.harnessNotePull(fmt.Sprintf("%d files", len(files)), files)
 	}
 
 	items := make([]FileItem, len(files))

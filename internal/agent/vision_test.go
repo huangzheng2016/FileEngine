@@ -104,7 +104,7 @@ func TestBuildToolsVisionGating(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := &db.ScanSession{AllowVision: tc.allowVision}
-			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, session, tc.modelVision)
+			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, tc.modelVision)
 
 			tools, err := tb.BuildTools()
 			if err != nil {
@@ -130,7 +130,7 @@ func TestBuildToolsVisionGating(t *testing.T) {
 // read_file / create_category.
 func TestBuildToolsDefaultOffRegression(t *testing.T) {
 	session := &db.ScanSession{AllowReadFile: true, AllowAutoCategory: true}
-	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, session, false)
+	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
 	tools, err := tb.BuildTools()
 	if err != nil {
 		t.Fatalf("BuildTools: %v", err)
@@ -180,7 +180,7 @@ func newVisionToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *Too
 	if err != nil {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
-	return NewToolBuilder(nil, fs, 1, 1, NewLogger(nil, 1), cfg, &db.ScanSession{AllowVision: true}, true)
+	return NewToolBuilder(nil, fs, 1, 1, NewLogger(nil, 1, 0), cfg, &db.ScanSession{AllowVision: true}, true)
 }
 
 func TestViewImageThumbnails(t *testing.T) {
@@ -360,8 +360,7 @@ func TestRunADKOnceEnhancedToolResultPlaceholder(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	logger := NewLogger(nil, 201)
-	logger.SetBatch(7)
+	logger := NewLogger(nil, 201, 7)
 
 	ch := db.SubscribeEvents(201)
 	defer db.UnsubscribeEvents(201, ch)

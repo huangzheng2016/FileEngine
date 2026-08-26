@@ -37,7 +37,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 		t.Fatalf("set target: %v", err)
 	}
 
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(nil, session.ID))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(nil, session.ID, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if len(pruned) != 1 || !strings.Contains(pruned[0], "监控录像") {
@@ -96,7 +96,7 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	}
 
 	// The run-ending prune for session B must keep 历史分类 (zero in B, used in A).
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(nil, sessB.ID))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(nil, sessB.ID, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if _, err := repo.GetCategoryByName(fs.ID, "历史分类"); err != nil {

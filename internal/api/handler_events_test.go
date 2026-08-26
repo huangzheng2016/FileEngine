@@ -55,7 +55,7 @@ func TestStreamSessionEventsStreamsPublishedEvents(t *testing.T) {
 	// the handler subscribed (duplicates are harmless for the assertions).
 	for i := 0; i < 10; i++ {
 		db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: 1, Payload: db.ProgressPayload{
-			SessionID: 1, Phase: db.PhaseTagging, Total: 10, Tagged: 7, Planned: 3, BatchIndex: 2,
+			SessionID: 1, Phase: db.PhaseTagging, Total: 10, Tagged: 7, Planned: 3,
 		}})
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -72,7 +72,7 @@ func TestStreamSessionEventsStreamsPublishedEvents(t *testing.T) {
 	if !strings.Contains(body, "event: progress\n") {
 		t.Fatalf("progress event missing, body: %q", body)
 	}
-	if !strings.Contains(body, `"tagged":7`) || !strings.Contains(body, `"batch_index":2`) {
+	if !strings.Contains(body, `"tagged":7`) || !strings.Contains(body, `"planned":3`) {
 		t.Fatalf("progress payload missing, body: %q", body)
 	}
 }

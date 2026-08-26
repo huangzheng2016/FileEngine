@@ -34,7 +34,7 @@ func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, s
 		modelProvider: modelProvider,
 		session:       session,
 		sessionID:     sessionID,
-		logger:        NewLogger(repo, sessionID),
+		logger:        NewLogger(repo, sessionID, 0),
 	}
 }
 

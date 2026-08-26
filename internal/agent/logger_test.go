@@ -24,7 +24,7 @@ func TestLoggerLogMessagePublishesToBus(t *testing.T) {
 	ch := db.SubscribeEvents(100)
 	defer db.UnsubscribeEvents(100, ch)
 
-	l := NewLogger(nil, 100)
+	l := NewLogger(nil, 100, 7)
 	l.SetBatch(3)
 	l.LogMessage("assistant", "final answer", 10, 20, 30)
 
@@ -36,7 +36,7 @@ func TestLoggerLogMessagePublishesToBus(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload type: got %T", ev.Payload)
 	}
-	if p.BatchIndex != 3 || p.Role != "assistant" || p.Content != "final answer" ||
+	if p.WorkerID != 7 || p.Role != "assistant" || p.Content != "final answer" ||
 		p.PromptTokens != 10 || p.CompletionTokens != 20 || p.TotalTokens != 30 {
 		t.Fatalf("payload: %+v", p)
 	}
@@ -48,7 +48,7 @@ func TestLoggerLogToolCallDoesNotPublish(t *testing.T) {
 
 	// Tool-call records are DB-only; live tool events come from the ADK event
 	// loop (EmitToolCall/EmitToolResult) to avoid duplicates.
-	l := NewLogger(nil, 101)
+	l := NewLogger(nil, 101, 0)
 	l.LogToolCall("list_files", map[string]int{"limit": 1}, map[string]int{"total": 1})
 
 	select {
@@ -62,14 +62,21 @@ func TestLoggerEmitHelpers(t *testing.T) {
 	ch := db.SubscribeEvents(102)
 	defer db.UnsubscribeEvents(102, ch)
 
-	l := NewLogger(nil, 102)
+	l := NewLogger(nil, 102, 2)
 	l.SetBatch(-1)
 
-	l.EmitBatchStart("instruct")
+	l.EmitPullBegin("instruct", 0, 0)
 	ev := recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.BatchStartPayload); ev.Type != db.EventBatchStart || !ok ||
-		p.BatchIndex != -1 || p.Label != "instruct" {
-		t.Fatalf("batch_start: type=%q payload=%+v", ev.Type, ev.Payload)
+	if p, ok := ev.Payload.(db.PullBeginPayload); ev.Type != db.EventPullBegin || !ok ||
+		p.WorkerID != 2 || p.Label != "instruct" {
+		t.Fatalf("pull_begin: type=%q payload=%+v", ev.Type, ev.Payload)
+	}
+
+	l.EmitPullDone("instruct", 3, 1)
+	ev = recvBusEvent(t, ch)
+	if p, ok := ev.Payload.(db.PullDonePayload); ev.Type != db.EventPullDone || !ok ||
+		p.WorkerID != 2 || p.Label != "instruct" || p.Tagged != 3 || p.Failed != 1 {
+		t.Fatalf("pull_done: type=%q payload=%+v", ev.Type, ev.Payload)
 	}
 
 	l.EmitToolCall("read_file", `{"path":"a.txt"}`)

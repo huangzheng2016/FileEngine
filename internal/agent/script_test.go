@@ -35,7 +35,7 @@ func scriptTestBuilder(t *testing.T, session *db.ScanSession) (*ToolBuilder, *db
 	if err := repo.CreateCategory(locked); err != nil {
 		t.Fatalf("seed locked category: %v", err)
 	}
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1), config.AgentConfig{}, session, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
 	return tb, repo
 }
 
@@ -515,7 +515,7 @@ func TestScriptToolRegistration(t *testing.T) {
 func TestScriptLoggedToAgentLogs(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	scriptSeedFile(t, repo, 1, "a.txt", "file")
-	logger := NewLogger(repo, 1)
+	logger := NewLogger(repo, 1, 0)
 	tb := NewToolBuilder(repo, nil, 1, 7, logger, config.AgentConfig{}, &db.ScanSession{AllowScript: true}, false)
 
 	if _, err := tb.runScript(context.Background(), &RunScriptInput{Script: "print(\"logged line\")\nresult = 42"}); err != nil {

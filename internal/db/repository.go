@@ -675,7 +675,6 @@ func (r *Repository) CreateAgentLogs(logs []*AgentLog) error {
 
 type LogQuery struct {
 	SessionID uint
-	Batch     *int
 	Role      string
 	ToolName  string
 	Order     string // "asc" or "desc"
@@ -687,9 +686,6 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	tx := r.db.Model(&AgentLog{})
 	if q.SessionID > 0 {
 		tx = tx.Where("scan_session_id = ?", q.SessionID)
-	}
-	if q.Batch != nil {
-		tx = tx.Where("batch_index = ?", *q.Batch)
 	}
 	if q.Role != "" {
 		tx = tx.Where("role = ?", q.Role)
@@ -721,11 +717,6 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	return logs, total, err
 }
 
-type BatchInfo struct {
-	BatchIndex int    `json:"batch_index"`
-	CreatedAt  string `json:"created_at"`
-}
-
 func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	var minBatch *int
 	r.db.Model(&AgentLog{}).
@@ -746,33 +737,6 @@ func (r *Repository) MaxBatchIndex(sessionID uint) int {
 		return 0
 	}
 	return *maxBatch
-}
-
-func (r *Repository) ListBatches(sessionID uint, page, pageSize int) ([]BatchInfo, int64, error) {
-	base := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", sessionID)
-
-	var total int64
-	if err := base.Distinct("batch_index").Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	offset := (page - 1) * pageSize
-
-	var batches []BatchInfo
-	err := r.db.Model(&AgentLog{}).
-		Select("batch_index, MIN(created_at) as created_at").
-		Where("scan_session_id = ?", sessionID).
-		Group("batch_index").
-		Order("MIN(created_at) ASC").
-		Offset(offset).Limit(pageSize).
-		Find(&batches).Error
-	return batches, total, err
 }
 
 // CategoryDistribution holds a category name/path and the count+size of files planned under it.

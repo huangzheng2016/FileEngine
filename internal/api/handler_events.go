@@ -16,7 +16,7 @@ const sseHeartbeatInterval = 25 * time.Second
 
 // streamSessionEvents serves the session event stream over SSE
 // (GET /api/v1/sessions/:id/events/stream). It is the single live channel for
-// agent run events (run_status / batch_start / message / tool_call /
+// agent run events (run_status / pull_begin / pull_done / message / tool_call /
 // tool_result / progress / run_done — see internal/db/events.go). History
 // stays available via GET /logs; this endpoint only streams new events.
 func (s *Server) streamSessionEvents(c *gin.Context) {

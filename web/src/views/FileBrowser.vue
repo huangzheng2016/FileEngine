@@ -128,14 +128,6 @@
                   <span v-else class="status-chip is-muted">{{ $t('common.no') }}</span>
                 </template>
               </el-table-column>
-              <el-table-column v-else-if="col.key === 'batch_index'" :label="col.label" width="70" align="center">
-                <template #default="{ row }">
-                  <router-link v-if="row.batch_index" :to="{ name: 'tasks', query: { session: String(row.scan_session_id), batch: String(row.batch_index) } }"
-                    class="cell-link cell-time">
-                    {{ row.batch_index < 0 ? ('M' + Math.abs(row.batch_index)) : '#' + row.batch_index }}
-                  </router-link>
-                </template>
-              </el-table-column>
               <el-table-column v-else-if="col.key === 'new_path'" :label="col.label" min-width="180" show-overflow-tooltip>
                 <template #default="{ row}">
                   <span v-if="row.new_path" class="cell-time">{{ displayPath(row.new_path) }}</span>
@@ -338,14 +330,13 @@ const defaultColumnOrder: { key: string; defaultVisible: boolean }[] = [
   { key: 'file_type', defaultVisible: true },
   { key: 'tagged', defaultVisible: true },
   { key: 'size', defaultVisible: false },
-  { key: 'batch_index', defaultVisible: false },
   { key: 'executed_at', defaultVisible: false },
   { key: 'preview', defaultVisible: false },
 ]
 const columnLabels: Record<string, () => string> = {
   name: () => t('files.fileName'), file_type: () => t('files.fileType'), size: () => t('files.fileSize'),
   description: () => t('files.fileDescription'), tagged: () => t('files.taggedStatus'),
-  batch_index: () => t('files.batchIndex'), new_path: () => t('files.plannedPath'), executed_at: () => t('files.executedAt'), preview: () => t('files.preview'),
+  new_path: () => t('files.plannedPath'), executed_at: () => t('files.executedAt'), preview: () => t('files.preview'),
 }
 function loadColumnPrefs(): ColumnDef[] {
   try {

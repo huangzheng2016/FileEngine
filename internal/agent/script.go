@@ -452,7 +452,7 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 			items[i] = fileToScriptMap(f)
 		}
 		if isPull && total > 0 {
-			tb.harnessEmitBatch(fmt.Sprintf("%d files", total))
+			tb.harnessNotePull(fmt.Sprintf("%d files", len(files)), files)
 			summaries := tb.archiveSummaries(ctx, files)
 			for i, f := range files {
 				if s := summaries[f.ID]; s != "" {

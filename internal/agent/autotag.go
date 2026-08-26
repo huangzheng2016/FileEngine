@@ -78,7 +78,7 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 			log.Printf("junk filter: %v (continuing)", err)
 		} else if n > 0 {
 			log.Printf("junk filter: auto-ignored %d system junk entries", n)
-			a.emitTagProgress(0)
+			a.emitTagProgress()
 		}
 	}
 
@@ -218,7 +218,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID)
+	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
 	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
@@ -250,7 +250,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 			continue
 		}
 
-		workerLogger.EmitBatchStart(dir.OriginalPath)
+		workerLogger.EmitPullBegin(dir.OriginalPath, 1, dir.ID)
 
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
@@ -273,7 +273,8 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		if err != nil {
 			log.Printf("%s (%s) failed after retries: %v", label, dir.OriginalPath, err)
 			a.noteFailure(BatchFailure{BatchIndex: int(batchIdx), Target: dir.OriginalPath, Err: err.Error()})
-			a.emitTagProgress(int(batchIdx))
+			workerLogger.EmitPullDone(dir.OriginalPath, 0, 1)
+			a.emitTagProgress()
 			continue
 		}
 
@@ -283,23 +284,24 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 			tracker.ResetUsage()
 		}
 		workerLogger.Flush()
-		a.emitTagProgress(int(batchIdx))
+		workerLogger.EmitPullDone(dir.OriginalPath, 1, 0)
+		a.emitTagProgress()
 	}
 }
 
-// emitTagProgress publishes absolute tagging counters after a finished batch.
-func (a *AutoTagAgent) emitTagProgress(batchIdx int) {
+// emitTagProgress publishes absolute tagging counters after a finished work
+// unit. Counters only (absolute, rolling) — the batch cursor is internal.
+func (a *AutoTagAgent) emitTagProgress() {
 	p, err := a.repo.GetSessionProgress(a.sessionID)
 	if err != nil {
 		return
 	}
 	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: a.sessionID, Payload: db.ProgressPayload{
-		SessionID:  a.sessionID,
-		Phase:      db.PhaseTagging,
-		Total:      p.Total,
-		Tagged:     p.Tagged,
-		Planned:    p.Planned,
-		BatchIndex: batchIdx,
+		SessionID: a.sessionID,
+		Phase:     db.PhaseTagging,
+		Total:     p.Total,
+		Tagged:    p.Tagged,
+		Planned:   p.Planned,
 	}})
 }
 
@@ -397,7 +399,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID)
+	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
 	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
@@ -421,7 +423,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 
 		workerLogger.SetBatch(int(batch.batchIdx))
-		workerLogger.EmitBatchStart(fmt.Sprintf("%d files", len(batch.files)))
+		workerLogger.EmitPullBegin(fmt.Sprintf("%d files", len(batch.files)), len(batch.files), minFileID(batch.files))
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
 			log.Printf("remaining worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
@@ -444,7 +446,8 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			target := fmt.Sprintf("%d files", len(batch.files))
 			log.Printf("%s (%s) failed after retries: %v", label, target, err)
 			a.noteFailure(BatchFailure{BatchIndex: int(batch.batchIdx), Target: target, Err: err.Error()})
-			a.emitTagProgress(int(batch.batchIdx))
+			workerLogger.EmitPullDone(target, 0, len(batch.files))
+			a.emitTagProgress()
 			continue
 		}
 		if result != nil {
@@ -454,9 +457,10 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 		// Batch-level re-check: a successful run does not guarantee every file
 		// got mark_tagged — verify against the manifest and record misses.
-		a.recheckBatchTagged(int(batch.batchIdx), batch.files)
+		missed := a.recheckBatchTagged(int(batch.batchIdx), batch.files)
 		workerLogger.Flush()
-		a.emitTagProgress(int(batch.batchIdx))
+		workerLogger.EmitPullDone(fmt.Sprintf("%d files", len(batch.files)), len(batch.files)-missed, missed)
+		a.emitTagProgress()
 	}
 }
 
@@ -511,7 +515,7 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID)
+	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
 	defer workerLogger.Flush()
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled).
@@ -543,10 +547,13 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 
 	label := fmt.Sprintf("harness worker %d", workerID)
 	result, err := runADKWithRetry(ctx, agentInst, []*schema.Message{{Role: schema.User, Content: userMsg}}, workerLogger, label, tracker)
+	// Settle the last open pull (if any): the run is over, so whatever the
+	// agent pulled and never tagged counts as missed.
+	toolBuilder.harnessSettlePull()
 	if err != nil {
 		log.Printf("%s failed after retries: %v", label, err)
 		a.noteFailure(BatchFailure{BatchIndex: int(atomic.LoadInt32(batchCounter)), Target: label, Err: err.Error()})
-		a.emitTagProgress(int(atomic.LoadInt32(batchCounter)))
+		a.emitTagProgress()
 		return
 	}
 	if result != nil {
@@ -555,7 +562,7 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 		tracker.ResetUsage()
 	}
 	workerLogger.Flush()
-	a.emitTagProgress(int(atomic.LoadInt32(batchCounter)))
+	a.emitTagProgress()
 }
 
 // recheckBatchTagged verifies that a finished loose-file batch actually
@@ -564,8 +571,9 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 // misses were silent (the dispatcher cursor had already passed their IDs).
 // Misses are recorded as batch failures so they surface exactly like hard
 // failures (tagged_partial status + report section), and the end-of-run
-// sweeps give them another pass.
-func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) {
+// sweeps give them another pass. Returns the number of missed files (0 when
+// the re-check itself fails — misses then stay silent, as before).
+func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) int {
 	ids := make([]uint, len(files))
 	paths := make(map[uint]string, len(files))
 	for i, f := range files {
@@ -575,7 +583,7 @@ func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) {
 	tagged, err := a.repo.TaggedStatusByIDs(ids)
 	if err != nil {
 		log.Printf("batch %d: tagged re-check failed (misses stay silent): %v", batchIdx, err)
-		return
+		return 0
 	}
 	var missed []string
 	for _, id := range ids {
@@ -584,7 +592,7 @@ func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) {
 		}
 	}
 	if len(missed) == 0 {
-		return
+		return 0
 	}
 	const maxListed = 5
 	shown := missed
@@ -599,4 +607,17 @@ func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) {
 		Err: fmt.Sprintf("agent 完成但未标记 %d/%d 个文件: %s%s",
 			len(missed), len(files), strings.Join(shown, ", "), suffix),
 	})
+	return len(missed)
+}
+
+// minFileID returns the smallest file id of a pulled set — the starting
+// cursor reported in pull_begin.
+func minFileID(files []db.FileEntry) uint {
+	var min uint
+	for i, f := range files {
+		if i == 0 || f.ID < min {
+			min = f.ID
+		}
+	}
+	return min
 }

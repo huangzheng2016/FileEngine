@@ -94,6 +94,7 @@ export interface AgentLog {
   id: number
   scan_session_id: number
   batch_index: number
+  worker_id: number
   role: string
   tool_name: string
   tool_input: string
@@ -190,15 +191,25 @@ export interface RunStatusEvent {
   message?: string
 }
 
-export interface BatchStartEvent {
+export interface PullBeginEvent {
   session_id: number
-  batch_index: number
+  worker_id: number
   label: string
+  count?: number
+  cursor?: number
+}
+
+export interface PullDoneEvent {
+  session_id: number
+  worker_id: number
+  label?: string
+  tagged?: number
+  failed?: number
 }
 
 export interface MessageEvent {
   session_id: number
-  batch_index: number
+  worker_id: number
   role: 'user' | 'assistant' | 'system'
   content: string
   prompt_tokens?: number
@@ -208,14 +219,14 @@ export interface MessageEvent {
 
 export interface ToolCallEvent {
   session_id: number
-  batch_index: number
+  worker_id: number
   tool_name: string
   input: string
 }
 
 export interface ToolResultEvent {
   session_id: number
-  batch_index: number
+  worker_id: number
   tool_name: string
   output: string
   ok: boolean
@@ -230,7 +241,6 @@ export interface ProgressEvent {
   success?: number
   failed?: number
   skipped?: number
-  batch_index?: number
 }
 
 export interface RunDoneEvent {
@@ -242,7 +252,8 @@ export interface RunDoneEvent {
 
 export interface SessionEventMap {
   run_status: RunStatusEvent
-  batch_start: BatchStartEvent
+  pull_begin: PullBeginEvent
+  pull_done: PullDoneEvent
   message: MessageEvent
   tool_call: ToolCallEvent
   tool_result: ToolResultEvent
