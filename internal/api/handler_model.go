@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"FileEngine/internal/db"
@@ -66,21 +67,25 @@ type ModelProviderRequest struct {
 	// VisionEnabled is additive like context_window: absent (nil) means
 	// "not provided" — create defaults to false, update keeps the stored value.
 	VisionEnabled *bool `json:"vision_enabled"`
-	// ReasoningEffort is additive too: ""/low/medium/high; absent (nil) keeps
+	// ReasoningEffort is additive too: free-form pass-through ("" = model
+	// default; suggested levels none/low/medium/high/max); absent (nil) keeps
 	// the stored value on update, means unset on create.
 	ReasoningEffort *string `json:"reasoning_effort"`
 }
 
-// validReasoningEfforts are the values passed through to OpenAI-compatible
-// APIs; "" means "not set — use the model default".
-var validReasoningEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true}
+// reasoningEffortPattern bounds the free-form pass-through: any value an
+// OpenAI-compatible backend might accept (suggested levels are
+// none/low/medium/high/max, but providers keep inventing new ones — the API
+// must not hard-reject values it does not know). "" means "not set — use the
+// model default".
+var reasoningEffortPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
 func resolveReasoningEffort(v *string, fallback string) (string, error) {
 	if v == nil {
 		return fallback, nil
 	}
-	if !validReasoningEfforts[*v] {
-		return "", fmt.Errorf("reasoning_effort must be one of: low, medium, high (or empty for the model default)")
+	if *v != "" && !reasoningEffortPattern.MatchString(*v) {
+		return "", fmt.Errorf("reasoning_effort must be empty or 1-32 chars of [a-zA-Z0-9_-] (suggested: none, low, medium, high, max)")
 	}
 	return *v, nil
 }
@@ -230,7 +235,12 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		BaseURL: req.BaseURL, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 	}
 	if req.ReasoningEffort != nil {
-		testProvider.ReasoningEffort = *req.ReasoningEffort
+		reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		testProvider.ReasoningEffort = reasoningEffort
 	}
 	chatModel, err := modelfactory.NewChatModelFromProvider(c.Request.Context(), testProvider)
 	if err != nil {

@@ -183,7 +183,6 @@ func (s *Server) createSession(c *gin.Context) {
 		Protocol:            filesystem.Protocol,
 		Status:              "scanning",
 		AllowReadFile:       true,
-		AllowAutoCategory:   false,
 		ExcludeCategoryDirs: req.ExcludeCategoryDirs,
 		FilterMode:          filterMode,
 		FilterDirs:          req.FilterDirs,
