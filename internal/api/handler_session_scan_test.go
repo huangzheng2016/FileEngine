@@ -3,10 +3,12 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"FileEngine/internal/db"
 )
@@ -156,5 +158,141 @@ func TestRescanClearsErrorAndProgress(t *testing.T) {
 	}
 	if got["scanned_count"] != float64(1) || got["total_files"] != float64(1) {
 		t.Errorf("scanned_count=%v total_files=%v, want 1/1", got["scanned_count"], got["total_files"])
+	}
+}
+
+// registerFakeScan injects an in-flight scan handle the test controls: the
+// goroutine "exits" when the returned channel is closed.
+func registerFakeScan(t *testing.T, sessionID uint, cancel func()) chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	h := &scanHandle{cancel: cancel, done: done}
+	scanMu.Lock()
+	scanners[sessionID] = h
+	scanMu.Unlock()
+	t.Cleanup(func() {
+		scanMu.Lock()
+		if scanners[sessionID] == h {
+			delete(scanners, sessionID)
+		}
+		scanMu.Unlock()
+	})
+	return done
+}
+
+// rescan must wait for the previous scan goroutine to fully exit before it
+// wipes and restarts: the canceled scan's DB tail (bulk insert + final save)
+// has no ctx checks, so without the wait its writes land on top of the fresh
+// scan (idx_uniq_session_path collisions, status clobbered to "scanned").
+func TestRescanWaitsForPreviousScan(t *testing.T) {
+	s := setupSessionTestServer(t)
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	if code != http.StatusCreated {
+		t.Fatalf("create session: code %d", code)
+	}
+	waitForScanDone(t, s, 1)
+
+	canceled := make(chan struct{})
+	done := registerFakeScan(t, 1, func() { close(canceled) })
+
+	rescanDone := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/1/rescan", nil)
+		w := httptest.NewRecorder()
+		s.Router().ServeHTTP(w, req)
+		rescanDone <- w.Code
+	}()
+
+	// The cancel fires, but the handler must stay blocked while the old scan
+	// is still "running".
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("rescan did not cancel the previous scan")
+	}
+	select {
+	case <-rescanDone:
+		t.Fatal("rescan returned while the previous scan was still running")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// The old goroutine exits → the rescan proceeds with its reset.
+	close(done)
+	select {
+	case rc := <-rescanDone:
+		if rc != http.StatusOK {
+			t.Fatalf("rescan code %d, want 200", rc)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rescan did not proceed after the previous scan exited")
+	}
+	waitForScanDone(t, s, 1) // the fresh scan the rescan kicked off
+}
+
+// A wedged scan goroutine must not block rescan forever: after
+// scanStopTimeout the handler logs and proceeds anyway.
+func TestRescanScanStopTimeoutFallback(t *testing.T) {
+	s := setupSessionTestServer(t)
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	if code != http.StatusCreated {
+		t.Fatalf("create session: code %d", code)
+	}
+	waitForScanDone(t, s, 1)
+
+	prev := scanStopTimeout
+	scanStopTimeout = 50 * time.Millisecond
+	defer func() { scanStopTimeout = prev }()
+	registerFakeScan(t, 1, func() {}) // done never closes
+
+	start := time.Now()
+	code, _ = doModelRequest(t, s, http.MethodPost, "/api/v1/sessions/1/rescan", nil)
+	if code != http.StatusOK {
+		t.Fatalf("rescan: code %d", code)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Fatalf("rescan blocked %v despite the stop timeout", el)
+	}
+	waitForScanDone(t, s, 1)
+}
+
+// delete waits for the same reason: the canceled goroutine's final Save
+// would otherwise resurrect a deleted session row (Save inserts when the
+// update matches nothing).
+func TestDeleteWaitsForScan(t *testing.T) {
+	s := setupSessionTestServer(t)
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	if code != http.StatusCreated {
+		t.Fatalf("create session: code %d", code)
+	}
+	waitForScanDone(t, s, 1)
+
+	done := registerFakeScan(t, 1, func() {})
+
+	deleteDone := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/1", nil)
+		w := httptest.NewRecorder()
+		s.Router().ServeHTTP(w, req)
+		deleteDone <- w.Code
+	}()
+
+	select {
+	case <-deleteDone:
+		t.Fatal("delete returned while the scan was still running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(done)
+	select {
+	case rc := <-deleteDone:
+		if rc != http.StatusOK {
+			t.Fatalf("delete code %d, want 200", rc)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delete did not proceed after the scan exited")
+	}
+
+	code, _ = doModelRequest(t, s, http.MethodGet, "/api/v1/sessions/1", nil)
+	if code != http.StatusNotFound {
+		t.Errorf("get after delete: code %d, want 404", code)
 	}
 }
