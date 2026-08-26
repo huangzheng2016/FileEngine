@@ -185,6 +185,12 @@ tasks:
   status_executing: 执行中
   status_done: 已完成
   statusError: 错误
+  status_interrupted: 已中断
+  scannedCount: 已扫条目
+  scanRate: 速率
+  scanRatePerSec: "{rate} 条/秒"
+  scanningPath: "正在扫描: {path}"
+  scanSaving: 正在保存扫描结果…
   executionPlans: 执行计划
   planName: 名称
   planOp: 操作
@@ -222,6 +228,7 @@ tasks:
   guideTagged: "打标完成，{count} 个计划待执行。"
   guideDone: "执行完成，共处理 {count} 个操作。"
   guideError: "上次运行出错：{status}"
+  guideInterrupted: "扫描被服务重启中断（中断时已扫 {count} 个条目），请重新扫描。"
 
 config:
   title: 系统配置

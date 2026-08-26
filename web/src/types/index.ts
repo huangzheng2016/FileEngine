@@ -55,6 +55,9 @@ export interface ScanSession {
   protocol: string
   status: string
   total_files: number
+  scanned_count: number
+  current_path: string
+  error_message: string
   tagged_files: number
   planned_ops: number
   executed_ops: number
