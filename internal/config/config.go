@@ -58,6 +58,17 @@ type AgentConfig struct {
 	// inline via the path::entry syntax (larger entries are listing-only).
 	ArchiveEntryMaxSize  int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
 	MaxRetries           int    `yaml:"max_retries" json:"max_retries"`
+	// RateLimitMaxRetries is the retry budget for HTTP 429 rate-limit failures
+	// only (default 8) — separate from MaxRetries (default 3, used for 5xx and
+	// network errors) so brief throttling does not fail a long tagging run.
+	// Hard errors (other 4xx: 400/401/403/context-length/…) are never retried.
+	RateLimitMaxRetries int `yaml:"rate_limit_max_retries" json:"rate_limit_max_retries"`
+	// RetryBaseDelay / RetryMaxDelay bound the exponential backoff with full
+	// jitter in seconds (defaults 2/60): attempt N sleeps
+	// rand[0, min(RetryMaxDelay, RetryBaseDelay*2^(N-1))]. A server-provided
+	// Retry-After hint replaces the computed wait (clamped to 4*RetryMaxDelay).
+	RetryBaseDelay int `yaml:"retry_base_delay" json:"retry_base_delay"`
+	RetryMaxDelay  int `yaml:"retry_max_delay" json:"retry_max_delay"`
 	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
 	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
@@ -174,6 +185,18 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.MaxRetries == 0 {
 		cfg.Agent.MaxRetries = 3
+	}
+	if cfg.Agent.RateLimitMaxRetries <= 0 {
+		cfg.Agent.RateLimitMaxRetries = 8
+	}
+	if cfg.Agent.RetryBaseDelay <= 0 {
+		cfg.Agent.RetryBaseDelay = 2
+	}
+	if cfg.Agent.RetryMaxDelay <= 0 {
+		cfg.Agent.RetryMaxDelay = 60
+	}
+	if cfg.Agent.RetryMaxDelay < cfg.Agent.RetryBaseDelay {
+		cfg.Agent.RetryMaxDelay = cfg.Agent.RetryBaseDelay
 	}
 	if cfg.Agent.MaxStep == 0 {
 		cfg.Agent.MaxStep = 150

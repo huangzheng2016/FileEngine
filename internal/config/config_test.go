@@ -60,6 +60,20 @@ func TestAgentDefaultsStillApplied(t *testing.T) {
 	if cfg.Agent.BatchSize != 200 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
 		t.Fatalf("agent defaults not applied: %+v", cfg.Agent)
 	}
+	if cfg.Agent.RateLimitMaxRetries != 8 || cfg.Agent.RetryBaseDelay != 2 || cfg.Agent.RetryMaxDelay != 60 {
+		t.Fatalf("retry defaults not applied: %+v", cfg.Agent)
+	}
+}
+
+// retry_max_delay below retry_base_delay is clamped up to the base.
+func TestRetryMaxDelayClampedToBase(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "agent:\n  retry_base_delay: 10\n  retry_max_delay: 5\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agent.RetryMaxDelay != 10 {
+		t.Fatalf("retry_max_delay: got %d, want clamped to base 10", cfg.Agent.RetryMaxDelay)
+	}
 }
 
 // The empty-DSN default follows the driver: PostgreSQL gets a libpq-style
