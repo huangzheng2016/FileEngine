@@ -69,16 +69,29 @@ func scanConnCount() int {
 	return n
 }
 
+// nfsDialTimeoutOnce aligns the vendored RPC dial timeout with our
+// per-operation budget exactly once (it is a package-level variable in the
+// vendored library; repeated identical writes would still be a data race
+// under -race when backends are constructed concurrently).
+var nfsDialTimeoutOnce sync.Once
+
 func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 	port := cfg.Port
 	if port == 0 {
 		port = 2049
 	}
 
+	timeout := opTimeout()
+	nfsDialTimeoutOnce.Do(func() { rpc.DialTimeout = timeout })
+
 	mount, err := nfsclient.DialMount(cfg.Host)
 	if err != nil {
-		return nil, fmt.Errorf("nfs dial mount: %w", err)
+		return nil, &OpError{Protocol: "nfs", Op: "dial", Path: cfg.Host, Err: err}
 	}
+	// Bound every RPC on the mount connection: without a timeout the
+	// vendored transport reads with no deadline and a silently dead TCP
+	// connection hangs the call forever (observed 18+ min in production).
+	mount.SetTimeout(timeout)
 
 	auth := rpc.NewAuthUnix("fileengine", 0, 0)
 
@@ -103,10 +116,12 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 		idx := strings.LastIndex(exportPath, "/")
 		if idx <= 0 {
 			mount.Close()
-			return nil, fmt.Errorf("nfs mount %s: %w", cfg.BasePath, firstErr)
+			return nil, &OpError{Protocol: "nfs", Op: "mount", Path: cfg.BasePath, Err: firstErr}
 		}
 		exportPath = exportPath[:idx]
 	}
+	// Mount dials a fresh connection for the NFS program: arm it too.
+	target.SetTimeout(timeout)
 	subPath := strings.TrimPrefix(strings.TrimPrefix(cfg.BasePath, exportPath), "/")
 
 	return &NFSFS{
@@ -138,6 +153,12 @@ func (n *NFSFS) ensurePool() {
 				pm.Close()
 				break
 			}
+			// Pool connections carry the same per-RPC timeout semantics as
+			// the primary connection — a dead pooled connection must fail
+			// its listing, not hang a scan worker forever.
+			timeout := opTimeout()
+			pm.SetTimeout(timeout)
+			pt.SetTimeout(timeout)
 			n.pool <- &nfsScanConn{mount: pm, target: pt}
 			n.poolSize++
 		}
@@ -170,7 +191,7 @@ func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	defer n.mu.Unlock()
 	entries, err := n.target.ReadDirPlus(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "nfs", Op: "list", Path: p, Err: err}
 	}
 	return entriesToFileInfo(entries, p), nil
 }
@@ -220,7 +241,7 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 				entries, err = c.target.ReadDirPlus(fullPath)
 			}
 			if err != nil {
-				return nil, err
+				return nil, &OpError{Protocol: "nfs", Op: "list", Path: p, Err: err}
 			}
 			return entriesToFileInfo(entries, p), nil
 		case <-ctx.Done():
@@ -233,7 +254,7 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 	defer n.mu.Unlock()
 	entries, err := n.target.ReadDirPlus(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "nfs", Op: "list", Path: p, Err: err}
 	}
 	return entriesToFileInfo(entries, p), nil
 }
@@ -280,7 +301,7 @@ func (n *NFSFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	defer n.mu.Unlock()
 	info, _, err := n.target.Lookup(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "nfs", Op: "stat", Path: p, Err: err}
 	}
 	ft := FileTypeFile
 	isDir := info.IsDir()
@@ -308,23 +329,28 @@ func (n *NFSFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	f, err := n.target.Open(fullPath)
 	n.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "nfs", Op: "open", Path: p, Err: err}
 	}
-	return &nfsLockedFile{mu: &n.mu, f: f}, nil
+	return &nfsLockedFile{mu: &n.mu, f: f, path: p}, nil
 }
 
 // nfsLockedFile serializes an opened file's RPC-issuing methods (Read/Seek/
 // Close) with the parent connection's mutex — the underlying rpc.Client is a
 // single non-multiplexed stream, so concurrent reads must not interleave.
 type nfsLockedFile struct {
-	mu *sync.Mutex
-	f  *nfsclient.File
+	mu   *sync.Mutex
+	f    *nfsclient.File
+	path string
 }
 
 func (l *nfsLockedFile) Read(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.f.Read(p)
+	n, err := l.f.Read(p)
+	if err != nil && err != io.EOF {
+		err = &OpError{Protocol: "nfs", Op: "read", Path: l.path, Err: err}
+	}
+	return n, err
 }
 
 func (l *nfsLockedFile) Write(p []byte) (int, error) {
