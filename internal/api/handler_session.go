@@ -77,15 +77,24 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 		fs, err := remotefs.NewFromConfig(fsCfg)
 		if err != nil {
 			log.Printf("scan session %d: connect fs failed: %v", session.ID, err)
-			session.Status = db.TruncateStatus("error: " + err.Error())
+			session.Status = "error"
+			session.ErrorMessage = err.Error()
 			s.repo.UpdateSession(session)
 			return
 		}
 		defer fs.Close()
 		sc := scanner.New(fs, s.repo, filterMode, filterDirs)
 		if err := sc.Scan(ctx, session); err != nil {
+			if ctx.Err() != nil {
+				// User-initiated cancel (rescan/delete) is not a failure —
+				// whoever canceled owns the session state; writing an error
+				// here would race the fresh rescan's "scanning" status.
+				log.Printf("scan session %d canceled", session.ID)
+				return
+			}
 			log.Printf("scan session %d failed: %v", session.ID, err)
-			session.Status = db.TruncateStatus("error: " + err.Error())
+			session.Status = "error"
+			session.ErrorMessage = err.Error()
 			s.repo.UpdateSession(session)
 		}
 	}()
@@ -290,6 +299,9 @@ func (s *Server) rescanSession(c *gin.Context) {
 	session.RootPath = scanRootPath(session.ScanPath)
 	session.Status = "scanning"
 	session.TotalFiles = 0
+	session.ScannedCount = 0
+	session.CurrentPath = ""
+	session.ErrorMessage = ""
 	session.TaggedFiles = 0
 	session.PlannedOps = 0
 	session.ExecutedOps = 0
