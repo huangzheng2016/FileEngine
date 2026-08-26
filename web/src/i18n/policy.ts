@@ -5,7 +5,7 @@ const policy = {
   'zh-CN': {
     categoryPolicy: {
       title: '分类规范',
-      hint: '规范文本会注入 system prompt 的「分类规范」章节，并附加到 create_category 工具描述末尾；保存后对新发起的打标任务生效',
+      hint: '规范文本会注入 system prompt 的「分类规范」章节，并附加到 create_category 工具描述末尾；保存后对新发起的打标任务生效；清空保存将恢复默认规范',
       quickFill: '快速填充',
       quickFillPlaceholder: '选择预设模板填入规范文本（填入后可再修改）',
       importTitle: '从模板导入分类',
@@ -19,7 +19,7 @@ const policy = {
   en: {
     categoryPolicy: {
       title: 'Category Policy',
-      hint: 'The policy text is injected into the system prompt as a "Category Policy" section and appended to the create_category tool description; it applies to tagging runs started after saving',
+      hint: 'The policy text is injected into the system prompt as a "Category Policy" section and appended to the create_category tool description; it applies to tagging runs started after saving. Clearing it and saving restores the default policy',
       quickFill: 'Quick fill',
       quickFillPlaceholder: 'Pick a preset to fill the policy text (editable afterwards)',
       importTitle: 'Import Categories from Template',
