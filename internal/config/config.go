@@ -104,7 +104,23 @@ type AgentConfig struct {
 	// classifies them without read_file calls.
 	ArchivePromptDisabled   bool `yaml:"archive_prompt_disabled" json:"archive_prompt_disabled"`
 	ArchivePromptMaxEntries int  `yaml:"archive_prompt_max_entries" json:"archive_prompt_max_entries"` // names per hint, default 6
+	// CategoryPolicy is a free-text category-creation policy injected into
+	// the default system prompt (as a 分类规范 section) and appended to the
+	// create_category tool / run_script builtin descriptions. Empty falls
+	// back to DefaultCategoryPolicy; hot-reloaded like every other knob
+	// (each agent run re-reads config.Get()).
+	CategoryPolicy string `yaml:"category_policy" json:"category_policy"`
 }
+
+// DefaultCategoryPolicy is the built-in category-creation policy applied when
+// agent.category_policy is unset.
+const DefaultCategoryPolicy = `分类创建规范：
+- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
+- 按"内容类型"建分类，不按人名/时间/设备名建
+- 名称用语义化中文（网站备份/数据库备份/照片视频/项目代码/文档资料），路径用小写英文短横线（/website-backups）
+- 同义近义必须合并，禁止一词多类
+- 预期少于 5 个文件就不新建，归入更宽的上级分类
+- 拿不准一律进 /uncategorized`
 
 var (
 	global *Config
@@ -227,5 +243,8 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Agent.HarnessMaxStep == 0 {
 		cfg.Agent.HarnessMaxStep = 2000
+	}
+	if cfg.Agent.CategoryPolicy == "" {
+		cfg.Agent.CategoryPolicy = DefaultCategoryPolicy
 	}
 }
