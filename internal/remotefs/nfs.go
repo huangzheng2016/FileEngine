@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"FileEngine/internal/config"
 
@@ -39,8 +40,17 @@ type NFSFS struct {
 	auth       rpc.Auth
 	exportPath string // resolved export, for dialing pool connections
 	poolOnce   sync.Once
-	pool       chan *nfsScanConn
-	poolSize   int // successfully dialed pool connections (scan concurrency)
+	poolMu     sync.Mutex // guards pool channel lifecycle (Close vs async replenish)
+	pool       chan scanConn
+	poolSize   atomic.Int32 // live pool connections (scan concurrency)
+}
+
+// scanConn is the listing surface of one pooled scan connection — an
+// interface so tests can inject failing connections into the pool.
+type scanConn interface {
+	ReadDirPlus(path string) ([]*nfsclient.EntryPlus, error)
+	ReadDirPlusByHandle(handle []byte) ([]*nfsclient.EntryPlus, error)
+	Close()
 }
 
 // nfsScanConn is one extra mount connection dedicated to scan-time directory
@@ -48,6 +58,38 @@ type NFSFS struct {
 type nfsScanConn struct {
 	mount  *nfsclient.Mount
 	target *nfsclient.Target
+}
+
+func (c *nfsScanConn) ReadDirPlus(p string) ([]*nfsclient.EntryPlus, error) {
+	return c.target.ReadDirPlus(p)
+}
+
+func (c *nfsScanConn) ReadDirPlusByHandle(h []byte) ([]*nfsclient.EntryPlus, error) {
+	return c.target.ReadDirPlusByHandle(h)
+}
+
+func (c *nfsScanConn) Close() {
+	c.target.Close()
+	c.mount.Close()
+}
+
+// dialNFSScanConn dials and mounts one scan-pool connection with the same
+// per-RPC timeout semantics as the primary connection. It is a package
+// variable so tests can stub the dial.
+var dialNFSScanConn = func(host, exportPath string, auth rpc.Auth) (scanConn, error) {
+	mount, err := nfsclient.DialMount(host)
+	if err != nil {
+		return nil, err
+	}
+	target, err := mount.Mount(exportPath, auth)
+	if err != nil {
+		mount.Close()
+		return nil, err
+	}
+	timeout := opTimeout()
+	mount.SetTimeout(timeout)
+	target.SetTimeout(timeout)
+	return &nfsScanConn{mount: mount, target: target}, nil
 }
 
 // scanConnCount reads FE_NFS_SCAN_CONNS (default 8, clamped to 1..32): how
@@ -140,29 +182,48 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 func (n *NFSFS) ensurePool() {
 	n.poolOnce.Do(func() {
 		want := scanConnCount()
-		n.pool = make(chan *nfsScanConn, want)
+		n.pool = make(chan scanConn, want)
 		for i := 0; i < want; i++ {
-			pm, err := nfsclient.DialMount(n.host)
+			c, err := dialNFSScanConn(n.host, n.exportPath, n.auth)
 			if err != nil {
 				log.Printf("warn: nfs scan pool dial %d/%d: %v", i+1, want, err)
 				break
 			}
-			pt, err := pm.Mount(n.exportPath, n.auth)
-			if err != nil {
-				log.Printf("warn: nfs scan pool mount %d/%d: %v", i+1, want, err)
-				pm.Close()
-				break
-			}
-			// Pool connections carry the same per-RPC timeout semantics as
-			// the primary connection — a dead pooled connection must fail
-			// its listing, not hang a scan worker forever.
-			timeout := opTimeout()
-			pm.SetTimeout(timeout)
-			pt.SetTimeout(timeout)
-			n.pool <- &nfsScanConn{mount: pm, target: pt}
-			n.poolSize++
+			n.pool <- c
+			n.poolSize.Add(1)
 		}
 	})
+}
+
+// replenish replaces a discarded pool connection in the background. On
+// failure the pool simply stays smaller (logged, same graceful degradation
+// as ensurePool); checked-out workers then serialize on fewer connections.
+func (n *NFSFS) replenish() {
+	c, err := dialNFSScanConn(n.host, n.exportPath, n.auth)
+	if err != nil {
+		log.Printf("warn: nfs scan pool re-dial: %v", err)
+		return
+	}
+	// The fs may have been closed while the dial was in flight: never send
+	// on the closed pool channel.
+	n.poolMu.Lock()
+	defer n.poolMu.Unlock()
+	if n.pool == nil {
+		c.Close()
+		return
+	}
+	n.pool <- c
+	n.poolSize.Add(1)
+}
+
+// discard drops a poisoned pool connection: an operation that timed out may
+// have left the single-stream connection desynced (a late reply would be
+// misread as the next response's XID), so it must not be returned for the
+// next checkout. The pool is replenished asynchronously.
+func (n *NFSFS) discard(c scanConn) {
+	c.Close()
+	n.poolSize.Add(-1)
+	go n.replenish()
 }
 
 // resolve maps a caller path to an export-relative slash path confined to
@@ -201,8 +262,8 @@ func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
 // call dials the pool (lazy), so call it once before sizing a worker pool.
 func (n *NFSFS) ListConcurrency() int {
 	n.ensurePool()
-	if n.poolSize > 0 {
-		return n.poolSize
+	if size := n.poolSize.Load(); size > 0 {
+		return int(size)
 	}
 	return 1
 }
@@ -215,6 +276,10 @@ func (n *NFSFS) ListConcurrency() int {
 // checks so lexical-confinement semantics match every other method. With no
 // pool (pool dialing failed at startup) it degrades to the mutex-serialized
 // primary connection.
+//
+// A connection whose operation timed out is potentially desynced and is
+// discarded (closed, asynchronously replaced) instead of returned to the
+// pool — the XID check in the vendored client remains as the backstop.
 func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]FileInfo, error) {
 	fullPath, err := n.resolve(p)
 	if err != nil {
@@ -222,23 +287,32 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 	}
 
 	n.ensurePool()
-	if n.poolSize > 0 {
+	if n.poolSize.Load() > 0 {
 		// Block until a pool connection is free — falling back to the
 		// primary connection here would serialize the whole worker pool on
 		// its mutex and starve the agent/tool paths.
 		select {
 		case c := <-n.pool:
-			defer func() { n.pool <- c }()
 			var entries []*nfsclient.EntryPlus
+			timedOut := false
 			if len(handle) > 0 {
-				entries, err = c.target.ReadDirPlusByHandle(handle)
+				entries, err = c.ReadDirPlusByHandle(handle)
 				if err != nil {
+					// A timeout here poisons the connection even if the
+					// fallback succeeds: the late handle reply could arrive
+					// later and be misread as a future response.
+					timedOut = IsTimeout(err)
 					// Stale or rejected handle: retry via the path walk
 					// before giving up on the directory.
-					entries, err = c.target.ReadDirPlus(fullPath)
+					entries, err = c.ReadDirPlus(fullPath)
 				}
 			} else {
-				entries, err = c.target.ReadDirPlus(fullPath)
+				entries, err = c.ReadDirPlus(fullPath)
+			}
+			if timedOut || IsTimeout(err) {
+				n.discard(c)
+			} else {
+				n.pool <- c
 			}
 			if err != nil {
 				return nil, &OpError{Protocol: "nfs", Op: "list", Path: p, Err: err}
@@ -441,15 +515,17 @@ func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 func (n *NFSFS) Close() error {
 	// Drain and close the scan pool first. Callers close the fs only after
 	// the scan (and its workers) have finished, so no connection is checked
-	// out and no sender can race the close.
+	// out and no sender can race the close; poolMu still excludes an
+	// asynchronously replenishing connection.
+	n.poolMu.Lock()
 	if n.pool != nil {
 		close(n.pool)
 		for c := range n.pool {
-			c.target.Close()
-			c.mount.Close()
+			c.Close()
 		}
 		n.pool = nil
 	}
+	n.poolMu.Unlock()
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.target.Close()
