@@ -13,28 +13,36 @@ import (
 
 type nullCall struct{ Header }
 
-// TestCallTimeout hangs a Call on a peer that accepts the connection but
-// never replies (the silently-dead-TCP failure mode): with SetTimeout armed
-// the recv must fail promptly with an errors.Is-recognizable timeout instead
-// of blocking forever.
-func TestCallTimeout(t *testing.T) {
+// silentPeer accepts one TCP connection and holds it open without ever
+// responding — the silently-dead-TCP failure mode.
+func silentPeer(t *testing.T) (addr string) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
 	done := make(chan struct{})
-	defer close(done)
+	t.Cleanup(func() { close(done); ln.Close() })
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				<-done
+				conn.Close()
+			}()
 		}
-		<-done // hold the connection open without ever responding
-		conn.Close()
 	}()
+	return ln.Addr().String()
+}
 
-	client, err := DialTCP("tcp", nil, ln.Addr().String())
+// TestCallTimeout: with SetTimeout armed, a Call against a silent peer must
+// fail promptly with an errors.Is-recognizable timeout instead of blocking
+// forever.
+func TestCallTimeout(t *testing.T) {
+	client, err := DialTCP("tcp", nil, silentPeer(t))
 	if err != nil {
 		t.Fatalf("DialTCP: %v", err)
 	}
@@ -59,6 +67,43 @@ func TestCallTimeout(t *testing.T) {
 	}
 	if el > 5*time.Second {
 		t.Fatalf("Call took %v to fail; timeout was 100ms", el)
+	}
+}
+
+// TestDialTCPPresetsTimeout covers the handshake hole: DialTCP arms the IO
+// timeout itself (from DialTimeout), so RPCs issued before the caller could
+// call SetTimeout — portmap GETPORT, MNT, FSINFO — cannot block forever on a
+// peer that accepts TCP but never answers.
+func TestDialTCPPresetsTimeout(t *testing.T) {
+	prev := DialTimeout
+	DialTimeout = 200 * time.Millisecond
+	defer func() { DialTimeout = prev }()
+
+	client, err := DialTCP("tcp", nil, silentPeer(t))
+	if err != nil {
+		t.Fatalf("DialTCP: %v", err)
+	}
+	defer client.Close()
+	// No SetTimeout call: the preset from DialTCP must bound the Call.
+
+	start := time.Now()
+	_, err = client.Call(&nullCall{Header{
+		Rpcvers: 2,
+		Prog:    100000,
+		Vers:    2,
+		Proc:    0,
+		Cred:    AuthNull,
+		Verf:    AuthNull,
+	}})
+	el := time.Since(start)
+	if err == nil {
+		t.Fatal("Call to a silent peer without SetTimeout: got nil error, want preset timeout")
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Call error %v is not recognizable via errors.Is(os.ErrDeadlineExceeded)", err)
+	}
+	if el > 5*time.Second {
+		t.Fatalf("Call took %v to fail; preset DialTimeout was 200ms", el)
 	}
 }
 

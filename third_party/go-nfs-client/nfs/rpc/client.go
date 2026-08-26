@@ -68,6 +68,11 @@ func DialTCP(network string, ldr *net.TCPAddr, addr string) (*Client, error) {
 		r:  bufio.NewReader(conn),
 		wc: conn,
 	}
+	// Arm the IO timeout right away: the handshake RPCs (portmap GETPORT,
+	// MNT, FSINFO) all run before the caller could call SetTimeout, and a
+	// peer that accepts TCP but never answers RPCs must fail them, not block
+	// them forever. Callers may still re-set or clear it via SetTimeout.
+	t.SetTimeout(DialTimeout)
 
 	return &Client{t}, nil
 }
