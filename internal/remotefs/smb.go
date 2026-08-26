@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"FileEngine/internal/config"
 
@@ -21,15 +23,46 @@ type SMBFS struct {
 	basePath string
 }
 
+// smbScanConns reads FE_SMB_SCAN_CONNS (default 8, clamped to 1..32): how
+// many directory listings the scanner may run in parallel over the
+// multiplexed SMB2 session. Named after the NFS knob to keep scan tuning
+// symmetrical, though no connection pool is involved here.
+func smbScanConns() int {
+	n := 8
+	if v := os.Getenv("FE_SMB_SCAN_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	if n > 32 {
+		n = 32
+	}
+	return n
+}
+
+// smbStreamTimeout bounds an opened file's whole read stream. go-smb2 fixes
+// a file's request context at Open time, so per-Read re-arming is impossible
+// without forking the library; a generous multiple of the per-operation
+// budget keeps realistic reads unharmed while still surfacing a dead
+// connection in minutes instead of never.
+func smbStreamTimeout() time.Duration {
+	return 10 * opTimeout()
+}
+
 func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 	port := cfg.Port
 	if port == 0 {
 		port = 445
 	}
 
-	conn, err := net.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(port)))
+	timeout := opTimeout()
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(port)))
 	if err != nil {
-		return nil, fmt.Errorf("smb connect: %w", err)
+		return nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
 	d := &smb2.Dialer{
@@ -39,10 +72,15 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 		},
 	}
 
-	session, err := d.Dial(conn)
+	// The negotiate/auth exchange waits on server replies with the dialer's
+	// context; Background (the Dial default) would hang forever on a dead
+	// peer, so bound it explicitly.
+	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	session, err := d.DialContext(dialCtx, conn)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("smb dial: %w", err)
+		return nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
 	// basePath format: "sharename/path/to/dir" (backslashes normalized to forward slashes)
@@ -55,11 +93,13 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 		subPath = normalized[idx:]
 	}
 
-	share, err := session.Mount(shareName)
+	mountCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	share, err := session.WithContext(mountCtx).Mount(shareName)
 	if err != nil {
 		session.Logoff()
 		conn.Close()
-		return nil, fmt.Errorf("smb mount %s: %w", shareName, err)
+		return nil, &OpError{Protocol: "smb", Op: "mount", Path: shareName, Err: err}
 	}
 
 	return &SMBFS{
@@ -91,14 +131,25 @@ func (s *SMBFS) resolve(p string) (string, error) {
 	return resolved, nil
 }
 
-func (s *SMBFS) List(_ context.Context, p string) ([]FileInfo, error) {
+// opCtx bounds one SMB operation. The go-smb2 transport arms no socket
+// deadlines on its always-blocked receive loop; instead every request waits
+// on the operation's context, so a timeout here is what keeps a dead peer
+// from hanging the call forever. Each call goes through a fresh
+// Share.WithContext copy, so concurrent operations never share a context.
+func smbOpCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, opTimeout())
+}
+
+func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := s.share.ReadDir(fullPath)
+	opCtx, cancel := smbOpCtx(ctx)
+	defer cancel()
+	entries, err := s.share.WithContext(opCtx).ReadDir(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "smb", Op: "list", Path: p, Err: err}
 	}
 	var result []FileInfo
 	for _, info := range entries {
@@ -119,14 +170,33 @@ func (s *SMBFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	return result, nil
 }
 
-func (s *SMBFS) Stat(_ context.Context, p string) (*FileInfo, error) {
+// ListConcurrency reports how many scan-listing calls may run in parallel.
+// The go-smb2 connection multiplexes concurrent requests over the single
+// TCP stream (per-message IDs, credits, locked response dispatch), so
+// concurrent Share operations are safe without the connection pool the NFS
+// backend needs; this only sizes the scanner's worker pool.
+func (s *SMBFS) ListConcurrency() int {
+	return smbScanConns()
+}
+
+// ListByHandle lists a directory for the scanner. SMB exposes no resumable
+// directory handle to chain on, so handle is ignored and the listing always
+// walks the path; the concurrency win comes from the multiplexed session,
+// not from skipping path resolution.
+func (s *SMBFS) ListByHandle(ctx context.Context, p string, _ []byte) ([]FileInfo, error) {
+	return s.List(ctx, p)
+}
+
+func (s *SMBFS) Stat(ctx context.Context, p string) (*FileInfo, error) {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.share.Stat(fullPath)
+	opCtx, cancel := smbOpCtx(ctx)
+	defer cancel()
+	info, err := s.share.WithContext(opCtx).Stat(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "smb", Op: "stat", Path: p, Err: err}
 	}
 	ft := FileTypeFile
 	if info.IsDir() {
@@ -143,12 +213,45 @@ func (s *SMBFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	}, nil
 }
 
-func (s *SMBFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
+func (s *SMBFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return nil, err
 	}
-	return s.share.Open(fullPath)
+	// The opened file keeps this context for its whole lifetime (see
+	// smbStreamTimeout); cancel fires only when the returned closer runs.
+	streamCtx, cancel := context.WithTimeout(ctx, smbStreamTimeout())
+	f, err := s.share.WithContext(streamCtx).Open(fullPath)
+	if err != nil {
+		cancel()
+		return nil, &OpError{Protocol: "smb", Op: "open", Path: p, Err: err}
+	}
+	return &smbReadCloser{f: f, cancel: cancel, path: p}, nil
+}
+
+// smbReadCloser pairs an opened SMB file with the cancel func of the stream
+// context that bounds its reads.
+type smbReadCloser struct {
+	f      *smb2.File
+	cancel context.CancelFunc
+	path   string
+}
+
+func (r *smbReadCloser) Read(p []byte) (int, error) {
+	n, err := r.f.Read(p)
+	if err != nil && err != io.EOF {
+		err = &OpError{Protocol: "smb", Op: "read", Path: r.path, Err: err}
+	}
+	return n, err
+}
+
+func (r *smbReadCloser) Close() error {
+	err := r.f.Close()
+	r.cancel()
+	if err != nil {
+		return &OpError{Protocol: "smb", Op: "close", Path: r.path, Err: err}
+	}
+	return nil
 }
 
 func (s *SMBFS) MoveFile(_ context.Context, src, dst string) error {
