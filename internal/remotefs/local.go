@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// LocalFS needs no timeout machinery: its operations are plain syscalls —
+// there is no dial and no remote peer that can silently stop responding.
+// Errors are still wrapped in OpError for a uniform shape across backends.
 type LocalFS struct {
 	basePath     string
 	resolvedBase string // basePath with symlinks resolved (macOS /var etc.)
@@ -92,7 +95,7 @@ func (l *LocalFS) List(_ context.Context, path string) ([]FileInfo, error) {
 	}
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "local", Op: "list", Path: path, Err: err}
 	}
 
 	var result []FileInfo
@@ -127,7 +130,7 @@ func (l *LocalFS) Stat(_ context.Context, path string) (*FileInfo, error) {
 	}
 	info, err := os.Stat(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "local", Op: "stat", Path: path, Err: err}
 	}
 	ft := FileTypeFile
 	if info.IsDir() {
@@ -151,7 +154,11 @@ func (l *LocalFS) ReadFile(_ context.Context, path string) (io.ReadCloser, error
 	if err != nil {
 		return nil, err
 	}
-	return os.Open(fullPath)
+	f, err := os.Open(fullPath)
+	if err != nil {
+		return nil, &OpError{Protocol: "local", Op: "open", Path: path, Err: err}
+	}
+	return f, nil
 }
 
 func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
