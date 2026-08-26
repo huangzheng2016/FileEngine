@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -154,40 +153,18 @@ func withRunTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	return ctx, func() {}
 }
 
+// runADKWithRetry executes one agent run and retries failures according to
+// their error class (see retry.go): 429/5xx/network errors back off with
+// jitter, hard 4xx errors fail immediately. Each attempt gets a fresh
+// per-run timeout (agent_timeout) and token-usage window.
 func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
-	callCtx, callCancel := withRunTimeout(ctx)
-	defer callCancel()
-
-	tracker.ResetUsage()
-	result, err := runADKOnce(callCtx, agent, messages, logger)
-	if err == nil {
-		return result, nil
-	}
-
-	maxRetries := config.Get().Agent.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-	for retry := 1; retry <= maxRetries; retry++ {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		log.Printf("%s retry %d/%d: %v", label, retry, maxRetries, err)
-		time.Sleep(time.Duration(retry) * 2 * time.Second)
-		retryCtx, retryCancel := withRunTimeout(ctx)
+	attempt := func(ctx context.Context) (*schema.Message, error) {
+		callCtx, callCancel := withRunTimeout(ctx)
+		defer callCancel()
 		tracker.ResetUsage()
-		result, err = runADKOnce(retryCtx, agent, messages, logger)
-		retryCancel()
-		if err == nil {
-			return result, nil
-		}
+		return runADKOnce(callCtx, agent, messages, logger)
 	}
-	// Attribute the last attempt's token usage to the system row too — a failed
-	// batch otherwise vanishes from the token accounting (batch cards showed
-	// no tokens for failed batches).
-	pt, ct, tt := tracker.Usage()
-	logger.LogMessage("system", fmt.Sprintf("Error after %d retries: %v", maxRetries, err), pt, ct, tt)
-	return nil, err
+	return runWithRetry(ctx, attempt, logger, label, tracker)
 }
 
 // runADKOnce executes one full agent run and forwards every ADK AgentEvent to
