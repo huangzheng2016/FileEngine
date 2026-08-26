@@ -137,7 +137,9 @@ type AgentLog struct {
 	BatchIndex       int       `gorm:"index:idx_log_session_batch,priority:2" json:"batch_index"`
 	// WorkerID identifies the agent worker lane that produced the row (0 for
 	// single-worker instruct runs and for rows written before lanes existed).
-	WorkerID         int       `json:"worker_id"`
+	// default:0 makes AutoMigrate backfill existing rows with 0 on all
+	// dialects — a bare ADD COLUMN would leave NULLs that fail int scans.
+	WorkerID         int       `gorm:"default:0" json:"worker_id"`
 	Role             string    `gorm:"size:32" json:"role"` // "system" / "user" / "assistant" / "tool"
 	ToolName         string    `gorm:"size:128" json:"tool_name"`
 	ToolInput        string    `gorm:"type:text" json:"tool_input"`
