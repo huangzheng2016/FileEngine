@@ -110,8 +110,8 @@ export const categoryPresets: CategoryPreset[] = [
         description: { 'zh-CN': '安防监控录像文件', en: 'Surveillance camera recordings' },
       },
       {
-        name: { 'zh-CN': '文档', en: 'Documents' },
-        path: '/documents',
+        name: { 'zh-CN': '文档', en: 'Docs' },
+        path: '/docs',
         description: { 'zh-CN': '相关文档资料', en: 'Related documents' },
       },
     ],
@@ -149,8 +149,8 @@ export const categoryPresets: CategoryPreset[] = [
         description: { 'zh-CN': '编译构建与依赖产物', en: 'Build outputs and dependency artifacts' },
       },
       {
-        name: { 'zh-CN': '文档', en: 'Docs' },
-        path: '/docs',
+        name: { 'zh-CN': '项目文档', en: 'Project Docs' },
+        path: '/project-docs',
         description: { 'zh-CN': '项目文档', en: 'Project documentation' },
       },
       {
