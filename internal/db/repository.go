@@ -155,7 +155,13 @@ func (r *Repository) CreateFiles(files []FileEntry) error {
 	if len(files) == 0 {
 		return nil
 	}
-	return r.db.CreateInBatches(files, 500).Error
+	// One explicit transaction for the whole bulk load: bare CreateInBatches
+	// commits every batch, and on bind-mounted SQLite volumes (Docker on
+	// macOS) each commit's fsync costs ~100ms — hundreds of batches meant
+	// the DB tail of a scan dwarfed the traversal itself.
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return tx.CreateInBatches(files, 500).Error
+	})
 }
 
 func (r *Repository) GetFile(id uint) (*FileEntry, error) {

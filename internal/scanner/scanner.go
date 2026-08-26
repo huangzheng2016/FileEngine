@@ -65,12 +65,16 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
+	saveStart := time.Now()
 	if err := db.WithRetry(func() error { return s.repo.CreateFiles(allFiles) }); err != nil {
 		return fmt.Errorf("save files: %w", err)
 	}
+	log.Printf("scan: saved %d entries in %v", len(allFiles), time.Since(saveStart).Round(time.Millisecond))
 
 	// Update child counts for directories
+	countStart := time.Now()
 	s.updateChildCounts(session.ID, allFiles)
+	log.Printf("scan: updated child counts in %v", time.Since(countStart).Round(time.Millisecond))
 
 	session.Status = "scanned"
 	session.TotalFiles = len(allFiles)
