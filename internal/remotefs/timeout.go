@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -61,4 +62,65 @@ func (c *stallConn) Write(p []byte) (int, error) {
 		c.Conn.SetWriteDeadline(time.Now().Add(c.timeout))
 	}
 	return c.Conn.Write(p)
+}
+
+// activityConn is a gated, sliding IO deadline for connections with a
+// permanently blocked background reader (ssh-style receive loops), where
+// stallConn's always-armed deadlines would kill healthy idle sessions.
+//
+// arm/disarm bracket one operation (the caller serializes operations, so
+// arm/disarm never races). While armed, every successful Read or Write
+// re-arms the deadline, so the timeout fires only after a full interval
+// without any IO progress — a long but progressing operation (a ReadDir
+// paging through a giant directory) never trips it, while a silently dead
+// peer still fails the operation instead of hanging it forever.
+type activityConn struct {
+	net.Conn
+	timeout time.Duration
+	mu      sync.Mutex
+	armed   bool
+}
+
+func (c *activityConn) arm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.armed = true
+	c.setDeadlines()
+}
+
+func (c *activityConn) disarm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.armed = false
+	c.Conn.SetDeadline(time.Time{})
+}
+
+func (c *activityConn) setDeadlines() {
+	deadline := time.Now().Add(c.timeout)
+	c.Conn.SetReadDeadline(deadline)
+	c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *activityConn) rearm() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.armed {
+		c.setDeadlines()
+	}
+}
+
+func (c *activityConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.rearm()
+	}
+	return n, err
+}
+
+func (c *activityConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.rearm()
+	}
+	return n, err
 }

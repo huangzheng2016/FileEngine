@@ -184,28 +184,74 @@ func TestSMBScanConnsEnv(t *testing.T) {
 	}
 }
 
-// SFTP's deadline arming must set and cleanly clear the transport deadline:
-// after disarm, a Read blocks again (no stale deadline fires later).
-func TestSFTPArmDisarm(t *testing.T) {
+// The activityConn deadline slides with IO progress: a peer that keeps
+// sending (slowly, but steadily) never trips it even when the total transfer
+// far exceeds the timeout; only a full quiet interval does. This is the
+// semantic that keeps a giant-directory ReadDir alive while still catching a
+// silently dead peer.
+func TestActivityConnSliding(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
 	defer c2.Close()
 
-	fs := &SFTPFS{conn: c1}
-	disarm := fs.armDeadline(100 * time.Millisecond)
-	_, err := c1.Read(make([]byte, 1))
-	if !errors.Is(err, os.ErrDeadlineExceeded) {
-		t.Fatalf("armed Read: got %v, want deadline error", err)
-	}
-	disarm()
+	ac := &activityConn{Conn: c1, timeout: 150 * time.Millisecond}
+	ac.arm()
+	defer ac.disarm()
 
-	// Disarmed: a read unblocks when data arrives, however long it takes.
+	// Phase 1: peer writes one byte every 50ms for 500ms (> 3x the timeout).
+	// An absolute deadline would fire at 150ms; the sliding one must not.
 	go func() {
-		time.Sleep(150 * time.Millisecond) // past the old deadline
+		for i := 0; i < 10; i++ {
+			c2.Write([]byte("x"))
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	for i := 0; i < 10; i++ {
+		if _, err := ac.Read(make([]byte, 1)); err != nil {
+			t.Fatalf("Read %d during steady progress: %v (deadline must slide, not fire)", i, err)
+		}
+	}
+
+	// Phase 2: peer goes silent — the read must fail ~timeout after the last
+	// byte, with an errors.Is-recognizable timeout.
+	start := time.Now()
+	_, err := ac.Read(make([]byte, 1))
+	el := time.Since(start)
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Read with silent peer: got %v, want os.ErrDeadlineExceeded", err)
+	}
+	if el > 5*time.Second {
+		t.Fatalf("Read took %v to fail; sliding timeout was 150ms", el)
+	}
+}
+
+// While disarmed (no operation in flight) the connection must tolerate
+// arbitrary idle time: the ssh receive loop is always blocked in Read, so an
+// armed deadline there would kill healthy idle sessions.
+func TestActivityConnDisarmedIdle(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	ac := &activityConn{Conn: c1, timeout: 100 * time.Millisecond}
+	// Never armed: idle far beyond the timeout, then data arrives.
+	go func() {
+		time.Sleep(300 * time.Millisecond)
 		c2.Write([]byte("x"))
 	}()
-	if _, err := c1.Read(make([]byte, 1)); err != nil {
-		t.Fatalf("disarmed Read: got %v, want nil", err)
+	if _, err := ac.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("Read after disarmed idle: got %v, want nil", err)
+	}
+
+	// Armed then disarmed: same tolerance (no stale deadline left behind).
+	ac.arm()
+	ac.disarm()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		c2.Write([]byte("y"))
+	}()
+	if _, err := ac.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("Read after arm+disarm idle: got %v, want nil", err)
 	}
 }
 

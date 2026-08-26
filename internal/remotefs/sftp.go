@@ -23,12 +23,14 @@ import (
 // arm/disarm on one connection is incoherent without serialization (the ssh
 // read loop is always blocked in Read, so a deadline left armed would kill a
 // healthy idle session). The posture matches the NFS and FTP backends: one
-// operation at a time, each bounded by opTimeout.
+// operation at a time. The deadline is sliding — see activityConn: it fires
+// only after opTimeout without any IO progress, so a long but progressing
+// operation (a ReadDir paging through a giant directory) is never cut off.
 type SFTPFS struct {
 	mu       sync.Mutex
 	client   *sftp.Client
 	sshConn  *ssh.Client
-	conn     net.Conn // raw transport, for deadline arming
+	conn     *activityConn
 	basePath string
 }
 
@@ -86,17 +88,9 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	return &SFTPFS{
 		client:   client,
 		sshConn:  sshClient,
-		conn:     conn,
+		conn:     &activityConn{Conn: conn, timeout: timeout},
 		basePath: cfg.BasePath,
 	}, nil
-}
-
-// armDeadline sets an absolute IO deadline on the ssh transport and returns
-// the disarm func. Callers must hold s.mu so concurrent operations cannot
-// race arm/disarm.
-func (s *SFTPFS) armDeadline(d time.Duration) (disarm func()) {
-	s.conn.SetDeadline(time.Now().Add(d))
-	return func() { s.conn.SetDeadline(time.Time{}) }
 }
 
 // resolve maps a caller path to a host slash path and confines it to
@@ -122,8 +116,8 @@ func (s *SFTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	disarm := s.armDeadline(opTimeout())
-	defer disarm()
+	s.conn.arm()
+	defer s.conn.disarm()
 	entries, err := s.client.ReadDir(fullPath)
 	if err != nil {
 		return nil, &OpError{Protocol: "sftp", Op: "list", Path: p, Err: err}
@@ -156,8 +150,8 @@ func (s *SFTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	disarm := s.armDeadline(opTimeout())
-	defer disarm()
+	s.conn.arm()
+	defer s.conn.disarm()
 	info, err := s.client.Stat(fullPath)
 	if err != nil {
 		return nil, &OpError{Protocol: "sftp", Op: "stat", Path: p, Err: err}
@@ -193,31 +187,31 @@ func (s *SFTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	// NFS/FTP locked files): deadline arming on the shared transport is only
 	// coherent while no other operation runs.
 	s.mu.Lock()
-	disarm := s.armDeadline(opTimeout())
+	s.conn.arm()
 	f, err := s.client.Open(fullPath)
-	disarm()
+	s.conn.disarm()
 	if err != nil {
 		s.mu.Unlock()
 		return nil, &OpError{Protocol: "sftp", Op: "open", Path: p, Err: err}
 	}
-	return &sftpLockedFile{mu: &s.mu, conn: s.conn, timeout: opTimeout(), f: f, path: p}, nil
+	return &sftpLockedFile{mu: &s.mu, conn: s.conn, f: f, path: p}, nil
 }
 
 // sftpLockedFile holds the parent connection's mutex from Open until Close;
-// each Read/Close arms a fresh stall deadline on the shared transport.
+// each Read/Close brackets itself with arm/disarm on the shared transport,
+// and IO progress inside the call keeps the deadline sliding.
 type sftpLockedFile struct {
-	mu      *sync.Mutex
-	conn    net.Conn
-	timeout time.Duration
-	f       *sftp.File
-	path    string
-	once    sync.Once
+	mu   *sync.Mutex
+	conn *activityConn
+	f    *sftp.File
+	path string
+	once sync.Once
 }
 
 func (l *sftpLockedFile) Read(p []byte) (int, error) {
-	l.conn.SetDeadline(time.Now().Add(l.timeout))
+	l.conn.arm()
 	n, err := l.f.Read(p)
-	l.conn.SetDeadline(time.Time{})
+	l.conn.disarm()
 	if err != nil && err != io.EOF {
 		err = &OpError{Protocol: "sftp", Op: "read", Path: l.path, Err: err}
 	}
@@ -227,9 +221,9 @@ func (l *sftpLockedFile) Read(p []byte) (int, error) {
 func (l *sftpLockedFile) Close() error {
 	var err error
 	l.once.Do(func() {
-		l.conn.SetDeadline(time.Now().Add(l.timeout))
+		l.conn.arm()
 		err = l.f.Close()
-		l.conn.SetDeadline(time.Time{})
+		l.conn.disarm()
 		l.mu.Unlock()
 	})
 	return err
