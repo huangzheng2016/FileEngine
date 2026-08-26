@@ -70,7 +70,7 @@
             <el-tab-pane :label="$t('files.navCats')" name="cats" />
           </el-tabs>
           <el-tooltip :content="navFolded ? $t('nav.expand') : $t('nav.collapse')" placement="right">
-            <button class="rail-toggle rail-toggle--sm" :aria-label="navFolded ? $t('nav.expand') : $t('nav.collapse')" @click="navFolded = !navFolded">
+            <button class="rail-toggle rail-toggle--sm" :aria-label="navFolded ? $t('nav.expand') : $t('nav.collapse')" :aria-expanded="!navFolded" @click="navFolded = !navFolded">
               <el-icon :size="14"><Fold v-if="!navFolded" /><Expand v-else /></el-icon>
             </button>
           </el-tooltip>
@@ -770,6 +770,26 @@ async function previewFile(file: FileEntry) {
 
 .files-nav__head .el-tabs {
   flex: 1;
+}
+
+/* Base styles used to come from MainLayout's scoped block, which never
+   applied here (scoped CSS is per-component) — the button rendered unstyled.
+   Self-contained now that MainLayout's collapse rail is removed. */
+.rail-toggle {
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.rail-toggle:hover {
+  background: var(--input-bg-hover);
+  color: var(--accent);
+  border-color: var(--floating-border);
 }
 
 .rail-toggle--sm {
