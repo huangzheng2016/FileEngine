@@ -65,7 +65,6 @@ files:
   fileSize: 大小
   fileDescription: 描述
   taggedStatus: 标记
-  batchIndex: 轮次
   columns: 列设置
   plannedPath: 规划路径
   executedAt: 执行记录
@@ -261,15 +260,25 @@ logs:
   noLogs: 该会话还没有运行记录
   noLogsHint: 启动打标或 AI 指令后，运行过程会实时显示在这里
   totalTokens: Token 总计
-  batch: "批次 #{index}"
-  batchWithFiles: "批次 #{index}（{count} 个文件）"
-  batchNavPlaceholder: 跳到批次…
   failed: 失败
   techDetails: 技术详情
   loadedTokens: "本地已加载 {count}"
   toolRunError: "工具 {tool} 运行失败：{reason}（已按策略重试）"
-  manualBatch: "手动 #{index}"
   stepCount: "{count} 步"
+  worker: "Worker {n}"
+  singleLane: 运行日志
+  pullActive: 进行中
+  pullResult: "归类 {tagged} · 失败 {failed}"
+  filesCount: "{count} 个文件"
+  phaseTagging: 打标
+  phaseInstruct: 指令
+  phaseExecuting: 执行
+  runStarted: 进行中
+  runDone: 已完成
+  runError: 出错
+  runStopped: 已停止
+  progressTagging: "已归类 {tagged}/{total} · 已规划 {planned}"
+  progressExecuting: "成功 {success} · 失败 {failed} · 跳过 {skipped} / 共 {total}"
   input: 输入
   output: 输出
   toolRunning: 执行中

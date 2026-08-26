@@ -67,7 +67,6 @@ files:
   fileSize: Size
   fileDescription: Description
   taggedStatus: Tagged
-  batchIndex: Batch
   columns: Columns
   plannedPath: Planned Path
   executedAt: Executed
@@ -263,15 +262,25 @@ logs:
   noLogs: No run records for this session yet
   noLogsHint: Start tagging or an AI instruction and the run will stream here live
   totalTokens: Total Tokens
-  batch: "Batch #{index}"
-  batchWithFiles: "Batch #{index} ({count} files)"
-  batchNavPlaceholder: Jump to batch…
   failed: Failed
   techDetails: Technical details
   loadedTokens: "{count} loaded locally"
   toolRunError: "Tool {tool} failed: {reason} (retried per policy)"
-  manualBatch: "Manual #{index}"
   stepCount: "{count} steps"
+  worker: "Worker {n}"
+  singleLane: Run log
+  pullActive: in progress
+  pullResult: "{tagged} tagged · {failed} failed"
+  filesCount: "{count} files"
+  phaseTagging: Tagging
+  phaseInstruct: Instruct
+  phaseExecuting: Executing
+  runStarted: running
+  runDone: done
+  runError: error
+  runStopped: stopped
+  progressTagging: "{tagged}/{total} tagged · {planned} planned"
+  progressExecuting: "{success} ok · {failed} failed · {skipped} skipped of {total}"
   input: Input
   output: Output
   toolRunning: Running

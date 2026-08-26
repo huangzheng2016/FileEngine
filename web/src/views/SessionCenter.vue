@@ -93,10 +93,9 @@
         </div>
       </div>
 
-      <!-- SSE step timeline -->
+      <!-- SSE worker-lane timeline -->
       <SessionTimeline
         :session-id="current.id"
-        :highlight-batch="highlightBatch"
         :total-tokens-server="current.total_tokens"
         @run-done="refreshSession(current.id)"
         @run-status="refreshSession(current.id)"
@@ -357,7 +356,6 @@ const filesystems = ref<Filesystem[]>([])
 const modelProviders = ref<ModelProvider[]>([])
 const loading = ref(false)
 const selectedId = ref<number>(0)
-const highlightBatch = ref<number | null>(null)
 
 const plansVisible = ref(false)
 const plans = ref<PlanItem[]>([])
@@ -401,29 +399,25 @@ const current = computed(() => sessions.value.find(s => s.id === selectedId.valu
 
 onMounted(async () => {
   await Promise.all([load(), loadFilesystems(), loadModelProviders()])
-  // Deep links: ?session=N&batch=M (legacy /logs redirects here), ?new=1 opens the scan dialog.
+  // Deep links: ?session=N (legacy /logs redirects here), ?new=1 opens the scan dialog.
   const qSession = Number(route.query.session)
   if (qSession && sessions.value.find(s => s.id === qSession)) {
     selectedId.value = qSession
   } else if (sessions.value.length > 0) {
     selectedId.value = sessions.value[0].id
   }
-  highlightBatch.value = route.query.batch != null ? Number(route.query.batch) : null
   if (route.query.new === '1') {
     openNewScanDialog()
     router.replace({ query: { ...route.query, new: undefined } })
   }
 })
 
-// Deep links re-applied while already mounted (e.g. /logs?session&batch
+// Deep links re-applied while already mounted (e.g. /logs?session=N
 // redirecting onto an active /tasks view — review P2-3).
-watch(() => [route.query.session, route.query.batch], ([qSession, qBatch]) => {
+watch(() => route.query.session, (qSession) => {
   const sessId = Number(qSession)
   if (sessId && sessId !== selectedId.value && sessions.value.find(s => s.id === sessId)) {
     selectedId.value = sessId
-  }
-  if (qBatch != null) {
-    highlightBatch.value = Number(qBatch)
   }
 })
 
@@ -435,7 +429,6 @@ onUnmounted(() => {
 
 function selectSession(id: number) {
   selectedId.value = id
-  highlightBatch.value = null
   router.replace({ query: { session: String(id) } })
 }
 

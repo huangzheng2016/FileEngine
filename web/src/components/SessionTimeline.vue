@@ -5,59 +5,63 @@
         <span class="metric-label">{{ $t('logs.totalTokens') }}</span>
         <span class="metric-value">{{ shownTotalTokens.toLocaleString() }}</span>
       </span>
-      <el-select
-        v-if="displayGroups.length > 1"
-        class="batch-nav"
-        size="small"
-        filterable
-        :placeholder="$t('logs.batchNavPlaceholder')"
-        @change="revealBatch"
-      >
-        <el-option
-          v-for="g in displayGroups"
-          :key="g.batch_index"
-          :value="g.batch_index"
-          :label="navLabel(g)"
-        />
-      </el-select>
+      <!-- Run mainline: latest phase transition + absolute progress counters -->
+      <span v-if="runPhase" class="status-chip" :class="phaseChipClass(runPhase.status)">
+        <span v-if="runPhase.status === 'started'" class="status-dot"></span>
+        {{ phaseLabel(runPhase.phase) }} · {{ runStatusLabel(runPhase.status) }}
+      </span>
+      <span v-if="progressText" class="metric-chip">
+        <span class="metric-value">{{ progressText }}</span>
+      </span>
       <span v-if="stream.connected.value" class="status-chip is-live">
         <span class="status-dot"></span>{{ $t('logs.live') }}
       </span>
       <span v-else class="status-chip is-muted">{{ $t('logs.reconnecting') }}</span>
     </div>
 
-    <div ref="scrollEl" class="timeline-scroll" @scroll="onScroll">
-      <div v-if="hasMore" class="load-earlier">
-        <button class="ghost-button ghost-button--sm" :disabled="loadingHistory" @click="loadEarlier">
-          {{ $t('logs.loadEarlier') }}
-        </button>
+    <div v-if="hasMore" class="load-earlier">
+      <button class="ghost-button ghost-button--sm" :disabled="loadingHistory" @click="loadEarlier">
+        {{ $t('logs.loadEarlier') }}
+      </button>
+    </div>
+
+    <div v-if="!displayLanes.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
+      <div class="empty-state-card__icon">
+        <el-icon :size="24"><Monitor /></el-icon>
       </div>
-
-      <div v-if="!displayGroups.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
-        <div class="empty-state-card__icon">
-          <el-icon :size="24"><Monitor /></el-icon>
-        </div>
-        <div class="empty-state-card__text">
-          <h4 class="empty-state-card__title">{{ $t('logs.noLogs') }}</h4>
-          <p class="empty-state-card__sub">{{ $t('logs.noLogsHint') }}</p>
-        </div>
+      <div class="empty-state-card__text">
+        <h4 class="empty-state-card__title">{{ $t('logs.noLogs') }}</h4>
+        <p class="empty-state-card__sub">{{ $t('logs.noLogsHint') }}</p>
       </div>
+    </div>
 
-      <div v-for="(group, gi) in displayGroups" :key="group.batch_index" :ref="el => setGroupRef(group.batch_index, el)" class="batch-group">
-        <div class="batch-header" @click="toggleGroup(group, gi)">
-          <el-icon class="batch-chevron" :class="{ 'is-open': !isCollapsed(group, gi) }"><ArrowDown /></el-icon>
-          <span class="batch-label">{{ groupLabel(group, gi) }}</span>
-          <span v-if="group.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
-          <span v-if="groupFailed(group)" class="status-chip is-danger">{{ $t('logs.failed') }}</span>
-          <span class="batch-meta cell-time">{{ $t('logs.stepCount', { count: group.steps.length }) }}</span>
-          <span v-if="group.tokenSum > 0" class="batch-meta cell-time">{{ group.tokenSum.toLocaleString() }} tok</span>
-          <span v-if="group.started_at" class="batch-meta cell-time">{{ formatTime(group.started_at) }}</span>
+    <!-- Worker lanes: one column per agent worker, each a continuous run log.
+         Historical rows (worker_id = 0 everywhere) collapse into a single lane. -->
+    <div class="lanes-grid">
+      <div v-for="lane in displayLanes" :key="lane.workerId" class="lane">
+        <div class="lane-header">
+          <span class="lane-title">{{ laneTitle(lane) }}</span>
+          <span v-if="lane.currentPull" class="lane-pull cell-time" :title="lane.currentPull">{{ pullLabel(lane.currentPull) }}</span>
+          <span v-if="lane.failed" class="status-chip is-danger">{{ $t('logs.failed') }}</span>
+          <span v-if="lane.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
+          <span class="lane-meta cell-time">{{ $t('logs.stepCount', { count: lane.steps.length }) }}</span>
+          <span v-if="lane.tokenSum > 0" class="lane-meta cell-time">{{ lane.tokenSum.toLocaleString() }} tok</span>
         </div>
 
-        <div v-if="!isCollapsed(group, gi)" class="batch-steps">
-          <template v-for="step in group.steps" :key="step.key">
+        <div class="lane-scroll" :ref="el => setLaneRef(lane.workerId, el)" @scroll="onLaneScroll(lane.workerId)">
+          <template v-for="step in lane.steps" :key="step.key">
+            <!-- Pull marker: one work unit (directory / loose-file pull / instruct) -->
+            <div v-if="step.kind === 'pull'" class="pull-marker" :class="{ 'is-failed': !step.pending && (step.failed ?? 0) > 0 }">
+              <el-icon v-if="step.pending" class="tool-icon is-spinning"><Loading /></el-icon>
+              <el-icon v-else class="tool-icon"><Finished /></el-icon>
+              <span class="pull-label" :title="step.label">{{ pullLabel(step.label) }}</span>
+              <span v-if="step.pending" class="status-chip is-warning">{{ $t('logs.pullActive') }}</span>
+              <span v-else class="pull-result cell-time">{{ $t('logs.pullResult', { tagged: step.tagged ?? 0, failed: step.failed ?? 0 }) }}</span>
+              <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
+            </div>
+
             <!-- Chat message -->
-            <div v-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
+            <div v-else-if="step.kind === 'message'" class="msg-row" :class="`msg-${step.role}`">
               <div class="msg-meta">
                 <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
                 <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
@@ -107,7 +111,7 @@
 
     <!-- Scroll-to-latest -->
     <transition name="fade">
-      <button v-if="!stickToBottom && displayGroups.length" class="scroll-latest" @click="scrollToBottom(true)">
+      <button v-if="anyUnstuck && displayLanes.length" class="scroll-latest" @click="scrollAllToBottom(true)">
         <el-icon :size="14"><Bottom /></el-icon>{{ $t('logs.scrollToLatest') }}
       </button>
     </transition>
@@ -118,17 +122,16 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listLogs } from '../api'
-import type { AgentLog } from '../types'
+import type { AgentLog, ProgressEvent } from '../types'
 import { useSessionEventStream } from '../composables/sessionEvents'
 import MarkdownView from './MarkdownView.vue'
 
 const props = withDefaults(defineProps<{
   sessionId: number
-  highlightBatch?: number | null
   /** Server-side session token total (single source of truth); when provided
       the toolbar shows it instead of the sum over locally loaded pages. */
   totalTokensServer?: number | null
-}>(), { highlightBatch: null, totalTokensServer: null })
+}>(), { totalTokensServer: null })
 
 const emit = defineEmits<{
   /** A run reached its terminal event — parent should refresh session counters. */
@@ -139,7 +142,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// ===== Steps & groups =====
+// ===== Steps & lanes =====
 interface MessageStep {
   kind: 'message'
   key: string
@@ -160,35 +163,45 @@ interface ToolStep {
   pending?: boolean
   time?: string
 }
-type Step = MessageStep | ToolStep
+interface PullStep {
+  kind: 'pull'
+  key: string
+  label: string
+  count?: number
+  cursor?: number
+  tagged?: number
+  failed?: number
+  pending: boolean
+  time?: string
+}
+type Step = MessageStep | ToolStep | PullStep
 
-interface BatchGroup {
-  batch_index: number
-  label?: string
+interface Lane {
+  workerId: number
   steps: Step[]
   tokenSum: number
-  started_at?: string
   live: boolean
-  firstId: number
+  failed: boolean
+  currentPull?: string
 }
 
 let stepSeq = 0
 const nextKey = () => `s${++stepSeq}`
 
 const histLogs = ref<AgentLog[]>([]) // ascending by id
-const liveSteps = reactive(new Map<number, Step[]>())
-const liveLabels = reactive(new Map<number, string>())
-const liveBatches = reactive(new Set<number>())
-const collapsedMap = reactive(new Map<number, boolean>())
+const liveSteps = reactive(new Map<number, Step[]>()) // per worker lane
 const stepDetail = reactive<Record<string, boolean>>({})
 const jsonCache = new Map<string, string>()
 const loadingHistory = ref(false)
 const totalLogs = ref(0)
 const loadedPages = ref(0)
 const pageSize = 50
-const scrollEl = ref<HTMLElement>()
-const stickToBottom = ref(true)
-const groupEls = new Map<number, Element>()
+const laneEls = new Map<number, HTMLElement>()
+const laneStick = reactive(new Map<number, boolean>())
+// Run mainline state (live only — historical sessions show counters in the
+// session run-card above the timeline instead).
+const runPhase = ref<{ phase: string; status: string } | null>(null)
+const progressInfo = ref<ProgressEvent | null>(null)
 
 const stream = useSessionEventStream()
 let skipFirstOpen = true
@@ -196,28 +209,26 @@ let historyReloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const hasMore = computed(() => histLogs.value.length < totalLogs.value)
 
-const displayGroups = computed<BatchGroup[]>(() => {
-  const map = new Map<number, BatchGroup>()
-  const order: number[] = []
-  const ensure = (bi: number, firstId: number) => {
-    let g = map.get(bi)
-    if (!g) {
-      g = { batch_index: bi, steps: [], tokenSum: 0, live: false, firstId }
-      map.set(bi, g)
-      order.push(bi)
+const displayLanes = computed<Lane[]>(() => {
+  const map = new Map<number, Lane>()
+  const ensure = (wid: number) => {
+    let l = map.get(wid)
+    if (!l) {
+      l = { workerId: wid, steps: [], tokenSum: 0, live: false, failed: false }
+      map.set(wid, l)
     }
-    return g
+    return l
   }
   for (const log of histLogs.value) {
-    const g = ensure(log.batch_index, log.id)
+    const l = ensure(log.worker_id || 0)
     if (log.role === 'tool') {
-      g.steps.push({
+      l.steps.push({
         kind: 'tool', key: `h${log.id}`, tool_name: log.tool_name,
         input: log.tool_input || undefined, output: log.tool_output || undefined,
         time: log.created_at,
       })
     } else {
-      g.steps.push({
+      l.steps.push({
         kind: 'message', key: `h${log.id}`, role: log.role, content: log.content,
         prompt_tokens: log.prompt_tokens || undefined,
         completion_tokens: log.completion_tokens || undefined,
@@ -225,21 +236,26 @@ const displayGroups = computed<BatchGroup[]>(() => {
         time: log.created_at,
       })
     }
-    g.tokenSum += log.total_tokens || 0
-    if (!g.started_at && log.created_at) g.started_at = log.created_at
+    l.tokenSum += log.total_tokens || 0
   }
-  for (const [bi, steps] of liveSteps) {
-    const g = ensure(bi, Number.MAX_SAFE_INTEGER - 1000 + order.length)
-    g.steps.push(...steps)
-    g.live = liveBatches.has(bi)
-    g.tokenSum += steps.reduce((sum, s) => sum + (s.kind === 'message' ? (s.total_tokens || 0) : 0), 0)
-    if (liveLabels.has(bi)) g.label = liveLabels.get(bi)
+  for (const [wid, steps] of liveSteps) {
+    const l = ensure(wid)
+    l.steps.push(...steps)
+    l.live = true
+    l.tokenSum += steps.reduce((sum, s) => sum + (s.kind === 'message' ? (s.total_tokens || 0) : 0), 0)
   }
-  // Live-only groups (no history yet) sort after history groups, in arrival order.
-  return order.map(bi => map.get(bi)!).sort((a, b) => a.firstId - b.firstId)
+  const lanes = [...map.values()].sort((a, b) => a.workerId - b.workerId)
+  for (const l of lanes) {
+    l.failed = l.steps.some(s =>
+      (s.kind === 'message' && s.role === 'system') ||
+      (s.kind === 'pull' && !s.pending && (s.failed ?? 0) > 0))
+    const open = l.steps.filter(s => s.kind === 'pull' && s.pending).pop() as PullStep | undefined
+    l.currentPull = open?.label
+  }
+  return lanes
 })
 
-const totalTokens = computed(() => displayGroups.value.reduce((sum, g) => sum + g.tokenSum, 0))
+const totalTokens = computed(() => displayLanes.value.reduce((sum, l) => sum + l.tokenSum, 0))
 
 // Token口径统一：优先服务端会话累计（含未加载页），否则退回本地已加载合计。
 const shownTotalTokens = computed(() => props.totalTokensServer ?? totalTokens.value)
@@ -248,10 +264,16 @@ const serverTokensTitle = computed(() =>
     ? t('logs.loadedTokens', { count: totalTokens.value.toLocaleString() })
     : undefined)
 
-/** A batch counts as failed when any persisted/live system message exists. */
-function groupFailed(group: BatchGroup): boolean {
-  return group.steps.some(s => s.kind === 'message' && s.role === 'system')
-}
+const anyUnstuck = computed(() => displayLanes.value.some(l => !isLaneSticky(l.workerId)))
+
+const progressText = computed(() => {
+  const p = progressInfo.value
+  if (!p) return ''
+  if (p.phase === 'tagging') {
+    return t('logs.progressTagging', { tagged: p.tagged ?? 0, total: p.total, planned: p.planned ?? 0 })
+  }
+  return t('logs.progressExecuting', { success: p.success ?? 0, failed: p.failed ?? 0, skipped: p.skipped ?? 0, total: p.total })
+})
 
 // ===== Lifecycle =====
 // Handlers are registered ONCE per stream instance — open(id) only re-points
@@ -264,42 +286,60 @@ stream
     if (skipFirstOpen) { skipFirstOpen = false; return }
     scheduleHistoryReload()
   })
-  .on('batch_start', (e) => {
-    liveLabels.set(e.batch_index, e.label)
-    liveBatches.add(e.batch_index)
-    if (!liveSteps.has(e.batch_index)) liveSteps.set(e.batch_index, [])
-    collapsedMap.set(e.batch_index, false)
-    afterAppend()
+  .on('pull_begin', (e) => {
+    pushLive(e.worker_id, {
+      kind: 'pull', key: nextKey(), label: e.label, count: e.count, cursor: e.cursor,
+      pending: true, time: new Date().toISOString(),
+    })
+  })
+  .on('pull_done', (e) => {
+    const steps = liveSteps.get(e.worker_id)
+    const marker = steps?.filter(s => s.kind === 'pull' && s.pending).pop() as PullStep | undefined
+    if (marker) {
+      marker.tagged = e.tagged
+      marker.failed = e.failed
+      marker.pending = false
+    } else {
+      pushLive(e.worker_id, {
+        kind: 'pull', key: nextKey(), label: e.label || '', tagged: e.tagged, failed: e.failed,
+        pending: false, time: new Date().toISOString(),
+      })
+    }
+    afterAppend(e.worker_id)
   })
   .on('message', (e) => {
-    pushLive(e.batch_index, {
+    pushLive(e.worker_id, {
       kind: 'message', key: nextKey(), role: e.role, content: e.content,
       prompt_tokens: e.prompt_tokens, completion_tokens: e.completion_tokens,
       total_tokens: e.total_tokens, time: new Date().toISOString(),
     })
   })
   .on('tool_call', (e) => {
-    pushLive(e.batch_index, {
+    pushLive(e.worker_id, {
       kind: 'tool', key: nextKey(), tool_name: e.tool_name, input: e.input, pending: true,
       time: new Date().toISOString(),
     })
   })
   .on('tool_result', (e) => {
-    const steps = liveSteps.get(e.batch_index)
+    const steps = liveSteps.get(e.worker_id)
     const pending = steps?.filter(s => s.kind === 'tool' && s.pending && s.tool_name === e.tool_name).pop() as ToolStep | undefined
     if (pending) {
       pending.output = e.output
       pending.ok = e.ok
       pending.pending = false
     } else {
-      pushLive(e.batch_index, {
+      pushLive(e.worker_id, {
         kind: 'tool', key: nextKey(), tool_name: e.tool_name, output: e.output, ok: e.ok,
         time: new Date().toISOString(),
       })
     }
-    afterAppend()
+    afterAppend(e.worker_id)
   })
-  .on('run_status', () => emit('runStatus'))
+  .on('run_status', (e) => {
+    runPhase.value = { phase: e.phase, status: e.status }
+    emit('runStatus')
+  })
+  .on('progress', (p) => { progressInfo.value = p })
   .on('run_done', () => {
     // Terminal event: persisted rows (with token counts) are now complete.
     emit('runDone')
@@ -309,17 +349,11 @@ stream
 onMounted(async () => {
   if (!props.sessionId) return
   await init()
-  if (props.highlightBatch != null) await revealBatch(props.highlightBatch)
 })
 
 watch(() => props.sessionId, async (id, oldId) => {
   if (!id || id === oldId) return
   await init()
-})
-
-// Deep links can re-point the batch while the component stays mounted.
-watch(() => props.highlightBatch, async (bi) => {
-  if (bi != null) await revealBatch(bi)
 })
 
 onUnmounted(() => {
@@ -333,14 +367,13 @@ async function init() {
   stream.close()
   histLogs.value = []
   liveSteps.clear()
-  liveLabels.clear()
-  liveBatches.clear()
-  collapsedMap.clear()
+  laneStick.clear()
   jsonCache.clear()
   Object.keys(stepDetail).forEach(k => delete stepDetail[k])
   loadedPages.value = 0
   totalLogs.value = 0
-  stickToBottom.value = true
+  runPhase.value = null
+  progressInfo.value = null
   skipFirstOpen = true
   await loadLatest()
   openStream()
@@ -356,7 +389,7 @@ async function loadLatest() {
     totalLogs.value = res.data.total
     loadedPages.value = 1
     await nextTick()
-    scrollToBottom(false)
+    scrollAllToBottom(false)
   } finally {
     loadingHistory.value = false
   }
@@ -365,34 +398,20 @@ async function loadLatest() {
 async function loadEarlier() {
   if (!props.sessionId || loadingHistory.value || !hasMore.value) return
   loadingHistory.value = true
-  const el = scrollEl.value
-  const prevHeight = el?.scrollHeight || 0
-  const prevTop = el?.scrollTop || 0
+  const prev = new Map<number, { h: number; t: number }>()
+  for (const [id, el] of laneEls) prev.set(id, { h: el.scrollHeight, t: el.scrollTop })
   try {
     const res = await listLogs({ session_id: props.sessionId, page: loadedPages.value + 1, page_size: pageSize, order: 'desc' })
     const rows = (res.data.logs || []).slice().reverse()
     histLogs.value = [...rows, ...histLogs.value]
     loadedPages.value += 1
     await nextTick()
-    if (el) el.scrollTop = el.scrollHeight - prevHeight + prevTop
+    for (const [id, el] of laneEls) {
+      const p = prev.get(id)
+      if (p) el.scrollTop = el.scrollHeight - p.h + p.t
+    }
   } finally {
     loadingHistory.value = false
-  }
-}
-
-/** Expand + scroll to a specific batch, loading older pages until it shows up. */
-async function revealBatch(bi: number) {
-  for (let i = 0; i < 10; i++) {
-    const gi = displayGroups.value.findIndex(g => g.batch_index === bi)
-    if (gi >= 0) {
-      collapsedMap.set(bi, false)
-      await nextTick()
-      groupEls.get(bi)?.scrollIntoView({ block: 'start' })
-      stickToBottom.value = false
-      return
-    }
-    if (!hasMore.value) return
-    await loadEarlier()
   }
 }
 
@@ -401,15 +420,14 @@ function openStream() {
   stream.open(props.sessionId)
 }
 
-function pushLive(bi: number, step: Step) {
-  if (!liveSteps.has(bi)) liveSteps.set(bi, [])
-  liveSteps.get(bi)!.push(step)
-  liveBatches.add(bi)
-  afterAppend()
+function pushLive(workerId: number, step: Step) {
+  if (!liveSteps.has(workerId)) liveSteps.set(workerId, [])
+  liveSteps.get(workerId)!.push(step)
+  afterAppend(workerId)
 }
 
-function afterAppend() {
-  nextTick(() => { if (stickToBottom.value) scrollToBottom(false) })
+function afterAppend(workerId: number) {
+  nextTick(() => { if (isLaneSticky(workerId)) scrollLaneToBottom(workerId, false) })
 }
 
 /** Refetch the newest history page and drop live steps now covered by it. */
@@ -425,27 +443,42 @@ function scheduleHistoryReload() {
     totalLogs.value = res.data.total
     loadedPages.value = 1
     liveSteps.clear()
-    liveBatches.clear()
     jsonCache.clear()
     await nextTick()
-    if (stickToBottom.value) scrollToBottom(false)
+    for (const l of displayLanes.value) {
+      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId, false)
+    }
   }, 600)
 }
 
+// ===== Lane scrolling =====
+function setLaneRef(workerId: number, el: any) {
+  if (el) laneEls.set(workerId, el as HTMLElement)
+  else laneEls.delete(workerId)
+}
+
+function isLaneSticky(workerId: number): boolean {
+  return laneStick.get(workerId) ?? true
+}
+
+function onLaneScroll(workerId: number) {
+  const el = laneEls.get(workerId)
+  if (!el) return
+  laneStick.set(workerId, el.scrollHeight - el.scrollTop - el.clientHeight < 120)
+}
+
+function scrollLaneToBottom(workerId: number, smooth: boolean) {
+  const el = laneEls.get(workerId)
+  if (!el) return
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  laneStick.set(workerId, true)
+}
+
+function scrollAllToBottom(smooth: boolean) {
+  for (const l of displayLanes.value) scrollLaneToBottom(l.workerId, smooth)
+}
+
 // ===== View helpers =====
-function isCollapsed(group: BatchGroup, gi: number): boolean {
-  const explicit = collapsedMap.get(group.batch_index)
-  if (explicit !== undefined) return explicit
-  // Default: expand live and failed batches plus the latest group; collapse
-  // finished healthy batches.
-  if (group.live || groupFailed(group)) return false
-  return gi < displayGroups.value.length - 1
-}
-
-function toggleGroup(group: BatchGroup, gi: number) {
-  collapsedMap.set(group.batch_index, !isCollapsed(group, gi))
-}
-
 function toggleStepDetail(step: ToolStep, part?: 'input' | 'output') {
   const target = part ?? (step.input ? 'input' : 'output')
   stepDetail[step.key + '_' + target] = !stepDetail[step.key + '_' + target]
@@ -460,23 +493,41 @@ function prettyJSON(key: string, part: string, raw: string): string {
   return result
 }
 
-function groupLabel(group: BatchGroup, gi: number): string {
-  if (group.label) {
-    // Backend labels loose-file batches in English ("10 files") — localize.
-    const m = /^(\d+) files$/.exec(group.label)
-    if (m) return t('logs.batchWithFiles', { index: group.batch_index, count: Number(m[1]) })
-    return group.label
-  }
-  if (group.batch_index < 0) {
-    const manualBefore = displayGroups.value.slice(0, gi).filter(g => g.batch_index < 0).length
-    return t('logs.manualBatch', { index: manualBefore + 1 })
-  }
-  return t('logs.batch', { index: group.batch_index })
+function laneTitle(lane: Lane): string {
+  if (displayLanes.value.length === 1) return t('logs.singleLane')
+  return t('logs.worker', { n: lane.workerId + 1 })
 }
 
-function navLabel(group: BatchGroup): string {
-  const gi = displayGroups.value.findIndex(g => g.batch_index === group.batch_index)
-  return groupLabel(group, gi)
+/** Backend labels loose-file pulls in English ("10 files") — localize. */
+function pullLabel(label: string): string {
+  const m = /^(\d+) files$/.exec(label)
+  if (m) return t('logs.filesCount', { count: Number(m[1]) })
+  if (label === 'instruct') return t('logs.phaseInstruct')
+  return label
+}
+
+function phaseLabel(phase: string): string {
+  const map: Record<string, string> = {
+    tagging: t('logs.phaseTagging'),
+    instruct: t('logs.phaseInstruct'),
+    executing: t('logs.phaseExecuting'),
+  }
+  return map[phase] || phase
+}
+
+function runStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    started: t('logs.runStarted'),
+    done: t('logs.runDone'),
+    error: t('logs.runError'),
+    stopped: t('logs.runStopped'),
+  }
+  return map[status] || status
+}
+
+function phaseChipClass(status: string): string {
+  const map: Record<string, string> = { started: 'is-live', done: 'is-muted', error: 'is-danger', stopped: 'is-warning' }
+  return map[status] || 'is-muted'
 }
 
 /** First-line Chinese conclusion for a persisted system error dump; the raw
@@ -507,24 +558,6 @@ function formatTime(tstr: string) {
   // Unified site-wide: local 24h with date (sv-SE renders ISO-style).
   return new Date(tstr).toLocaleString('sv-SE')
 }
-
-function setGroupRef(bi: number, el: any) {
-  if (el) groupEls.set(bi, el as Element)
-  else groupEls.delete(bi)
-}
-
-function onScroll() {
-  const el = scrollEl.value
-  if (!el) return
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-}
-
-function scrollToBottom(smooth: boolean) {
-  const el = scrollEl.value
-  if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
-  stickToBottom.value = true
-}
 </script>
 
 <style scoped>
@@ -542,16 +575,7 @@ function scrollToBottom(smooth: boolean) {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.timeline-scroll {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-right: 4px;
+  flex-wrap: wrap;
 }
 
 .load-earlier {
@@ -560,44 +584,48 @@ function scrollToBottom(smooth: boolean) {
   flex-shrink: 0;
 }
 
-/* ===== Batch group ===== */
-.batch-group {
+/* ===== Worker lanes ===== */
+.lanes-grid {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  /* Default ≈3 parallel lanes on wide screens; the worker count adapts —
+     fewer workers stretch, more wrap onto the next row. */
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.lane {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--surface-elevated);
   overflow: hidden;
-  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
 }
 
-.batch-header {
+.lane-header {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  cursor: pointer;
-  user-select: none;
-  transition: background-color var(--duration-fast) var(--ease-spring);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
 }
 
-.batch-header:hover {
-  background: var(--accent-soft);
-}
-
-.batch-chevron {
-  color: var(--text-muted);
-  transition: transform var(--duration-fast) var(--ease-spring);
-  transform: rotate(-90deg);
-}
-
-.batch-chevron.is-open {
-  transform: rotate(0deg);
-}
-
-.batch-label {
+.lane-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.lane-pull {
+  font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -605,16 +633,62 @@ function scrollToBottom(smooth: boolean) {
   flex: 1;
 }
 
-.batch-meta {
+.lane-meta {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  margin-left: auto;
+}
+
+.lane-meta + .lane-meta {
+  margin-left: 0;
+}
+
+.lane-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+
+/* ===== Pull markers ===== */
+.pull-marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+
+.pull-marker.is-failed {
+  border-color: var(--danger);
+  background: var(--danger-soft, rgba(220, 38, 38, 0.08));
+}
+
+.pull-label {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.pull-result {
   flex-shrink: 0;
   font-size: 11.5px;
 }
 
-.batch-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 4px 14px 14px 38px;
+.pull-marker .cell-time {
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 /* ===== Chat bubbles ===== */
@@ -622,7 +696,7 @@ function scrollToBottom(smooth: boolean) {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 88%;
+  max-width: 92%;
 }
 
 .msg-user {
@@ -742,12 +816,6 @@ function scrollToBottom(smooth: boolean) {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-/* ===== Floating scroll button ===== */
-.batch-nav {
-  min-width: 200px;
-  max-width: 320px;
 }
 
 .sys-details {
