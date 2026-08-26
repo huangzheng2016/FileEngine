@@ -94,13 +94,18 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 	}
 
 	mountCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 	share, err := session.WithContext(mountCtx).Mount(shareName)
+	cancel()
 	if err != nil {
-		session.Logoff()
+		// Bound the cleanup too: the mount failure may be a dead peer.
+		session.WithContext(dialCtx).Logoff()
 		conn.Close()
 		return nil, &OpError{Protocol: "smb", Op: "mount", Path: shareName, Err: err}
 	}
+	// Mount propagates the session's context into the share; re-base it, or
+	// the canceled mount context would break every later operation (Umount
+	// and the execute paths use the share's stored context directly).
+	share = share.WithContext(context.Background())
 
 	return &SMBFS{
 		session:  session,
@@ -308,7 +313,11 @@ func (s *SMBFS) MkdirAll(_ context.Context, p string) error {
 }
 
 func (s *SMBFS) Close() error {
-	s.share.Umount()
-	s.session.Logoff()
+	// Umount and Logoff wait on server replies with the stored (Background)
+	// context; bound them so Close cannot hang on a dead peer.
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout())
+	defer cancel()
+	s.share.WithContext(ctx).Umount()
+	s.session.WithContext(ctx).Logoff()
 	return s.conn.Close()
 }
