@@ -1,21 +1,12 @@
 package agent
 
-// Well-known system junk that should never reach an agent batch: it carries
-// no classification signal, wastes tokens, and pollutes the uncategorized
-// bucket. Matching is on the entry's base name, ASCII-case-insensitive;
-// AppleDouble sidecars ("._*") are always junk on NAS shares.
-var junkFileNames = []string{
-	".ds_store",
-	"thumbs.db",
-	"desktop.ini",
-}
+import "FileEngine/internal/db"
 
-var junkDirNames = []string{
-	"@eadir",
-	"__macosx",
-	"$recycle.bin",
-	".trashes",
-	".spotlight-v100",
-	".fseventsd",
-	".temporaryitems",
-}
+// The canonical junk name lists live in the db package (db.JunkFileNames /
+// db.JunkDirNames) so the scanner's traversal-time pruning and this layer's
+// post-scan auto-ignore share one source of truth. This file keeps the
+// agent-local aliases; matching is ASCII-case-insensitive on the base name,
+// and AppleDouble sidecars ("._*") are always junk on NAS shares.
+var junkFileNames = db.JunkFileNames
+
+var junkDirNames = db.JunkDirNames
