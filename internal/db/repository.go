@@ -47,6 +47,33 @@ func (r *Repository) UpdateSession(s *ScanSession) error {
 	return r.db.Save(s).Error
 }
 
+// UpdateScanProgress persists the live scan counters without touching any
+// other column. The scanner calls this every few seconds while walking, so a
+// full-row Save of a previously loaded session struct would race the API
+// layer's own session writes — column-scoped is the rule for racing writers.
+func (r *Repository) UpdateScanProgress(sessionID uint, scanned int, currentPath string) error {
+	return r.db.Model(&ScanSession{}).Where("id = ?", sessionID).
+		Updates(map[string]interface{}{"scanned_count": scanned, "current_path": currentPath}).Error
+}
+
+// ScanInterruptedMessage is the error_message stamped on sessions the startup
+// sweep finds stuck in "scanning" from a previous process lifetime.
+const ScanInterruptedMessage = "scan interrupted by server restart"
+
+// MarkInterruptedScans flips sessions stuck in "scanning" (process died or was
+// killed mid-scan — the walk lives in memory, so nothing will ever finish
+// them) to the terminal "interrupted" state. Without this sweep a killed scan
+// shows "scanning" forever with zero diagnostics. Returns the rows flipped.
+func (r *Repository) MarkInterruptedScans() (int64, error) {
+	res := r.db.Model(&ScanSession{}).Where("status = ?", "scanning").
+		Updates(map[string]interface{}{
+			"status":        "interrupted",
+			"error_message": ScanInterruptedMessage,
+			"current_path":  "",
+		})
+	return res.RowsAffected, res.Error
+}
+
 func (r *Repository) DeleteSession(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("scan_session_id = ?", id).Delete(&FileEntry{}).Error; err != nil {
