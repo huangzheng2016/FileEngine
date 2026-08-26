@@ -1,10 +1,6 @@
 <template>
   <div class="timeline-wrap">
     <div class="timeline-toolbar">
-      <span class="metric-chip" :title="serverTokensTitle">
-        <span class="metric-label">{{ $t('logs.totalTokens') }}</span>
-        <span class="metric-value">{{ shownTotalTokens.toLocaleString() }}</span>
-      </span>
       <!-- Run mainline: latest phase transition + absolute progress counters -->
       <span v-if="runPhase" class="status-chip" :class="phaseChipClass(runPhase.status)">
         <span v-if="runPhase.status === 'started'" class="status-dot"></span>
@@ -17,15 +13,14 @@
         <span class="status-dot"></span>{{ $t('logs.live') }}
       </span>
       <span v-else class="status-chip is-muted">{{ $t('logs.reconnecting') }}</span>
+      <!-- Stats sit right; run state and live indicators take priority on the left -->
+      <span class="metric-chip metric-chip--right" :title="serverTokensTitle">
+        <span class="metric-label">{{ $t('logs.totalTokens') }}</span>
+        <span class="metric-value">{{ shownTotalTokens.toLocaleString() }}</span>
+      </span>
     </div>
 
-    <div v-if="hasMore" class="load-earlier">
-      <button class="ghost-button ghost-button--sm" :disabled="loadingHistory" @click="loadEarlier">
-        {{ $t('logs.loadEarlier') }}
-      </button>
-    </div>
-
-    <div v-if="!displayLanes.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
+    <div v-if="!visibleLanes.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
       <div class="empty-state-card__icon">
         <el-icon :size="24"><Monitor /></el-icon>
       </div>
@@ -38,7 +33,7 @@
     <!-- Worker lanes: one column per agent worker, each a continuous run log.
          Historical rows (worker_id = 0 everywhere) collapse into a single lane. -->
     <div class="lanes-grid">
-      <div v-for="lane in displayLanes" :key="lane.workerId" class="lane">
+      <div v-for="lane in visibleLanes" :key="lane.workerId" class="lane">
         <div class="lane-header">
           <span class="lane-title">{{ laneTitle(lane) }}</span>
           <span v-if="lane.currentPull" class="lane-pull cell-time" :title="lane.currentPull">{{ pullLabel(lane.currentPull) }}</span>
@@ -46,9 +41,20 @@
           <span v-if="lane.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
           <span class="lane-meta cell-time">{{ $t('logs.stepCount', { count: lane.steps.length }) }}</span>
           <span v-if="lane.tokenSum > 0" class="lane-meta cell-time">{{ lane.tokenSum.toLocaleString() }} tok</span>
+          <button
+            v-if="displayLanes.length > 1"
+            class="ghost-button ghost-button--sm lane-solo"
+            :title="soloWorker === lane.workerId ? $t('logs.allLanes') : $t('logs.soloLane')"
+            @click="toggleSolo(lane.workerId)"
+          >
+            <el-icon :size="13"><ScaleToOriginal v-if="soloWorker === lane.workerId" /><FullScreen v-else /></el-icon>
+          </button>
         </div>
 
+        <div v-if="laneLoadingEarlier.has(lane.workerId)" class="lane-loading" role="status" :aria-label="$t('logs.laneLoading')"><span></span></div>
         <div class="lane-scroll" :ref="el => setLaneRef(lane.workerId, el)" @scroll="onLaneScroll(lane.workerId)">
+          <div v-if="laneExhausted.has(lane.workerId) && lane.steps.length" class="lane-nomore">{{ $t('logs.laneNoMore') }}</div>
+          <div v-if="!lane.steps.length" class="lane-idle">{{ $t('logs.workerIdle') }}</div>
           <template v-for="step in lane.steps" :key="step.key">
             <!-- Pull marker: one work unit (directory / loose-file pull / instruct) -->
             <div v-if="step.kind === 'pull'" class="pull-marker" :class="{ 'is-failed': !step.pending && (step.failed ?? 0) > 0 }">
@@ -106,15 +112,16 @@
             </div>
           </template>
         </div>
+
+        <!-- Lane-level back-to-latest: floats inside the lane, only while unstuck -->
+        <transition name="fade">
+          <button v-if="!isLaneSticky(lane.workerId)" class="lane-latest" @click="scrollLaneToBottom(lane.workerId)">
+            <el-icon :size="13"><Bottom /></el-icon>{{ $t('logs.backToLatest') }}
+            <span v-if="unreadCount(lane.workerId)" class="lane-latest__badge">{{ unreadCount(lane.workerId) }}</span>
+          </button>
+        </transition>
       </div>
     </div>
-
-    <!-- Scroll-to-latest -->
-    <transition name="fade">
-      <button v-if="anyUnstuck && displayLanes.length" class="scroll-latest" @click="scrollAllToBottom(true)">
-        <el-icon :size="14"><Bottom /></el-icon>{{ $t('logs.scrollToLatest') }}
-      </button>
-    </transition>
   </div>
 </template>
 
@@ -189,13 +196,19 @@ interface Lane {
 let stepSeq = 0
 const nextKey = () => `s${++stepSeq}`
 
-const histLogs = ref<AgentLog[]>([]) // ascending by id
+const laneLogs = reactive(new Map<number, AgentLog[]>()) // per worker, ascending by id
 const liveSteps = reactive(new Map<number, Step[]>()) // per worker lane
+// Every worker_id ever seen this session — lanes stay mounted even when a
+// worker goes quiet between pulls, so the grid stops flickering.
+const seenWorkers = reactive(new Set<number>())
+const soloWorker = ref<number | null>(null) // null = all lanes, otherwise only this one
 const stepDetail = reactive<Record<string, boolean>>({})
 const jsonCache = new Map<string, string>()
 const loadingHistory = ref(false)
-const totalLogs = ref(0)
-const loadedPages = ref(0)
+// Lane-level history pagination state (infinite scroll-up per lane).
+const laneLoadingEarlier = reactive(new Set<number>())
+const laneExhausted = reactive(new Set<number>()) // no earlier rows for this worker
+const laneUnread = reactive(new Map<number, number>()) // appends while unstuck
 const pageSize = 50
 const laneEls = new Map<number, HTMLElement>()
 const laneStick = reactive(new Map<number, boolean>())
@@ -207,8 +220,11 @@ const progressInfo = ref<ProgressEvent | null>(null)
 const stream = useSessionEventStream()
 let skipFirstOpen = true
 let historyReloadTimer: ReturnType<typeof setTimeout> | null = null
+const laneEarlierTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-const hasMore = computed(() => histLogs.value.length < totalLogs.value)
+/** Client-side double-check for the lane contract (worker_id filter lands with
+    the backend follow-up; harmless once the server filters too). */
+const laneRow = (log: AgentLog, wid: number) => (log.worker_id || 0) === wid
 
 const displayLanes = computed<Lane[]>(() => {
   const map = new Map<number, Lane>()
@@ -220,26 +236,30 @@ const displayLanes = computed<Lane[]>(() => {
     }
     return l
   }
-  for (const log of histLogs.value) {
-    const l = ensure(log.worker_id || 0)
-    if (log.role === 'tool') {
-      l.steps.push({
-        kind: 'tool', key: `h${log.id}`, tool_name: log.tool_name,
-        input: log.tool_input || undefined, output: log.tool_output || undefined,
-        time: log.created_at,
-      })
-    } else {
-      l.steps.push({
-        kind: 'message', key: `h${log.id}`, role: log.role, content: log.content,
-        prompt_tokens: log.prompt_tokens || undefined,
-        cached_tokens: log.cached_tokens || undefined,
-        completion_tokens: log.completion_tokens || undefined,
-        total_tokens: log.total_tokens || undefined,
-        time: log.created_at,
-      })
+  for (const [wid, logs] of laneLogs) {
+    const l = ensure(wid)
+    for (const log of logs) {
+      if (log.role === 'tool') {
+        l.steps.push({
+          kind: 'tool', key: `h${log.id}`, tool_name: log.tool_name,
+          input: log.tool_input || undefined, output: log.tool_output || undefined,
+          time: log.created_at,
+        })
+      } else {
+        l.steps.push({
+          kind: 'message', key: `h${log.id}`, role: log.role, content: log.content,
+          prompt_tokens: log.prompt_tokens || undefined,
+          cached_tokens: log.cached_tokens || undefined,
+          completion_tokens: log.completion_tokens || undefined,
+          total_tokens: log.total_tokens || undefined,
+          time: log.created_at,
+        })
+      }
+      l.tokenSum += log.total_tokens || 0
     }
-    l.tokenSum += log.total_tokens || 0
   }
+  // Workers seen before but silent right now still get a (header-only) lane.
+  for (const wid of seenWorkers) ensure(wid)
   for (const [wid, steps] of liveSteps) {
     const l = ensure(wid)
     l.steps.push(...steps)
@@ -259,14 +279,19 @@ const displayLanes = computed<Lane[]>(() => {
 
 const totalTokens = computed(() => displayLanes.value.reduce((sum, l) => sum + l.tokenSum, 0))
 
+// Solo view: null shows every lane; a worker id shows only that lane, which
+// then stretches to full grid width via auto-fit.
+const visibleLanes = computed<Lane[]>(() =>
+  soloWorker.value == null
+    ? displayLanes.value
+    : displayLanes.value.filter(l => l.workerId === soloWorker.value))
+
 // Token口径统一：优先服务端会话累计（含未加载页），否则退回本地已加载合计。
 const shownTotalTokens = computed(() => props.totalTokensServer ?? totalTokens.value)
 const serverTokensTitle = computed(() =>
   props.totalTokensServer != null
     ? t('logs.loadedTokens', { count: totalTokens.value.toLocaleString() })
     : undefined)
-
-const anyUnstuck = computed(() => displayLanes.value.some(l => !isLaneSticky(l.workerId)))
 
 const progressText = computed(() => {
   const p = progressInfo.value
@@ -360,20 +385,27 @@ watch(() => props.sessionId, async (id, oldId) => {
 
 onUnmounted(() => {
   if (historyReloadTimer) clearTimeout(historyReloadTimer)
+  for (const timer of laneEarlierTimers.values()) clearTimeout(timer)
+  laneEarlierTimers.clear()
 })
 
 async function init() {
   // Drop any pending history refill from the previous session — it would
   // fire with the NEW sessionId and wipe its live steps (review P2-2).
   if (historyReloadTimer) { clearTimeout(historyReloadTimer); historyReloadTimer = null }
+  for (const timer of laneEarlierTimers.values()) clearTimeout(timer)
+  laneEarlierTimers.clear()
   stream.close()
-  histLogs.value = []
+  laneLogs.clear()
   liveSteps.clear()
+  seenWorkers.clear()
+  soloWorker.value = null
   laneStick.clear()
+  laneLoadingEarlier.clear()
+  laneExhausted.clear()
+  laneUnread.clear()
   jsonCache.clear()
   Object.keys(stepDetail).forEach(k => delete stepDetail[k])
-  loadedPages.value = 0
-  totalLogs.value = 0
   runPhase.value = null
   progressInfo.value = null
   skipFirstOpen = true
@@ -381,40 +413,75 @@ async function init() {
   openStream()
 }
 
+// Initial load: one global newest page discovers recently active workers,
+// then each discovered worker gets its own newest-page baseline (parallel).
+// Workers silent in the newest global page appear via live events later —
+// same initial visibility as the old global paging, but lanes paginate
+// independently from here on.
 async function loadLatest() {
   if (!props.sessionId) return
   loadingHistory.value = true
   try {
     const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: pageSize, order: 'desc' })
-    const rows = (res.data.logs || []).slice().reverse() // chronological
-    histLogs.value = rows
-    totalLogs.value = res.data.total
-    loadedPages.value = 1
+    const wids = [...new Set((res.data.logs || []).map(log => log.worker_id || 0))]
+    for (const wid of wids) seenWorkers.add(wid)
+    await Promise.all(wids.map(wid => loadLaneLatest(wid)))
     await nextTick()
-    scrollAllToBottom(false)
+    for (const l of visibleLanes.value) scrollLaneToBottom(l.workerId)
   } finally {
     loadingHistory.value = false
   }
 }
 
-async function loadEarlier() {
-  if (!props.sessionId || loadingHistory.value || !hasMore.value) return
-  loadingHistory.value = true
-  const prev = new Map<number, { h: number; t: number }>()
-  for (const [id, el] of laneEls) prev.set(id, { h: el.scrollHeight, t: el.scrollTop })
+/** Newest page of one worker's own history; short page means history exhausted. */
+async function loadLaneLatest(wid: number) {
+  const res = await listLogs({ session_id: props.sessionId, worker_id: wid, page: 1, page_size: pageSize, order: 'desc' })
+  const rows = (res.data.logs || []).filter(log => laneRow(log, wid)).slice().reverse()
+  laneLogs.set(wid, rows)
+  if (rows.length) seenWorkers.add(wid)
+  if (rows.length < pageSize) laneExhausted.add(wid)
+  else laneExhausted.delete(wid)
+}
+
+// Lane-level infinite scroll-up: fetch rows older than this lane's oldest
+// loaded id (before_id contract) and prepend, keeping the viewport anchored
+// on the previously topmost step. Lanes paginate fully independently.
+async function loadLaneEarlier(wid: number) {
+  if (!props.sessionId || laneLoadingEarlier.has(wid) || laneExhausted.has(wid)) return
+  const current = laneLogs.get(wid) || []
+  const oldestId = current[0]?.id
+  laneLoadingEarlier.add(wid)
+  const el = laneEls.get(wid)
+  const prev = el ? { h: el.scrollHeight, t: el.scrollTop } : null
   try {
-    const res = await listLogs({ session_id: props.sessionId, page: loadedPages.value + 1, page_size: pageSize, order: 'desc' })
-    const rows = (res.data.logs || []).slice().reverse()
-    histLogs.value = [...rows, ...histLogs.value]
-    loadedPages.value += 1
-    await nextTick()
-    for (const [id, el] of laneEls) {
-      const p = prev.get(id)
-      if (p) el.scrollTop = el.scrollHeight - p.h + p.t
+    const res = await listLogs({
+      session_id: props.sessionId, worker_id: wid,
+      ...(oldestId != null ? { before_id: oldestId } : {}),
+      page: 1, page_size: pageSize, order: 'desc',
+    })
+    const raw = res.data.logs || []
+    const fresh = raw
+      .filter(log => laneRow(log, wid) && (oldestId == null || log.id < oldestId))
+      .slice().reverse()
+    if (fresh.length > 0) {
+      laneLogs.set(wid, [...fresh, ...current])
     }
+    if (raw.length < pageSize || fresh.length === 0) laneExhausted.add(wid)
+    await nextTick()
+    // Anchor on the previously topmost visible step — viewport must not jump.
+    if (el && prev && fresh.length > 0) el.scrollTop = el.scrollHeight - prev.h + prev.t
   } finally {
-    loadingHistory.value = false
+    laneLoadingEarlier.delete(wid)
   }
+}
+
+function scheduleLaneEarlier(wid: number) {
+  if (laneEarlierTimers.has(wid) || laneLoadingEarlier.has(wid) || laneExhausted.has(wid)) return
+  laneEarlierTimers.set(wid, setTimeout(() => {
+    laneEarlierTimers.delete(wid)
+    const el = laneEls.get(wid)
+    if (el && el.scrollTop < 20) loadLaneEarlier(wid)
+  }, 200))
 }
 
 function openStream() {
@@ -425,30 +492,50 @@ function openStream() {
 function pushLive(workerId: number, step: Step) {
   if (!liveSteps.has(workerId)) liveSteps.set(workerId, [])
   liveSteps.get(workerId)!.push(step)
+  seenWorkers.add(workerId)
   afterAppend(workerId)
 }
 
 function afterAppend(workerId: number) {
-  nextTick(() => { if (isLaneSticky(workerId)) scrollLaneToBottom(workerId, false) })
+  nextTick(() => {
+    if (isLaneSticky(workerId)) scrollLaneToBottom(workerId)
+    else laneUnread.set(workerId, (laneUnread.get(workerId) ?? 0) + 1)
+  })
 }
 
-/** Refetch the newest history page and drop live steps now covered by it. */
+/** Per-worker refill: fetch each lane's own newest page (sized to cover its
+    live steps, now persisted) and drop those live steps. Unstuck lanes keep
+    their scrollTop — a reload must not yank the reader back to the bottom. */
 function scheduleHistoryReload() {
   if (historyReloadTimer) clearTimeout(historyReloadTimer)
   historyReloadTimer = setTimeout(async () => {
     historyReloadTimer = null
-    const liveTotal = [...liveSteps.values()].reduce((n, arr) => n + arr.length, 0)
-    const size = Math.max(pageSize, Math.ceil((liveTotal + 10) / pageSize) * pageSize)
-    const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: size, order: 'desc' }).catch(() => null)
-    if (!res) return // keep live steps; a later reconnect will retry the refill
-    histLogs.value = (res.data.logs || []).slice().reverse()
-    totalLogs.value = res.data.total
-    loadedPages.value = 1
-    liveSteps.clear()
+    const wids = [...new Set([...laneLogs.keys(), ...liveSteps.keys()])]
+    if (!wids.length) return
+    const prevTops = new Map<number, number>()
+    for (const [id, el] of laneEls) prevTops.set(id, el.scrollTop)
+    await Promise.all(wids.map(async wid => {
+      const liveCount = liveSteps.get(wid)?.length ?? 0
+      const size = Math.max(pageSize, Math.ceil((liveCount + 10) / pageSize) * pageSize)
+      const res = await listLogs({ session_id: props.sessionId, worker_id: wid, page: 1, page_size: size, order: 'desc' }).catch(() => null)
+      if (!res) return // keep lane as-is; a later reconnect will retry the refill
+      const rows = (res.data.logs || []).filter(log => laneRow(log, wid)).slice().reverse()
+      laneLogs.set(wid, rows)
+      seenWorkers.add(wid)
+      liveSteps.delete(wid)
+      if (rows.length < pageSize) laneExhausted.add(wid)
+      else laneExhausted.delete(wid)
+    }))
     jsonCache.clear()
     await nextTick()
     for (const l of displayLanes.value) {
-      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId, false)
+      const el = laneEls.get(l.workerId)
+      if (!el) continue
+      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId)
+      else {
+        const t = prevTops.get(l.workerId)
+        if (t != null) el.scrollTop = t
+      }
     }
   }, 600)
 }
@@ -466,18 +553,37 @@ function isLaneSticky(workerId: number): boolean {
 function onLaneScroll(workerId: number) {
   const el = laneEls.get(workerId)
   if (!el) return
-  laneStick.set(workerId, el.scrollHeight - el.scrollTop - el.clientHeight < 120)
+  const sticky = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  laneStick.set(workerId, sticky)
+  if (sticky) laneUnread.set(workerId, 0)
+  if (el.scrollTop < 20) scheduleLaneEarlier(workerId)
 }
 
-function scrollLaneToBottom(workerId: number, smooth: boolean) {
+function scrollLaneToBottom(workerId: number) {
   const el = laneEls.get(workerId)
   if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  // Always instant: a smooth animation is interrupted by the next live append
+  // (afterAppend re-pins to the growing scrollHeight), lands short of the
+  // bottom, and the mid-animation scroll events clear laneStick — the lane
+  // stops following and the back-to-latest pill stays lit for good.
+  el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
   laneStick.set(workerId, true)
+  laneUnread.set(workerId, 0)
 }
 
-function scrollAllToBottom(smooth: boolean) {
-  for (const l of displayLanes.value) scrollLaneToBottom(l.workerId, smooth)
+function unreadCount(workerId: number): number {
+  return laneUnread.get(workerId) ?? 0
+}
+
+function toggleSolo(workerId: number) {
+  soloWorker.value = soloWorker.value === workerId ? null : workerId
+  // Lanes remounted by the filter start at scrollTop 0; re-pin the ones that
+  // were following so they land back at the bottom.
+  nextTick(() => {
+    for (const l of visibleLanes.value) {
+      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId)
+    }
+  })
 }
 
 // ===== View helpers =====
@@ -580,10 +686,8 @@ function formatTime(tstr: string) {
   flex-wrap: wrap;
 }
 
-.load-earlier {
-  display: flex;
-  justify-content: center;
-  flex-shrink: 0;
+.metric-chip--right {
+  margin-left: auto;
 }
 
 /* ===== Worker lanes ===== */
@@ -608,6 +712,41 @@ function formatTime(tstr: string) {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  position: relative;
+}
+
+/* Slim indeterminate bar pinned to the lane top while earlier rows load. */
+.lane-loading {
+  height: 2px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.lane-loading span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--accent);
+  animation: lane-loading-slide 1s ease-in-out infinite;
+}
+
+@keyframes lane-loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.lane-nomore,
+.lane-idle {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 4px 0 2px;
+  flex-shrink: 0;
+}
+
+.lane-idle {
+  padding: 18px 0 8px;
 }
 
 .lane-header {
@@ -643,6 +782,15 @@ function formatTime(tstr: string) {
 
 .lane-meta + .lane-meta {
   margin-left: 0;
+}
+
+/* Icon-only ghost button — ghost-button--sm is pill-sized for text. */
+.lane-solo {
+  min-height: 24px;
+  padding: 0 7px;
+  gap: 0;
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .lane-scroll {
@@ -846,18 +994,20 @@ function formatTime(tstr: string) {
   word-break: break-all;
 }
 
-/* ===== Floating scroll button ===== */
-.scroll-latest {
+/* ===== Lane-level back-to-latest pill (floats inside the lane) ===== */
+.lane-latest {
   position: absolute;
-  right: 24px;
-  bottom: 16px;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px;
-  min-height: 34px;
+  padding: 0 12px;
+  min-height: 28px;
   font-family: var(--font-display);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   background: var(--surface-strong);
@@ -869,9 +1019,23 @@ function formatTime(tstr: string) {
   transition: all var(--duration-fast) var(--ease-spring);
 }
 
-.scroll-latest:hover {
-  transform: translateY(-1px);
+.lane-latest:hover {
+  transform: translateX(-50%) translateY(-1px);
   background: var(--accent-soft);
+}
+
+.lane-latest__badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--surface-strong);
+  font-size: 10.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .fade-enter-active,

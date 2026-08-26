@@ -29,8 +29,11 @@ common:
   size: 大小
   status: 状态
   description: 描述
+  yes: 是
+  no: 否
   deleted: 已删除
   saved: 已保存
+  copied: 已复制
   created: 已创建
   refresh: 刷新
 
@@ -52,6 +55,12 @@ files:
   noCategoryYet: 未归类
   unprocessed: 未处理
   directoryTree: 目录树
+  goUp: 上一级
+  rootDir: 根目录
+  editPath: 输入路径跳转
+  pathPlaceholder: 粘贴或输入完整路径，回车跳转
+  pathNotFound: "路径不存在：{path}"
+  copyPath: 复制当前路径
   session: 会话
   searchPlaceholder: 搜索文件...
   typeFilter: 类型筛选
@@ -289,6 +298,8 @@ logs:
   stepCount: "{count} 步"
   worker: "Worker {n}"
   singleLane: 运行日志
+  soloLane: 只看此泳道
+  allLanes: 恢复全部泳道
   pullActive: 进行中
   pullResult: "归类 {tagged} · 失败 {failed}"
   filesCount: "{count} 个文件"
@@ -310,6 +321,10 @@ logs:
   roleAssistant: 助手
   roleSystem: 系统
   scrollToLatest: 回到底部
+  laneLoading: 正在加载更早的记录…
+  laneNoMore: 没有更多了
+  backToLatest: 回到最新
+  workerIdle: 该 worker 暂空闲
 
 models:
   title: 模型管理

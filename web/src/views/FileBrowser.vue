@@ -75,8 +75,8 @@
             </button>
           </el-tooltip>
         </div>
-        <div v-if="!navFolded" class="files-nav__scroll">
-          <el-tree v-show="navTab === 'dirs'" :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
+        <div v-show="!navFolded" class="files-nav__scroll">
+          <el-tree ref="treeRef" v-show="navTab === 'dirs'" :data="treeData" :props="{ label: 'label', children: 'children', isLeaf: 'is_leaf' }"
             lazy :load="loadNode" node-key="original_path" highlight-current @node-click="onNodeClick" />
           <div v-show="navTab === 'cats'" class="cat-tree">
             <div v-if="categories.length === 0" class="side-hint">{{ $t('files.noCategories') }}</div>
@@ -104,7 +104,44 @@
             · {{ $t('tasks.scannedCount') }} {{ currentSession.scanned_count }}
           </template>
         </el-alert>
-        <el-tag v-if="currentPath" closable class="current-path-tag" @close="currentPath = ''; loadFiles()">{{ currentPath }}</el-tag>
+        <nav class="path-nav">
+          <el-tooltip :content="$t('files.goUp')" placement="bottom">
+            <button class="icon-button icon-button--sm path-nav__btn" :disabled="!currentPath" :aria-label="$t('files.goUp')" @click="goUp">
+              <el-icon :size="14"><Back /></el-icon>
+            </button>
+          </el-tooltip>
+
+          <div v-if="!addrMode" class="path-nav__crumbs" @click.self="openAddr">
+            <button class="crumb" @click="navigateTo('')">{{ $t('files.rootDir') }}</button>
+            <template v-for="seg in crumbSegments" :key="seg.hidden ? 'collapsed' : seg.path">
+              <span class="crumb-sep">/</span>
+              <el-dropdown v-if="seg.hidden" trigger="click" @command="navigateTo">
+                <button class="crumb">…</button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="h in seg.hiddenSegs" :key="h.path" :command="h.path">{{ h.label }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <button v-else class="crumb" :class="{ 'is-current': seg.path === currentPath }" @click="navigateTo(seg.path)">{{ seg.label }}</button>
+            </template>
+          </div>
+          <el-input
+            v-else ref="addrInputRef" v-model="addrText" class="path-nav__addr" size="small"
+            :placeholder="$t('files.pathPlaceholder')"
+            @keyup.enter="jumpToAddr" @keyup.esc="addrMode = false" @blur="addrMode = false" />
+
+          <el-tooltip v-if="!addrMode" :content="$t('files.editPath')" placement="bottom">
+            <button class="icon-button icon-button--sm path-nav__btn" :aria-label="$t('files.editPath')" @click="openAddr">
+              <el-icon :size="14"><Position /></el-icon>
+            </button>
+          </el-tooltip>
+          <el-tooltip :content="$t('files.copyPath')" placement="bottom">
+            <button class="icon-button icon-button--sm path-nav__btn" :aria-label="$t('files.copyPath')" @click="copyCurrentPath">
+              <el-icon :size="14"><CopyDocument /></el-icon>
+            </button>
+          </el-tooltip>
+        </nav>
         <section class="page-card table-card">
           <el-table :data="files" v-loading="tableLoading" style="width: 100%" height="100%" @selection-change="onSelectionChange">
             <el-table-column type="selection" width="40" />
@@ -315,12 +352,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, exportCategories, importCategories, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
 import type { FileEntry, Filesystem, ScanSession, Category, TreeNode, CategoryExportItem } from '../types'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElTree } from 'element-plus'
 import draggable from 'vuedraggable'
 import Loading from '../components/Loading.vue'
 
@@ -401,9 +438,93 @@ const catDrawerVisible = ref(false)
 // Directory rows drill into the table (same as clicking the tree node);
 // files open the edit drawer instead.
 function drillDir(row: FileEntry) {
-  currentPath.value = row.original_path
+  navigateTo(row.original_path)
+}
+
+// ===== Path navigation: breadcrumb / address bar / up-one-level =====
+const treeRef = ref<InstanceType<typeof ElTree> | null>(null)
+const addrMode = ref(false)
+const addrText = ref('')
+const addrInputRef = ref<any>(null)
+
+const pathSegments = computed(() => (currentPath.value ? currentPath.value.split('/') : []))
+
+interface CrumbSeg { label: string; path: string; hidden?: boolean; hiddenSegs?: { label: string; path: string }[] }
+// Long paths collapse their middle segments into a … dropdown (first + last 4 stay).
+const MAX_VISIBLE_CRUMBS = 6
+const crumbSegments = computed<CrumbSeg[]>(() => {
+  const segs = pathSegments.value.map((label, i) => ({ label, path: pathSegments.value.slice(0, i + 1).join('/') }))
+  if (segs.length <= MAX_VISIBLE_CRUMBS) return segs
+  return [segs[0], { label: '…', path: '', hidden: true, hiddenSegs: segs.slice(1, segs.length - 4) }, ...segs.slice(-4)]
+})
+
+function navigateTo(path: string) {
+  if (path === currentPath.value) return
+  currentPath.value = path
   page.value = 1
   loadFiles()
+  syncTreeTo(path) // fire-and-forget: tree selection follows the breadcrumb
+}
+
+function goUp() {
+  if (!currentPath.value) return
+  const i = currentPath.value.lastIndexOf('/')
+  navigateTo(i < 0 ? '' : currentPath.value.slice(0, i))
+}
+
+function expandNode(node: any): Promise<void> {
+  return new Promise(resolve => {
+    if (node.expanded || node.isLeaf) return resolve()
+    node.expand(() => resolve())
+  })
+}
+
+/** Walk the lazy directory tree level by level, expanding ancestors and
+    highlighting the target. Returns false when a segment doesn't exist —
+    doubles as path validation for the address bar. */
+async function syncTreeTo(path: string): Promise<boolean> {
+  const tree = treeRef.value
+  if (!tree) return false
+  if (!path) { tree.setCurrentKey(); return true }
+  const segs = path.split('/')
+  let prefix = ''
+  for (const seg of segs) {
+    prefix = prefix ? `${prefix}/${seg}` : seg
+    const node = tree.getNode(prefix)
+    if (!node) return false
+    if (prefix !== path) await expandNode(node)
+  }
+  tree.setCurrentKey(path)
+  return true
+}
+
+function openAddr() {
+  addrText.value = currentPath.value
+  addrMode.value = true
+  nextTick(() => addrInputRef.value?.focus())
+}
+
+async function jumpToAddr() {
+  // Tolerant cleanup: surrounding spaces and stray leading/trailing slashes.
+  const cleaned = addrText.value.trim().replace(/^\/+|\/+$/g, '')
+  if (!cleaned) {
+    addrMode.value = false
+    navigateTo('')
+    return
+  }
+  if (!(await syncTreeTo(cleaned))) {
+    ElMessage.error(t('files.pathNotFound', { path: cleaned }))
+    return // keep the input open and untouched, stay where we are
+  }
+  addrMode.value = false
+  navigateTo(cleaned)
+}
+
+async function copyCurrentPath() {
+  try {
+    await navigator.clipboard.writeText(currentPath.value || '/')
+    ElMessage.success(t('common.copied'))
+  } catch { ElMessage.error(t('common.error')) }
 }
 
 // Selection is mirrored into the URL (?fs=N&session=N) so session
@@ -500,6 +621,8 @@ onUnmounted(() => {
 
 async function onSessionChange() {
   currentPath.value = ''
+  addrMode.value = false
+  addrText.value = ''
   page.value = 1
   if (!sessionId.value) { treeData.value = []; files.value = []; return }
   syncQuery()
@@ -516,9 +639,7 @@ async function loadNode(node: any, resolve: (data: TreeNode[]) => void) {
 }
 
 function onNodeClick(data: TreeNode) {
-  currentPath.value = data.original_path
-  page.value = 1
-  loadFiles()
+  navigateTo(data.original_path)
 }
 
 function setCategoryFilter(path: string) {
@@ -842,9 +963,73 @@ async function previewFile(file: FileEntry) {
   gap: 6px;
 }
 
-.current-path-tag {
-  align-self: flex-start;
+/* ===== Path navigation: up / breadcrumb / address bar ===== */
+.path-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.path-nav__btn {
+  flex-shrink: 0;
+}
+
+.path-nav__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.path-nav__crumbs {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.crumb {
+  display: inline-block;
+  background: transparent;
+  border: none;
+  padding: 3px 7px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color var(--duration-fast) var(--ease-spring),
+              color var(--duration-fast) var(--ease-spring);
+}
+
+.crumb:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.crumb.is-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.crumb-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.path-nav__addr {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .cell-muted {
