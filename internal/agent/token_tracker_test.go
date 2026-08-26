@@ -47,14 +47,14 @@ func drainStream(t *testing.T, sr *schema.StreamReader[*schema.Message]) {
 
 // claudeTwoFrameUsage mimics eino-ext claude v0.1.25: a message_start frame
 // with initial usage followed by a message_delta frame whose counters are
-// cumulative for the whole call.
+// cumulative for the whole call. CachedTokens rides the same cumulative shape.
 func claudeTwoFrameUsage() []*schema.Message {
 	return []*schema.Message{
 		{
 			Role:    schema.Assistant,
 			Content: "chunk-1",
 			ResponseMeta: &schema.ResponseMeta{
-				Usage: &schema.TokenUsage{PromptTokens: 100, CompletionTokens: 1, TotalTokens: 101},
+				Usage: &schema.TokenUsage{PromptTokens: 100, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 40}, CompletionTokens: 1, TotalTokens: 101},
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func claudeTwoFrameUsage() []*schema.Message {
 			Content: "chunk-2",
 			ResponseMeta: &schema.ResponseMeta{
 				FinishReason: "stop",
-				Usage:        &schema.TokenUsage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
+				Usage:        &schema.TokenUsage{PromptTokens: 100, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 40}, CompletionTokens: 50, TotalTokens: 150},
 			},
 		},
 	}
@@ -77,9 +77,9 @@ func TestTokenTrackingStreamCumulativeFrames(t *testing.T) {
 	}
 	drainStream(t, sr)
 
-	p, c, tt := tracker.Usage()
-	if p != 100 || c != 50 || tt != 150 {
-		t.Fatalf("cumulative frames double counted: got (%d, %d, %d), want (100, 50, 150)", p, c, tt)
+	p, ca, c, tt := tracker.Usage()
+	if p != 100 || ca != 40 || c != 50 || tt != 150 {
+		t.Fatalf("cumulative frames double counted: got (%d, %d, %d, %d), want (100, 40, 50, 150)", p, ca, c, tt)
 	}
 }
 
@@ -96,9 +96,9 @@ func TestTokenTrackingStreamAccumulatesAcrossCalls(t *testing.T) {
 		drainStream(t, sr)
 	}
 
-	p, c, tt := tracker.Usage()
-	if p != 200 || c != 100 || tt != 300 {
-		t.Fatalf("two calls: got (%d, %d, %d), want (200, 100, 300)", p, c, tt)
+	p, ca, c, tt := tracker.Usage()
+	if p != 200 || ca != 80 || c != 100 || tt != 300 {
+		t.Fatalf("two calls: got (%d, %d, %d, %d), want (200, 80, 100, 300)", p, ca, c, tt)
 	}
 }
 
@@ -116,8 +116,42 @@ func TestTokenTrackingStreamFramesWithoutUsage(t *testing.T) {
 	}
 	drainStream(t, sr)
 
-	p, c, tt := tracker.Usage()
-	if p != 0 || c != 0 || tt != 0 {
-		t.Fatalf("frames without usage: got (%d, %d, %d), want (0, 0, 0)", p, c, tt)
+	p, ca, c, tt := tracker.Usage()
+	if p != 0 || ca != 0 || c != 0 || tt != 0 {
+		t.Fatalf("frames without usage: got (%d, %d, %d, %d), want (0, 0, 0, 0)", p, ca, c, tt)
 	}
 }
+
+// Generate counts usage including the cached-token breakdown in one shot.
+func TestTokenTrackingGenerateWithCachedTokens(t *testing.T) {
+	inner := &fakeStreamModel{}
+	tracker := newTokenTrackingModel(inner)
+	msg := &schema.Message{
+		Role:    schema.Assistant,
+		Content: "done",
+		ResponseMeta: &schema.ResponseMeta{
+			Usage: &schema.TokenUsage{PromptTokens: 100, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 40}, CompletionTokens: 50, TotalTokens: 150},
+		},
+	}
+	// Route Generate through a fake that returns this message.
+	g := &fakeGenerateModel{msg: msg}
+	tracker = newTokenTrackingModel(g)
+	if _, err := tracker.Generate(context.Background(), nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	p, ca, c, tt := tracker.Usage()
+	if p != 100 || ca != 40 || c != 50 || tt != 150 {
+		t.Fatalf("generate with cached: got (%d, %d, %d, %d), want (100, 40, 50, 150)", p, ca, c, tt)
+	}
+}
+
+// fakeGenerateModel returns a fixed message from Generate.
+type fakeGenerateModel struct{ msg *schema.Message }
+
+func (f *fakeGenerateModel) Generate(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {
+	return f.msg, nil
+}
+func (f *fakeGenerateModel) Stream(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, nil
+}
+func (f *fakeGenerateModel) BindTools(_ []*schema.ToolInfo) error { return nil }

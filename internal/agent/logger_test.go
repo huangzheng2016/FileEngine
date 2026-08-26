@@ -26,7 +26,7 @@ func TestLoggerLogMessagePublishesToBus(t *testing.T) {
 
 	l := NewLogger(nil, 100, 7)
 	l.SetBatch(3)
-	l.LogMessage("assistant", "final answer", 10, 20, 30)
+	l.LogMessage("assistant", "final answer", 10, 5, 20, 30)
 
 	ev := recvBusEvent(t, ch)
 	if ev.Type != db.EventMessage {
@@ -37,7 +37,7 @@ func TestLoggerLogMessagePublishesToBus(t *testing.T) {
 		t.Fatalf("payload type: got %T", ev.Payload)
 	}
 	if p.WorkerID != 7 || p.Role != "assistant" || p.Content != "final answer" ||
-		p.PromptTokens != 10 || p.CompletionTokens != 20 || p.TotalTokens != 30 {
+		p.PromptTokens != 10 || p.CachedTokens != 5 || p.CompletionTokens != 20 || p.TotalTokens != 30 {
 		t.Fatalf("payload: %+v", p)
 	}
 }

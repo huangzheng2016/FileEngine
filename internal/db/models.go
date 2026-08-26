@@ -96,6 +96,7 @@ type ScanSession struct {
 	ExecutedOps         int       `json:"executed_ops"`
 	TotalSize           int64     `json:"total_size"`
 	PromptTokens        int       `json:"prompt_tokens"`
+	CachedTokens        int       `json:"cached_tokens"` // cache-hit subset of prompt_tokens, as reported by the provider
 	CompletionTokens    int       `json:"completion_tokens"`
 	TotalTokens         int       `json:"total_tokens"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
@@ -157,6 +158,7 @@ type AgentLog struct {
 	ToolOutput       string    `gorm:"type:text" json:"tool_output"`
 	Content          string    `gorm:"type:text" json:"content"`
 	PromptTokens     int       `json:"prompt_tokens"`
+	CachedTokens     int       `json:"cached_tokens"` // cache-hit subset of PromptTokens; 0 on rows written before it existed
 	CompletionTokens int       `json:"completion_tokens"`
 	TotalTokens      int       `json:"total_tokens"`
 	CreatedAt        time.Time `json:"created_at"`

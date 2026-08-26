@@ -143,6 +143,7 @@ tasks:
   totalFiles: Files
   taggedFiles: Tagged
   plannedOps: Planned
+  tokenBreakdown: In {prompt} · Cached {cached} · Out {completion}
   executedOps: Executed
   tag: Tag
   stopTag: Stop Tag
@@ -269,6 +270,7 @@ logs:
   noLogs: No run records for this session yet
   noLogsHint: Start tagging or an AI instruction and the run will stream here live
   totalTokens: Total Tokens
+  cachedTokens: cached {count}
   failed: Failed
   techDetails: Technical details
   loadedTokens: "{count} loaded locally"

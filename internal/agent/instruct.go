@@ -80,7 +80,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
 	a.logger.EmitPullBegin("instruct", 0, 0)
 	userMsg := sb.String()
-	a.logger.LogMessage("user", userMsg, 0, 0, 0)
+	a.logger.LogMessage("user", userMsg, 0, 0, 0, 0)
 
 	messages := []*schema.Message{
 		{Role: schema.User, Content: userMsg},
@@ -95,8 +95,8 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 
 	response := ""
 	if result != nil {
-		pt, ct, tt := tracker.Usage()
-		a.logger.LogMessage("assistant", result.Content, pt, ct, tt)
+		pt, cached, ct, tt := tracker.Usage()
+		a.logger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
 		response = result.Content
 	}
 	a.logger.EmitPullDone("instruct", 0, 0)

@@ -51,7 +51,7 @@ func (l *Logger) GetBatch() int {
 	return l.batch
 }
 
-func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens, totalTokens int) {
+func (l *Logger) LogMessage(role, content string, promptTokens, cachedTokens, completionTokens, totalTokens int) {
 	l.mu.Lock()
 	batch := l.batch
 	l.mu.Unlock()
@@ -63,6 +63,7 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 		Role:             role,
 		Content:          content,
 		PromptTokens:     promptTokens,
+		CachedTokens:     cachedTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      totalTokens,
 		CreatedAt:        time.Now(),
@@ -74,6 +75,7 @@ func (l *Logger) LogMessage(role, content string, promptTokens, completionTokens
 		Role:             role,
 		Content:          content,
 		PromptTokens:     promptTokens,
+		CachedTokens:     cachedTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      totalTokens,
 	}})

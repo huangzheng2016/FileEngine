@@ -112,11 +112,13 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 	// Single query for all AgentLog token sums (was 3 separate queries)
 	var tokenSums struct {
 		PromptTokens     int64
+		CachedTokens     int64
 		CompletionTokens int64
 		TotalTokens      int64
 	}
 	if err := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
 		Select(`COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
 			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
 			COALESCE(SUM(total_tokens), 0) AS total_tokens`).
 		Scan(&tokenSums).Error; err != nil {
@@ -136,6 +138,7 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 			"executed_ops":      int(fileCounts.Executed),
 			"total_size":        fileCounts.Size,
 			"prompt_tokens":     int(tokenSums.PromptTokens),
+			"cached_tokens":     int(tokenSums.CachedTokens),
 			"completion_tokens": int(tokenSums.CompletionTokens),
 			"total_tokens":      int(tokenSums.TotalTokens),
 		}).Error

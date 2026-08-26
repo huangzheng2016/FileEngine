@@ -65,7 +65,7 @@
               <div class="msg-meta">
                 <span class="status-chip" :class="roleChipClass(step.role)">{{ roleLabel(step.role) }}</span>
                 <span v-if="step.time" class="cell-time">{{ formatTime(step.time) }}</span>
-                <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑ {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
+                <span v-if="step.total_tokens" class="cell-time">{{ step.prompt_tokens }}↑<template v-if="step.cached_tokens">({{ $t('logs.cachedTokens', { count: step.cached_tokens }) }})</template> {{ step.completion_tokens }}↓ = {{ step.total_tokens }}</span>
               </div>
               <div class="msg-bubble">
                 <MarkdownView v-if="step.role === 'assistant'" :content="step.content" />
@@ -149,6 +149,7 @@ interface MessageStep {
   role: string
   content: string
   prompt_tokens?: number
+  cached_tokens?: number
   completion_tokens?: number
   total_tokens?: number
   time?: string
@@ -231,6 +232,7 @@ const displayLanes = computed<Lane[]>(() => {
       l.steps.push({
         kind: 'message', key: `h${log.id}`, role: log.role, content: log.content,
         prompt_tokens: log.prompt_tokens || undefined,
+        cached_tokens: log.cached_tokens || undefined,
         completion_tokens: log.completion_tokens || undefined,
         total_tokens: log.total_tokens || undefined,
         time: log.created_at,
@@ -310,7 +312,7 @@ stream
   .on('message', (e) => {
     pushLive(e.worker_id, {
       kind: 'message', key: nextKey(), role: e.role, content: e.content,
-      prompt_tokens: e.prompt_tokens, completion_tokens: e.completion_tokens,
+      prompt_tokens: e.prompt_tokens, cached_tokens: e.cached_tokens, completion_tokens: e.completion_tokens,
       total_tokens: e.total_tokens, time: new Date().toISOString(),
     })
   })

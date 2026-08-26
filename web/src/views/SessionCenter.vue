@@ -83,7 +83,9 @@
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.plannedOps') }}</span><span class="metric-value">{{ current.planned_ops }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.executedOps') }}</span><span class="metric-value">{{ current.executed_ops }}</span></span>
           <span v-if="current.total_size > 0" class="metric-chip"><span class="metric-label">{{ $t('common.size') }}</span><span class="metric-value">{{ formatSize(current.total_size) }}</span></span>
-          <span v-if="current.total_tokens > 0" class="metric-chip"><span class="metric-label">Token</span><span class="metric-value">{{ current.total_tokens.toLocaleString() }}</span></span>
+          <el-tooltip v-if="current.total_tokens > 0" placement="bottom" :content="$t('tasks.tokenBreakdown', { prompt: current.prompt_tokens.toLocaleString(), cached: current.cached_tokens.toLocaleString(), completion: current.completion_tokens.toLocaleString() })">
+            <span class="metric-chip"><span class="metric-label">Token</span><span class="metric-value">{{ current.total_tokens.toLocaleString() }}</span></span>
+          </el-tooltip>
           <el-progress v-if="current.total_files > 0" class="run-card__progress"
             :percentage="Math.round((current.tagged_files / current.total_files) * 100)"
             :stroke-width="6" />

@@ -63,6 +63,7 @@ export interface ScanSession {
   executed_ops: number
   total_size: number
   prompt_tokens: number
+  cached_tokens: number
   completion_tokens: number
   total_tokens: number
   allow_read_file: boolean
@@ -104,6 +105,7 @@ export interface AgentLog {
   tool_output: string
   content: string
   prompt_tokens: number
+  cached_tokens: number
   completion_tokens: number
   total_tokens: number
   created_at: string
@@ -216,6 +218,7 @@ export interface MessageEvent {
   role: 'user' | 'assistant' | 'system'
   content: string
   prompt_tokens?: number
+  cached_tokens?: number
   completion_tokens?: number
   total_tokens?: number
 }

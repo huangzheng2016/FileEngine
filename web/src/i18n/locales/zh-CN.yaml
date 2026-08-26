@@ -141,6 +141,7 @@ tasks:
   totalFiles: 文件总数
   taggedFiles: 已标记
   plannedOps: 已规划
+  tokenBreakdown: 输入 {prompt} · 缓存命中 {cached} · 输出 {completion}
   executedOps: 已执行
   tag: 打标
   stopTag: 停止打标
@@ -267,6 +268,7 @@ logs:
   noLogs: 该会话还没有运行记录
   noLogsHint: 启动打标或 AI 指令后，运行过程会实时显示在这里
   totalTokens: Token 总计
+  cachedTokens: 缓存 {count}
   failed: 失败
   techDetails: 技术详情
   loadedTokens: "本地已加载 {count}"

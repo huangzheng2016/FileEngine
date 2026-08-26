@@ -337,7 +337,7 @@ func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, l
 	// Attribute the last attempt's token usage to the system row too — a failed
 	// batch otherwise vanishes from the token accounting (batch cards showed
 	// no tokens for failed batches).
-	pt, ct, tt := tracker.Usage()
-	logger.LogMessage("system", fmt.Sprintf("Error after %d retries (%s): %v", retriesUsed, classifyRunErrorWithStatus(err, statusHint), err), pt, ct, tt)
+	pt, cached, ct, tt := tracker.Usage()
+	logger.LogMessage("system", fmt.Sprintf("Error after %d retries (%s): %v", retriesUsed, classifyRunErrorWithStatus(err, statusHint), err), pt, cached, ct, tt)
 	return nil, err
 }

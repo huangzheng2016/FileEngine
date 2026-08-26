@@ -262,7 +262,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildDirectoryPrompt(dir, catSummary)
-		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
+		workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
 
 		messages := []*schema.Message{
 			{Role: schema.User, Content: userMsg},
@@ -279,8 +279,8 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		}
 
 		if result != nil {
-			pt, ct, tt := tracker.Usage()
-			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+			pt, cached, ct, tt := tracker.Usage()
+			workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
 			tracker.ResetUsage()
 		}
 		workerLogger.Flush()
@@ -434,7 +434,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildBatchPrompt(batch.files, catSummary, a.archiveHints(ctx, workerFS, batch.files, config.Get().Agent))
-		workerLogger.LogMessage("user", userMsg, 0, 0, 0)
+		workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
 
 		messages := []*schema.Message{
 			{Role: schema.User, Content: userMsg},
@@ -451,8 +451,8 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 			continue
 		}
 		if result != nil {
-			pt, ct, tt := tracker.Usage()
-			workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+			pt, cached, ct, tt := tracker.Usage()
+			workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
 			tracker.ResetUsage()
 		}
 		// Batch-level re-check: a successful run does not guarantee every file
@@ -543,7 +543,7 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 		toolBuilder.noteCategoryUsages(usages)
 	}
 	userMsg := buildHarnessPrompt(buildCategorySummary(usages))
-	workerLogger.LogMessage("user", userMsg, 0, 0, 0)
+	workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
 
 	label := fmt.Sprintf("harness worker %d", workerID)
 	result, err := runADKWithRetry(ctx, agentInst, []*schema.Message{{Role: schema.User, Content: userMsg}}, workerLogger, label, tracker)
@@ -557,8 +557,8 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 		return
 	}
 	if result != nil {
-		pt, ct, tt := tracker.Usage()
-		workerLogger.LogMessage("assistant", result.Content, pt, ct, tt)
+		pt, cached, ct, tt := tracker.Usage()
+		workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
 		tracker.ResetUsage()
 	}
 	workerLogger.Flush()
