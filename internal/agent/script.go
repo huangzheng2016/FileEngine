@@ -94,6 +94,9 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 		return nil, nil
 	}
 	maxSize, timeout, maxResult := tb.scriptLimits()
+	// The create_category builtin line carries the session gate note plus the
+	// configured category policy verbatim (empty when no policy is set).
+	createCatNote := map[bool]string{true: "", false: "（本会话未开启 allow_auto_category，不可用）"}[tb.session.AllowAutoCategory] + categoryPolicySuffix(tb.cfg.CategoryPolicy)
 	desc := fmt.Sprintf(`运行一段 Tengo 脚本（类 Go 语法）做批量查询和批量分类操作，代替逐文件的工具调用。返回 print 输出和 result 全局变量的 JSON 值。
 
 内置函数（全部围绕当前会话的文件与分类）：
@@ -119,7 +122,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - print(...) 输出、脚本返回值分别限 %d 字节；脚本源码限 %d 字节；单次运行限 %d 秒，超时中止
 - 可用标准库模块：%s（无 os/exec/env/文件/网络能力，一切数据访问必须经内置函数）`,
 		scriptQueryDefault, scriptQueryMax,
-		map[bool]string{true: "", false: "（本会话未开启 allow_auto_category，不可用）"}[tb.session.AllowAutoCategory],
+		createCatNote,
 		scriptSampleDefault, scriptSampleMax,
 		maxResult, maxSize, int(timeout.Seconds()), scriptStdlibModules)
 	runScript, err := utils.InferTool("run_script", desc, tb.runScript)

@@ -9,10 +9,12 @@ import (
 
 // DefaultSystemPrompt is the default autotag prompt for a default session
 // (create_category and run_script both enabled — allow_auto_category and
-// allow_script default on for new sessions).
+// allow_script default on for new sessions) under the built-in category
+// policy (config.DefaultCategoryPolicy).
 // systemPromptForSession adapts it to the tools actually registered for the
-// session; a custom Agent.SystemPrompt always wins and is used verbatim.
-var DefaultSystemPrompt = defaultSystemPrompt(true, true)
+// session and to the configured category policy; a custom
+// Agent.SystemPrompt always wins and is used verbatim.
+var DefaultSystemPrompt = defaultSystemPrompt(true, true, config.DefaultCategoryPolicy)
 
 const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目录和文件，将它们归类到用户定义的分类中。
 
@@ -79,12 +81,32 @@ const systemPromptTail = `- set_target 传空字符串可清除已有目标
 - 对同一目录的操作尽量连续完成
 `
 
+// categoryPolicySection renders the 分类规范 section for the default system
+// prompt, or "" when no policy is configured.
+func categoryPolicySection(policy string) string {
+	if strings.TrimSpace(policy) == "" {
+		return ""
+	}
+	return "\n## 分类规范\n\n" + policy + "\n"
+}
+
+// categoryPolicySuffix renders the configured category policy for tool
+// descriptions (create_category tool and the run_script builtin): "" when no
+// policy is set, otherwise the policy text verbatim under a 分类规范 heading.
+func categoryPolicySuffix(policy string) string {
+	if strings.TrimSpace(policy) == "" {
+		return ""
+	}
+	return "\n\n分类规范：\n" + policy
+}
+
 // defaultSystemPrompt builds the default autotag prompt describing only the
 // capabilities the session actually has: the create_category workflow is
 // mentioned only when the tool is registered (ScanSession.AllowAutoCategory),
 // otherwise the prompt steers the agent to the fallback category; run_script
-// is mentioned only when registered (ScanSession.AllowScript).
-func defaultSystemPrompt(allowAutoCategory, allowScript bool) string {
+// is mentioned only when registered (ScanSession.AllowScript). A non-empty
+// category policy adds a 分类规范 section after the category guidance.
+func defaultSystemPrompt(allowAutoCategory, allowScript bool, policy string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptHead)
 	if allowAutoCategory {
@@ -92,6 +114,7 @@ func defaultSystemPrompt(allowAutoCategory, allowScript bool) string {
 	} else {
 		sb.WriteString(noAutoCategoryGuidance)
 	}
+	sb.WriteString(categoryPolicySection(policy))
 	if allowScript {
 		sb.WriteString(scriptGuidance)
 	}
@@ -100,12 +123,12 @@ func defaultSystemPrompt(allowAutoCategory, allowScript bool) string {
 }
 
 // systemPromptForSession returns the configured autotag prompt, or the
-// default adapted to the session's registered tools.
+// default adapted to the session's registered tools and category policy.
 func systemPromptForSession(cfg config.AgentConfig, session *db.ScanSession) string {
 	if cfg.SystemPrompt != "" {
 		return cfg.SystemPrompt
 	}
-	return defaultSystemPrompt(session.AllowAutoCategory, session.AllowScript)
+	return defaultSystemPrompt(session.AllowAutoCategory, session.AllowScript, cfg.CategoryPolicy)
 }
 
 const instructPromptHead = `你是一个文件整理助手。用户选择了一些文件并给出了指令，请使用工具完成用户的要求。
