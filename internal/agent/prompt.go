@@ -8,10 +8,11 @@ import (
 )
 
 // DefaultSystemPrompt is the default autotag prompt for a default session
-// (create_category disabled, run_script enabled — allow_script defaults on).
+// (create_category and run_script both enabled — allow_auto_category and
+// allow_script default on for new sessions).
 // systemPromptForSession adapts it to the tools actually registered for the
 // session; a custom Agent.SystemPrompt always wins and is used verbatim.
-var DefaultSystemPrompt = defaultSystemPrompt(false, true)
+var DefaultSystemPrompt = defaultSystemPrompt(true, true)
 
 const systemPromptHead = `你是一个文件整理 AI Agent。任务是分析目录和文件，将它们归类到用户定义的分类中。
 

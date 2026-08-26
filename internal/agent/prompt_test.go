@@ -29,10 +29,10 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatal("prompt with create_category must not forbid creation")
 	}
 
-	// The exported default matches the default session (AllowAutoCategory=false,
+	// The exported default matches the default session (AllowAutoCategory=true,
 	// AllowScript=true).
-	if DefaultSystemPrompt != off {
-		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=false, AllowScript=true variant")
+	if DefaultSystemPrompt != on {
+		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=true, AllowScript=true variant")
 	}
 
 	// A custom configured prompt always wins, verbatim.
