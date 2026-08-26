@@ -13,7 +13,7 @@ import (
 // is registered (AllowAutoCategory), otherwise the prompt steers to the
 // fallback category instead of inviting hallucinated tool calls.
 func TestSystemPromptMatchesToolAvailability(t *testing.T) {
-	off := defaultSystemPrompt(false, true)
+	off := defaultSystemPrompt(false, true, "")
 	if strings.Contains(off, "创建新分类前必须") {
 		t.Fatal("prompt without create_category must not teach category creation")
 	}
@@ -21,7 +21,7 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatal("prompt without create_category must steer to the fallback category")
 	}
 
-	on := defaultSystemPrompt(true, true)
+	on := defaultSystemPrompt(true, true, "")
 	if !strings.Contains(on, "创建新分类前必须 list_categories") {
 		t.Fatal("prompt with create_category must teach the create workflow")
 	}
@@ -29,10 +29,10 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatal("prompt with create_category must not forbid creation")
 	}
 
-	// The exported default matches the default session (AllowAutoCategory=false,
-	// AllowScript=true).
-	if DefaultSystemPrompt != off {
-		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=false, AllowScript=true variant")
+	// The exported default matches the default session (AllowAutoCategory=true,
+	// AllowScript=true) under the built-in category policy.
+	if DefaultSystemPrompt != defaultSystemPrompt(true, true, config.DefaultCategoryPolicy) {
+		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=true, AllowScript=true variant with the default category policy")
 	}
 
 	// A custom configured prompt always wins, verbatim.
@@ -45,11 +45,11 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 // The run_script guidance follows the session switch: present only when
 // AllowScript is on (its default), absent when the tool is not registered.
 func TestSystemPromptMatchesScriptAvailability(t *testing.T) {
-	on := defaultSystemPrompt(false, true)
+	on := defaultSystemPrompt(false, true, "")
 	if !strings.Contains(on, "run_script") {
 		t.Fatal("prompt with AllowScript must mention run_script")
 	}
-	off := defaultSystemPrompt(false, false)
+	off := defaultSystemPrompt(false, false, "")
 	if strings.Contains(off, "run_script") {
 		t.Fatal("prompt without AllowScript must not mention run_script")
 	}
@@ -91,7 +91,7 @@ func TestInstructPromptMatchesToolAvailability(t *testing.T) {
 // existing categories, creation is guarded, a rejection returns the latest
 // list to act on, and fuzzy-similar hits come back as merge hints.
 func TestPromptsTeachCreateGuard(t *testing.T) {
-	on := defaultSystemPrompt(true, true)
+	on := defaultSystemPrompt(true, true, "")
 	for _, want := range []string{"优先使用现有分类", "护栏", "最新完整分类列表", "归并"} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("auto-category prompt must teach %q", want)

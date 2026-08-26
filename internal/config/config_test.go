@@ -112,3 +112,33 @@ func TestDatabaseExplicitDSNPreserved(t *testing.T) {
 		t.Fatalf("explicit DSN overwritten: got %q", cfg.Database.DSN)
 	}
 }
+
+// category_policy defaults to the built-in policy text when the key is absent.
+func TestCategoryPolicyDefaultApplied(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agent.CategoryPolicy != DefaultCategoryPolicy {
+		t.Fatalf("category_policy default: got %q", cfg.Agent.CategoryPolicy)
+	}
+}
+
+// An explicit category_policy (custom text) is preserved verbatim, including
+// through the Update path used by the config API (hot reload).
+func TestCategoryPolicyExplicitPreserved(t *testing.T) {
+	custom := "自定义规范：\n- 只按年份建类"
+	cfg, err := Load(writeConfig(t, "agent:\n  category_policy: \"自定义规范：\\n- 只按年份建类\"\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agent.CategoryPolicy != custom {
+		t.Fatalf("explicit category_policy: got %q, want %q", cfg.Agent.CategoryPolicy, custom)
+	}
+
+	updated := &Config{Agent: AgentConfig{CategoryPolicy: custom}}
+	Update(updated)
+	if Get().Agent.CategoryPolicy != custom {
+		t.Fatalf("Update must preserve explicit category_policy: got %q", Get().Agent.CategoryPolicy)
+	}
+}

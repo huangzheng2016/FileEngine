@@ -359,7 +359,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化会被拒绝并返回最新列表；同名（含大小写变体）或同路径的重复创建会被拒绝。创建成功时若存在路径重叠的相似分类，返回值会附 similar_categories 参考，请评估是否归并", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化会被拒绝并返回最新列表；同名（含大小写变体）或同路径的重复创建会被拒绝。创建成功时若存在路径重叠的相似分类，返回值会附 similar_categories 参考，请评估是否归并"+categoryPolicySuffix(tb.cfg.CategoryPolicy), tb.createCategory)
 		if err != nil {
 			return nil, fmt.Errorf("build create_category: %w", err)
 		}
@@ -447,7 +447,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	}
 
 	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；同名（含大小写变体）或同路径的重复会被拒绝；创建成功时可能附 similar_categories 相似参考，请评估归并", tb.createCategory)
+		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；同名（含大小写变体）或同路径的重复会被拒绝；创建成功时可能附 similar_categories 相似参考，请评估归并"+categoryPolicySuffix(tb.cfg.CategoryPolicy), tb.createCategory)
 		if err != nil {
 			return nil, err
 		}
