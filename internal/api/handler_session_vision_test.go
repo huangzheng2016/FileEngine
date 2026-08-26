@@ -43,8 +43,9 @@ func waitForScanDone(t *testing.T, s *Server, id uint) {
 	t.Fatalf("session %d still scanning after deadline (status matters for test determinism)", id)
 }
 
-// allow_vision follows the same per-session pattern as allow_auto_category:
-// created off by default, toggleable via PATCH, untouched by unrelated patches.
+// allow_vision follows the per-session switch pattern (like allow_script and
+// allow_auto_category, which default ON) but is created off by default:
+// toggleable via PATCH, untouched by unrelated patches.
 func TestSessionAllowVisionToggle(t *testing.T) {
 	s := setupSessionTestServer(t)
 

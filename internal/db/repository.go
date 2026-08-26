@@ -715,9 +715,16 @@ type LogQuery struct {
 	SessionID uint
 	Role      string
 	ToolName  string
-	Order     string // "asc" or "desc"
-	Page      int
-	PageSize  int
+	// WorkerID filters by agent worker lane; nil means no filter. A pointer is
+	// required because worker_id=0 is a legal filter value (single-worker
+	// instruct runs and pre-lane rows live on lane 0).
+	WorkerID *int
+	// BeforeID returns only rows with id < BeforeID (0 = no bound) — the
+	// cursor for paging backwards through a lane without page math.
+	BeforeID uint
+	Order    string // "asc" or "desc"
+	Page     int
+	PageSize int
 }
 
 func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
@@ -730,6 +737,12 @@ func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
 	}
 	if q.ToolName != "" {
 		tx = tx.Where("tool_name = ?", q.ToolName)
+	}
+	if q.WorkerID != nil {
+		tx = tx.Where("worker_id = ?", *q.WorkerID)
+	}
+	if q.BeforeID > 0 {
+		tx = tx.Where("id < ?", q.BeforeID)
 	}
 
 	var total int64

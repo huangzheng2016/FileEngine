@@ -241,7 +241,7 @@
             </template>
             <div class="form-field">
               <label class="form-field__label">{{ $t('tasks.allowVision') }}</label>
-              <div><el-switch v-model="newScan.allowVision" :disabled="!newScanVisionCapable" /></div>
+              <div><el-switch v-model="newScan.allowVision" :disabled="!newScanVisionCapable" @change="newScanVisionDirty = true" /></div>
               <p class="form-field__hint">{{ newScanVisionCapable ? $t('tasks.allowVisionHint') : $t('tasks.visionNotCapable') }}</p>
             </div>
             <div class="form-field">
@@ -384,13 +384,17 @@ const showNewDialog = ref(false)
 const newScan = ref<{ filesystemId: number; scanPath: string; modelProviderId: number | null; allowVision: boolean; allowScript: boolean; excludeCategoryDirs: boolean; filterMode: string; filterDirs: string }>({ filesystemId: 0, scanPath: '', modelProviderId: null, allowVision: false, allowScript: true, excludeCategoryDirs: false, filterMode: 'blacklist', filterDirs: '' })
 
 // Vision linkage: the switch only makes sense when the chosen model accepts
-// image input; otherwise it is disabled and forced off.
+// image input (otherwise it is disabled, and submit ANDs the capability in).
+// The default follows the selected model — ON for vision-capable models — and
+// model switches re-sync it until the user touches the switch (dirty), after
+// which their choice sticks.
 const newScanVisionCapable = computed(() => {
   const m = modelProviders.value.find(m => m.id === newScan.value.modelProviderId)
   return !!m?.vision_enabled
 })
+const newScanVisionDirty = ref(false)
 watch(() => newScan.value.modelProviderId, () => {
-  if (!newScanVisionCapable.value) newScan.value.allowVision = false
+  if (!newScanVisionDirty.value) newScan.value.allowVision = newScanVisionCapable.value
 })
 
 // One-click directory-filter presets (common generated/junk dirs).
@@ -404,7 +408,7 @@ const execDialogVisible = ref(false)
 const execMode = ref('copy')
 const execSession = ref<ScanSession | null>(null)
 const settingsVisible = ref(false)
-const sessionSettings = ref({ allow_read_file: true, allow_auto_category: false, allow_vision: false, allow_script: true, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
+const sessionSettings = ref({ allow_read_file: true, allow_auto_category: true, allow_vision: false, allow_script: true, exclude_category_dirs: false, filter_mode: 'blacklist', filter_dirs: '', model_provider_id: 0 })
 const validating = ref(false)
 const validationResult = ref<ValidationResult | null>(null)
 const statsVisible = ref(false)
@@ -871,6 +875,11 @@ function openNewScanDialog() {
     filterMode: 'blacklist',
     filterDirs: '',
   }
+  // Fresh dialog: vision starts at the selected model's capability and the
+  // dirty flag resets, so model switches keep re-syncing the switch until the
+  // user toggles it manually.
+  newScanVisionDirty.value = false
+  newScan.value.allowVision = newScanVisionCapable.value
   showNewDialog.value = true
 }
 

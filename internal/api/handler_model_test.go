@@ -113,8 +113,72 @@ func TestModelProviderContextWindowCompat(t *testing.T) {
 	}
 }
 
-// Non-positive context_window must be rejected on update as well as create,
-// and must leave the stored value untouched.
+// reasoning_effort is a free-form pass-through: "" (model default), the
+// suggested levels (none/low/medium/high/max), or any other value an
+// OpenAI-compatible backend might accept are all stored verbatim; only the
+// charset/length guard ([a-zA-Z0-9_-]{1,32}) rejects with 400. "max" was
+// rejected by the old enum validation — that case is now flipped.
+func TestModelProviderReasoningEffortPassthrough(t *testing.T) {
+	s := setupModelTestServer(t)
+
+	// Accepted: empty, suggested levels, and unknown-but-legal custom values.
+	for _, v := range []string{"", "none", "low", "medium", "high", "max", "xhigh_v2-9", "X-High_2"} {
+		code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
+			"name": "effort-" + v, "provider": "openai", "model": "gpt-4o", "reasoning_effort": v,
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("create reasoning_effort=%q: code %d, resp %v", v, code, created)
+		}
+		if got := created["reasoning_effort"]; got != v {
+			t.Fatalf("create reasoning_effort=%q: stored %v", v, got)
+		}
+	}
+
+	// Update accepts the previously rejected "max" and custom levels.
+	code, updated := doModelRequest(t, s, http.MethodPut, "/api/v1/models/1", map[string]any{
+		"name": "effort-", "provider": "openai", "model": "gpt-4o", "reasoning_effort": "max",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("update to max: code %d, resp %v", code, updated)
+	}
+	if got := updated["reasoning_effort"]; got != "max" {
+		t.Fatalf("update to max: stored %v", got)
+	}
+
+	// Charset/length violations are rejected on create and update, and a
+	// rejected update leaves the stored value untouched.
+	bad := []string{"has space", "bad!chars", "chinese中文", "this-value-is-way-too-long-to-pass32"}
+	for _, v := range bad {
+		code, _ = doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
+			"name": "bad", "provider": "openai", "model": "gpt-4o", "reasoning_effort": v,
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("create reasoning_effort=%q: got code %d, want 400", v, code)
+		}
+		code, _ = doModelRequest(t, s, http.MethodPut, "/api/v1/models/1", map[string]any{
+			"name": "effort-", "provider": "openai", "model": "gpt-4o", "reasoning_effort": v,
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("update reasoning_effort=%q: got code %d, want 400", v, code)
+		}
+	}
+	code, got := doModelRequest(t, s, http.MethodGet, "/api/v1/models/1", nil)
+	if code != http.StatusOK {
+		t.Fatalf("get: code %d", code)
+	}
+	if got["reasoning_effort"] != "max" {
+		t.Fatalf("stored reasoning_effort after rejected updates: got %v, want max", got["reasoning_effort"])
+	}
+
+	// The test-connection path validates identically (before any network I/O).
+	code, resp := doModelRequest(t, s, http.MethodPost, "/api/v1/models/test", map[string]any{
+		"name": "t", "provider": "openai", "model": "gpt-4o", "reasoning_effort": "has space",
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("test path invalid effort: got code %d, want 400 (resp %v)", code, resp)
+	}
+}
+
 func TestModelProviderUpdateRejectsNonPositiveContextWindow(t *testing.T) {
 	s := setupModelTestServer(t)
 
