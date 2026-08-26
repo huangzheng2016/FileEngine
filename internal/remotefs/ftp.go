@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"path"
 	"sync"
-	"time"
 
 	"FileEngine/internal/config"
 
@@ -30,15 +30,28 @@ func NewFTPFS(cfg config.RemoteFSConfig) (*FTPFS, error) {
 		port = 21
 	}
 
-	conn, err := ftp.Dial(fmt.Sprintf("%s:%d", cfg.Host, port), ftp.DialWithTimeout(10*time.Second))
+	timeout := opTimeout()
+	// FTP has no background reader: control-connection replies are read
+	// synchronously after each command and data connections only flow during
+	// a transfer, so a per-syscall stall deadline is safe on both. The
+	// library dials data connections through the same dial func.
+	dial := func(network, address string) (net.Conn, error) {
+		d := net.Dialer{Timeout: timeout}
+		conn, err := d.Dial(network, address)
+		if err != nil {
+			return nil, err
+		}
+		return &stallConn{Conn: conn, timeout: timeout}, nil
+	}
+	conn, err := ftp.Dial(fmt.Sprintf("%s:%d", cfg.Host, port), ftp.DialWithDialFunc(dial))
 	if err != nil {
-		return nil, fmt.Errorf("ftp dial: %w", err)
+		return nil, &OpError{Protocol: "ftp", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
 	if cfg.Username != "" {
 		if err := conn.Login(cfg.Username, cfg.Password); err != nil {
 			conn.Quit()
-			return nil, fmt.Errorf("ftp login: %w", err)
+			return nil, &OpError{Protocol: "ftp", Op: "login", Path: cfg.Host, Err: err}
 		}
 	}
 
@@ -69,7 +82,7 @@ func (f *FTPFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	entries, err := f.conn.List(fullPath)
 	f.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "ftp", Op: "list", Path: p, Err: err}
 	}
 	var result []FileInfo
 	for _, entry := range entries {
@@ -103,7 +116,7 @@ func (f *FTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	entry, err := f.conn.GetEntry(fullPath)
 	f.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, &OpError{Protocol: "ftp", Op: "stat", Path: p, Err: err}
 	}
 	ft := FileTypeFile
 	if entry.Type == ftp.EntryTypeFolder {
@@ -132,9 +145,9 @@ func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 	resp, err := f.conn.Retr(fullPath)
 	if err != nil {
 		f.mu.Unlock()
-		return nil, err
+		return nil, &OpError{Protocol: "ftp", Op: "open", Path: p, Err: err}
 	}
-	return &ftpLockedResponse{mu: &f.mu, r: resp}, nil
+	return &ftpLockedResponse{mu: &f.mu, r: resp, path: p}, nil
 }
 
 // ftpLockedResponse holds the control-connection mutex from Retr until
@@ -143,10 +156,17 @@ func (f *FTPFS) ReadFile(_ context.Context, p string) (io.ReadCloser, error) {
 type ftpLockedResponse struct {
 	mu   *sync.Mutex
 	r    *ftp.Response
+	path string
 	once sync.Once
 }
 
-func (l *ftpLockedResponse) Read(p []byte) (int, error) { return l.r.Read(p) }
+func (l *ftpLockedResponse) Read(p []byte) (int, error) {
+	n, err := l.r.Read(p)
+	if err != nil && err != io.EOF {
+		err = &OpError{Protocol: "ftp", Op: "read", Path: l.path, Err: err}
+	}
+	return n, err
+}
 
 func (l *ftpLockedResponse) Close() error {
 	var err error
