@@ -64,6 +64,24 @@ func runScript(t *testing.T, tb *ToolBuilder, src string) (*RunScriptOutput, err
 	return tb.runScript(context.Background(), &RunScriptInput{Script: src})
 }
 
+// Script failures come back as the tool result's error field (the agent fixes
+// the script in-loop); only context cancellation stays a hard error so a user
+// stop / run kill still aborts the run.
+func TestRunScriptErrorAsResultVsCancel(t *testing.T) {
+	tb, _ := scriptTestBuilder(t, nil)
+
+	out, err := runScript(t, tb, `undefined_fn()`)
+	if err != nil || !strings.Contains(out.Error, "unresolved reference") {
+		t.Fatalf("compile error must surface as tool-result error: err=%v out=%+v", err, out)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := tb.runScript(ctx, &RunScriptInput{Script: `result = 1`}); err == nil {
+		t.Fatal("canceled ctx must stay a hard error")
+	}
+}
+
 func mustRunScript(t *testing.T, tb *ToolBuilder, src string) *RunScriptOutput {
 	t.Helper()
 	out, err := runScript(t, tb, src)
@@ -202,8 +220,9 @@ func TestScriptBuiltinArgumentValidation(t *testing.T) {
 		`set_target(1, "b")`,                      // wrong type
 		`rename_category("照片", "")`,               // empty new name
 	} {
-		if _, err := runScript(t, tb, src); err == nil {
-			t.Fatalf("script must fail loudly: %s", src)
+		out, err := runScript(t, tb, src)
+		if err != nil || out.Error == "" {
+			t.Fatalf("script must fail loudly as a tool-result error: %s (err=%v out=%+v)", src, err, out)
 		}
 	}
 }
@@ -337,8 +356,9 @@ result = {a_ok: a.success, a_path: a.path, dup_err: is_error(dup), b_ok: b.succe
 // scripts cannot bypass the session gate.
 func TestScriptCreateCategoryGatedBySession(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: false})
-	if _, err := runScript(t, tb, `create_category("x", "/x", "d")`); err == nil {
-		t.Fatal("create_category must be undefined when allow_auto_category is off")
+	out, err := runScript(t, tb, `create_category("x", "/x", "d")`)
+	if err != nil || out.Error == "" {
+		t.Fatalf("create_category must be undefined when allow_auto_category is off (err=%v out=%+v)", err, out)
 	}
 }
 
@@ -347,16 +367,16 @@ func TestScriptCreateCategoryGatedBySession(t *testing.T) {
 func TestScriptSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptMaxSize = 16
-	if _, err := runScript(t, tb, `result = "this script is definitely longer than sixteen bytes"`); err == nil ||
-		!strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("oversized script must be rejected: %v", err)
+	out, err := runScript(t, tb, `result = "this script is definitely longer than sixteen bytes"`)
+	if err != nil || !strings.Contains(out.Error, "exceeds") {
+		t.Fatalf("oversized script must be rejected: err=%v out=%+v", err, out)
 	}
-	if _, err := runScript(t, tb, "   \n  "); err == nil {
-		t.Fatal("empty script must be rejected")
+	if out, err := runScript(t, tb, "   \n  "); err != nil || out.Error == "" {
+		t.Fatalf("empty script must be rejected: err=%v out=%+v", err, out)
 	}
 	// Just under the cap runs fine.
-	if _, err := runScript(t, tb, `result = 1`); err != nil {
-		t.Fatalf("small script must run: %v", err)
+	if out, err := runScript(t, tb, `result = 1`); err != nil || out.Error != "" {
+		t.Fatalf("small script must run: err=%v out=%+v", err, out)
 	}
 }
 
@@ -364,9 +384,9 @@ func TestScriptTimeoutGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptTimeout = 1
 	start := time.Now()
-	_, err := runScript(t, tb, `for { x := 1 }`)
-	if err == nil || !strings.Contains(err.Error(), "timeout") {
-		t.Fatalf("infinite loop must die by timeout: %v", err)
+	out, err := runScript(t, tb, `for { x := 1 }`)
+	if err != nil || !strings.Contains(out.Error, "timeout") {
+		t.Fatalf("infinite loop must die by timeout: err=%v out=%+v", err, out)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("timeout abort took too long: %v", elapsed)
@@ -397,13 +417,13 @@ func TestScriptValueSizeGuard(t *testing.T) {
 }
 
 // A runaway allocation loop dies by the alloc cap or the timeout — never by
-// taking the process down — and the abort surfaces as a plain error.
+// taking the process down — and the abort surfaces as a tool-result error.
 func TestScriptAllocGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptTimeout = 3
-	_, err := runScript(t, tb, `x := "" for { x += "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }`)
-	if err == nil {
-		t.Fatal("allocation bomb must be aborted (alloc cap or timeout)")
+	out, err := runScript(t, tb, `x := "" for { x += "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }`)
+	if err != nil || out.Error == "" {
+		t.Fatalf("allocation bomb must be aborted (alloc cap or timeout): err=%v out=%+v", err, out)
 	}
 }
 
@@ -424,8 +444,9 @@ func TestScriptDangerousModulesUnavailable(t *testing.T) {
 		`x := import("/etc/passwd")`,   // ditto, absolute
 	}
 	for _, src := range dangerous {
-		if _, err := runScript(t, tb, src); err == nil {
-			t.Fatalf("dangerous/unknown import must fail: %s", src)
+		out, err := runScript(t, tb, src)
+		if err != nil || out.Error == "" {
+			t.Fatalf("dangerous/unknown import must fail: %s (err=%v out=%+v)", src, err, out)
 		}
 	}
 }
@@ -464,8 +485,9 @@ result = {
 func TestScriptNoUnexpectedGlobals(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	for _, src := range []string{`exec("ls")`, `open("/etc/passwd")`, `http_get("http://x")`} {
-		if _, err := runScript(t, tb, src); err == nil {
-			t.Fatalf("unexpected global must not exist: %s", src)
+		out, err := runScript(t, tb, src)
+		if err != nil || out.Error == "" {
+			t.Fatalf("unexpected global must not exist: %s (err=%v out=%+v)", src, err, out)
 		}
 	}
 }
@@ -521,8 +543,8 @@ func TestScriptLoggedToAgentLogs(t *testing.T) {
 	if _, err := tb.runScript(context.Background(), &RunScriptInput{Script: "print(\"logged line\")\nresult = 42"}); err != nil {
 		t.Fatalf("runScript: %v", err)
 	}
-	if _, err := tb.runScript(context.Background(), &RunScriptInput{Script: `boom(`}); err == nil {
-		t.Fatal("compile error expected")
+	if out, err := tb.runScript(context.Background(), &RunScriptInput{Script: `boom(`}); err != nil || out.Error == "" {
+		t.Fatalf("compile error must surface as tool-result error: err=%v out=%+v", err, out)
 	}
 	logger.Flush()
 

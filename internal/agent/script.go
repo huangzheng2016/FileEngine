@@ -43,6 +43,7 @@ type RunScriptOutput struct {
 	Output     string `json:"output"`              // captured print()/println() text
 	Value      string `json:"value,omitempty"`     // JSON of the script's `result` global, when set
 	Truncated  bool   `json:"truncated,omitempty"` // output or value hit script_max_result_size
+	Error      string `json:"error,omitempty"`     // script compile/runtime/timeout failure, fed back for the model to fix
 	DurationMs int64  `json:"duration_ms"`
 }
 
@@ -112,6 +113,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 
 约定：
 - 失败的内置函数返回 error 值，用 is_error(x) 判断，不会中断脚本（参数形状错误会直接报运行时错误）
+- 脚本本身的编译/运行/超时错误会作为工具结果的 error 字段返回（不中断 agent 运行），读到后修正脚本重新调用即可
 - 注释用 //（不支持 #），语句结束不用分号
 - result 已预声明，赋值用 = 不要用 :=（result := ... 会报 'result' redeclared）
 - print(...) 输出、脚本返回值分别限 %d 字节；脚本源码限 %d 字节；单次运行限 %d 秒，超时中止
@@ -129,21 +131,34 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 
 func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*RunScriptOutput, error) {
 	maxSize, timeout, maxResult := tb.scriptLimits()
+	start := time.Now()
+
+	// Model-fixable failures (bad input shape, compile/runtime errors,
+	// script-side timeout) come back as the tool result's error field: the
+	// agent reads the message and fixes the script on its next call, instead
+	// of the whole run dying on a NodeRunError and burning a full retry. Only
+	// context cancellation (user stop / run kill) stays a hard error.
+	fail := func(format string, args ...any) (*RunScriptOutput, error) {
+		err := fmt.Errorf(format, args...)
+		tb.logger.LogToolCall("run_script", input, map[string]string{"error": err.Error()})
+		return &RunScriptOutput{Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}, nil
+	}
 
 	if strings.TrimSpace(input.Script) == "" {
-		return nil, fmt.Errorf("script must not be empty")
+		return fail("script must not be empty")
 	}
 	if len(input.Script) > maxSize {
-		return nil, fmt.Errorf("script is %d bytes, exceeds the %d-byte limit", len(input.Script), maxSize)
+		return fail("script is %d bytes, exceeds the %d-byte limit", len(input.Script), maxSize)
 	}
 
-	start := time.Now()
 	out, err := tb.executeScript(ctx, input.Script, timeout, maxResult)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		// Failures are logged too: the entry records what the agent tried and
 		// why it failed (bounded — the script source is capped by maxSize).
-		tb.logger.LogToolCall("run_script", input, map[string]string{"error": err.Error()})
-		return nil, err
+		return fail("%s", err.Error())
 	}
 	out.DurationMs = time.Since(start).Milliseconds()
 	tb.logger.LogToolCall("run_script", input, out)
