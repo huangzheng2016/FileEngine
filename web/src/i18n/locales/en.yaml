@@ -192,6 +192,10 @@ tasks:
   scannedCount: Scanned
   scanRate: Rate
   scanRatePerSec: "{rate}/s"
+  eta: ETA
+  etaHours: "{h}h {m}m"
+  etaMinutes: "{m}m"
+  etaSeconds: "{s}s"
   scanningPath: "Scanning: {path}"
   scanSaving: Saving scan results…
   executionPlans: Execution Plans
@@ -232,6 +236,15 @@ tasks:
   guideDone: "Execution finished — {count} operations processed."
   guideError: "Last run failed: {status}"
   guideInterrupted: "Scan interrupted by a server restart ({count} entries scanned at that point). Rescan to continue."
+
+notify:
+  eventTitle: Run event
+  scanDone: "Scan finished: {name} ({count} files)"
+  tagDone: "Tagging finished: {name} ({tagged}/{total} tagged, {planned} plans ready)"
+  tagPartial: "Tagging partially done: {name} ({tagged}/{total} tagged)"
+  interrupted: "Run interrupted: {name} (server restart; safe to start again)"
+  execDone: "Execution finished: {name}"
+  runError: "Run failed: {name} — {msg}"
 
 config:
   title: Configuration

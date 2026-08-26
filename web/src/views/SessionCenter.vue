@@ -77,6 +77,7 @@
           <template v-if="current.status === 'scanning'">
             <span class="metric-chip"><span class="metric-label">{{ $t('tasks.scannedCount') }}</span><span class="metric-value">{{ current.scanned_count }}</span></span>
             <span v-if="scanRateText" class="metric-chip"><span class="metric-label">{{ $t('tasks.scanRate') }}</span><span class="metric-value">{{ scanRateText }}</span></span>
+          <span v-if="tagEtaText" class="metric-chip"><span class="metric-label">{{ $t('tasks.eta') }}</span><span class="metric-value">{{ tagEtaText }}</span></span>
           </template>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.totalFiles') }}</span><span class="metric-value">{{ current.total_files }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.taggedFiles') }}</span><span class="metric-value">{{ current.tagged_files }}/{{ current.total_files }}</span></span>
@@ -364,7 +365,7 @@ import { listSessions, getSession, createSession, deleteSession, rescanSession, 
 import type { ScanSession, PlanItem, Filesystem, ModelProvider, ValidationResult, SessionStats, ProgressEvent } from '../types'
 import { SessionEventStream } from '../composables/sessionEvents'
 import SessionTimeline from '../components/SessionTimeline.vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Download, CircleCheck, DataAnalysis, Plus, Refresh, Monitor, Guide } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -409,26 +410,46 @@ const validationResult = ref<ValidationResult | null>(null)
 const statsVisible = ref(false)
 const sessionStatsData = ref<SessionStats | null>(null)
 
-// ===== Scan rate (client-side): the poll refreshes scanned_count every few
-// seconds; the rate is the delta between the last two samples of a session.
+// ===== Run rate & ETA (client-side): every session-row refresh (the scan
+// poll or SSE-driven GETs) records a sample; rates use a short sliding window
+// so bursty directory cascades don't whip the estimate around.
+interface RateSample { count: number; at: number }
+const rateWindows = new Map<string, RateSample[]>()
 const scanRates = ref<Record<number, number>>({})
-const scanSamples = new Map<number, { count: number; at: number }>()
+const tagRates = ref<Record<number, number>>({})
+
+function recordRate(id: number, field: 'scan' | 'tag', count: number, store: Record<number, number>) {
+  const key = `${id}:${field}`
+  const now = Date.now()
+  let win = rateWindows.get(key)
+  if (!win) { win = []; rateWindows.set(key, win) }
+  const last = win[win.length - 1]
+  if (!last || count > last.count) {
+    win.push({ count, at: now })
+    if (win.length > 6) win.shift()
+  }
+  const first = win[0]
+  const dt = (now - first.at) / 1000
+  if (win.length >= 2 && dt > 0.5 && count > first.count) {
+    store[id] = Math.round((count - first.count) / dt)
+  }
+}
+
+function dropRate(id: number, field: 'scan' | 'tag') {
+  rateWindows.delete(`${id}:${field}`)
+  if (field === 'scan') delete scanRates.value[id]; else delete tagRates.value[id]
+}
 
 function updateScanRates(list: ScanSession[]) {
-  const now = Date.now()
   const live = new Set<number>()
   for (const s of list) {
     if (s.status !== 'scanning') continue
     live.add(s.id)
-    const prev = scanSamples.get(s.id)
-    if (prev && s.scanned_count > prev.count) {
-      const dt = (now - prev.at) / 1000
-      if (dt > 0.5) scanRates.value[s.id] = Math.round((s.scanned_count - prev.count) / dt)
-    }
-    scanSamples.set(s.id, { count: s.scanned_count, at: now })
+    recordRate(s.id, 'scan', s.scanned_count, scanRates.value)
   }
-  for (const id of [...scanSamples.keys()]) {
-    if (!live.has(id)) { scanSamples.delete(id); delete scanRates.value[id] }
+  for (const key of [...rateWindows.keys()]) {
+    const [idStr, field] = key.split(':')
+    if (field === 'scan' && !live.has(Number(idStr))) dropRate(Number(idStr), 'scan')
   }
 }
 
@@ -439,6 +460,44 @@ const scanRateText = computed(() => {
   if (!r || r <= 0) return ''
   return t('tasks.scanRatePerSec', { rate: r.toLocaleString() })
 })
+
+const tagEtaText = computed(() => {
+  const s = current.value
+  if (!s || s.status !== 'tagging' || !s.total_files) return ''
+  const r = tagRates.value[s.id]
+  if (!r || r <= 0) return ''
+  const remaining = s.total_files - s.tagged_files
+  if (remaining <= 0) return ''
+  const secs = Math.round(remaining / r)
+  if (secs >= 3600) return t('tasks.etaHours', { h: Math.floor(secs / 3600), m: Math.round((secs % 3600) / 60) })
+  if (secs >= 60) return t('tasks.etaMinutes', { m: Math.round(secs / 60) })
+  return t('tasks.etaSeconds', { s: secs })
+})
+
+// ===== Run-lifecycle notifications: a session leaving a running state for a
+// terminal one (finished / error / interrupted) raises a corner notification —
+// the user no longer has to watch the page to catch completions.
+const RUNNING_STATUSES = new Set(['scanning', 'tagging', 'executing'])
+
+function notifyTransition(prev: ScanSession, next: ScanSession) {
+  if (!RUNNING_STATUSES.has(prev.status) || prev.status === next.status) return
+  const name = next.root_path || next.scan_path
+  const title = t('notify.eventTitle')
+  const opts = { title, duration: 6000 } as const
+  if (next.status === 'scanned') {
+    ElNotification({ ...opts, type: 'success', message: t('notify.scanDone', { name, count: next.total_files.toLocaleString() }) })
+  } else if (next.status === 'tagged') {
+    ElNotification({ ...opts, type: 'success', message: t('notify.tagDone', { name, tagged: next.tagged_files.toLocaleString(), total: next.total_files.toLocaleString(), planned: next.planned_ops }) })
+  } else if (next.status === 'tagged_partial') {
+    ElNotification({ ...opts, type: 'warning', message: t('notify.tagPartial', { name, tagged: next.tagged_files.toLocaleString(), total: next.total_files.toLocaleString() }) })
+  } else if (next.status === 'interrupted') {
+    ElNotification({ ...opts, type: 'warning', message: t('notify.interrupted', { name }) })
+  } else if (next.status === 'done') {
+    ElNotification({ ...opts, type: 'success', message: t('notify.execDone', { name }) })
+  } else if (next.status.startsWith('error')) {
+    ElNotification({ ...opts, type: 'error', duration: 0, message: t('notify.runError', { name, msg: (next.error_message || next.status).slice(0, 160) }) })
+  }
+}
 
 // ===== Event-driven live updates =====
 // Agent runs (tagging / executing) stream over SSE per session; scanning has no
@@ -521,7 +580,12 @@ function syncScanPoll() {
 
 function patchRow(updated: ScanSession) {
   const idx = sessions.value.findIndex(s => s.id === updated.id)
-  if (idx >= 0) sessions.value[idx] = updated
+  if (idx < 0) return
+  notifyTransition(sessions.value[idx], updated)
+  sessions.value[idx] = updated
+  if (updated.status === 'tagging') recordRate(updated.id, 'tag', updated.tagged_files, tagRates.value)
+  else dropRate(updated.id, 'tag')
+  if (updated.status !== 'scanning') dropRate(updated.id, 'scan')
 }
 
 function patchProgress(id: number, p: ProgressEvent) {

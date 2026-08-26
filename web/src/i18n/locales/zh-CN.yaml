@@ -190,6 +190,10 @@ tasks:
   scannedCount: 已扫条目
   scanRate: 速率
   scanRatePerSec: "{rate} 条/秒"
+  eta: 预计剩余
+  etaHours: "{h} 小时 {m} 分"
+  etaMinutes: "{m} 分钟"
+  etaSeconds: "{s} 秒"
   scanningPath: "正在扫描: {path}"
   scanSaving: 正在保存扫描结果…
   executionPlans: 执行计划
@@ -230,6 +234,15 @@ tasks:
   guideDone: "执行完成，共处理 {count} 个操作。"
   guideError: "上次运行出错：{status}"
   guideInterrupted: "扫描被服务重启中断（中断时已扫 {count} 个条目），请重新扫描。"
+
+notify:
+  eventTitle: 运行事件
+  scanDone: "扫描完成：{name}（{count} 个文件）"
+  tagDone: "打标完成：{name}（已标 {tagged}/{total}，{planned} 个计划待执行）"
+  tagPartial: "打标部分完成：{name}（已标 {tagged}/{total}）"
+  interrupted: "运行中断：{name}（服务重启导致，可重新开始）"
+  execDone: "执行完成：{name}"
+  runError: "运行出错：{name}——{msg}"
 
 config:
   title: 系统配置
