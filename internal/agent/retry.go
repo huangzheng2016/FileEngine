@@ -18,6 +18,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
+	modelfactory "FileEngine/internal/model"
 )
 
 // errorClass buckets a failed agent run by its retry semantics. The class is
@@ -78,22 +79,26 @@ func httpStatusFromError(err error) (int, bool) {
 	return 0, false
 }
 
-// classifyRunError decides the retry class of a failed run. The caller checks
-// the parent ctx first, so a context error here means the per-attempt
-// timeout, not user stop.
+// classifyRunError decides the retry class of a failed run with no transport
+// hints; see classifyRunErrorWithStatus.
 func classifyRunError(err error) errorClass {
+	return classifyRunErrorWithStatus(err, 0)
+}
+
+// classifyRunErrorWithStatus decides the retry class of a failed run.
+// statusHint is the error response's status code captured by the hint
+// transport (0 when unknown) — the least precise source, used only when the
+// error itself carries no status. The caller checks the parent ctx first, so
+// a context error here means the per-attempt timeout, not user stop.
+func classifyRunErrorWithStatus(err error, statusHint int) errorClass {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return errClassHard
 	}
 	if status, ok := httpStatusFromError(err); ok {
-		switch {
-		case status == http.StatusTooManyRequests:
-			return errClassRateLimit
-		case status >= 500 && status < 600:
-			return errClassServer
-		default:
-			return errClassHard
-		}
+		return classForStatus(status)
+	}
+	if statusHint > 0 {
+		return classForStatus(statusHint)
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {
@@ -106,9 +111,25 @@ func classifyRunError(err error) errorClass {
 	return errClassServer
 }
 
+// classForStatus maps an HTTP status code to its retry class: 429 is rate
+// limiting, 5xx a server error, everything else (other 4xx, odd 1xx/2xx/3xx
+// error responses) is hard.
+func classForStatus(status int) errorClass {
+	switch {
+	case status == http.StatusTooManyRequests:
+		return errClassRateLimit
+	case status >= 500 && status < 600:
+		return errClassServer
+	default:
+		return errClassHard
+	}
+}
+
 // retryAfterCarrier is implemented by error types that surface a
-// server-provided Retry-After hint (e.g. a header-capturing HTTP transport
-// once the model construction layer exposes one).
+// server-provided Retry-After hint. The primary Retry-After source is the
+// response header captured per attempt via modelfactory.ResponseHints (see
+// runWithRetry); this interface and the message parse below are fallbacks for
+// providers that put the hint only in the error payload.
 type retryAfterCarrier interface {
 	RetryAfter() time.Duration
 }
@@ -255,6 +276,19 @@ var retrySleep = func(ctx context.Context, d time.Duration) {
 // runAttemptFunc executes one full agent run under ctx.
 type runAttemptFunc func(ctx context.Context) (*schema.Message, error)
 
+// attemptWithHints runs one attempt under a child context carrying a fresh
+// modelfactory.ResponseHints store and returns what the hint transport
+// captured from that attempt's error response (status 0 / retryAfter 0 when
+// the failure never reached HTTP or carried no header).
+func attemptWithHints(ctx context.Context, attempt runAttemptFunc) (*schema.Message, error, int, time.Duration) {
+	attemptCtx, hints := modelfactory.WithResponseHints(ctx)
+	result, err := attempt(attemptCtx)
+	if hints == nil {
+		return result, err, 0, 0
+	}
+	return result, err, hints.StatusCode(), hints.RetryAfter()
+}
+
 // runWithRetry runs attempt once, then retries failures according to their
 // class: hard errors fail immediately; rate_limit/server/network errors retry
 // with jittered exponential backoff until the class budget is exhausted. The
@@ -262,7 +296,7 @@ type runAttemptFunc func(ctx context.Context) (*schema.Message, error)
 // a 500 switches budget mid-loop. On total failure the last attempt's token
 // usage is attributed to the system row, same as before.
 func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
-	result, err := attempt(ctx)
+	result, err, statusHint, retryAfterHint := attemptWithHints(ctx, attempt)
 	if err == nil {
 		rateLimitStreak.Store(0)
 		return result, nil
@@ -273,7 +307,7 @@ func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, l
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		class := classifyRunError(err)
+		class := classifyRunErrorWithStatus(err, statusHint)
 		if class == errClassRateLimit {
 			rateLimitStreak.Add(1)
 		}
@@ -286,10 +320,14 @@ func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, l
 			break
 		}
 		retriesUsed++
-		delay := backoffDelay(class, retriesUsed, retryAfterFromError(err), cfg)
+		retryAfter := retryAfterHint
+		if retryAfter <= 0 {
+			retryAfter = retryAfterFromError(err)
+		}
+		delay := backoffDelay(class, retriesUsed, retryAfter, cfg)
 		log.Printf("%s retry %d/%d (%s) in %s: %v", label, retriesUsed, maxRetries, class, delay.Round(time.Millisecond), err)
 		retrySleep(ctx, delay)
-		result, err = attempt(ctx)
+		result, err, statusHint, retryAfterHint = attemptWithHints(ctx, attempt)
 		if err == nil {
 			rateLimitStreak.Store(0)
 			return result, nil
@@ -300,6 +338,6 @@ func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, l
 	// batch otherwise vanishes from the token accounting (batch cards showed
 	// no tokens for failed batches).
 	pt, ct, tt := tracker.Usage()
-	logger.LogMessage("system", fmt.Sprintf("Error after %d retries (%s): %v", retriesUsed, classifyRunError(err), err), pt, ct, tt)
+	logger.LogMessage("system", fmt.Sprintf("Error after %d retries (%s): %v", retriesUsed, classifyRunErrorWithStatus(err, statusHint), err), pt, ct, tt)
 	return nil, err
 }

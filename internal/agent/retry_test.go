@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
+	modelfactory "FileEngine/internal/model"
 )
 
 // stubRetryEnv freezes the retry environment: config, jitter source, sleep
@@ -380,6 +381,85 @@ func TestRunWithRetryAbortsOnContextCancel(t *testing.T) {
 	}, logger, "test", tracker)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got err=%v, want context.Canceled", err)
+	}
+	if calls != 1 || len(*sleeps) != 0 {
+		t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", calls, *sleeps)
+	}
+}
+
+func TestClassifyRunErrorWithStatusHint(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		statusHint int
+		want       errorClass
+	}{
+		{"hint 429 classifies plain error", errors.New("boom"), 429, errClassRateLimit},
+		{"hint 503 classifies plain error", errors.New("boom"), 503, errClassServer},
+		{"hint 401 is hard", errors.New("boom"), 401, errClassHard},
+		{"error-carried status beats hint", &einoopenai.APIError{HTTPStatusCode: 400, Message: "bad"}, 429, errClassHard},
+		{"hint ignored when error has text status", errors.New("error, status code: 502, status: 502, message: x, body: y"), 429, errClassServer},
+		{"zero hint falls back to old paths", errors.New("boom"), 0, errClassServer},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyRunErrorWithStatus(tc.err, tc.statusHint); got != tc.want {
+				t.Fatalf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// The header captured by the hint transport must drive both classification
+// (429 via hints status) and the backoff wait (5s hint + jittered base slot)
+// even when the error itself carries no status at all.
+func TestRunWithRetryUsesTransportHints(t *testing.T) {
+	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
+	logger := NewLogger(nil, 900, 1)
+	tracker := newTokenTrackingModel(nil)
+	calls := 0
+	msg, err := runWithRetry(context.Background(), func(ctx context.Context) (*schema.Message, error) {
+		calls++
+		if calls == 1 {
+			h := modelfactory.ResponseHintsFromContext(ctx)
+			if h == nil {
+				t.Error("attempt ctx carries no ResponseHints store")
+				return nil, errors.New("boom")
+			}
+			h.Record(429, 5*time.Second)
+			return nil, errors.New("boom")
+		}
+		return &schema.Message{Role: schema.Assistant, Content: "ok"}, nil
+	}, logger, "test", tracker)
+	if err != nil || msg == nil {
+		t.Fatalf("got msg=%+v err=%v, want success", msg, err)
+	}
+	if calls != 2 || len(*sleeps) != 1 {
+		t.Fatalf("calls=%d sleeps=%v, want 2 calls 1 sleep", calls, *sleeps)
+	}
+	// 5s header hint + jittered base slot (0.5 * 2s); a server-class
+	// misclassification would have slept 1s and ignored the hint.
+	if (*sleeps)[0] != 6*time.Second {
+		t.Fatalf("hint-driven sleep: got %v, want 6s", (*sleeps)[0])
+	}
+}
+
+// A hint-only hard status (401 in the header, no status in the error) fails
+// without any retry.
+func TestRunWithRetryHardStatusFromHints(t *testing.T) {
+	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
+	logger := NewLogger(nil, 900, 1)
+	tracker := newTokenTrackingModel(nil)
+	calls := 0
+	_, err := runWithRetry(context.Background(), func(ctx context.Context) (*schema.Message, error) {
+		calls++
+		if h := modelfactory.ResponseHintsFromContext(ctx); h != nil {
+			h.Record(401, 0)
+		}
+		return nil, errors.New("boom")
+	}, logger, "test", tracker)
+	if err == nil {
+		t.Fatal("want failure")
 	}
 	if calls != 1 || len(*sleeps) != 0 {
 		t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", calls, *sleeps)
