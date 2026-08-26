@@ -102,9 +102,10 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 		conn.Close()
 		return nil, &OpError{Protocol: "smb", Op: "mount", Path: shareName, Err: err}
 	}
-	// Mount propagates the session's context into the share; re-base it, or
-	// the canceled mount context would break every later operation (Umount
-	// and the execute paths use the share's stored context directly).
+	// go-smb2's Mount does not propagate the session context into the share
+	// (it returns Share{ctx: context.Background()}), so later operations
+	// already start from a clean context; re-base anyway as cheap defense in
+	// case that behavior ever changes.
 	share = share.WithContext(context.Background())
 
 	return &SMBFS{
