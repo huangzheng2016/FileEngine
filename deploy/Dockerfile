@@ -17,6 +17,8 @@ FROM golang:1.25-alpine AS go-builder
 RUN apk add --no-cache build-base
 WORKDIR /build
 COPY go.mod go.sum ./
+# Local replace targets must exist before go mod download reads go.mod.
+COPY third_party ./third_party
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 # web/dist comes from stage 1, never from the build context (see .dockerignore)
