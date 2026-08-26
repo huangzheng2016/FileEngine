@@ -62,6 +62,11 @@ cd web && npm run build && cd .. && go build -o fileengine .
 
 ### Scanner
 - Recursive directory walker, creates `FileEntry` records for all files/directories
+- Concurrent walk (worker pool) for backends implementing `HandleLister` (NFS, SMB); serial otherwise; junk dirs (`db.JunkDirNames`) pruned during walk
+- Live progress: atomic counters + current path flushed to `ScanSession.ScannedCount` / `CurrentPath` every 2s; surfaced via session JSON (no new endpoints); walk failure sets `Status="error"` + `ErrorMessage`
+- On startup `db.Init` sweeps stale `scanning` sessions to `interrupted` (counts preserved) — a session can never sit in `scanning` forever
+- Rescan/delete wait for the previous scan goroutine to finish (`scanHandle.done`, 30s timeout fallback); `RefreshSessionCounts` writes only count columns (never status/progress)
+- All RemoteFS ops carry timeouts (`FE_REMOTEFS_TIMEOUT_SEC`, default 30s; SFTP uses sliding activity deadlines; NFS pool discards timed-out conns and redials); errors are wrapped as `OpError` with `errors.Is(os.ErrDeadlineExceeded)` support
 - Supports blacklist/whitelist directory filtering (`ScanSession.FilterMode` + `FilterDirs`)
 - `ExcludeCategoryDirs` option auto-appends category paths to blacklist
 - Filter dirs stored as newline-separated text, parsed at scan time
