@@ -155,7 +155,7 @@ func (r *Repository) CreateFiles(files []FileEntry) error {
 	if len(files) == 0 {
 		return nil
 	}
-	return r.db.CreateInBatches(files, 100).Error
+	return r.db.CreateInBatches(files, 500).Error
 }
 
 func (r *Repository) GetFile(id uint) (*FileEntry, error) {

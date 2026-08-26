@@ -23,4 +23,6 @@ services:
       FE_AGENT_MAX_STEP: "${FE_AGENT_MAX_STEP:-150}"
       FE_AGENT_MAX_RETRIES: "${FE_AGENT_MAX_RETRIES:-3}"
       FE_AGENT_MAX_FILE_READ_SIZE: "${FE_AGENT_MAX_FILE_READ_SIZE:-102400}"
+      # NFS scan connection pool (see deploy/.env.example)
+      FE_NFS_SCAN_CONNS: "${FE_NFS_SCAN_CONNS:-8}"
     restart: unless-stopped

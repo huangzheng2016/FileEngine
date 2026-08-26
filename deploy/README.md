@@ -27,6 +27,9 @@ docker compose up -d --build
 打开 `http://localhost:${FE_PORT}`（默认 8080）。此后扫描会话、打标、审查都
 在 Web UI 操作；`.env` 里的 `FE_AGENT_*` 只在**首次**生成 config.yaml 时生效，
 之后改 Agent 参数用 UI 配置页（热更新，写回 `data/config.yaml`）。
+`FE_NFS_SCAN_CONNS`（NFS 扫描连接池大小，默认 8）是进程环境变量，
+改动后 `docker compose up -d` 重建容器生效；扫描进度与速率
+（dirs/entries per min）每 15 秒打在容器日志里。
 
 ## 日常使用
 
