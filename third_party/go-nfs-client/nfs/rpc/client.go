@@ -46,13 +46,20 @@ type Client struct {
 	*tcpTransport
 }
 
+// DialTimeout bounds the TCP connect in DialTCP. Upstream dialed without any
+// timeout, so a silently dead peer could block the connect for the OS's full
+// SYN retry budget (minutes). It is a package variable so the embedding
+// application can align it with its own timeout configuration.
+var DialTimeout = 30 * time.Second
+
 func DialTCP(network string, ldr *net.TCPAddr, addr string) (*Client, error) {
 	a, err := net.ResolveTCPAddr(network, addr)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := net.DialTCP(a.Network(), ldr, a)
+	d := net.Dialer{Timeout: DialTimeout, LocalAddr: ldr}
+	conn, err := d.Dial(a.Network(), a.String())
 	if err != nil {
 		return nil, err
 	}
