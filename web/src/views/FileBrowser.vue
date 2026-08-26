@@ -487,9 +487,11 @@ async function syncTreeTo(path: string): Promise<boolean> {
   if (!tree) return false
   if (!path) { tree.setCurrentKey(); return true }
   const segs = path.split('/')
-  let prefix = ''
-  for (const seg of segs) {
-    prefix = prefix ? `${prefix}/${seg}` : seg
+  // The scan root itself (e.g. "iSCSI") has no tree node — the tree's top
+  // level is the root's children — so the walk starts from segment two.
+  let prefix = segs[0] || ''
+  for (const seg of segs.slice(1)) {
+    prefix = `${prefix}/${seg}`
     const node = tree.getNode(prefix)
     if (!node) return false
     if (prefix !== path) await expandNode(node)
@@ -512,12 +514,24 @@ async function jumpToAddr() {
     navigateTo('')
     return
   }
-  if (!(await syncTreeTo(cleaned))) {
+  // Paths are displayed with the scan-root prefix everywhere ("iSCSI/…"), but
+  // users may also type root-relative ones ("Backup/…") — accept both.
+  const root = currentSession.value?.root_path || ''
+  let target = cleaned
+  if (root && cleaned !== root && !cleaned.startsWith(root + '/')) {
+    target = `${root}/${cleaned}`
+  }
+  if (root && target === root) {
+    addrMode.value = false
+    navigateTo('')
+    return
+  }
+  if (!(await syncTreeTo(target))) {
     ElMessage.error(t('files.pathNotFound', { path: cleaned }))
     return // keep the input open and untouched, stay where we are
   }
   addrMode.value = false
-  navigateTo(cleaned)
+  navigateTo(target)
 }
 
 async function copyCurrentPath() {
