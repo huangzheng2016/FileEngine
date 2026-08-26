@@ -70,23 +70,21 @@
             </el-dropdown>
           </div>
         </div>
-        <div class="run-card__metrics">
+        <div class="run-card__meta">
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.totalFiles') }}</span><span class="metric-value">{{ current.total_files }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.taggedFiles') }}</span><span class="metric-value">{{ current.tagged_files }}/{{ current.total_files }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.plannedOps') }}</span><span class="metric-value">{{ current.planned_ops }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.executedOps') }}</span><span class="metric-value">{{ current.executed_ops }}</span></span>
           <span v-if="current.total_size > 0" class="metric-chip"><span class="metric-label">{{ $t('common.size') }}</span><span class="metric-value">{{ formatSize(current.total_size) }}</span></span>
           <span v-if="current.total_tokens > 0" class="metric-chip"><span class="metric-label">Token</span><span class="metric-value">{{ current.total_tokens.toLocaleString() }}</span></span>
-        </div>
-        <el-progress v-if="current.total_files > 0"
-          :percentage="Math.round((current.tagged_files / current.total_files) * 100)"
-          :stroke-width="6" />
+          <el-progress v-if="current.total_files > 0" class="run-card__progress"
+            :percentage="Math.round((current.tagged_files / current.total_files) * 100)"
+            :stroke-width="6" />
 
-        <!-- Next-step guide (only when nothing is running) -->
-        <div v-if="guide" class="guide-strip" :class="`is-${guide.tone}`">
-          <el-icon :size="16"><Guide /></el-icon>
-          <span class="guide-strip__text">{{ guide.text }}</span>
-          <div class="guide-strip__actions">
+          <!-- Next-step guide (only when nothing is running): inline in the meta row -->
+          <div v-if="guide" class="run-card__guide" :class="`is-${guide.tone}`">
+            <el-icon :size="14"><Guide /></el-icon>
+            <span class="run-card__guide-text">{{ guide.text }}</span>
             <router-link v-if="guide.reviewTo" :to="guide.reviewTo">
               <el-button size="small">{{ $t('tasks.goReview') }}</el-button>
             </router-link>
@@ -894,50 +892,45 @@ async function handleNewScan() {
   align-items: center;
 }
 
-.run-card__metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* ===== Guide strip ===== */
-.guide-strip {
+.run-card__meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.run-card__progress {
+  flex: 1 1 120px;
+  min-width: 120px;
+  max-width: 320px;
+  margin: 0;
+}
+
+/* ===== Inline next-step guide (merged into the meta row) ===== */
+.run-card__guide {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
   font-size: 13px;
   font-weight: 500;
 }
 
-.guide-strip.is-accent {
-  background: var(--accent-soft);
-  border: 1px solid var(--floating-border);
+.run-card__guide.is-accent {
   color: var(--accent);
 }
 
-.guide-strip.is-success {
-  background: var(--success-soft);
-  border: 1px solid color-mix(in srgb, var(--success) 22%, transparent);
+.run-card__guide.is-success {
   color: var(--success);
 }
 
-.guide-strip.is-danger {
-  background: var(--danger-soft);
-  border: 1px solid color-mix(in srgb, var(--danger) 24%, transparent);
+.run-card__guide.is-danger {
   color: var(--danger);
 }
 
-.guide-strip__text {
-  flex: 1;
+.run-card__guide-text {
   min-width: 0;
   color: var(--text-primary);
-}
-
-.guide-strip__actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
 }
 </style>
