@@ -25,7 +25,7 @@
       </button>
     </div>
 
-    <div v-if="!displayLanes.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
+    <div v-if="!visibleLanes.length && !loadingHistory" class="empty-state-card empty-state-card--inline">
       <div class="empty-state-card__icon">
         <el-icon :size="24"><Monitor /></el-icon>
       </div>
@@ -38,7 +38,7 @@
     <!-- Worker lanes: one column per agent worker, each a continuous run log.
          Historical rows (worker_id = 0 everywhere) collapse into a single lane. -->
     <div class="lanes-grid">
-      <div v-for="lane in displayLanes" :key="lane.workerId" class="lane">
+      <div v-for="lane in visibleLanes" :key="lane.workerId" class="lane">
         <div class="lane-header">
           <span class="lane-title">{{ laneTitle(lane) }}</span>
           <span v-if="lane.currentPull" class="lane-pull cell-time" :title="lane.currentPull">{{ pullLabel(lane.currentPull) }}</span>
@@ -46,6 +46,14 @@
           <span v-if="lane.live" class="status-chip is-live"><span class="status-dot"></span>{{ $t('logs.live') }}</span>
           <span class="lane-meta cell-time">{{ $t('logs.stepCount', { count: lane.steps.length }) }}</span>
           <span v-if="lane.tokenSum > 0" class="lane-meta cell-time">{{ lane.tokenSum.toLocaleString() }} tok</span>
+          <button
+            v-if="displayLanes.length > 1"
+            class="ghost-button ghost-button--sm lane-solo"
+            :title="soloWorker === lane.workerId ? $t('logs.allLanes') : $t('logs.soloLane')"
+            @click="toggleSolo(lane.workerId)"
+          >
+            <el-icon :size="13"><ScaleToOriginal v-if="soloWorker === lane.workerId" /><FullScreen v-else /></el-icon>
+          </button>
         </div>
 
         <div class="lane-scroll" :ref="el => setLaneRef(lane.workerId, el)" @scroll="onLaneScroll(lane.workerId)">
@@ -111,7 +119,7 @@
 
     <!-- Scroll-to-latest -->
     <transition name="fade">
-      <button v-if="anyUnstuck && displayLanes.length" class="scroll-latest" @click="scrollAllToBottom(true)">
+      <button v-if="anyUnstuck" class="scroll-latest" @click="scrollAllToBottom">
         <el-icon :size="14"><Bottom /></el-icon>{{ $t('logs.scrollToLatest') }}
       </button>
     </transition>
@@ -191,11 +199,14 @@ const nextKey = () => `s${++stepSeq}`
 
 const histLogs = ref<AgentLog[]>([]) // ascending by id
 const liveSteps = reactive(new Map<number, Step[]>()) // per worker lane
+// Every worker_id ever seen this session — lanes stay mounted even when a
+// worker goes quiet between pulls, so the grid stops flickering.
+const seenWorkers = reactive(new Set<number>())
+const soloWorker = ref<number | null>(null) // null = all lanes, otherwise only this one
 const stepDetail = reactive<Record<string, boolean>>({})
 const jsonCache = new Map<string, string>()
 const loadingHistory = ref(false)
 const totalLogs = ref(0)
-const loadedPages = ref(0)
 const pageSize = 50
 const laneEls = new Map<number, HTMLElement>()
 const laneStick = reactive(new Map<number, boolean>())
@@ -240,6 +251,8 @@ const displayLanes = computed<Lane[]>(() => {
     }
     l.tokenSum += log.total_tokens || 0
   }
+  // Workers seen before but silent right now still get a (header-only) lane.
+  for (const wid of seenWorkers) ensure(wid)
   for (const [wid, steps] of liveSteps) {
     const l = ensure(wid)
     l.steps.push(...steps)
@@ -259,6 +272,13 @@ const displayLanes = computed<Lane[]>(() => {
 
 const totalTokens = computed(() => displayLanes.value.reduce((sum, l) => sum + l.tokenSum, 0))
 
+// Solo view: null shows every lane; a worker id shows only that lane, which
+// then stretches to full grid width via auto-fit.
+const visibleLanes = computed<Lane[]>(() =>
+  soloWorker.value == null
+    ? displayLanes.value
+    : displayLanes.value.filter(l => l.workerId === soloWorker.value))
+
 // Token口径统一：优先服务端会话累计（含未加载页），否则退回本地已加载合计。
 const shownTotalTokens = computed(() => props.totalTokensServer ?? totalTokens.value)
 const serverTokensTitle = computed(() =>
@@ -266,7 +286,7 @@ const serverTokensTitle = computed(() =>
     ? t('logs.loadedTokens', { count: totalTokens.value.toLocaleString() })
     : undefined)
 
-const anyUnstuck = computed(() => displayLanes.value.some(l => !isLaneSticky(l.workerId)))
+const anyUnstuck = computed(() => visibleLanes.value.some(l => !isLaneSticky(l.workerId)))
 
 const progressText = computed(() => {
   const p = progressInfo.value
@@ -369,10 +389,11 @@ async function init() {
   stream.close()
   histLogs.value = []
   liveSteps.clear()
+  seenWorkers.clear()
+  soloWorker.value = null
   laneStick.clear()
   jsonCache.clear()
   Object.keys(stepDetail).forEach(k => delete stepDetail[k])
-  loadedPages.value = 0
   totalLogs.value = 0
   runPhase.value = null
   progressInfo.value = null
@@ -388,10 +409,10 @@ async function loadLatest() {
     const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: pageSize, order: 'desc' })
     const rows = (res.data.logs || []).slice().reverse() // chronological
     histLogs.value = rows
+    for (const log of rows) seenWorkers.add(log.worker_id || 0)
     totalLogs.value = res.data.total
-    loadedPages.value = 1
     await nextTick()
-    scrollAllToBottom(false)
+    scrollAllToBottom()
   } finally {
     loadingHistory.value = false
   }
@@ -403,10 +424,28 @@ async function loadEarlier() {
   const prev = new Map<number, { h: number; t: number }>()
   for (const [id, el] of laneEls) prev.set(id, { h: el.scrollHeight, t: el.scrollTop })
   try {
-    const res = await listLogs({ session_id: props.sessionId, page: loadedPages.value + 1, page_size: pageSize, order: 'desc' })
-    const rows = (res.data.logs || []).slice().reverse()
-    histLogs.value = [...rows, ...histLogs.value]
-    loadedPages.value += 1
+    // Anchor on the oldest loaded row id, never a page counter: live inserts
+    // and bulk reloads shift desc offsets, so fetch a page-1 window reaching
+    // past the anchor and keep only strictly older rows — overlap (and with it
+    // duplicate `h${id}` keys) is filtered out, gaps are impossible.
+    const oldestId = histLogs.value[0]?.id
+    let size = histLogs.value.length + pageSize
+    let older: AgentLog[] = []
+    let total = totalLogs.value
+    for (;;) {
+      const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: size, order: 'desc' })
+      const rows: AgentLog[] = res.data.logs || []
+      total = res.data.total
+      older = oldestId == null ? rows.slice() : rows.filter(log => log.id < oldestId)
+      // Grow the window while it still covers only rows we already have; stop
+      // once older rows show up or the whole table is inside the window.
+      if (older.length > 0 || rows.length >= total) break
+      size = Math.min(total, size * 2)
+    }
+    older.reverse() // desc -> chronological for prepend
+    histLogs.value = [...older, ...histLogs.value]
+    for (const log of older) seenWorkers.add(log.worker_id || 0)
+    totalLogs.value = total
     await nextTick()
     for (const [id, el] of laneEls) {
       const p = prev.get(id)
@@ -425,11 +464,12 @@ function openStream() {
 function pushLive(workerId: number, step: Step) {
   if (!liveSteps.has(workerId)) liveSteps.set(workerId, [])
   liveSteps.get(workerId)!.push(step)
+  seenWorkers.add(workerId)
   afterAppend(workerId)
 }
 
 function afterAppend(workerId: number) {
-  nextTick(() => { if (isLaneSticky(workerId)) scrollLaneToBottom(workerId, false) })
+  nextTick(() => { if (isLaneSticky(workerId)) scrollLaneToBottom(workerId) })
 }
 
 /** Refetch the newest history page and drop live steps now covered by it. */
@@ -441,14 +481,15 @@ function scheduleHistoryReload() {
     const size = Math.max(pageSize, Math.ceil((liveTotal + 10) / pageSize) * pageSize)
     const res = await listLogs({ session_id: props.sessionId, page: 1, page_size: size, order: 'desc' }).catch(() => null)
     if (!res) return // keep live steps; a later reconnect will retry the refill
-    histLogs.value = (res.data.logs || []).slice().reverse()
+    const rows = (res.data.logs || []).slice().reverse()
+    histLogs.value = rows
+    for (const log of rows) seenWorkers.add(log.worker_id || 0)
     totalLogs.value = res.data.total
-    loadedPages.value = 1
     liveSteps.clear()
     jsonCache.clear()
     await nextTick()
     for (const l of displayLanes.value) {
-      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId, false)
+      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId)
     }
   }, 600)
 }
@@ -469,15 +510,30 @@ function onLaneScroll(workerId: number) {
   laneStick.set(workerId, el.scrollHeight - el.scrollTop - el.clientHeight < 120)
 }
 
-function scrollLaneToBottom(workerId: number, smooth: boolean) {
+function scrollLaneToBottom(workerId: number) {
   const el = laneEls.get(workerId)
   if (!el) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  // Always instant: a smooth animation is interrupted by the next live append
+  // (afterAppend re-pins to the growing scrollHeight), lands short of the
+  // bottom, and the mid-animation scroll events clear laneStick — the lane
+  // stops following and the scroll-latest button stays lit for good.
+  el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
   laneStick.set(workerId, true)
 }
 
-function scrollAllToBottom(smooth: boolean) {
-  for (const l of displayLanes.value) scrollLaneToBottom(l.workerId, smooth)
+function scrollAllToBottom() {
+  for (const l of visibleLanes.value) scrollLaneToBottom(l.workerId)
+}
+
+function toggleSolo(workerId: number) {
+  soloWorker.value = soloWorker.value === workerId ? null : workerId
+  // Lanes remounted by the filter start at scrollTop 0; re-pin the ones that
+  // were following so they land back at the bottom.
+  nextTick(() => {
+    for (const l of visibleLanes.value) {
+      if (isLaneSticky(l.workerId)) scrollLaneToBottom(l.workerId)
+    }
+  })
 }
 
 // ===== View helpers =====
@@ -643,6 +699,15 @@ function formatTime(tstr: string) {
 
 .lane-meta + .lane-meta {
   margin-left: 0;
+}
+
+/* Icon-only ghost button — ghost-button--sm is pill-sized for text. */
+.lane-solo {
+  min-height: 24px;
+  padding: 0 7px;
+  gap: 0;
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .lane-scroll {

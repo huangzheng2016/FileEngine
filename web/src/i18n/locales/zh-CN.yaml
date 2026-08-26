@@ -289,6 +289,8 @@ logs:
   stepCount: "{count} 步"
   worker: "Worker {n}"
   singleLane: 运行日志
+  soloLane: 只看此泳道
+  allLanes: 恢复全部泳道
   pullActive: 进行中
   pullResult: "归类 {tagged} · 失败 {failed}"
   filesCount: "{count} 个文件"

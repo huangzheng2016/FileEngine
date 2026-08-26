@@ -291,6 +291,8 @@ logs:
   stepCount: "{count} steps"
   worker: "Worker {n}"
   singleLane: Run log
+  soloLane: Focus this lane
+  allLanes: Show all lanes
   pullActive: in progress
   pullResult: "{tagged} tagged · {failed} failed"
   filesCount: "{count} files"
