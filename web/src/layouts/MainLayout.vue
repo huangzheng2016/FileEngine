@@ -5,13 +5,12 @@ import { useI18n } from 'vue-i18n'
 import { ElIcon } from 'element-plus'
 import {
   FolderOpened, Monitor, Setting,
-  Moon, Sunny, Fold, Expand, SwitchFilled, Folder,
+  Moon, Sunny, SwitchFilled, Folder,
 } from '@element-plus/icons-vue'
 import { setLocale } from '../i18n'
 
 const route = useRoute()
 const { t, locale } = useI18n()
-const collapsed = ref(false)
 
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
@@ -39,47 +38,30 @@ function switchLang(lang: string) {
 </script>
 
 <template>
-  <div class="shell-layout" :class="{ 'is-collapsed': collapsed }">
+  <div class="shell-layout">
     <aside class="shell-sidebar">
       <div class="brand">
         <div class="brand-mark">
           <ElIcon :size="20"><Folder /></ElIcon>
         </div>
-        <transition name="fade">
-          <div v-if="!collapsed" class="brand-text">
-            <span class="brand-name">FileEngine</span>
-            <span class="brand-sub">{{ t('app.tagline') }}</span>
-          </div>
-        </transition>
+        <div class="brand-text">
+          <span class="brand-name">FileEngine</span>
+          <span class="brand-sub">{{ t('app.tagline') }}</span>
+        </div>
       </div>
 
       <nav class="nav-list">
-        <el-tooltip
+        <router-link
           v-for="item in navItems"
           :key="item.name"
-          :content="item.label"
-          placement="right"
-          :disabled="!collapsed"
+          :to="item.path"
+          class="nav-item"
+          :class="{ 'is-active': activeName === item.name }"
         >
-          <router-link
-            :to="item.path"
-            class="nav-item"
-            :class="{ 'is-active': activeName === item.name }"
-          >
-            <ElIcon :size="18"><component :is="item.icon" /></ElIcon>
-            <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
-          </router-link>
-        </el-tooltip>
+          <ElIcon :size="18"><component :is="item.icon" /></ElIcon>
+          <span class="nav-label">{{ item.label }}</span>
+        </router-link>
       </nav>
-
-      <el-tooltip :content="collapsed ? t('nav.expand') : t('nav.collapse')" placement="right">
-        <button class="rail-toggle" :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')" @click="collapsed = !collapsed">
-          <ElIcon :size="16">
-            <Fold v-if="!collapsed" />
-            <Expand v-else />
-          </ElIcon>
-        </button>
-      </el-tooltip>
     </aside>
 
     <main class="shell-main">
@@ -128,11 +110,6 @@ function switchLang(lang: string) {
   gap: 24px;
   padding: 24px;
   min-height: 100vh;
-  transition: grid-template-columns var(--duration-base) var(--ease-spring);
-}
-
-.shell-layout.is-collapsed {
-  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 /* ===== Sidebar ===== */
@@ -234,25 +211,6 @@ function switchLang(lang: string) {
   white-space: nowrap;
 }
 
-.rail-toggle {
-  align-self: stretch;
-  display: grid;
-  place-items: center;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-soft);
-  background: var(--input-bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-spring);
-}
-
-.rail-toggle:hover {
-  background: var(--input-bg-hover);
-  color: var(--accent);
-  border-color: var(--floating-border);
-}
-
 /* ===== Main ===== */
 .shell-main {
   display: flex;
@@ -339,16 +297,6 @@ function switchLang(lang: string) {
 }
 
 /* ===== Transitions ===== */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--duration-fast) var(--ease-spring);
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
 .page-fade-enter-active,
 .page-fade-leave-active {
   transition: opacity var(--duration-fast) var(--ease-spring),
@@ -374,13 +322,8 @@ function switchLang(lang: string) {
 /* ===== Responsive ===== */
 @media (max-width: 960px) {
   .shell-layout {
-    grid-template-columns: 72px minmax(0, 1fr);
     padding: 16px;
     gap: 16px;
-  }
-  .nav-label,
-  .brand-text {
-    display: none;
   }
 }
 
