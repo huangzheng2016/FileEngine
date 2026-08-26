@@ -113,6 +113,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 约定：
 - 失败的内置函数返回 error 值，用 is_error(x) 判断，不会中断脚本（参数形状错误会直接报运行时错误）
 - 注释用 //（不支持 #），语句结束不用分号
+- result 已预声明，赋值用 = 不要用 :=（result := ... 会报 'result' redeclared）
 - print(...) 输出、脚本返回值分别限 %d 字节；脚本源码限 %d 字节；单次运行限 %d 秒，超时中止
 - 可用标准库模块：%s（无 os/exec/env/文件/网络能力，一切数据访问必须经内置函数）`,
 		scriptQueryDefault, scriptQueryMax,
