@@ -72,6 +72,14 @@ func Init(cfg config.DatabaseConfig) error {
 		return fmt.Errorf("failed to backfill context_window: %w", err)
 	}
 
+	// Zombie sweep: sessions still "scanning" belong to a previous process
+	// lifetime — mark them interrupted so they cannot masquerade as live.
+	if n, err := NewRepository(DB).MarkInterruptedScans(); err != nil {
+		return fmt.Errorf("failed to mark interrupted scans: %w", err)
+	} else if n > 0 {
+		log.Printf("db init: marked %d zombie scanning session(s) as interrupted", n)
+	}
+
 	return nil
 }
 

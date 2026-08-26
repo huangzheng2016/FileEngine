@@ -97,6 +97,13 @@
 
       <!-- File table as the main zone -->
       <div class="files-main">
+        <el-alert v-if="currentSession?.status === 'scanning'" type="warning" show-icon :closable="false" class="scan-banner">
+          <template #title>
+            <code v-if="currentSession.current_path">{{ $t('tasks.scanningPath', { path: currentSession.current_path }) }}</code>
+            <span v-else>{{ $t('tasks.scanSaving') }}</span>
+            · {{ $t('tasks.scannedCount') }} {{ currentSession.scanned_count }}
+          </template>
+        </el-alert>
         <el-tag v-if="currentPath" closable class="current-path-tag" @close="currentPath = ''; loadFiles()">{{ currentPath }}</el-tag>
         <section class="page-card table-card">
           <el-table :data="files" v-loading="tableLoading" style="width: 100%" height="100%" @selection-change="onSelectionChange">
@@ -308,7 +315,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { listFilesystems, listSessions, listCategories, createCategory, updateCategory, deleteCategory, exportCategories, importCategories, getFileTree, listFiles as apiListFiles, updateFile, getFileContent, instructAgent } from '../api'
@@ -456,7 +463,40 @@ async function onFsChange() {
     sessionId.value = sessions.value[0].id
     onSessionChange()
   }
+  syncScanPoll()
 }
+
+// ===== Scan progress banner =====
+// The selected session's live scan state drives a banner + light poll; when
+// the scan finishes the tree/table reload (rows only land in the DB at the
+// end of the walk, so they were empty until then).
+const currentSession = computed(() => sessions.value.find(s => s.id === sessionId.value) || null)
+let scanPollTimer: ReturnType<typeof setInterval> | null = null
+
+function syncScanPoll() {
+  const scanning = currentSession.value?.status === 'scanning'
+  if (scanning && !scanPollTimer) {
+    scanPollTimer = setInterval(refreshSessions, 3000)
+  } else if (!scanning && scanPollTimer) {
+    clearInterval(scanPollTimer)
+    scanPollTimer = null
+  }
+}
+
+async function refreshSessions() {
+  if (!selectedFsId.value) return
+  const wasScanning = currentSession.value?.status === 'scanning'
+  const res = await listSessions(selectedFsId.value)
+  sessions.value = res.data
+  if (wasScanning && currentSession.value && currentSession.value.status !== 'scanning') {
+    onSessionChange()
+  }
+  syncScanPoll()
+}
+
+onUnmounted(() => {
+  if (scanPollTimer) { clearInterval(scanPollTimer); scanPollTimer = null }
+})
 
 async function onSessionChange() {
   currentPath.value = ''
@@ -466,6 +506,7 @@ async function onSessionChange() {
   const res = await getFileTree(sessionId.value, '')
   treeData.value = res.data
   loadFiles()
+  syncScanPoll()
 }
 
 async function loadNode(node: any, resolve: (data: TreeNode[]) => void) {
@@ -900,6 +941,18 @@ async function previewFile(file: FileEntry) {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+}
+
+/* Live scan progress banner above the table */
+.scan-banner {
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+}
+
+.scan-banner :deep(.el-alert__title) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-card {

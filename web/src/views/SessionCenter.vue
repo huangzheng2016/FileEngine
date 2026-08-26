@@ -27,9 +27,12 @@
             </span>
           </div>
           <div class="session-item__meta cell-time">
-            #{{ s.id }} · {{ $t('tasks.taggedFiles') }} {{ s.tagged_files }}/{{ s.total_files }}
-            <template v-if="s.planned_ops > 0"> · {{ $t('tasks.plannedOps') }} {{ s.planned_ops }}</template>
-            <template v-if="s.executed_ops > 0"> · {{ $t('tasks.executedOps') }} {{ s.executed_ops }}</template>
+            <template v-if="s.status === 'scanning'">#{{ s.id }} · {{ $t('tasks.scannedCount') }} {{ s.scanned_count }}</template>
+            <template v-else>
+              #{{ s.id }} · {{ $t('tasks.taggedFiles') }} {{ s.tagged_files }}/{{ s.total_files }}
+              <template v-if="s.planned_ops > 0"> · {{ $t('tasks.plannedOps') }} {{ s.planned_ops }}</template>
+              <template v-if="s.executed_ops > 0"> · {{ $t('tasks.executedOps') }} {{ s.executed_ops }}</template>
+            </template>
           </div>
         </div>
       </div>
@@ -71,6 +74,10 @@
           </div>
         </div>
         <div class="run-card__meta">
+          <template v-if="current.status === 'scanning'">
+            <span class="metric-chip"><span class="metric-label">{{ $t('tasks.scannedCount') }}</span><span class="metric-value">{{ current.scanned_count }}</span></span>
+            <span v-if="scanRateText" class="metric-chip"><span class="metric-label">{{ $t('tasks.scanRate') }}</span><span class="metric-value">{{ scanRateText }}</span></span>
+          </template>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.totalFiles') }}</span><span class="metric-value">{{ current.total_files }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.taggedFiles') }}</span><span class="metric-value">{{ current.tagged_files }}/{{ current.total_files }}</span></span>
           <span class="metric-chip"><span class="metric-label">{{ $t('tasks.plannedOps') }}</span><span class="metric-value">{{ current.planned_ops }}</span></span>
@@ -91,6 +98,17 @@
             <el-button v-if="guide.action" size="small" type="primary" @click="guide.action">{{ guide.actionLabel }}</el-button>
           </div>
         </div>
+
+        <!-- Live scan heartbeat: where the walk is right now (or its DB tail) -->
+        <div v-if="current.status === 'scanning'" class="run-card__scanline">
+          <span class="status-dot"></span>
+          <code v-if="current.current_path" class="run-card__scanpath">{{ $t('tasks.scanningPath', { path: current.current_path }) }}</code>
+          <span v-else class="cell-muted">{{ $t('tasks.scanSaving') }}</span>
+        </div>
+
+        <!-- Persisted failure detail (scan error / interrupted zombie sweep) -->
+        <el-alert v-if="current.error_message" type="error" show-icon :closable="false"
+          :title="statusLabel(current.status)" :description="current.error_message" />
       </div>
 
       <!-- SSE worker-lane timeline -->
@@ -389,6 +407,37 @@ const validationResult = ref<ValidationResult | null>(null)
 const statsVisible = ref(false)
 const sessionStatsData = ref<SessionStats | null>(null)
 
+// ===== Scan rate (client-side): the poll refreshes scanned_count every few
+// seconds; the rate is the delta between the last two samples of a session.
+const scanRates = ref<Record<number, number>>({})
+const scanSamples = new Map<number, { count: number; at: number }>()
+
+function updateScanRates(list: ScanSession[]) {
+  const now = Date.now()
+  const live = new Set<number>()
+  for (const s of list) {
+    if (s.status !== 'scanning') continue
+    live.add(s.id)
+    const prev = scanSamples.get(s.id)
+    if (prev && s.scanned_count > prev.count) {
+      const dt = (now - prev.at) / 1000
+      if (dt > 0.5) scanRates.value[s.id] = Math.round((s.scanned_count - prev.count) / dt)
+    }
+    scanSamples.set(s.id, { count: s.scanned_count, at: now })
+  }
+  for (const id of [...scanSamples.keys()]) {
+    if (!live.has(id)) { scanSamples.delete(id); delete scanRates.value[id] }
+  }
+}
+
+const scanRateText = computed(() => {
+  const s = current.value
+  if (!s || s.status !== 'scanning') return ''
+  const r = scanRates.value[s.id]
+  if (!r || r <= 0) return ''
+  return t('tasks.scanRatePerSec', { rate: r.toLocaleString() })
+})
+
 // ===== Event-driven live updates =====
 // Agent runs (tagging / executing) stream over SSE per session; scanning has no
 // run events, so a light poll runs only while at least one session is scanning.
@@ -501,6 +550,7 @@ async function load() {
   try {
     const res = await listSessions()
     sessions.value = res.data
+    updateScanRates(res.data)
     syncStreams()
   } finally {
     loading.value = false
@@ -529,10 +579,18 @@ interface Guide {
 const guide = computed<Guide | null>(() => {
   const s = current.value
   if (!s || isActive(s) || s.status === 'scanning') return null
+  if (s.status === 'interrupted') {
+    return {
+      tone: 'danger',
+      text: t('tasks.guideInterrupted', { count: s.scanned_count }),
+      actionLabel: t('tasks.rescan'),
+      action: () => handleRescan(s),
+    }
+  }
   if (s.status.startsWith('error')) {
     return {
       tone: 'danger',
-      text: t('tasks.guideError', { status: s.status }),
+      text: t('tasks.guideError', { status: s.error_message || s.status }),
       actionLabel: s.planned_ops > 0 ? t('tasks.execute') : t('tasks.tag'),
       action: () => (s.planned_ops > 0 ? handleExecute(s) : handleTag(s)),
     }
@@ -589,7 +647,7 @@ function statusLabel(status: string): string {
 
 function statusChipClass(status: string): string {
   if (status === 'done' || status === 'tagged') return 'is-live'
-  if (status.startsWith('error')) return 'is-danger'
+  if (status.startsWith('error') || status === 'interrupted') return 'is-danger'
   if (status === 'scanning' || status === 'tagging' || status === 'executing' || status === 'tagged_partial') return 'is-warning'
   return 'is-muted'
 }
@@ -897,6 +955,25 @@ async function handleNewScan() {
   min-width: 120px;
   max-width: 320px;
   margin: 0;
+}
+
+/* ===== Live scan heartbeat line ===== */
+.run-card__scanline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.run-card__scanpath {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 /* ===== Inline next-step guide (merged into the meta row) ===== */

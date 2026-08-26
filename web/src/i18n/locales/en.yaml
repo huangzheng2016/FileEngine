@@ -187,6 +187,12 @@ tasks:
   status_executing: Executing
   status_done: Done
   statusError: Error
+  status_interrupted: Interrupted
+  scannedCount: Scanned
+  scanRate: Rate
+  scanRatePerSec: "{rate}/s"
+  scanningPath: "Scanning: {path}"
+  scanSaving: Saving scan results…
   executionPlans: Execution Plans
   planName: Name
   planOp: Op
@@ -224,6 +230,7 @@ tasks:
   guideTagged: "Tagging finished — {count} plans ready to execute."
   guideDone: "Execution finished — {count} operations processed."
   guideError: "Last run failed: {status}"
+  guideInterrupted: "Scan interrupted by a server restart ({count} entries scanned at that point). Rescan to continue."
 
 config:
   title: Configuration

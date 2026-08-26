@@ -47,6 +47,33 @@ func (r *Repository) UpdateSession(s *ScanSession) error {
 	return r.db.Save(s).Error
 }
 
+// UpdateScanProgress persists the live scan counters without touching any
+// other column. The scanner calls this every few seconds while walking, so a
+// full-row Save of a previously loaded session struct would race the API
+// layer's own session writes — column-scoped is the rule for racing writers.
+func (r *Repository) UpdateScanProgress(sessionID uint, scanned int, currentPath string) error {
+	return r.db.Model(&ScanSession{}).Where("id = ?", sessionID).
+		Updates(map[string]interface{}{"scanned_count": scanned, "current_path": currentPath}).Error
+}
+
+// ScanInterruptedMessage is the error_message stamped on sessions the startup
+// sweep finds stuck in "scanning" from a previous process lifetime.
+const ScanInterruptedMessage = "scan interrupted by server restart"
+
+// MarkInterruptedScans flips sessions stuck in "scanning" (process died or was
+// killed mid-scan — the walk lives in memory, so nothing will ever finish
+// them) to the terminal "interrupted" state. Without this sweep a killed scan
+// shows "scanning" forever with zero diagnostics. Returns the rows flipped.
+func (r *Repository) MarkInterruptedScans() (int64, error) {
+	res := r.db.Model(&ScanSession{}).Where("status = ?", "scanning").
+		Updates(map[string]interface{}{
+			"status":        "interrupted",
+			"error_message": ScanInterruptedMessage,
+			"current_path":  "",
+		})
+	return res.RowsAffected, res.Error
+}
+
 func (r *Repository) DeleteSession(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("scan_session_id = ?", id).Delete(&FileEntry{}).Error; err != nil {
@@ -64,11 +91,6 @@ func (r *Repository) DeleteFilesBySession(sessionID uint) error {
 }
 
 func (r *Repository) RefreshSessionCounts(id uint) error {
-	var session ScanSession
-	if err := r.db.First(&session, id).Error; err != nil {
-		return err
-	}
-
 	// Single query for all FileEntry aggregations (was 5 separate queries)
 	var fileCounts struct {
 		Total    int64
@@ -101,15 +123,22 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 		return err
 	}
 
-	session.TotalFiles = int(fileCounts.Total)
-	session.TaggedFiles = int(fileCounts.Tagged)
-	session.PlannedOps = int(fileCounts.Planned)
-	session.ExecutedOps = int(fileCounts.Executed)
-	session.TotalSize = fileCounts.Size
-	session.PromptTokens = int(tokenSums.PromptTokens)
-	session.CompletionTokens = int(tokenSums.CompletionTokens)
-	session.TotalTokens = int(tokenSums.TotalTokens)
-	return r.db.Save(&session).Error
+	// Column-scoped update: NEVER a full-row Save. This runs on every session
+	// GET, i.e. exactly while a scan/tag/execute goroutine is writing the row
+	// — a Save of a previously loaded struct is a lost update that can
+	// resurrect status="scanning" over a finished run (and the startup sweep
+	// would then mislabel that completed scan as interrupted).
+	return r.db.Model(&ScanSession{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"total_files":       int(fileCounts.Total),
+			"tagged_files":      int(fileCounts.Tagged),
+			"planned_ops":       int(fileCounts.Planned),
+			"executed_ops":      int(fileCounts.Executed),
+			"total_size":        fileCounts.Size,
+			"prompt_tokens":     int(tokenSums.PromptTokens),
+			"completion_tokens": int(tokenSums.CompletionTokens),
+			"total_tokens":      int(tokenSums.TotalTokens),
+		}).Error
 }
 
 // SessionProgress holds read-only progress counters for live progress events.

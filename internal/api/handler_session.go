@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -16,9 +17,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// scanHandle tracks one in-flight scan goroutine: cancel stops its walk,
+// done closes when the goroutine has fully exited (all DB writes included).
+type scanHandle struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 var (
 	scanMu   sync.Mutex
-	scanners = make(map[uint]context.CancelFunc)
+	scanners = make(map[uint]*scanHandle)
 )
 
 // scanRootPath computes the FS-relative root path for scanning.
@@ -63,41 +71,77 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	h := &scanHandle{cancel: cancel, done: make(chan struct{})}
 	scanMu.Lock()
-	scanners[session.ID] = cancel
+	scanners[session.ID] = h
 	scanMu.Unlock()
 
 	go func() {
+		// Registered first, runs last: waiters on done must only wake once
+		// every write (and the map detach) of this goroutine is complete.
+		defer close(h.done)
 		defer func() {
 			scanMu.Lock()
-			delete(scanners, session.ID)
+			// Detach only if we are still the registered scan — a rescan
+			// that raced past the stop wait may have replaced us.
+			if scanners[session.ID] == h {
+				delete(scanners, session.ID)
+			}
 			scanMu.Unlock()
 		}()
 
 		fs, err := remotefs.NewFromConfig(fsCfg)
 		if err != nil {
 			log.Printf("scan session %d: connect fs failed: %v", session.ID, err)
-			session.Status = db.TruncateStatus("error: " + err.Error())
+			session.Status = "error"
+			session.ErrorMessage = err.Error()
 			s.repo.UpdateSession(session)
 			return
 		}
 		defer fs.Close()
 		sc := scanner.New(fs, s.repo, filterMode, filterDirs)
 		if err := sc.Scan(ctx, session); err != nil {
+			if ctx.Err() != nil {
+				// User-initiated cancel (rescan/delete) is not a failure —
+				// whoever canceled owns the session state; writing an error
+				// here would race the fresh rescan's "scanning" status.
+				log.Printf("scan session %d canceled", session.ID)
+				return
+			}
 			log.Printf("scan session %d failed: %v", session.ID, err)
-			session.Status = db.TruncateStatus("error: " + err.Error())
+			session.Status = "error"
+			session.ErrorMessage = err.Error()
 			s.repo.UpdateSession(session)
 		}
 	}()
 }
 
-// cancelScan cancels a running scan if one exists for the given session ID.
-func cancelScan(sessionID uint) {
+// scanStopTimeout bounds how long rescan/delete wait for a canceled scan
+// goroutine to unwind. The scan's DB tail (bulk insert + final save) never
+// consults ctx, so a huge tree can take seconds to finish writing — but a
+// wedged goroutine must not block the API forever. A var so tests can shrink.
+var scanStopTimeout = 30 * time.Second
+
+// cancelAndWaitScan cancels a running scan (if any) and waits for its
+// goroutine to exit. The canceled scan's DB tail has no ctx checks; without
+// this wait its bulk insert and final save can land AFTER the caller's own
+// reset — the rescan then hits idx_uniq_session_path duplicates and its
+// "scanning" status gets clobbered by the old goroutine's "scanned". Returns
+// false when the wait timed out (caller logs and proceeds anyway).
+func cancelAndWaitScan(sessionID uint) bool {
 	scanMu.Lock()
-	if cancel, ok := scanners[sessionID]; ok {
-		cancel()
-	}
+	h := scanners[sessionID]
 	scanMu.Unlock()
+	if h == nil {
+		return true
+	}
+	h.cancel()
+	select {
+	case <-h.done:
+		return true
+	case <-time.After(scanStopTimeout):
+		return false
+	}
 }
 
 type CreateSessionRequest struct {
@@ -199,7 +243,9 @@ func (s *Server) deleteSession(c *gin.Context) {
 		return
 	}
 
-	cancelScan(uint(id))
+	if !cancelAndWaitScan(uint(id)) {
+		log.Printf("delete session %d: timed out waiting for the scan to stop; proceeding anyway", id)
+	}
 
 	if err := s.repo.DeleteSession(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -279,7 +325,9 @@ func (s *Server) rescanSession(c *gin.Context) {
 		return
 	}
 
-	cancelScan(session.ID)
+	if !cancelAndWaitScan(session.ID) {
+		log.Printf("rescan session %d: timed out waiting for the previous scan to stop; proceeding anyway", session.ID)
+	}
 
 	if err := s.repo.DeleteFilesBySession(session.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -290,6 +338,9 @@ func (s *Server) rescanSession(c *gin.Context) {
 	session.RootPath = scanRootPath(session.ScanPath)
 	session.Status = "scanning"
 	session.TotalFiles = 0
+	session.ScannedCount = 0
+	session.CurrentPath = ""
+	session.ErrorMessage = ""
 	session.TaggedFiles = 0
 	session.PlannedOps = 0
 	session.ExecutedOps = 0

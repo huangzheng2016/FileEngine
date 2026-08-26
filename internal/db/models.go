@@ -73,13 +73,24 @@ func (f *Filesystem) ToRemoteFSConfig() config.RemoteFSConfig {
 }
 
 type ScanSession struct {
-	ID                  uint      `gorm:"primaryKey" json:"id"`
-	FilesystemID        uint      `gorm:"index" json:"filesystem_id"`
-	ScanPath            string    `gorm:"size:1024" json:"scan_path"`
-	RootPath            string    `gorm:"size:1024" json:"root_path"`
-	Protocol            string    `gorm:"size:32" json:"protocol"`
-	Status              string    `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/tagged_partial/executing/done/error:... (error strings truncated via TruncateStatus)
-	TotalFiles          int       `json:"total_files"`
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	FilesystemID uint   `gorm:"index" json:"filesystem_id"`
+	ScanPath     string `gorm:"size:1024" json:"scan_path"`
+	RootPath     string `gorm:"size:1024" json:"root_path"`
+	Protocol     string `gorm:"size:32" json:"protocol"`
+	Status       string `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/tagged_partial/executing/done/error/interrupted (+ legacy "error:..." strings truncated via TruncateStatus)
+	TotalFiles   int    `json:"total_files"`
+	// ScannedCount is the live entries counter during "scanning": the scanner
+	// persists it every few seconds so the UI shows progress before the
+	// full-tree TotalFiles lands at the end.
+	ScannedCount int `json:"scanned_count"`
+	// CurrentPath is the directory the scan is listing right now (heartbeat);
+	// empty when the walk is not running (saving results / terminal states).
+	CurrentPath string `gorm:"size:1024" json:"current_path"`
+	// ErrorMessage carries the failure detail when Status is "error" (or the
+	// interruption note for "interrupted") — kept out of Status so the enum
+	// stays short and the full message survives.
+	ErrorMessage        string    `gorm:"type:text" json:"error_message"`
 	TaggedFiles         int       `json:"tagged_files"`
 	PlannedOps          int       `json:"planned_ops"`
 	ExecutedOps         int       `json:"executed_ops"`
@@ -132,9 +143,9 @@ func (p *ModelProvider) EffectiveContextWindow() int {
 }
 
 type AgentLog struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
-	ScanSessionID    uint      `gorm:"index:idx_log_session_batch,priority:1" json:"scan_session_id"`
-	BatchIndex       int       `gorm:"index:idx_log_session_batch,priority:2" json:"batch_index"`
+	ID            uint `gorm:"primaryKey" json:"id"`
+	ScanSessionID uint `gorm:"index:idx_log_session_batch,priority:1" json:"scan_session_id"`
+	BatchIndex    int  `gorm:"index:idx_log_session_batch,priority:2" json:"batch_index"`
 	// WorkerID identifies the agent worker lane that produced the row (0 for
 	// single-worker instruct runs and for rows written before lanes existed).
 	// default:0 makes AutoMigrate backfill existing rows with 0 on all
