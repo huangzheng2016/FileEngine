@@ -21,7 +21,34 @@ type Scanner struct {
 	repo       *db.Repository
 	filterMode string
 	filterDirs []string
+	progress   *Progress
 }
+
+// Progress tracks one scan's live walk counters. Walk workers update it
+// concurrently (atomics throughout); the reporter goroutine reads it to
+// persist progress onto the session row every progressReportInterval, so a
+// long scan is observable before its rows land in the DB at the end.
+type Progress struct {
+	entries int64        // FileEntry rows collected so far
+	dirs    int64        // directories listed
+	path    atomic.Value // string: directory currently being listed
+}
+
+func (p *Progress) addEntries(n int64)  { atomic.AddInt64(&p.entries, n) }
+func (p *Progress) addDir()             { atomic.AddInt64(&p.dirs, 1) }
+func (p *Progress) setPath(path string) { p.path.Store(path) }
+func (p *Progress) Entries() int64      { return atomic.LoadInt64(&p.entries) }
+func (p *Progress) Dirs() int64         { return atomic.LoadInt64(&p.dirs) }
+func (p *Progress) CurrentPath() string {
+	if v := p.path.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
+// progressReportInterval is how often the walk's live counters are persisted
+// to the session row. A var so tests can shrink it.
+var progressReportInterval = 2 * time.Second
 
 // HandleLister is implemented by backends (NFS) that can list directories
 // concurrently and resolve a directory by an opaque handle from a previous
@@ -53,6 +80,9 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	}
 
 	rootPath := session.RootPath
+	s.progress = &Progress{}
+	s.progress.setPath(rootPath)
+	stopReport := s.startProgressReporter(session.ID)
 	var allFiles []db.FileEntry
 	var err error
 
@@ -61,8 +91,18 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	} else {
 		err = s.scanDir(ctx, rootPath, rootPath, 0, session.ID, &allFiles)
 	}
+	stopReport()
+	session.ScannedCount = int(s.progress.Entries())
+	// The walk is over: stop the path heartbeat. While the DB tail runs, the
+	// session row carries an empty current_path ("saving results" for the UI).
+	s.progress.setPath("")
 	if err != nil {
 		return fmt.Errorf("scan failed: %w", err)
+	}
+	if uerr := db.WithRetry(func() error {
+		return s.repo.UpdateScanProgress(session.ID, session.ScannedCount, "")
+	}); uerr != nil {
+		log.Printf("warn: scan progress final update failed: %v", uerr)
 	}
 
 	saveStart := time.Now()
@@ -78,7 +118,42 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 
 	session.Status = "scanned"
 	session.TotalFiles = len(allFiles)
+	session.ScannedCount = len(allFiles)
+	session.CurrentPath = ""
+	session.ErrorMessage = ""
 	return s.repo.UpdateSession(session)
+}
+
+// startProgressReporter launches the goroutine that persists the walk's live
+// counters to the session row until the returned stop function is called.
+// Stop is idempotent and blocks until the goroutine exits, so no reporter
+// write can land after the caller's own final session save.
+func (s *Scanner) startProgressReporter(sessionID uint) func() {
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(progressReportInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				if err := db.WithRetry(func() error {
+					return s.repo.UpdateScanProgress(sessionID, int(s.progress.Entries()), s.progress.CurrentPath())
+				}); err != nil {
+					log.Printf("warn: scan progress update failed: %v", err)
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(stop) })
+		wg.Wait()
+	}
 }
 
 func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, depth int, sessionID uint, result *[]db.FileEntry) error {
@@ -88,6 +163,7 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 	default:
 	}
 
+	s.progress.setPath(currentPath)
 	entries, err := s.fs.List(ctx, currentPath)
 	if err != nil {
 		// Accumulate listing errors instead of silently swallowing them.
@@ -95,6 +171,7 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 		log.Printf("warn: cannot list %s: %v", currentPath, err)
 		return fmt.Errorf("list %s: %w", currentPath, err)
 	}
+	s.progress.addDir()
 
 	parentPath := currentPath
 	if currentPath == rootPath {
@@ -141,6 +218,7 @@ func (s *Scanner) scanDir(ctx context.Context, currentPath, rootPath string, dep
 			Depth:         relDepth,
 		}
 		*result = append(*result, fe)
+		s.progress.addEntries(1)
 
 		if entry.IsDir {
 			if err := s.scanDir(ctx, entryPath, rootPath, depth+1, sessionID, result); err != nil {
@@ -288,6 +366,7 @@ func (s *Scanner) scanConcurrent(ctx context.Context, hl HandleLister, rootPath 
 					queue.taskDone()
 					return
 				}
+				s.progress.setPath(t.path)
 				entries, err := hl.ListByHandle(walkCtx, t.path, t.handle)
 				if err != nil {
 					queue.taskDone()
@@ -303,6 +382,7 @@ func (s *Scanner) scanConcurrent(ctx context.Context, hl HandleLister, rootPath 
 				if t.path == rootPath {
 					parentPath = ""
 				}
+				rowsBefore := len(rows)
 				for _, entry := range entries {
 					entryPath := entry.Path
 					if !path.IsAbs(entryPath) {
@@ -332,6 +412,8 @@ func (s *Scanner) scanConcurrent(ctx context.Context, hl HandleLister, rootPath 
 				}
 				atomic.AddInt64(&dirsDone, 1)
 				atomic.AddInt64(&entriesDone, int64(len(entries)))
+				s.progress.addDir()
+				s.progress.addEntries(int64(len(rows) - rowsBefore))
 				queue.taskDone()
 			}
 		}(w)
