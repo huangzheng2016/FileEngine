@@ -132,3 +132,66 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 			got.Status, got.ErrorMessage, ScanInterruptedMessage)
 	}
 }
+
+// RefreshSessionCounts runs on every session GET — exactly while a scan or
+// agent run is writing the same row. It must touch ONLY the aggregate count
+// columns: the old full-row Save was a lost update that could resurrect
+// status="scanning" over a finished run's terminal state (and the startup
+// sweep would then mislabel that completed scan as interrupted). This pins
+// the contract: the row is already in its terminal state when the refresh
+// lands, and every non-count column must survive.
+func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
+	r := setupScanProgressRepo(t)
+	session := &ScanSession{FilesystemID: 1, Status: "scanning"}
+	if err := r.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	for _, f := range []FileEntry{
+		{ScanSessionID: session.ID, OriginalPath: "a", Name: "a", FileType: "file", Size: 10, Tagged: true, Operation: "move"},
+		{ScanSessionID: session.ID, OriginalPath: "b", Name: "b", FileType: "file", Size: 20},
+	} {
+		fe := f
+		if err := r.CreateFile(&fe); err != nil {
+			t.Fatalf("create file: %v", err)
+		}
+	}
+	if err := r.CreateAgentLog(&AgentLog{ScanSessionID: session.ID, Role: "assistant", PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}); err != nil {
+		t.Fatalf("create log: %v", err)
+	}
+
+	// The terminal write of the finished scan lands first (this is the state
+	// the lost update used to clobber).
+	if err := r.db.Model(&ScanSession{}).Where("id = ?", session.ID).
+		Updates(map[string]interface{}{
+			"status":        "scanned",
+			"scanned_count": 2,
+			"current_path":  "",
+			"error_message": "",
+		}).Error; err != nil {
+		t.Fatalf("terminal update: %v", err)
+	}
+
+	if err := r.RefreshSessionCounts(session.ID); err != nil {
+		t.Fatalf("RefreshSessionCounts: %v", err)
+	}
+
+	got, err := r.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	// Count columns recomputed.
+	if got.TotalFiles != 2 || got.TaggedFiles != 1 || got.PlannedOps != 1 || got.TotalSize != 30 {
+		t.Errorf("counts = total %d tagged %d planned %d size %d, want 2/1/1/30",
+			got.TotalFiles, got.TaggedFiles, got.PlannedOps, got.TotalSize)
+	}
+	if got.TotalTokens != 7 || got.PromptTokens != 3 || got.CompletionTokens != 4 {
+		t.Errorf("tokens = %d/%d/%d, want 7/3/4", got.TotalTokens, got.PromptTokens, got.CompletionTokens)
+	}
+	// Everything else preserved — status above all.
+	if got.Status != "scanned" {
+		t.Errorf("status = %s, want scanned (lost update would have resurrected scanning)", got.Status)
+	}
+	if got.ScannedCount != 2 || got.CurrentPath != "" || got.ErrorMessage != "" {
+		t.Errorf("progress fields = %d/%q/%q, want 2/empty/empty", got.ScannedCount, got.CurrentPath, got.ErrorMessage)
+	}
+}
