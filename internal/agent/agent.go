@@ -25,6 +25,8 @@ type Agent struct {
 	mu       sync.Mutex
 	running  bool
 	cancelFn context.CancelFunc
+	runGen   uint64
+	doneCh   chan struct{}
 }
 
 func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint, modelProvider *db.ModelProvider, session *db.ScanSession) *Agent {
@@ -57,6 +59,36 @@ func (a *Agent) Stop() {
 	a.running = false
 }
 
+// finishRun clears the running state only when the finishing run is still
+// the CURRENT one: a stopped-and-replaced run (user stopped run A, then run
+// B started on the same Agent before A drained) must not clobber B's flag
+// with A's deferred cleanup — the classic stop→restart ABA race that left
+// live runs invisible to Stop()/tagStatus.
+func (a *Agent) finishRun(gen uint64) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.runGen != gen {
+		return false
+	}
+	a.running = false
+	a.cancelFn = nil
+	return true
+}
+
+// Done returns a channel closed when the current run fully returns, so
+// stopTagging can wait for the drain instead of letting a new run start on
+// top of a still-draining one.
+func (a *Agent) Done() <-chan struct{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.doneCh == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return a.doneCh
+}
+
 // RunTagging delegates to AutoTagAgent for automatic file classification.
 // On success it returns the summary report for the run_done event.
 func (a *Agent) RunTagging(ctx context.Context) (string, error) {
@@ -68,13 +100,17 @@ func (a *Agent) RunTagging(ctx context.Context) (string, error) {
 	a.running = true
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancelFn = cancel
+	a.runGen++
+	gen := a.runGen
+	done := make(chan struct{})
+	a.doneCh = done
 	a.mu.Unlock()
 
 	defer func() {
-		a.mu.Lock()
-		a.running = false
-		a.cancelFn = nil
-		a.mu.Unlock()
+		defer close(done)
+		if !a.finishRun(gen) {
+			return // superseded by a newer run — leave its flag and the session status alone
+		}
 		if ctx.Err() != nil {
 			if s, err := a.repo.GetSession(a.sessionID); err == nil && s.Status == "tagging" {
 				s.Status = "tagged"
@@ -97,13 +133,15 @@ func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPromp
 	a.running = true
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancelFn = cancel
+	a.runGen++
+	gen := a.runGen
+	done := make(chan struct{})
+	a.doneCh = done
 	a.mu.Unlock()
 
 	defer func() {
-		a.mu.Lock()
-		a.running = false
-		a.cancelFn = nil
-		a.mu.Unlock()
+		defer close(done)
+		a.finishRun(gen)
 	}()
 
 	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)

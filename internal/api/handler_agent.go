@@ -223,6 +223,15 @@ func (s *Server) stopTagging(c *gin.Context) {
 		return
 	}
 	a.Stop()
+	// Wait for the old run to drain: starting a new run on top of a
+	// still-draining one is what left live runs invisible to this endpoint
+	// (the drain's deferred cleanup is identity-guarded, but the session
+	// should only read "stopped" once workers actually exited).
+	select {
+	case <-a.Done():
+	case <-time.After(30 * time.Second):
+		log.Printf("stopTagging session %d: run did not drain within 30s", id)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
 }
 
@@ -305,6 +314,13 @@ func (s *Server) stopInstruct(c *gin.Context) {
 		return
 	}
 	a.Stop()
+	// Wait for the old run to drain so a follow-up instruct never starts on
+	// top of a still-draining one (its deferred cleanup is identity-guarded).
+	select {
+	case <-a.Done():
+	case <-time.After(30 * time.Second):
+		log.Printf("stopInstruct session %d: run did not drain within 30s", id)
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
 }
 
