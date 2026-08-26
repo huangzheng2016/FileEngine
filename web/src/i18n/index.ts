@@ -1,6 +1,7 @@
 import { createI18n } from 'vue-i18n'
 import zhCN from './locales/zh-CN.yaml'
 import en from './locales/en.yaml'
+import policy from './policy'
 
 function getDefaultLocale(): string {
   // Try to read saved preference
@@ -24,8 +25,8 @@ const i18n = createI18n({
   locale: getDefaultLocale(),
   fallbackLocale: 'zh-CN',
   messages: {
-    'zh-CN': zhCN,
-    en,
+    'zh-CN': { ...zhCN, ...policy['zh-CN'] },
+    en: { ...en, ...policy.en },
   },
 })
 

@@ -56,6 +56,39 @@
                 <p class="form-field__hint">{{ $t('config.agent.maxRetriesHint') }}</p>
               </div>
             </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('categoryPolicy.title') }}</label>
+              <el-input v-model="config.agent.category_policy" type="textarea" :rows="8" />
+              <p class="form-field__hint">{{ $t('categoryPolicy.hint') }}</p>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('categoryPolicy.quickFill') }}</label>
+              <el-select
+                v-model="quickFillPresetId"
+                :placeholder="$t('categoryPolicy.quickFillPlaceholder')"
+                @change="handleQuickFill"
+              >
+                <el-option v-for="p in categoryPresets" :key="p.id" :label="pickText(p.label)" :value="p.id" />
+              </el-select>
+            </div>
+            <div class="form-field">
+              <label class="form-field__label">{{ $t('categoryPolicy.importTitle') }}</label>
+              <div class="import-row">
+                <el-select v-model="importPresetId" :placeholder="$t('categoryPolicy.selectTemplate')" style="flex: 1">
+                  <el-option v-for="p in categoryPresets" :key="p.id" :label="pickText(p.label)" :value="p.id" />
+                </el-select>
+                <el-select v-model="importFilesystemId" :placeholder="$t('categoryPolicy.selectFilesystem')" style="flex: 1">
+                  <el-option v-for="f in filesystems" :key="f.id" :label="f.name" :value="f.id" />
+                </el-select>
+                <el-button
+                  @click="handleImportTemplate"
+                  :loading="importing"
+                  :disabled="!importPresetId || !importFilesystemId"
+                >
+                  {{ $t('categoryPolicy.importButton') }}
+                </el-button>
+              </div>
+            </div>
             <div>
               <el-button type="primary" @click="handleSave" :loading="saving">{{ $t('config.saveConfig') }}</el-button>
             </div>
@@ -87,15 +120,16 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getConfig, updateConfig, getPrompt, updatePrompt } from '../api'
-import type { Config } from '../types'
+import { getConfig, updateConfig, getPrompt, updatePrompt, listFilesystems, importCategories } from '../api'
+import type { Config, Filesystem, CategoryExportItem } from '../types'
+import { categoryPresets } from '../data/categoryPresets'
 import { ElMessage } from 'element-plus'
 import { EditorView, basicSetup } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorState } from '@codemirror/state'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const activeTab = ref('database')
 const saving = ref(false)
 const savingPrompt = ref(false)
@@ -127,15 +161,62 @@ function initEditor(content: string) {
   })
 }
 
-const config = reactive<Config>({
+// category_policy rides along on the agent config; the shared Config type
+// predates the knob, so extend it locally instead of touching types/index.ts.
+type ConfigForm = Omit<Config, 'agent'> & { agent: Config['agent'] & { category_policy?: string } }
+
+const config = reactive<ConfigForm>({
   server: { port: 8080, host: '0.0.0.0' },
   database: { driver: 'sqlite', dsn: 'fileengine.db' },
-  agent: { batch_size: 50, concurrency: 1, max_file_read_size: 102400, max_retries: 3 },
+  agent: { batch_size: 50, concurrency: 1, max_file_read_size: 102400, max_retries: 3, category_policy: '' },
 })
+
+const filesystems = ref<Filesystem[]>([])
+const quickFillPresetId = ref<string>()
+const importPresetId = ref<string>()
+const importFilesystemId = ref<number>()
+const importing = ref(false)
+
+function pickText(text: { 'zh-CN': string; en: string }): string {
+  return locale.value === 'en' ? text.en : text['zh-CN']
+}
+
+function handleQuickFill(id: string) {
+  const preset = categoryPresets.find((p) => p.id === id)
+  if (preset) {
+    config.agent.category_policy = pickText(preset.policy)
+  }
+  // Reset so picking the same preset again re-fills the textarea.
+  quickFillPresetId.value = undefined
+}
+
+async function handleImportTemplate() {
+  const preset = categoryPresets.find((p) => p.id === importPresetId.value)
+  const fsId = importFilesystemId.value
+  if (!preset || !fsId) return
+  importing.value = true
+  try {
+    const items: CategoryExportItem[] = preset.categories.map((c) => ({
+      name: pickText(c.name),
+      path: c.path,
+      description: pickText(c.description),
+    }))
+    const res = await importCategories(fsId, items)
+    ElMessage.success(t('categoryPolicy.importResult', { created: res.data.created, skipped: res.data.skipped }))
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || t('categoryPolicy.importFailed'))
+  } finally {
+    importing.value = false
+  }
+}
 
 onMounted(async () => {
   const res = await getConfig()
   Object.assign(config, res.data)
+  try {
+    const fRes = await listFilesystems()
+    filesystems.value = fRes.data
+  } catch { /* ignore */ }
   try {
     const pRes = await getPrompt()
     promptText.value = pRes.data.prompt
@@ -185,5 +266,10 @@ function handleResetPrompt() {
   overflow: hidden;
   min-height: 400px;
   background: var(--surface-soft);
+}
+.import-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 </style>
