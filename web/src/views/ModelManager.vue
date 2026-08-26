@@ -118,11 +118,13 @@
         </div>
         <div class="form-field">
           <label class="form-field__label">{{ $t('models.reasoningEffort') }}</label>
-          <el-select v-model="form.reasoning_effort">
+          <el-select v-model="form.reasoning_effort" filterable allow-create>
             <el-option :label="$t('models.reasoningDefault')" value="" />
+            <el-option label="none" value="none" />
             <el-option label="low" value="low" />
             <el-option label="medium" value="medium" />
             <el-option label="high" value="high" />
+            <el-option label="max" value="max" />
           </el-select>
           <p class="form-field__hint">{{ $t('models.reasoningEffortHint') }}</p>
         </div>

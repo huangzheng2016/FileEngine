@@ -122,9 +122,12 @@ type ModelProvider struct {
 	MaxTokens     int     `json:"max_tokens"`     // output completion cap passed to the LLM API
 	ContextWindow int     `json:"context_window"` // model context window in tokens (drives compaction thresholds)
 	// ReasoningEffort is passed through to OpenAI-compatible APIs as
-	// reasoning_effort: "" keeps the model default, low/medium/high override
-	// it (e.g. low cuts kimi-k3 thinking tokens ~85% on tool-heavy runs).
-	ReasoningEffort string    `gorm:"size:16" json:"reasoning_effort"`
+	// reasoning_effort: "" keeps the model default, otherwise any free-form
+	// level the backend accepts (suggested none/low/medium/high/max; e.g. low
+	// cuts kimi-k3 thinking tokens ~85% on tool-heavy runs). The API validates
+	// charset/length ([a-zA-Z0-9_-]{1,32}) but never hard-rejects unknown
+	// levels — providers keep inventing new ones.
+	ReasoningEffort string    `gorm:"size:32" json:"reasoning_effort"`
 	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"` // model can read images (gates the view_image tool)
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
