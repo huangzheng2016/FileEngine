@@ -78,7 +78,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 	sb.WriteString("\n请使用工具执行用户的指令。")
 
 	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
-	a.logger.EmitBatchStart("instruct")
+	a.logger.EmitPullBegin("instruct", 0, 0)
 	userMsg := sb.String()
 	a.logger.LogMessage("user", userMsg, 0, 0, 0)
 
@@ -89,6 +89,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 	label := "instruct"
 	result, err := runADKWithRetry(ctx, agentInst, messages, a.logger, label, tracker)
 	if err != nil {
+		a.logger.EmitPullDone("instruct", 0, 1)
 		return "", err
 	}
 
@@ -98,6 +99,7 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 		a.logger.LogMessage("assistant", result.Content, pt, ct, tt)
 		response = result.Content
 	}
+	a.logger.EmitPullDone("instruct", 0, 0)
 
 	_ = a.repo.RefreshSessionCounts(a.sessionID)
 	return response, nil

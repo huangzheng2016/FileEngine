@@ -73,8 +73,7 @@ func TestRunADKOnceForwardsStepEvents(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	logger := NewLogger(nil, 200)
-	logger.SetBatch(5)
+	logger := NewLogger(nil, 200, 5)
 
 	ch := db.SubscribeEvents(200)
 	defer db.UnsubscribeEvents(200, ch)
@@ -93,7 +92,7 @@ func TestRunADKOnceForwardsStepEvents(t *testing.T) {
 	if ev.Type != db.EventToolCall || !ok {
 		t.Fatalf("event 1: type=%q payload=%+v", ev.Type, ev.Payload)
 	}
-	if p1.BatchIndex != 5 || p1.ToolName != "echo" || p1.Input != `{"text":"hi"}` {
+	if p1.WorkerID != 5 || p1.ToolName != "echo" || p1.Input != `{"text":"hi"}` {
 		t.Fatalf("tool_call payload: %+v", p1)
 	}
 
@@ -103,7 +102,7 @@ func TestRunADKOnceForwardsStepEvents(t *testing.T) {
 	if ev.Type != db.EventToolResult || !ok {
 		t.Fatalf("event 2: type=%q payload=%+v", ev.Type, ev.Payload)
 	}
-	if p2.BatchIndex != 5 || p2.ToolName != "echo" || !p2.OK || p2.Output == "" {
+	if p2.WorkerID != 5 || p2.ToolName != "echo" || !p2.OK || p2.Output == "" {
 		t.Fatalf("tool_result payload: %+v", p2)
 	}
 

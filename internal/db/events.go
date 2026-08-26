@@ -14,7 +14,8 @@ type EventType string
 
 const (
 	EventRunStatus  EventType = "run_status"
-	EventBatchStart EventType = "batch_start"
+	EventPullBegin  EventType = "pull_begin"
+	EventPullDone   EventType = "pull_done"
 	EventMessage    EventType = "message"
 	EventToolCall   EventType = "tool_call"
 	EventToolResult EventType = "tool_result"
@@ -53,12 +54,26 @@ type RunStatusPayload struct {
 	Message   string `json:"message,omitempty"`
 }
 
-// BatchStartPayload announces a new agent batch (one directory / one file
-// batch / one instruct run).
-type BatchStartPayload struct {
-	SessionID  uint   `json:"session_id"`
-	BatchIndex int    `json:"batch_index"`
-	Label      string `json:"label"` // directory path, "N files", or "instruct"
+// PullBeginPayload announces a worker starting one work unit (one directory,
+// one loose-file pull, or one instruct run). The batch system is gone: a
+// batch index survives only as an internal DB cursor and is never exposed on
+// the event stream — the frontend groups the timeline by worker lanes.
+type PullBeginPayload struct {
+	SessionID uint   `json:"session_id"`
+	WorkerID  int    `json:"worker_id"`
+	Label     string `json:"label"`            // directory path, "N files", or "instruct"
+	Count     int    `json:"count,omitempty"`  // files pulled this round (loose-file pulls)
+	Cursor    uint   `json:"cursor,omitempty"` // starting cursor (smallest file id of the pull)
+}
+
+// PullDonePayload settles the worker's current work unit: how many of its
+// files ended up classified (tagged) versus missed or failed.
+type PullDonePayload struct {
+	SessionID uint   `json:"session_id"`
+	WorkerID  int    `json:"worker_id"`
+	Label     string `json:"label,omitempty"`
+	Tagged    int    `json:"tagged,omitempty"`
+	Failed    int    `json:"failed,omitempty"`
 }
 
 // MessagePayload carries a chat message. Persisted messages (user prompts,
@@ -66,7 +81,7 @@ type BatchStartPayload struct {
 // intermediate assistant steps omit them.
 type MessagePayload struct {
 	SessionID        uint   `json:"session_id"`
-	BatchIndex       int    `json:"batch_index"`
+	WorkerID         int    `json:"worker_id"`
 	Role             string `json:"role"` // user / assistant / system
 	Content          string `json:"content"`
 	PromptTokens     int    `json:"prompt_tokens,omitempty"`
@@ -76,34 +91,32 @@ type MessagePayload struct {
 
 // ToolCallPayload carries one model-requested tool invocation.
 type ToolCallPayload struct {
-	SessionID  uint   `json:"session_id"`
-	BatchIndex int    `json:"batch_index"`
-	ToolName   string `json:"tool_name"`
-	Input      string `json:"input"` // raw JSON arguments from the model
+	SessionID uint   `json:"session_id"`
+	WorkerID  int    `json:"worker_id"`
+	ToolName  string `json:"tool_name"`
+	Input     string `json:"input"` // raw JSON arguments from the model
 }
 
 // ToolResultPayload carries one tool execution result.
 type ToolResultPayload struct {
-	SessionID  uint   `json:"session_id"`
-	BatchIndex int    `json:"batch_index"`
-	ToolName   string `json:"tool_name"`
-	Output     string `json:"output"` // tool output serialized as JSON text
-	OK         bool   `json:"ok"`
+	SessionID uint   `json:"session_id"`
+	WorkerID  int    `json:"worker_id"`
+	ToolName  string `json:"tool_name"`
+	Output    string `json:"output"` // tool output serialized as JSON text
+	OK        bool   `json:"ok"`
 }
 
 // ProgressPayload carries absolute progress counters. Tagging runs fill
-// Total/Tagged/Planned (+BatchIndex of the just-finished batch); executing
-// runs fill Total/Success/Failed/Skipped.
+// Total/Tagged/Planned; executing runs fill Total/Success/Failed/Skipped.
 type ProgressPayload struct {
-	SessionID  uint   `json:"session_id"`
-	Phase      string `json:"phase"` // tagging / executing
-	Total      int    `json:"total"`
-	Tagged     int    `json:"tagged,omitempty"`
-	Planned    int    `json:"planned,omitempty"`
-	Success    int    `json:"success,omitempty"`
-	Failed     int    `json:"failed,omitempty"`
-	Skipped    int    `json:"skipped,omitempty"`
-	BatchIndex int    `json:"batch_index,omitempty"`
+	SessionID uint   `json:"session_id"`
+	Phase     string `json:"phase"` // tagging / executing
+	Total     int    `json:"total"`
+	Tagged    int    `json:"tagged,omitempty"`
+	Planned   int    `json:"planned,omitempty"`
+	Success   int    `json:"success,omitempty"`
+	Failed    int    `json:"failed,omitempty"`
+	Skipped   int    `json:"skipped,omitempty"`
 }
 
 // RunDonePayload is the exactly-once terminal event of a run.

@@ -89,7 +89,7 @@ func newReadFileToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *T
 	if err != nil {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
-	return NewToolBuilder(nil, fs, 1, 1, NewLogger(nil, 1), cfg, &db.ScanSession{AllowReadFile: true}, false)
+	return NewToolBuilder(nil, fs, 1, 1, NewLogger(nil, 1, 0), cfg, &db.ScanSession{AllowReadFile: true}, false)
 }
 
 func writeTestFile(t *testing.T, dir, name string, data []byte) {
@@ -613,7 +613,7 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 	}
 
 	// NFS-style: seek but no ReaderAt → adapter, listing works.
-	tbNFS := NewToolBuilder(nil, seekOnlyFS{base}, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "nfs"}, false)
+	tbNFS := NewToolBuilder(nil, seekOnlyFS{base}, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "nfs"}, false)
 	out, err := tbNFS.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
 		t.Fatalf("seek-only listing: %v", err)
@@ -623,7 +623,7 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 	}
 
 	// FTP-style: stream only → small archive still works via temp download.
-	tbFTP := NewToolBuilder(nil, streamOnlyFS{base}, 1, 1, NewLogger(nil, 1), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "ftp"}, false)
+	tbFTP := NewToolBuilder(nil, streamOnlyFS{base}, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "ftp"}, false)
 	out, err = tbFTP.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
 		t.Fatalf("stream-only small listing: %v", err)
