@@ -19,6 +19,22 @@ func (s *Server) listLogs(c *gin.Context) {
 	}
 	q.Role = c.Query("role")
 	q.ToolName = c.Query("tool_name")
+	if wid := c.Query("worker_id"); wid != "" {
+		id, err := strconv.Atoi(wid)
+		if err != nil || id < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "worker_id must be a non-negative integer"})
+			return
+		}
+		q.WorkerID = &id
+	}
+	if bid := c.Query("before_id"); bid != "" {
+		id, err := strconv.ParseUint(bid, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "before_id must be a non-negative integer"})
+			return
+		}
+		q.BeforeID = uint(id)
+	}
 	q.Order = c.Query("order") // "asc" or "desc"
 	if page := c.Query("page"); page != "" {
 		q.Page, _ = strconv.Atoi(page)

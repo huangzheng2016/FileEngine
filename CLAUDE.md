@@ -150,7 +150,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Mode (`copy` or `move`) passed via API query param, overrides per-file operation
 
 ### Session Event Stream (SSE)
-- **Endpoint**: `GET /api/v1/sessions/:id/events/stream` — SSE stream of live agent run events for one session. History stays in `GET /logs` (agent_logs persistence is unchanged); the stream only carries new events.
+- **Endpoint**: `GET /api/v1/sessions/:id/events/stream` — SSE stream of live agent run events for one session. History stays in `GET /logs` (agent_logs persistence is unchanged); the stream only carries new events. `GET /logs` query filters: `session_id`, `role`, `tool_name`, `worker_id` (worker lane; 0 is a legal filter value — single-worker and pre-lane rows), `before_id` (strict id upper bound — the backwards-paging/gap-fill cursor), `order` (asc/desc), `page`/`page_size`; the `total` count carries the same filters as the row query.
 - **Bus**: `internal/db/events.go` — session-scoped in-memory event bus living in the `db` package so every producer (agent Logger, ADK event loop, orchestrator, API handlers) can publish without import cycles. `db.PublishEvent` broadcasts with non-blocking sends (slow consumers drop events; refetch `/logs` to fill gaps); subscriber channels are never closed by the bus.
 - **Frame format**: `event: <type>\ndata: <json payload>\n\n`, plus `: ping` comment heartbeats every 25s. Consume with `EventSource`; there is no last-event-id replay — on reconnect, refetch history from `/logs`.
 - **Wails desktop**: `wails/app.go` `proxySSE` already forwards any request with `Accept: text/event-stream` to the backend with chunked flushing — it works with this endpoint as-is.
