@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	testHost     = "test-nas.invalid"
+	testHost     = "test-nas.invalid" // RFC 2606 .invalid — credentials hygiene: no real hosts in the repo
 	testUsername = "test"
 	testPassword = "not-a-real-password"
 	testBasePath = "test"
 )
 
-// requireTestNAS skips the test when the hardcoded owner-LAN test NAS is not
+// requireTestNAS skips the test when the env-gated test NAS is not
 // resolvable — these are integration tests that only run on that network.
 func requireTestNAS(t *testing.T) {
 	t.Helper()

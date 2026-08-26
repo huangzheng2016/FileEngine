@@ -14,8 +14,9 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// testNASHost is the hardcoded owner-LAN test NAS used by the integration
-// test below; requireTestNAS skips it off that network.
+// testNASHost is the env-gated test NAS used by the integration test below;
+// requireTestNAS skips it off that network. RFC 2606 .invalid — no real
+// hosts in the repo (credentials hygiene).
 const testNASHost = "test-nas.invalid"
 
 func requireTestNAS(t *testing.T) {
