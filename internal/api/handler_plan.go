@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 
 	"github.com/gin-gonic/gin"
@@ -93,4 +95,34 @@ func (s *Server) approvePlan(c *gin.Context) {
 	}
 	db.Emit(session.ID, 0, db.EvPlanUpdated, db.PlanUpdatedData{Version: plan.Version, Status: plan.Status})
 	c.JSON(http.StatusOK, plan)
+}
+
+type DraftPlanRequest struct {
+	Instructions string `json:"instructions"`
+}
+
+// draftPlan starts a survey run that drafts the plan:
+// POST /sessions/:id/plan/draft {instructions?} → {run_id}.
+func (s *Server) draftPlan(c *gin.Context) {
+	var req DraftPlanRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	session, a, ok := s.agentForSession(c)
+	if !ok {
+		return
+	}
+	if session.Status == "scanning" {
+		c.JSON(http.StatusConflict, gin.H{"error": "会话还在扫描中，请等扫描完成后再生成方案"})
+		return
+	}
+	run, err := s.launchRun(session.ID, db.RunPhaseSurvey, "生成整理方案", func(ctx context.Context, run *db.AgentRun) runOutcome {
+		logger := agent.NewLogger(session.ID, run.ID, 0)
+		summary, err := a.RunSurvey(ctx, logger, req.Instructions)
+		return runOutcome{Summary: summary, Err: err, Tokens: logger.Tokens()}
+	})
+	respondRunStart(c, run, err)
 }

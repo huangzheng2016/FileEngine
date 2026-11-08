@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -13,16 +12,13 @@ import (
 // RequestType identifies the kind of operation requested.
 type RequestType string
 
-const (
-	RequestAutoTag  RequestType = "autotag"
-	RequestInstruct RequestType = "instruct"
-)
+const RequestAutoTag RequestType = "autotag"
 
-// OrchestratorRequest is the unified request for the orchestrator.
+// OrchestratorRequest is the unified request for the orchestrator. Chat,
+// survey and review runs do not route through it (see Agent.RunChat,
+// RunSurvey, RunReview).
 type OrchestratorRequest struct {
-	Type       RequestType
-	UserPrompt string
-	Files      []db.FileEntry
+	Type RequestType
 }
 
 // OrchestratorAgent routes requests to specialized sub-agents and coordinates execution.
@@ -50,35 +46,13 @@ func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, mode
 	}
 }
 
-// DetectRequestType analyzes a user prompt to determine the best agent to handle it.
-func DetectRequestType(prompt string) RequestType {
-	lower := strings.ToLower(prompt)
-	// Keywords suggesting classification/organization
-	autoKeywords := []string{"整理", "分类", "归档", "自动", "organize", "classify", "sort", "auto"}
-	for _, kw := range autoKeywords {
-		if strings.Contains(lower, kw) {
-			return RequestAutoTag
-		}
-	}
-	return RequestInstruct
-}
-
-// Run executes the request by routing to the appropriate sub-agent and summarizing results.
+// Run executes the request by routing to the appropriate sub-agent.
 func (o *OrchestratorAgent) Run(ctx context.Context, req OrchestratorRequest) (string, error) {
 	switch req.Type {
 	case RequestAutoTag:
 		return o.runAutoTag(ctx)
-	case RequestInstruct:
-		return o.runInstruct(ctx, req.Files, req.UserPrompt)
 	default:
-		// Fallback: try to detect from prompt
-		if req.UserPrompt != "" {
-			detected := DetectRequestType(req.UserPrompt)
-			if detected == RequestAutoTag {
-				return o.runAutoTag(ctx)
-			}
-		}
-		return o.runInstruct(ctx, req.Files, req.UserPrompt)
+		return "", fmt.Errorf("unknown request type %q", req.Type)
 	}
 }
 
@@ -161,24 +135,4 @@ func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
 		pruned = append(pruned, fmt.Sprintf("%s (%s)", c.Name, c.Path))
 	}
 	return pruned
-}
-
-func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
-	log.Printf("orchestrator: routing to InstructAgent for session %d", o.sessionID)
-
-	instruct := NewInstructAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger)
-	response, err := instruct.Run(ctx, files, userPrompt)
-	if err != nil {
-		return "", fmt.Errorf("instruct failed: %w", err)
-	}
-
-	// Generate summary
-	summary := NewSummaryAgent(o.repo, o.sessionID)
-	report, err := summary.Run(ctx)
-	if err != nil {
-		log.Printf("orchestrator: summary generation failed: %v", err)
-		return response, nil
-	}
-
-	return response + "\n\n---\n\n" + report, nil
 }
