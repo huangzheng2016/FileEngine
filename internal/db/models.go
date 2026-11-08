@@ -8,11 +8,12 @@ import (
 
 type FileEntry struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1" json:"scan_session_id"`
+	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1;index:idx_session_newkey,priority:1;index:idx_session_role,priority:1" json:"scan_session_id"`
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024;index:idx_session_newpath,priority:2" json:"new_path"` // always "/"-rooted when set
+	NewPathKey    string     `gorm:"size:1024;index:idx_session_newkey,priority:2" json:"-"`         // CollisionKey(NewPath), "" without a target; written with new_path
 	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"`  // "move" / "copy" / ""
-	Role          string     `gorm:"size:16;index" json:"role"`                                      // decision role, see Role* in contract.go
+	Role          string     `gorm:"size:16;index:idx_session_role,priority:2" json:"role"`          // decision role, see Role* in contract.go
 	Reason        string     `gorm:"size:1024" json:"reason"`
 	Confidence    float64    `json:"confidence"`                        // agent confidence 0-1; 0 = not given
 	NeedsReview   bool       `gorm:"default:false" json:"needs_review"` // low-confidence decision: excluded from execution until the user confirms
@@ -20,13 +21,13 @@ type FileEntry struct {
 	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"
-	Name          string     `gorm:"size:512" json:"name"`
+	Name          string     `gorm:"size:512;index:idx_session_parent,priority:4" json:"name"`
 	Size          int64      `json:"size"`
 	ModTime       time.Time  `json:"mod_time"`
 	Permissions   string     `gorm:"size:16" json:"permissions"`
 	FileType      string     `gorm:"size:16;index:idx_session_type_tagged_depth,priority:2;index:idx_session_parent,priority:3" json:"file_type"` // "file" / "directory" / "symlink"
 	Description   string     `gorm:"type:text" json:"description"`
-	Tagged        bool       `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3;index:idx_session_parent,priority:4" json:"tagged"`
+	Tagged        bool       `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3" json:"tagged"`
 	ParentPath    string     `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
 	Depth         int        `gorm:"index:idx_session_type_tagged_depth,priority:4" json:"depth"`
 	ChildCount    int        `json:"child_count"`  // direct children kept by the scan (directories only)

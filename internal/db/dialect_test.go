@@ -27,17 +27,8 @@ func TestLikeLiteral(t *testing.T) {
 	}
 }
 
-func TestChildPathPattern(t *testing.T) {
-	if got := childPathPattern("/photo"); got != "/photo/%" {
-		t.Fatalf("plain dir: got %q", got)
-	}
-	if got := childPathPattern("/my_dir"); got != "/my!_dir/%" {
-		t.Fatalf("dir with underscore: got %q", got)
-	}
-}
-
-// nameSearchCondition picks ILIKE only for PostgreSQL; SQLite and MySQL LIKE
-// are already case-insensitive.
+// nameSearchCondition is case-insensitive per dialect: SQLite LIKE already is,
+// PostgreSQL needs ILIKE, MySQL relabels its binary column collation.
 func TestNameSearchConditionPerDialect(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -46,7 +37,7 @@ func TestNameSearchConditionPerDialect(t *testing.T) {
 	}{
 		{"sqlite", sqlite.Open("file::memory:?cache=shared"), "name LIKE ?"},
 		{"postgres", postgres.New(postgres.Config{DSN: "host=localhost dbname=x sslmode=disable", WithoutQuotingCheck: true}), "name ILIKE ?"},
-		{"mysql", mysql.New(mysql.Config{DSN: "u:p@tcp(127.0.0.1:3306)/x", SkipInitializeWithVersion: true}), "name LIKE ?"},
+		{"mysql", mysql.New(mysql.Config{DSN: "u:p@tcp(127.0.0.1:3306)/x", SkipInitializeWithVersion: true}), "name COLLATE utf8mb4_general_ci LIKE ?"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

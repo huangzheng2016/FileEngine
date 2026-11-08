@@ -2,7 +2,13 @@ package db
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"math/rand/v2"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -89,38 +95,69 @@ func (r *Repository) DeleteSession(id uint) error {
 	})
 }
 
-func (r *Repository) RefreshSessionCounts(id uint) error {
-	// One query for all FileEntry aggregations.
-	var fileCounts struct {
+// RefreshSessionCounts recomputes the stored session counters and writes
+// them only when they changed. It is never called on a read path: writers
+// call it at the end of a phase, and entry writes schedule it through
+// touchCounts.
+func (r *Repository) RefreshSessionCounts(id uint) error { return r.refreshCounts(r.Reader(), id) }
+
+func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
+	var c struct {
 		Total    int64
 		Tagged   int64
 		Planned  int64
 		Executed int64
 		Size     int64
 	}
-	if err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).
+	if err := reader.Model(&FileEntry{}).Where("scan_session_id = ?", id).
 		Select(`COUNT(*) AS total,
-			SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END) AS tagged,
-			SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END) AS planned,
-			SUM(CASE WHEN executed = ? THEN 1 ELSE 0 END) AS executed,
+			COALESCE(SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END), 0) AS tagged,
+			COALESCE(SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END), 0) AS planned,
+			COALESCE(SUM(CASE WHEN executed = ? THEN 1 ELSE 0 END), 0) AS executed,
 			COALESCE(SUM(size), 0) AS size`, true, true).
-		Scan(&fileCounts).Error; err != nil {
+		Scan(&c).Error; err != nil {
 		return err
 	}
-
-	// Column-scoped update: NEVER a full-row Save. This runs on every session
-	// GET, i.e. exactly while a scan/tag/execute goroutine is writing the row
-	// — a Save of a previously loaded struct is a lost update that can
-	// resurrect status="scanning" over a finished scan (and the startup sweep
-	// would then mislabel that completed scan as interrupted).
-	return r.db.Model(&ScanSession{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"total_files":  int(fileCounts.Total),
-			"tagged_files": int(fileCounts.Tagged),
-			"planned_ops":  int(fileCounts.Planned),
-			"executed_ops": int(fileCounts.Executed),
-			"total_size":   fileCounts.Size,
+	// Column-scoped (never a Save of a loaded session, which would race the
+	// scan/run writers' status updates); the WHERE makes an unchanged row a
+	// no-op.
+	return r.db.Model(&ScanSession{}).
+		Where("id = ? AND (total_files <> ? OR tagged_files <> ? OR planned_ops <> ? OR executed_ops <> ? OR total_size <> ?)",
+			id, c.Total, c.Tagged, c.Planned, c.Executed, c.Size).
+		Updates(map[string]any{
+			"total_files":  c.Total,
+			"tagged_files": c.Tagged,
+			"planned_ops":  c.Planned,
+			"executed_ops": c.Executed,
+			"total_size":   c.Size,
 		}).Error
+}
+
+// countsDelay coalesces entry writes before a session's counters are
+// recomputed.
+var countsDelay = time.Second
+
+type countsKey struct {
+	db *gorm.DB
+	id uint
+}
+
+var countsPending sync.Map
+
+// touchCounts schedules one coalesced RefreshSessionCounts after entry
+// writes, so per-decision writes never pay for a full aggregate.
+func (r *Repository) touchCounts(sessionID uint) {
+	k := countsKey{r.db, sessionID}
+	if _, loaded := countsPending.LoadOrStore(k, struct{}{}); loaded {
+		return
+	}
+	reader := r.Reader() // resolved here: the timer must not read the package globals
+	time.AfterFunc(countsDelay, func() {
+		countsPending.Delete(k)
+		if err := WithRetry(func() error { return r.refreshCounts(reader, sessionID) }); err != nil {
+			log.Printf("refresh counts of session %d: %v", sessionID, err)
+		}
+	})
 }
 
 // SessionProgress holds read-only progress counters for live progress events.
@@ -142,7 +179,7 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 		Planned  int64
 		Executed int64
 	}
-	err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", id).
+	err := r.Reader().Model(&FileEntry{}).Where("scan_session_id = ?", id).
 		Select(`COUNT(*) AS total,
 			SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END) AS tagged,
 			SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END) AS planned,
@@ -171,7 +208,7 @@ func (r *Repository) CreateFiles(files []FileEntry) error {
 	// macOS) each commit's fsync costs ~100ms — hundreds of batches meant
 	// the DB tail of a scan dwarfed the traversal itself.
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		return tx.CreateInBatches(files, 500).Error
+		return tx.CreateInBatches(files, r.InsertBatchRows()).Error
 	})
 }
 
@@ -197,12 +234,16 @@ type FileQuery struct {
 	Search       string
 	Page         int
 	PageSize     int
-	MinID        uint // cursor-based pagination: only return rows with id > MinID
 	Role         *string
 	NeedsReview  *bool
 	Sensitive    *bool
 }
 
+// fileOrder is the listing order; id makes it total so pages never overlap.
+const fileOrder = "file_type ASC, name ASC, id ASC"
+
+// ListFiles returns one offset page plus the total count (the REST listing,
+// whose UI shows page numbers). Iterating callers use ListFilesAfter.
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
 
@@ -219,17 +260,45 @@ func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	}
 
 	var files []FileEntry
-	query := tx
-	if q.MinID > 0 {
-		query = query.Where("id > ?", q.MinID)
-	}
 	offset := (q.Page - 1) * q.PageSize
-	err := query.Order("file_type ASC, name ASC").Offset(offset).Limit(q.PageSize).Find(&files).Error
+	err := tx.Order(fileOrder).Offset(offset).Limit(q.PageSize).Find(&files).Error
 	return files, total, err
 }
 
+// ErrBadCursor reports a keyset cursor whose entry no longer exists.
+var ErrBadCursor = errors.New("bad cursor")
+
+// ListFilesAfter is keyset pagination over q in fileOrder: the page after
+// entry afterID (0 = first page) and whether more rows follow, without a
+// COUNT. For a directory listing idx_session_parent serves both the filter
+// and the order, so every page costs the same.
+func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]FileEntry, bool, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
+	if afterID > 0 {
+		var last []FileEntry
+		if err := r.db.Select("id", "file_type", "name").Where("scan_session_id = ? AND id = ?", q.SessionID, afterID).Limit(1).Find(&last).Error; err != nil {
+			return nil, false, err
+		}
+		if len(last) == 0 {
+			return nil, false, ErrBadCursor
+		}
+		tx = tx.Where("(file_type, name, id) > (?, ?, ?)", last[0].FileType, last[0].Name, last[0].ID)
+	}
+	var files []FileEntry
+	if err := tx.Order(fileOrder).Limit(limit + 1).Find(&files).Error; err != nil {
+		return nil, false, err
+	}
+	if len(files) > limit {
+		return files[:limit], true, nil
+	}
+	return files, false, nil
+}
+
 // applyFileFilters builds the shared WHERE clause for FileQuery consumers
-// (ListFiles, SampleFiles). Pagination/cursor fields are left to the caller.
+// (ListFiles, ListFilesAfter, SampleFiles). Pagination is left to the caller.
 func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	if q.SessionID > 0 {
 		tx = tx.Where("scan_session_id = ?", q.SessionID)
@@ -251,7 +320,8 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 		}
 	}
 	if q.CategoryPath != nil {
-		tx = tx.Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(*q.CategoryPath)+"%")
+		cond, args := targetCond(tx, *q.CategoryPath)
+		tx = tx.Where(cond, args...)
 	}
 	if q.Role != nil {
 		tx = tx.Where("role = ?", *q.Role)
@@ -269,20 +339,47 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 }
 
 // SampleFiles returns up to n randomly chosen files matching the query
-// filters. It plucks matching IDs, shuffles them in Go (keeps the SQL
-// dialect-agnostic — RANDOM()/RAND() differ), then loads and path-sorts the
-// winners so the output reads deterministically.
+// filters, path-sorted. It probes random points of the matching id range
+// (each probe is one indexed "id >= x LIMIT 1") instead of loading every id;
+// rows after id gaps are slightly favored, which sampling tolerates.
 func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
 	if n <= 0 {
 		return nil, nil
 	}
-	var ids []uint
-	if err := applyFileFilters(r.db.Model(&FileEntry{}), q).Pluck("id", &ids).Error; err != nil {
+	base := func() *gorm.DB { return applyFileFilters(r.db.Model(&FileEntry{}), q) }
+	var head []uint
+	if err := base().Order("id").Limit(n+1).Pluck("id", &head).Error; err != nil {
 		return nil, err
 	}
-	rand.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] })
-	if len(ids) > n {
-		ids = ids[:n]
+	ids := head
+	if len(head) > n {
+		var maxID uint
+		if err := base().Select("MAX(id)").Scan(&maxID).Error; err != nil {
+			return nil, err
+		}
+		lo := head[0]
+		seen := make(map[uint]bool, n)
+		ids = make([]uint, 0, n)
+		for tries := 0; len(ids) < n && tries < 4*n; tries++ {
+			probe := lo + uint(rand.Uint64N(uint64(maxID-lo)+1))
+			var hit []uint
+			if err := base().Where("id >= ?", probe).Order("id").Limit(1).Pluck("id", &hit).Error; err != nil {
+				return nil, err
+			}
+			if len(hit) == 1 && !seen[hit[0]] {
+				seen[hit[0]] = true
+				ids = append(ids, hit[0])
+			}
+		}
+		for _, id := range head {
+			if len(ids) >= n {
+				break
+			}
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
 	}
 	var files []FileEntry
 	if len(ids) == 0 {
@@ -379,9 +476,8 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 				Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾目录", "batch_index": JunkBatchIndex}).Error; err != nil {
 				return err
 			}
-			res := tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(d.OriginalPath)).
-				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "reason": MemberReason(d.OriginalPath, RoleSkip), "new_path": "", "operation": "", "batch_index": JunkBatchIndex})
+			res := entriesUnder(tx, sessionID, d.OriginalPath).
+				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "reason": MemberReason(d.OriginalPath, RoleSkip), "new_path": "", "new_path_key": "", "operation": "", "batch_index": JunkBatchIndex})
 			if res.Error != nil {
 				return res.Error
 			}
@@ -389,6 +485,9 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 		}
 		return nil
 	})
+	if err == nil && total > 0 {
+		r.touchCounts(sessionID)
+	}
 	return total, err
 }
 
@@ -409,8 +508,10 @@ func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
 // genuinely in use (multi-session rescan workflows).
 func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath string) (int64, error) {
 	var n int64
+	cond, args := targetCond(r.db, categoryPath)
 	err := r.db.Model(&FileEntry{}).
-		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND operation != '' AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", filesystemID, categoryPath, childPathPattern(categoryPath)).
+		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND operation != ''", filesystemID).
+		Where(cond, args...).
 		Count(&n).Error
 	return n, err
 }
@@ -418,9 +519,41 @@ func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath st
 // ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
 // whose new_path falls under the given category path, across all sessions of a filesystem.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {
-	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", filesystemID, categoryPath, childPathPattern(categoryPath)).
-		Updates(map[string]interface{}{"new_path": "", "operation": "", "tagged": false}).Error
+	sessions, err := r.filesystemSessionIDs(filesystemID)
+	if err != nil || len(sessions) == 0 {
+		return err
+	}
+	cond, args := targetCond(r.db, categoryPath)
+	if err := r.db.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+		Updates(map[string]interface{}{"new_path": "", "new_path_key": "", "operation": "", "tagged": false}).Error; err != nil {
+		return err
+	}
+	for _, id := range sessions {
+		r.touchCounts(id)
+	}
+	return nil
+}
+
+func (r *Repository) filesystemSessionIDs(filesystemID uint) ([]uint, error) {
+	var ids []uint
+	err := r.db.Model(&ScanSession{}).Where("filesystem_id = ?", filesystemID).Pluck("id", &ids).Error
+	return ids, err
+}
+
+// categoryDir is a category path in the stored target spelling without a
+// trailing slash ("/" becomes "", the whole target tree).
+func categoryDir(p string) string {
+	return strings.TrimSuffix(NormalizeTargetPath(p), "/")
+}
+
+// targetCond matches new_path at or under a category path; "/" sibling
+// prefixes ("/photo" vs "/photos2") never match.
+func targetCond(tx *gorm.DB, categoryPath string) (string, []any) {
+	dir := categoryDir(categoryPath)
+	if dir == "" {
+		return subtreeCond(tx, "new_path", "")
+	}
+	return atOrUnderCond(tx, "new_path", dir)
 }
 
 func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
@@ -495,36 +628,80 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	if err != nil {
 		return nil, err
 	}
-	result := make([]CategoryUsage, 0, len(cats))
-	for _, c := range cats {
-		var count int64
-		if err := r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", sessionID, c.Path, childPathPattern(c.Path)).
-			Count(&count).Error; err != nil {
-			return nil, err
-		}
-		result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, Description: c.Description, Structure: c.Structure, FileCount: count})
+	stats, err := r.categoryStats(sessionID, cats)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CategoryUsage, len(cats))
+	for i, c := range cats {
+		result[i] = CategoryUsage{Name: c.Name, Path: c.Path, Description: c.Description, Structure: c.Structure, FileCount: stats[i].Count}
 	}
 	return result, nil
+}
+
+type categoryStat struct {
+	Idx   int
+	Count int64
+	Size  int64
+}
+
+// categoryStatsChunk bounds the UNION ALL arms of one statement (SQLite caps
+// compound selects at 500).
+const categoryStatsChunk = 200
+
+// categoryStats counts the session's targets at or under each category path
+// (and sums their sizes) in one UNION ALL statement per chunk; every arm is an
+// index range on idx_session_newpath.
+func (r *Repository) categoryStats(sessionID uint, cats []Category) ([]categoryStat, error) {
+	out := make([]categoryStat, len(cats))
+	for start := 0; start < len(cats); start += categoryStatsChunk {
+		end := min(start+categoryStatsChunk, len(cats))
+		arms := make([]string, 0, end-start)
+		var args []any
+		for i := start; i < end; i++ {
+			cond, cargs := targetCond(r.db, cats[i].Path)
+			arms = append(arms, fmt.Sprintf("SELECT %d AS idx, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size FROM file_entries WHERE scan_session_id = ? AND %s", i, cond))
+			args = append(append(args, sessionID), cargs...)
+		}
+		var rows []categoryStat
+		if err := r.db.Raw(strings.Join(arms, " UNION ALL "), args...).Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out[row.Idx] = row
+		}
+	}
+	return out, nil
 }
 
 func (r *Repository) UpdateCategory(c *Category) error {
 	return r.db.Save(c).Error
 }
 
-// UpdateCategoryPath updates the category and cascades the path change to all files
-// whose new_path starts with the old path prefix.
+// UpdateCategoryPath saves the category and moves the targets at or under
+// its old path to the new one, in the filesystem's sessions only. The prefix
+// is swapped by position, so "/photo" → "/pics" leaves "/photos2" alone and a
+// repeated substring deeper in the path is never touched.
 func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
 	if err := r.db.Save(c).Error; err != nil {
 		return err
 	}
-	if oldPath != "" && oldPath != c.Path {
-		// Update all files whose new_path starts with oldPath
-		return r.db.Model(&FileEntry{}).
-			Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(oldPath)+"%").
-			Update("new_path", gorm.Expr("REPLACE(new_path, ?, ?)", oldPath, c.Path)).Error
+	from, to := categoryDir(oldPath), categoryDir(c.Path)
+	if from == "" || to == "" || from == to {
+		return nil
 	}
-	return nil
+	sessions, err := r.filesystemSessionIDs(c.FilesystemID)
+	if err != nil || len(sessions) == 0 {
+		return err
+	}
+	cond, args := atOrUnderCond(r.db, "new_path", from)
+	return WithRetry(func() error {
+		return r.db.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+			Updates(map[string]any{
+				"new_path":     gorm.Expr(concatExpr(r.db, "?", "substr(new_path, ?)"), to, utf8.RuneCountInString(from)+1),
+				"new_path_key": gorm.Expr(concatExpr(r.db, "?", "substr(new_path_key, ?)"), CollisionKey(to), utf8.RuneCountInString(CollisionKey(from))+1),
+			}).Error
+	})
 }
 
 func (r *Repository) DeleteCategory(id uint) error {
@@ -612,20 +789,16 @@ func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]Categ
 	if err != nil {
 		return nil, err
 	}
+	stats, err := r.categoryStats(sessionID, cats)
+	if err != nil {
+		return nil, err
+	}
 	var result []CategoryDistribution
-	for _, c := range cats {
-		var stats struct {
-			Count int64
-			Size  int64
-		}
-		r.db.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND (new_path = ? OR new_path LIKE ?"+likeEscapeClause+")", sessionID, c.Path, childPathPattern(c.Path)).
-			Select("COUNT(*) AS count, COALESCE(SUM(size), 0) AS size").
-			Scan(&stats)
-		if stats.Count > 0 {
+	for i, c := range cats {
+		if stats[i].Count > 0 {
 			result = append(result, CategoryDistribution{
 				Name: c.Name, Path: c.Path,
-				FileCount: stats.Count, TotalSize: stats.Size,
+				FileCount: stats[i].Count, TotalSize: stats[i].Size,
 			})
 		}
 	}

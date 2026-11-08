@@ -81,6 +81,7 @@ func (r *Repository) ApplyScope(session *ScanSession) (int64, error) {
 	if len(scope) == 0 {
 		return 0, nil
 	}
+	defer r.touchCounts(session.ID)
 	var ids []uint
 	err := r.scanFiles(session.ID, "role = ?", []any{RoleUndecided}, func(rows []FileEntry) error {
 		for _, f := range rows {

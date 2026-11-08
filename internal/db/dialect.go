@@ -6,19 +6,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// LIKE helpers shared by the three supported dialects (SQLite / MySQL /
-// PostgreSQL). Two semantic differences matter here:
+// Dialect helpers shared by SQLite / MySQL / PostgreSQL.
 //
-//   - Case sensitivity: PostgreSQL LIKE is case-sensitive while SQLite (ASCII)
-//     and MySQL (default *_ci collation) LIKE are not. Path-prefix matching
-//     compares machine-generated paths from the same scanner, so exact-case
-//     matching is the intended semantics and plain LIKE is correct on all
-//     dialects. User-facing name search must stay case-insensitive
-//     everywhere, so PostgreSQL gets ILIKE (see nameSearchCondition).
-//   - Wildcards: % and _ are LIKE metacharacters in every dialect, so a
-//     literal path or search fragment containing them over-matches (e.g. a
-//     "my_dir" prefix pattern also matches "myXdir"). likeLiteral escapes
-//     them; patterns built with it must carry likeEscapeClause.
+// Path columns compare as raw bytes on every dialect: SQLite's default BINARY
+// collation, a binary table collation on MySQL (mysqlTableOptions) and "C"
+// collation on PostgreSQL (postgresCollatePaths). Subtree matches are byte
+// ranges (subtreeCond) so they are served by the path indexes; LIKE, which
+// SQLite never serves from a BINARY index, is kept for user-facing substring
+// search only, with '%'/'_' escaped by likeLiteral.
 
 // likeEscapeClause is appended to every LIKE/ILIKE condition whose pattern
 // came from likeLiteral. The escape character is '!' rather than the common
@@ -32,20 +27,51 @@ var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
 // likeLiteral escapes LIKE wildcards in s so it matches literally.
 func likeLiteral(s string) string { return likeEscaper.Replace(s) }
 
-// childPathPattern matches path-column values strictly under dir
-// (dir + "/<anything>"), with LIKE wildcards in dir neutralized.
-func childPathPattern(dir string) string { return likeLiteral(dir) + "/%" }
+// subtreeCond matches column values strictly under dir (dir + "/<anything>")
+// as the byte range [dir+"/", dir+"0"): '0' is the byte right after '/', so
+// the range is exactly the "dir/" prefix. dir "" matches every "/"-rooted
+// value.
+func subtreeCond(tx *gorm.DB, column, dir string) (string, []any) {
+	c := pathCol(tx, column)
+	return "(" + c + " >= ? AND " + c + " < ?)", []any{dir + "/", dir + "0"}
+}
 
-// nameSearchCondition returns the case-insensitive name-search condition for
-// the dialect of tx: PostgreSQL needs ILIKE (its LIKE is case-sensitive),
-// SQLite and MySQL LIKE are already case-insensitive.
+// atOrUnderCond matches column = dir or values strictly under it.
+func atOrUnderCond(tx *gorm.DB, column, dir string) (string, []any) {
+	sub, args := subtreeCond(tx, column, dir)
+	return "(" + column + " = ? OR " + sub + ")", append([]any{dir}, args...)
+}
+
+// pathCol forces byte-order comparison of a path column on PostgreSQL; on the
+// "C"-collated path columns it is a no-op relabel, so indexes still apply.
+func pathCol(tx *gorm.DB, column string) string {
+	if tx.Dialector.Name() == "postgres" {
+		return column + ` COLLATE "C"`
+	}
+	return column
+}
+
+// concatExpr concatenates SQL expressions (MySQL parses || as OR).
+func concatExpr(tx *gorm.DB, parts ...string) string {
+	if tx.Dialector.Name() == "mysql" {
+		return "CONCAT(" + strings.Join(parts, ", ") + ")"
+	}
+	return strings.Join(parts, " || ")
+}
+
+// nameSearchCondition returns the case-insensitive name-search condition.
 func nameSearchCondition(tx *gorm.DB) string { return ciLikeCondition(tx, "name") }
 
 // ciLikeCondition is the case-insensitive LIKE condition on column for the
-// dialect of tx (ILIKE on PostgreSQL); the pattern must come from likeLiteral.
+// dialect of tx; the pattern must come from likeLiteral. SQLite LIKE is
+// already ASCII case-insensitive, PostgreSQL needs ILIKE, and MySQL tables use
+// a binary collation, so the column is relabeled to a case-insensitive one.
 func ciLikeCondition(tx *gorm.DB, column string) string {
-	if tx.Dialector.Name() == "postgres" {
+	switch tx.Dialector.Name() {
+	case "postgres":
 		return column + " ILIKE ?" + likeEscapeClause
+	case "mysql":
+		return column + " COLLATE utf8mb4_general_ci LIKE ?" + likeEscapeClause
 	}
 	return column + " LIKE ?" + likeEscapeClause
 }
@@ -68,4 +94,11 @@ func instrFunc(tx *gorm.DB) string {
 		return "strpos"
 	}
 	return "instr"
+}
+
+// entriesUnder scopes a FileEntry query to the session's entries strictly
+// under dir.
+func entriesUnder(tx *gorm.DB, sessionID uint, dir string) *gorm.DB {
+	cond, args := subtreeCond(tx, "original_path", dir)
+	return tx.Model(&FileEntry{}).Where("scan_session_id = ?", sessionID).Where(cond, args...)
 }

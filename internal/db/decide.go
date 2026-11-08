@@ -64,6 +64,7 @@ var decidedRoles = []string{RoleUnit, RoleFile, RoleSkip}
 //     reports what it overrode; its descendants become members;
 //   - unit/file targets get plan-time collision naming.
 func (r *Repository) Decide(sessionID uint, d Decision) (*DecideResult, error) {
+	defer r.touchCounts(sessionID)
 	var res *DecideResult
 	err := WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
@@ -84,6 +85,7 @@ type DecideOutcome struct {
 // DecideBatch applies decisions in chunked transactions; rejections are
 // reported per item, storage failures abort.
 func (r *Repository) DecideBatch(sessionID uint, ds []Decision) ([]DecideOutcome, error) {
+	defer r.touchCounts(sessionID)
 	out := make([]DecideOutcome, len(ds))
 	const chunk = 200
 	for start := 0; start < len(ds); start += chunk {
@@ -177,17 +179,17 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	}
 	res.NeedsReview = res.NewPath != "" && d.Confidence > 0 && d.Confidence < ReviewConfidence
 	if err := tx.Model(&FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
-		"role": role, "new_path": res.NewPath, "operation": op, "reason": d.Reason,
+		"role": role, "new_path": res.NewPath, "new_path_key": targetKey(res.NewPath), "operation": op, "reason": d.Reason,
 		"tagged": role != RoleUndecided, "needs_review": res.NeedsReview, "confidence": d.Confidence,
 	}).Error; err != nil {
 		return nil, err
 	}
 
 	if isDir {
-		under := tx.Model(&FileEntry{}).Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(p))
+		under := entriesUnder(tx, sessionID, p)
 		switch {
 		case ownsSubtree:
-			q := under.Updates(map[string]any{"role": RoleMember, "new_path": "", "operation": "", "reason": MemberReason(p, role),
+			q := under.Updates(map[string]any{"role": RoleMember, "new_path": "", "new_path_key": "", "operation": "", "reason": MemberReason(p, role),
 				"tagged": true, "needs_review": false, "confidence": 0})
 			if q.Error != nil {
 				return nil, q.Error
@@ -243,15 +245,13 @@ func underUnitRejection(owner *FileEntry) error {
 // decidedDescendants lists up to limit descendants with a decision of their
 // own and counts them all.
 func decidedDescendants(tx *gorm.DB, sessionID uint, p string, limit int) ([]string, int64, error) {
-	q := tx.Model(&FileEntry{}).Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND (role IN ? OR operation != '')",
-		sessionID, childPathPattern(p), decidedRoles)
+	q := entriesUnder(tx, sessionID, p).Where("(role IN ? OR operation != '')", decidedRoles)
 	var n int64
 	if err := q.Count(&n).Error; err != nil || n == 0 {
 		return nil, n, err
 	}
 	var paths []string
-	err := tx.Model(&FileEntry{}).Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND (role IN ? OR operation != '')",
-		sessionID, childPathPattern(p), decidedRoles).Order("original_path").Limit(limit).Pluck("original_path", &paths).Error
+	err := entriesUnder(tx, sessionID, p).Where("(role IN ? OR operation != '')", decidedRoles).Order("original_path").Limit(limit).Pluck("original_path", &paths).Error
 	return paths, n, err
 }
 
@@ -278,6 +278,7 @@ func uniqueTarget(tx *gorm.DB, sessionID uint, originalPath, target string) (str
 // target is cleared and its members become undecided. Returns how many
 // members were released.
 func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
+	defer r.touchCounts(sessionID)
 	p = strings.Trim(p, "/")
 	var released int64
 	err := WithRetry(func() error {
@@ -293,11 +294,11 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 				return reject("%s 不是整体移动或整体跳过的目录，无需拆分", p)
 			}
 			if err := tx.Model(&FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
-				"role": RoleContainer, "new_path": "", "operation": "", "reason": "拆分为逐项处理", "needs_review": false,
+				"role": RoleContainer, "new_path": "", "new_path_key": "", "operation": "", "reason": "拆分为逐项处理", "needs_review": false,
 			}).Error; err != nil {
 				return err
 			}
-			q := tx.Model(&FileEntry{}).Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND role = ?", sessionID, childPathPattern(p), RoleMember).
+			q := entriesUnder(tx, sessionID, p).Where("role = ?", RoleMember).
 				Updates(map[string]any{"role": RoleUndecided, "tagged": false})
 			released = q.RowsAffected
 			return q.Error

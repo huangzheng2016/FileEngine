@@ -67,7 +67,7 @@ func resetCols(fe db.FileEntry) map[string]any {
 	return map[string]any{
 		"size": fe.Size, "mod_time": fe.ModTime, "permissions": fe.Permissions, "file_type": fe.FileType,
 		"child_count": fe.ChildCount, "subdir_count": fe.SubdirCount,
-		"role": db.RoleUndecided, "reason": "", "new_path": "", "operation": "", "tagged": false,
+		"role": db.RoleUndecided, "reason": "", "new_path": "", "new_path_key": "", "operation": "", "tagged": false,
 		"executed": false, "executed_at": nil, "execute_mode": "", "description": "", "batch_index": 0,
 		"taken_at": nil, "camera": "", "has_gps": false, "date_source": "",
 		"hash": "", "duplicate_of": nil,

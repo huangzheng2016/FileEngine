@@ -36,12 +36,7 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	}
 
 	// Fresh slate: drop + re-migrate so the test is re-runnable on the same DB.
-	if err := DB.Migrator().DropTable(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
-		t.Fatalf("drop tables: %v", err)
-	}
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
-		t.Fatalf("re-migrate: %v", err)
-	}
+	resetSchema(t)
 	r := NewRepository(DB)
 
 	fs := &Filesystem{Name: "pgfs", Protocol: "local", BasePath: "/data"}
@@ -106,8 +101,8 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload session: %v", err)
 	}
-	if reloaded.TotalFiles != len(entries) || reloaded.TaggedFiles != 2 {
-		t.Fatalf("session counts: got total=%d tagged=%d, want total=%d tagged=2",
+	if reloaded.TotalFiles != len(entries) || reloaded.TaggedFiles != 4 {
+		t.Fatalf("session counts: got total=%d tagged=%d, want total=%d tagged=4 (two units, each with one member)",
 			reloaded.TotalFiles, reloaded.TaggedFiles, len(entries))
 	}
 }
@@ -119,12 +114,7 @@ func TestPostgresBrainQueries(t *testing.T) {
 	if err := Init(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
 		t.Fatalf("init postgres: %v", err)
 	}
-	if err := DB.Migrator().DropTable(&FileEntry{}, &SessionPlan{}, &MemoryItem{}); err != nil {
-		t.Fatalf("drop tables: %v", err)
-	}
-	if err := DB.AutoMigrate(&FileEntry{}, &SessionPlan{}, &MemoryItem{}); err != nil {
-		t.Fatalf("re-migrate: %v", err)
-	}
+	resetSchema(t)
 	r := NewRepository(DB)
 
 	seedPreviewFixture(t, r)

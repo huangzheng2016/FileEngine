@@ -160,7 +160,7 @@ func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]FileE
 	pattern := "%" + likeLiteral(q) + "%"
 	tx := r.db.Where("scan_session_id = ?", sessionID)
 	err := tx.Where(r.db.Where("original_path = ?", q).
-		Or("original_path LIKE ?"+likeEscapeClause, pattern).
+		Or(ciLikeCondition(r.db, "original_path"), pattern).
 		Or(nameSearchCondition(r.db), pattern)).
 		Order("depth ASC, original_path ASC").Limit(limit).Find(&files).Error
 	return files, err

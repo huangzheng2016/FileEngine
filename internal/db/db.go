@@ -9,7 +9,6 @@ import (
 	"FileEngine/internal/config"
 
 	"github.com/glebarez/sqlite"
-	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -41,7 +40,7 @@ func Init(cfg config.DatabaseConfig) error {
 	case "sqlite":
 		dialector = sqlite.Open(sqliteDSN(cfg.DSN))
 	case "mysql":
-		dialector = mysql.Open(cfg.DSN)
+		dialector = newMySQLDialector(cfg.DSN)
 	case "postgres":
 		dialector = postgres.Open(cfg.DSN)
 	default:
@@ -78,8 +77,7 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 	}
 
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
-		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &PlanRule{}, &ExecOp{}); err != nil {
+	if err := migrate(DB); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 

@@ -232,7 +232,6 @@ func (s *Server) getSession(c *gin.Context) {
 		return
 	}
 
-	_ = s.repo.RefreshSessionCounts(uint(id))
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})

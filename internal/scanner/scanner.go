@@ -147,6 +147,9 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	if err := s.repo.UpdateSession(session); err != nil {
 		return err
 	}
+	if err := s.repo.RefreshSessionCounts(session.ID); err != nil {
+		return err
+	}
 	if ApplyRulesHook != nil {
 		ApplyRulesHook(session.ID)
 	}
