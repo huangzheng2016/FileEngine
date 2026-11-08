@@ -28,7 +28,7 @@ func TestStreamSessionEventsUnknownSession(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/999/events/stream", nil)
 	w := httptest.NewRecorder()
-	s.Router().ServeHTTP(w, req)
+	serveAuthed(s, w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status: got %d, want 404", w.Code)
@@ -48,7 +48,7 @@ func TestStreamSessionEventsStreamsPublishedEvents(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.Router().ServeHTTP(w, req)
+		serveAuthed(s, w, req)
 	}()
 
 	// Publish repeatedly for a short window so at least one event lands after

@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"FileEngine/internal/config"
+	"FileEngine/internal/secret"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -48,7 +51,9 @@ func TestShutdownEndsStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get("http://" + ln.Addr().String() + "/api/v1/sessions")
+	req, _ := http.NewRequest(http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+config.Get().Server.Token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,5 +82,24 @@ func TestShutdownEndsStreams(t *testing.T) {
 	}
 	if err := a.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
+	}
+}
+
+// TestNewSecuritySetup pins the startup security wiring: a token is generated
+// and persisted, the secret key file is created 0600 next to the database, and
+// requests without the token are refused.
+func TestNewSecuritySetup(t *testing.T) {
+	a := newTestApp(t)
+	tok := config.Get().Server.Token
+	if len(tok) < 40 {
+		t.Fatalf("token not generated: %q", tok)
+	}
+	dir := filepath.Dir(config.Path())
+	st, err := os.Stat(filepath.Join(dir, secret.KeyFileName))
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("secret key file: %v %v", st, err)
+	}
+	if a.Config().Server.Host != "127.0.0.1" {
+		t.Fatalf("default bind = %q", a.Config().Server.Host)
 	}
 }

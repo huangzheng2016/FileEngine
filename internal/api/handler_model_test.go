@@ -32,7 +32,7 @@ func doModelRequest(t *testing.T, s *Server, method, path string, body any) (int
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	s.Router().ServeHTTP(w, req)
+	serveAuthed(s, w, req)
 	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response %q: %v", w.Body.String(), err)

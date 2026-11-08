@@ -26,7 +26,7 @@ func getLogs(t *testing.T, s *Server, query string) (int, []map[string]any, floa
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs?"+query, nil)
 	w := httptest.NewRecorder()
-	s.Router().ServeHTTP(w, req)
+	serveAuthed(s, w, req)
 	if w.Code != http.StatusOK {
 		return w.Code, nil, 0
 	}

@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -48,7 +49,7 @@ func (s *Server) listFiles(c *gin.Context) {
 
 	files, total, err := s.repo.ListFiles(q)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"files": files, "total": total})
@@ -99,19 +100,19 @@ func (s *Server) updateFile(c *gin.Context) {
 
 	if req.Description != nil {
 		if err := s.repo.UpdateFileFields(file.ID, map[string]any{"description": *req.Description}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 	}
 	if req.NewPath != nil {
 		if err := pathutil.ValidateFSPath(*req.NewPath); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid new_path: " + err.Error()})
+			badRequest(c, "目标路径非法："+err.Error())
 			return
 		}
 		oldTarget := file.NewPath
 		final, _, err := s.repo.SetTargetUnique(file.ScanSessionID, file.OriginalPath, *req.NewPath, file.FileType)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := s.learnCorrection(*file, oldTarget, final); err != nil {
@@ -121,7 +122,7 @@ func (s *Server) updateFile(c *gin.Context) {
 
 	updated, err := s.repo.GetFile(file.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -148,46 +149,50 @@ func (s *Server) learnCorrection(f db.FileEntry, oldTarget, newTarget string) er
 func (s *Server) getFileContent(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, "无效的文件 ID")
 		return
 	}
-
 	file, err := s.repo.GetFile(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		notFound(c, "文件不存在")
 		return
 	}
-
-	// Resolve filesystem connection from session
+	src, err := pathutil.RootRelative(file.OriginalPath)
+	if err != nil {
+		badRequest(c, "文件路径非法")
+		return
+	}
 	session, err := s.repo.GetSession(file.ScanSessionID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "session not found"})
+		internalError(c, err)
 		return
 	}
-
 	fsCfg, err := s.resolveFSConfig(session)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "filesystem not available: " + err.Error()})
+		internalError(c, err)
 		return
 	}
-
 	rfs, err := remotefs.NewFromConfig(fsCfg)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connect fs: " + err.Error()})
+		slog.Warn("file content: connect filesystem", "file", file.ID, "err", err)
+		abortError(c, http.StatusServiceUnavailable, "无法连接文件系统")
 		return
 	}
 	defer rfs.Close()
 
-	reader, err := rfs.ReadFile(c.Request.Context(), file.OriginalPath)
+	reader, err := rfs.ReadFile(c.Request.Context(), src)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		slog.Warn("file content: read", "file", file.ID, "err", err)
+		abortError(c, http.StatusBadGateway, "读取文件失败")
 		return
 	}
 	defer reader.Close()
 
-	c.Header("Content-Disposition", "inline; filename=\""+file.Name+"\"")
+	c.Header("Content-Disposition", contentDisposition("inline", file.Name))
 	c.Header("Content-Type", "application/octet-stream")
-	io.Copy(c.Writer, reader)
+	if _, err := io.Copy(c.Writer, reader); err != nil {
+		slog.Warn("file content: stream", "file", file.ID, "err", err)
+	}
 }
 
 type TreeNode struct {
@@ -212,7 +217,7 @@ func (s *Server) getFileTree(c *gin.Context) {
 
 	files, err := s.repo.GetTreeNodes(uint(sessionID), parentPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 

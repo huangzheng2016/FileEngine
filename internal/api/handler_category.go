@@ -18,7 +18,7 @@ func (s *Server) listCategories(c *gin.Context) {
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, cats)
@@ -55,7 +55,7 @@ func (s *Server) createCategory(c *gin.Context) {
 		Description:  req.Description,
 	}
 	if err := s.repo.CreateCategory(cat); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, cat)
@@ -95,7 +95,7 @@ func (s *Server) updateCategory(c *gin.Context) {
 	cat.Description = req.Description
 
 	if err := s.repo.UpdateCategoryPath(cat, oldPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, cat)
@@ -115,7 +115,7 @@ func (s *Server) deleteCategory(c *gin.Context) {
 	// Clear planned files under this category and reset tagged for re-classification
 	_ = s.repo.ClearPlannedByTargetPath(cat.FilesystemID, cat.Path)
 	if err := s.repo.DeleteCategory(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
@@ -136,7 +136,7 @@ func (s *Server) exportCategories(c *gin.Context) {
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	items := make([]CategoryExportItem, len(cats))

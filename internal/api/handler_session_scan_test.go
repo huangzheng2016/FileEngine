@@ -199,7 +199,7 @@ func TestRescanWaitsForPreviousScan(t *testing.T) {
 	go func() {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/1/rescan", nil)
 		w := httptest.NewRecorder()
-		s.Router().ServeHTTP(w, req)
+		serveAuthed(s, w, req)
 		rescanDone <- w.Code
 	}()
 
@@ -272,7 +272,7 @@ func TestDeleteWaitsForScan(t *testing.T) {
 	go func() {
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/1", nil)
 		w := httptest.NewRecorder()
-		s.Router().ServeHTTP(w, req)
+		serveAuthed(s, w, req)
 		deleteDone <- w.Code
 	}()
 

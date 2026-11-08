@@ -52,16 +52,21 @@ func (s *Server) backup(c *gin.Context) {
 		return
 	}
 	name := "fileengine-" + time.Now().Format("20060102-150405") + ".db"
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	c.Header("Content-Disposition", contentDisposition("attachment", name))
 	c.Header("Cache-Control", "no-store")
 	c.File(snap)
 }
+
+// drainTimeout bounds how long Shutdown waits for runs and executors.
+const drainTimeout = 30 * time.Second
 
 // Shutdown stops all running work so the process can exit cleanly: run
 // contexts are cancelled, legacy agents are stopped, and executors are asked
 // to stop after their current file operation. It waits for those to drain,
 // bounded by ctx. The HTTP server itself is shut down by the caller.
 func (s *Server) Shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, drainTimeout)
+	defer cancel()
 	if n := db.CancelAllRuns(); n > 0 {
 		slog.Info("shutdown: cancelled runs", "count", n)
 	}
@@ -107,4 +112,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// contentDisposition builds a header value that cannot be broken by quotes,
+// CR/LF or non-ASCII in the file name; unencodable names fall back to the
+// bare disposition.
+func contentDisposition(disposition, filename string) string {
+	if v := mime.FormatMediaType(disposition, map[string]string{"filename": filename}); v != "" {
+		return v
+	}
+	return disposition
 }

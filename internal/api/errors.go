@@ -1,13 +1,14 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Error envelope: every error response is {"error": "<中文消息>"}. Client
+// Error envelope: every error response is {"error": "<message in Chinese>"}. Client
 // errors carry a message meant for the user; internal errors are logged with
 // their detail server-side and answered with a fixed message so DB errors,
 // paths and driver internals never leak to the client.
@@ -28,3 +29,5 @@ func internalError(c *gin.Context, err error) {
 	slog.Error("internal error", "method", c.Request.Method, "path", c.Request.URL.Path, "err", err)
 	abortError(c, http.StatusInternalServerError, msgInternal)
 }
+
+var errConfigNotLoaded = errors.New("config not loaded")

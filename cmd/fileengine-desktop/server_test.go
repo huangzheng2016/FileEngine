@@ -29,10 +29,9 @@ func TestStartServerEndToEnd(t *testing.T) {
 	if err := paths.prepare(); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(t.TempDir()) // startServer changes directory; restore afterwards
 
 	service := &Service{}
-	guard, err := startServer(service, paths, webRoot)
+	startURL, err := startServer(service, paths, webRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +40,11 @@ func TestStartServerEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = service.ServiceShutdown() })
 
-	if cwd, _ := os.Getwd(); cwd != paths.DataDir {
-		t.Fatalf("cwd = %s, want data dir %s", cwd, paths.DataDir)
-	}
+	origin := "http://" + service.ln.Addr().String()
 
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar}
-	resp, err := client.Get(guard.bootstrapURL())
+	resp, err := client.Get(startURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +54,7 @@ func TestStartServerEndToEnd(t *testing.T) {
 		t.Fatalf("bootstrap -> SPA = %d %q", resp.StatusCode, body)
 	}
 
-	resp, err = client.Get(guard.origin + "/api/v1/sessions")
+	resp, err = client.Get(origin + "/api/v1/sessions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +63,12 @@ func TestStartServerEndToEnd(t *testing.T) {
 		t.Fatalf("API with cookie = %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(guard.origin + "/api/v1/sessions")
+	resp, err = http.Get(origin + "/api/v1/sessions")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("API without cookie = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("API without cookie = %d, want 401", resp.StatusCode)
 	}
 }
