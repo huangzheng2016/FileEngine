@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
-	"sync/atomic"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -21,31 +19,20 @@ import (
 // ============ Tool Input/Output Types ============
 
 type ListFilesInput struct {
-	ParentPath   string `json:"parent_path" jsonschema_description:"Parent directory path to list files from"`
-	FileType     string `json:"file_type,omitempty" jsonschema_description:"Filter by type: file, directory, symlink"`
-	Tagged       *bool  `json:"tagged,omitempty" jsonschema_description:"Filter by tagged status"`
-	CategoryPath string `json:"category_path,omitempty" jsonschema_description:"Filter by category path prefix (files whose target starts with this path)"`
-	Offset       int    `json:"offset,omitempty" jsonschema_description:"Number of items to skip (default 0)"`
-	Limit        int    `json:"limit,omitempty" jsonschema_description:"Max items to return (default 300)"`
+	ParentPath string `json:"parent_path" jsonschema_description:"目录路径；空=扫描根目录"`
+	FileType   string `json:"file_type,omitempty" jsonschema_description:"file / directory"`
+	Undecided  bool   `json:"undecided,omitempty" jsonschema_description:"只列出尚未决定的条目"`
+	Offset     int    `json:"offset,omitempty"`
+	Limit      int    `json:"limit,omitempty" jsonschema_description:"默认 100，最多 500"`
 }
 
+// ListFilesOutput is a compact TSV listing; names are relative to Parent.
 type ListFilesOutput struct {
-	Files []FileItem `json:"files"`
-	Total int64      `json:"total"`
-}
-
-type FileItem struct {
-	OriginalPath string `json:"original_path"`
-	Name         string `json:"name"`
-	Size         int64  `json:"size"`
-	FileType     string `json:"file_type"`
-	Description  string `json:"description,omitempty"`
-	Tagged       bool   `json:"tagged"`
-	NewPath      string `json:"new_path,omitempty"`
-	ChildCount   int    `json:"child_count,omitempty"`
-	// ArchiveSummary is the one-line listing hint for archive files (only
-	// populated on harness untagged pulls — see ToolBuilder.archiveSummaries).
-	ArchiveSummary string `json:"archive_summary,omitempty"`
+	Parent     string `json:"parent"`
+	Total      int64  `json:"total"`
+	NextOffset int    `json:"next_offset,omitempty"`
+	Columns    string `json:"columns"`
+	Rows       string `json:"rows"`
 }
 
 type GetFileInfoInput struct {
@@ -65,12 +52,14 @@ type GetFileInfoOutput struct {
 }
 
 type ReadFileInput struct {
-	Path string `json:"path" jsonschema_description:"Path of the file to read"`
+	Path   string `json:"path" jsonschema_description:"文件路径；压缩包条目用 路径::条目"`
+	Offset int    `json:"offset,omitempty" jsonschema_description:"从第几个字符开始读（续读用 next_offset）"`
 }
 
 type ReadFileOutput struct {
-	Content   string `json:"content"`
-	Truncated bool   `json:"truncated"`
+	Content    string `json:"content"`
+	Truncated  bool   `json:"truncated"`
+	NextOffset int    `json:"next_offset,omitempty"`
 }
 
 type UpdateDescriptionInput struct {
@@ -79,15 +68,6 @@ type UpdateDescriptionInput struct {
 }
 
 type UpdateDescriptionOutput struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-}
-
-type MarkTaggedInput struct {
-	Path string `json:"path" jsonschema_description:"Original path of the file or directory to mark as tagged (a directory's children are also marked)"`
-}
-
-type MarkTaggedOutput struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 }
@@ -104,24 +84,6 @@ type CategoryItem struct {
 	Structure     string `json:"structure,omitempty"`
 	Description   string `json:"description"`
 	AgentEditable bool   `json:"agent_editable"`
-}
-
-type SetTargetInput struct {
-	Path    string `json:"path" jsonschema_description:"Original path of the file/directory"`
-	NewPath string `json:"new_path" jsonschema_description:"Target path under a category folder. Empty string clears the target"`
-}
-
-type SetTargetOutput struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	// NewPath is the stored target. It differs from the requested path when
-	// another entry already targeted it ("name (2).ext" was chosen).
-	NewPath string `json:"new_path,omitempty"`
-	// ClearedChildren reports how many already-planned descendants the
-	// directory cascade overrode (outer target wins over inner). Non-zero
-	// means finer child classifications were just discarded.
-	ClearedChildren int64  `json:"cleared_children,omitempty"`
-	Guidance        string `json:"guidance,omitempty"`
 }
 
 type CreateCategoryInput struct {
@@ -208,13 +170,6 @@ type ToolBuilder struct {
 	// guard remembers the category-set snapshot this worker's agent last saw
 	// and backs the create_category guard rails (see category_guard.go).
 	guard categoryGuard
-	// harness, when non-nil, marks this builder as belonging to a continuous
-	// (long-run) worker: untagged pulls (list_files / query_files with
-	// tagged=false) are auto-sharded by id % numWorkers = workerID so
-	// concurrent harness workers never see each other's files, and every
-	// such pull rolls a fresh pull on the worker's lane (pull_done for the
-	// previous pull + pull_begin for the new one).
-	harness *harnessContext
 
 	// RunID is the agent run these tools act for; tool-originated events
 	// (plan_updated, memory_updated) carry it. 0 outside a run.
@@ -225,79 +180,6 @@ type ToolBuilder struct {
 	// notes tracks which shared session notes this worker has already seen
 	// (see TakeNewNotes).
 	notes notesCursor
-}
-
-type harnessContext struct {
-	workerID     int
-	numWorkers   int
-	batchCounter *int32
-	// lastPullIDs remembers the file ids of the most recent non-empty untagged
-	// pull so the next pull — or harnessSettlePull at run end — can
-	// close it out with a pull_done event (tagged/missed settlement).
-	lastPullIDs []uint
-}
-
-// withHarness marks the builder as a continuous worker's toolset.
-func (tb *ToolBuilder) withHarness(workerID, numWorkers int, batchCounter *int32) *ToolBuilder {
-	tb.harness = &harnessContext{workerID: workerID, numWorkers: numWorkers, batchCounter: batchCounter}
-	return tb
-}
-
-// harnessShard applies harness semantics to an untagged file query before it
-// runs: shard it to this worker so concurrent harness workers never see each
-// other's files. Returns true when the query is an untagged pull under an
-// active harness — the caller then rolls a new pull once the query comes
-// back non-empty (harnessNotePull).
-func (tb *ToolBuilder) harnessShard(q *db.FileQuery) bool {
-	if tb.harness == nil || q.Tagged == nil || *q.Tagged {
-		return false
-	}
-	if tb.harness.numWorkers > 1 {
-		q.IDMod, q.IDModRem = tb.harness.numWorkers, tb.harness.workerID
-	}
-	return true
-}
-
-// harnessNotePull rolls a fresh pull for a non-empty untagged pull in a
-// continuous run: settles the previous pull (pull_done), advances the
-// internal batch cursor, and announces the new pull (pull_begin).
-func (tb *ToolBuilder) harnessNotePull(label string, files []db.FileEntry) {
-	if tb.harness == nil || len(files) == 0 {
-		return
-	}
-	tb.harnessSettlePull()
-	batchIdx := atomic.AddInt32(tb.harness.batchCounter, 1)
-	tb.logger.SetBatch(int(batchIdx))
-	ids := make([]uint, len(files))
-	for i, f := range files {
-		ids[i] = f.ID
-	}
-	tb.logger.EmitPullBegin(label, len(files))
-	tb.harness.lastPullIDs = ids
-}
-
-// harnessSettlePull closes out the last open pull with a pull_done event:
-// files tagged since the pull count as classified, the rest as missed.
-// Called before each new pull and once at run end (the agent's tool stream
-// is sequential, so by the next pull the previous one has been processed).
-func (tb *ToolBuilder) harnessSettlePull() {
-	if tb.harness == nil || len(tb.harness.lastPullIDs) == 0 {
-		return
-	}
-	ids := tb.harness.lastPullIDs
-	tb.harness.lastPullIDs = nil
-	tagged, err := tb.repo.TaggedStatusByIDs(ids)
-	if err != nil {
-		log.Printf("harness worker %d: pull settle failed, pull_done skipped: %v", tb.harness.workerID, err)
-		return
-	}
-	taggedCount := 0
-	for _, id := range ids {
-		if tagged[id] {
-			taggedCount++
-		}
-	}
-	tb.logger.EmitPullDone(taggedCount, len(ids)-taggedCount)
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -311,88 +193,6 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 		session:            session,
 		modelVisionEnabled: modelVisionEnabled,
 	}
-}
-
-func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "列出目录中的文件。已打标的文件会包含描述和目标路径。支持 offset+limit 分页（默认 offset=0, limit=300），如果 total > limit 需要用 offset 翻页。可用 category_path 过滤某分类下已规划的文件", tb.listFiles)
-	if err != nil {
-		return nil, fmt.Errorf("build list_files: %w", err)
-	}
-
-	getFileInfo, err := utils.InferTool("get_file_info", "获取单个文件或目录的详细元数据", tb.getFileInfo)
-	if err != nil {
-		return nil, fmt.Errorf("build get_file_info: %w", err)
-	}
-
-	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
-	if err != nil {
-		return nil, fmt.Errorf("build read_file: %w", err)
-	}
-
-	updateDesc, err := utils.InferTool("update_description", "为文件或目录设置 AI 生成的描述", tb.updateDescription)
-	if err != nil {
-		return nil, fmt.Errorf("build update_description: %w", err)
-	}
-
-	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
-	if err != nil {
-		return nil, fmt.Errorf("build mark_tagged: %w", err)
-	}
-
-	listCats, err := utils.InferTool("list_categories", "列出所有用户定义的分类目录", tb.listCategories)
-	if err != nil {
-		return nil, fmt.Errorf("build list_categories: %w", err)
-	}
-
-	setTarget, err := utils.InferTool("set_target", "为文件/目录设置整理目标路径（仅修改数据库，不操作实际文件）。new_path 传空字符串可清除已有目标", tb.setTarget)
-	if err != nil {
-		return nil, fmt.Errorf("build set_target: %w", err)
-	}
-
-	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, listCats, setTarget}
-
-	// update_category is always available
-	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述等。如果修改了路径，该分类下所有文件的目标路径会自动更新", tb.updateCategory)
-	if err != nil {
-		return nil, fmt.Errorf("build update_category: %w", err)
-	}
-	allTools = append(allTools, updateCat)
-
-	deleteCat, err := utils.InferTool("delete_category", "删除一个分类。合并分类时先将文件迁移到目标分类再删除旧分类", tb.deleteCategory)
-	if err != nil {
-		return nil, fmt.Errorf("build delete_category: %w", err)
-	}
-	allTools = append(allTools, deleteCat)
-
-	if tb.session.AllowReadFile {
-		allTools = append(allTools, readFile)
-	}
-
-	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "当没有合适的现有分类时创建新分类，谨慎使用。受护栏校验：分类列表自你上次查看后有变化会被拒绝并返回最新列表；同名（含大小写变体）或同路径的重复创建会被拒绝。创建成功时若存在路径重叠的相似分类，返回值会附 similar_categories 参考，请评估是否归并"+categoryPolicySuffix(tb.cfg.CategoryPolicy), tb.createCategory)
-		if err != nil {
-			return nil, fmt.Errorf("build create_category: %w", err)
-		}
-		allTools = append(allTools, createCat)
-	}
-
-	if visionTool, err := tb.buildVisionTool(); err != nil {
-		return nil, err
-	} else if visionTool != nil {
-		allTools = append(allTools, visionTool)
-	}
-
-	if scriptTool, err := tb.buildScriptTool(); err != nil {
-		return nil, err
-	} else if scriptTool != nil {
-		allTools = append(allTools, scriptTool)
-	}
-
-	brain, err := tb.buildBrainTools(false)
-	if err != nil {
-		return nil, err
-	}
-	return append(allTools, brain...), nil
 }
 
 // buildVisionTool returns the view_image tool when both vision switches are on
@@ -412,81 +212,6 @@ func (tb *ToolBuilder) buildVisionTool() (tool.BaseTool, error) {
 	return viewImage, nil
 }
 
-// BuildInstructTools returns tools for user-directed instruct mode.
-func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
-	listFiles, err := utils.InferTool("list_files", "列出目录中的文件，支持 offset+limit 分页。可用 category_path 过滤某分类下已规划的文件", tb.listFiles)
-	if err != nil {
-		return nil, err
-	}
-	getFileInfo, err := utils.InferTool("get_file_info", "获取单个文件或目录的详细元数据", tb.getFileInfo)
-	if err != nil {
-		return nil, err
-	}
-	updateDesc, err := utils.InferTool("update_description", "修改文件/目录的描述", tb.updateDescription)
-	if err != nil {
-		return nil, err
-	}
-	markTagged, err := utils.InferTool("mark_tagged", "标记文件或目录为已处理；目录的所有子项会级联标记。散文件批次中每个文件处理完都要单独标记", tb.markTagged)
-	if err != nil {
-		return nil, err
-	}
-	setTarget, err := utils.InferTool("set_target", "设置文件/目录的整理目标路径。new_path 传空字符串可清除已有目标", tb.setTarget)
-	if err != nil {
-		return nil, err
-	}
-	listCats, err := utils.InferTool("list_categories", "列出所有分类目录", tb.listCategories)
-	if err != nil {
-		return nil, err
-	}
-	allTools := []tool.BaseTool{listFiles, getFileInfo, updateDesc, markTagged, setTarget, listCats}
-
-	updateCat, err := utils.InferTool("update_category", "修改已有分类的名称、路径、描述。路径变更会级联更新文件", tb.updateCategory)
-	if err != nil {
-		return nil, err
-	}
-	allTools = append(allTools, updateCat)
-
-	deleteCat, err := utils.InferTool("delete_category", "删除一个分类。合并分类时先将文件迁移到目标分类再删除旧分类", tb.deleteCategory)
-	if err != nil {
-		return nil, err
-	}
-	allTools = append(allTools, deleteCat)
-
-	if tb.session.AllowReadFile {
-		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, readFile)
-	}
-
-	if tb.session.AllowAutoCategory {
-		createCat, err := utils.InferTool("create_category", "创建新分类目录。受护栏校验：需先 list_categories 了解最新分类；同名（含大小写变体）或同路径的重复会被拒绝；创建成功时可能附 similar_categories 相似参考，请评估归并"+categoryPolicySuffix(tb.cfg.CategoryPolicy), tb.createCategory)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, createCat)
-	}
-
-	if visionTool, err := tb.buildVisionTool(); err != nil {
-		return nil, err
-	} else if visionTool != nil {
-		allTools = append(allTools, visionTool)
-	}
-
-	if scriptTool, err := tb.buildScriptTool(); err != nil {
-		return nil, err
-	} else if scriptTool != nil {
-		allTools = append(allTools, scriptTool)
-	}
-
-	brain, err := tb.buildBrainTools(true)
-	if err != nil {
-		return nil, err
-	}
-	return append(allTools, brain...), nil
-}
-
 // ============ Tool Implementations ============
 
 // normalizePath strips leading slash to match DB storage format.
@@ -498,67 +223,63 @@ func ptrStr(s string) *string {
 	return &s
 }
 
-func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {
+const listColumns = "名称\t类型\t大小\t角色\t目标\t描述"
 
+func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*ListFilesOutput, error) {
 	limit := input.Limit
 	if limit <= 0 {
-		limit = 300
+		limit = 100
 	}
-	offset := input.Offset
-	if offset < 0 {
-		offset = 0
+	limit = min(limit, 500)
+	offset := max(input.Offset, 0)
+	parent := strings.Trim(normalizePath(input.ParentPath), "/")
+	q := db.FileQuery{SessionID: tb.sessionID, ParentPath: &parent, FileType: input.FileType, Page: offset/limit + 1, PageSize: limit}
+	if input.Undecided {
+		role := db.RoleUndecided
+		q.Role = &role
 	}
-	// Convert offset+limit to page+pageSize for the repository
-	page := (offset / limit) + 1
-	q := db.FileQuery{
-		SessionID:  tb.sessionID,
-		ParentPath: ptrStr(normalizePath(input.ParentPath)),
-		FileType:   input.FileType,
-		Tagged:     input.Tagged,
-		Page:       page,
-		PageSize:   limit,
-	}
-	if input.CategoryPath != "" {
-		q.CategoryPath = &input.CategoryPath
-	}
-
-	isPull := tb.harnessShard(&q)
 	files, total, err := tb.repo.ListFiles(q)
 	if err != nil {
 		return nil, err
 	}
-	if isPull && total > 0 {
-		// A fresh untagged pull in a continuous run rolls a new pull on the
-		// worker's lane (emitted before the tool log so it orders correctly).
-		tb.harnessNotePull(fmt.Sprintf("%d files", len(files)), files)
+	out := &ListFilesOutput{Parent: parent, Total: total, Columns: listColumns, Rows: entryRows(files)}
+	if next := offset + len(files); int64(next) < total {
+		out.NextOffset = next
 	}
-
-	items := make([]FileItem, len(files))
-	for i, f := range files {
-		items[i] = FileItem{
-			OriginalPath: f.OriginalPath,
-			Name:         f.Name,
-			Size:         f.Size,
-			FileType:     f.FileType,
-			Description:  f.Description,
-			Tagged:       f.Tagged,
-			NewPath:      f.NewPath,
-			ChildCount:   f.ChildCount,
-		}
-	}
-	if isPull && total > 0 {
-		// Harness pulls carry the same archive listing summaries the batch
-		// prompt promises (bounded per pull — see archiveSummaries).
-		summaries := tb.archiveSummaries(ctx, files)
-		for i, f := range files {
-			if s := summaries[f.ID]; s != "" {
-				items[i].ArchiveSummary = SanitizeUntrustedName(s)
-			}
-		}
-	}
-
-	out := &ListFilesOutput{Files: items, Total: total}
 	return out, nil
+}
+
+// entryRows renders entries as compact TSV rows (see listColumns): names
+// only (relative to their parent), sanitized since they are untrusted.
+func entryRows(files []db.FileEntry) string {
+	var sb strings.Builder
+	for _, f := range files {
+		typ := "f"
+		size := humanBytes(f.Size)
+		if f.FileType == "directory" {
+			typ = "d"
+			size = fmt.Sprintf("%d项", f.ChildCount)
+		} else if f.FileType == "symlink" {
+			typ = "l"
+		}
+		role := f.Role
+		if role == "" {
+			role = "-"
+		}
+		if f.NeedsReview {
+			role += "?"
+		}
+		target := f.NewPath
+		if f.Sensitive {
+			target += " [敏感]"
+		}
+		desc := strings.Join(strings.Fields(f.Description), " ")
+		if r := []rune(desc); len(r) > 60 {
+			desc = string(r[:60]) + "…"
+		}
+		sb.WriteString(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\n", SanitizeUntrustedName(f.Name), typ, size, role, target, SanitizeUntrustedName(desc)))
+	}
+	return sb.String()
 }
 
 func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput) (*GetFileInfoOutput, error) {
@@ -582,7 +303,54 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 	return out, nil
 }
 
+// defaultReadChars is read_file's page size in characters.
+const defaultReadChars = 8000
+
+// sensitiveNotice is returned instead of the content of a sensitive file.
+const sensitiveNotice = "[敏感文件（密钥/凭证/证件/税务类），不读取内容；只按文件名和位置判断]"
+
+// isSensitivePath reports whether an entry must never be read or viewed.
+func (tb *ToolBuilder) isSensitivePath(p string) bool {
+	p, _, _ = strings.Cut(p, "::")
+	if db.IsSensitiveName(p) {
+		return true
+	}
+	if tb.repo == nil {
+		return false
+	}
+	f, err := tb.repo.GetFileByPath(tb.sessionID, strings.Trim(normalizePath(p), "/"))
+	return err == nil && f.Sensitive
+}
+
 func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*ReadFileOutput, error) {
+	if tb.isSensitivePath(input.Path) {
+		return &ReadFileOutput{Content: sensitiveNotice}, nil
+	}
+	limit := tb.cfg.MaxFileReadSize
+	if limit <= 0 {
+		limit = defaultReadChars
+	}
+	offset := max(input.Offset, 0)
+	out, err := tb.readFileRaw(ctx, input, offset+limit)
+	if err != nil || out == nil {
+		return out, err
+	}
+	runes := []rune(out.Content)
+	if offset >= len(runes) {
+		return &ReadFileOutput{Content: ""}, nil
+	}
+	page := runes[offset:]
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	res := &ReadFileOutput{Content: string(page), Truncated: out.Truncated || offset+len(page) < len(runes)}
+	if res.Truncated {
+		res.NextOffset = offset + len(page)
+	}
+	return res, nil
+}
+
+func (tb *ToolBuilder) readFileRaw(ctx context.Context, input *ReadFileInput, maxSize int) (*ReadFileOutput, error) {
 	// Archive entry syntax: "path/to/archive.zip::entry/inside.txt". Split
 	// first; the filesystem-facing part is validated like every other path.
 	archivePath, entryName, hasEntry := strings.Cut(input.Path, "::")
@@ -591,11 +359,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	}
 	if hasEntry && entryName == "" {
 		return nil, fmt.Errorf("empty archive entry name in %q", input.Path)
-	}
-
-	maxSize := tb.cfg.MaxFileReadSize
-	if maxSize <= 0 {
-		maxSize = 102400
 	}
 
 	ext := documentExt(archivePath)
@@ -612,7 +375,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	// central directories and PDF xref tables live at the end of the file —
 	// so they get a larger read budget; the extracted text is still capped
 	// to maxSize runes. Everything else stays on the text path.
-	readCap := int64(maxSize) + 1
+	readCap := int64(maxSize)*4 + 1
 	if ext != "" {
 		readCap = maxDocumentReadBytes + 1
 	}
@@ -645,12 +408,8 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 		return out, nil
 	}
 
-	truncated := len(data) > maxSize
-	if truncated {
-		data = data[:maxSize]
-	}
-
-	out := &ReadFileOutput{Content: string(data), Truncated: truncated}
+	content, cut := capRunes(string(data), maxSize)
+	out := &ReadFileOutput{Content: content, Truncated: cut || int64(len(data)) >= readCap}
 	return out, nil
 }
 
@@ -771,29 +530,6 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 	return out, nil
 }
 
-func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (*MarkTaggedOutput, error) {
-
-	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
-	if err != nil {
-		out := &MarkTaggedOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
-		return out, nil
-	}
-
-	// Idempotency check: already tagged, skip DB write
-	if f.Tagged {
-		out := &MarkTaggedOutput{Success: true}
-		return out, nil
-	}
-
-	batch := tb.logger.GetBatch()
-	if err := tb.repo.MarkTaggedAtomic(tb.sessionID, normalizePath(input.Path), batch); err != nil {
-		return nil, err
-	}
-
-	out := &MarkTaggedOutput{Success: true}
-	return out, nil
-}
-
 func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategoriesInput) (*ListCategoriesOutput, error) {
 
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
@@ -822,105 +558,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 
 	out := &ListCategoriesOutput{Categories: items}
 	return out, nil
-}
-
-func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*SetTargetOutput, error) {
-	final, cleared, err := tb.setTargetCore(ctx, input.Path, input.NewPath)
-	if err != nil {
-		var rj *rejectError
-		if errors.As(err, &rj) {
-			out := &SetTargetOutput{Error: rj.msg}
-			return out, nil
-		}
-		return nil, err
-	}
-	out := &SetTargetOutput{Success: true, NewPath: final}
-	var guidance []string
-	if final != "" && final != db.NormalizeTargetPath(input.NewPath) {
-		guidance = append(guidance, fmt.Sprintf("目标 %s 已被其他条目占用，已自动改为 %s", db.NormalizeTargetPath(input.NewPath), final))
-	}
-	if cleared > 0 {
-		out.ClearedChildren = cleared
-		guidance = append(guidance, fmt.Sprintf("已级联覆盖并清除 %d 个子项的既有规划路径（外层目标覆盖内层）。若这些子项需要更细的独立归类，请对它们重新 set_target；若本目录就应作为整体归类，则无需处理", cleared))
-	}
-	out.Guidance = strings.Join(guidance, "；")
-	return out, nil
-}
-
-// setTargetCore is the set_target logic shared by the tool handler and the
-// run_script builtin: same validation, same idempotency, same atomic write.
-// Only the tool handler logs; script-internal calls are covered by the single
-// run_script log entry. Returns the stored target (collisions with other
-// entries' targets resolve to "name (n).ext" at plan time) and how many
-// planned children the directory cascade cleared.
-func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) (string, int64, error) {
-	// Validate before any DB access: an illegal target must be rejected
-	// loudly, never written. The executor resolves new_path against the
-	// filesystem root, so anything that could escape it is refused here.
-	if err := pathutil.ValidateFSPath(newPath); err != nil {
-		return "", 0, rejectf("invalid new_path: %v", err)
-	}
-	newPath = db.NormalizeTargetPath(newPath)
-
-	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(path))
-	if err != nil {
-		return "", 0, rejectf("file not found: %s", path)
-	}
-
-	// Idempotency check: already in target state, skip DB write
-	if f.NewPath == newPath && (f.Operation != "") == (newPath != "") {
-		return newPath, 0, nil
-	}
-
-	if newPath != "" {
-		if err := tb.checkTargetInCategories(newPath); err != nil {
-			return "", 0, err
-		}
-	}
-
-	final, cleared, err := tb.repo.SetTargetUnique(tb.sessionID, normalizePath(path), newPath, f.FileType)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to set target: %w", err)
-	}
-	return final, cleared, nil
-}
-
-// checkTargetInCategories requires a target to lie under a known category
-// path. The only exception is a session with a plan: the plan may
-// define destinations outside every category, so such targets are accepted.
-func (tb *ToolBuilder) checkTargetInCategories(newPath string) error {
-	cats, err := tb.repo.ListCategories(tb.filesystemID)
-	if err != nil {
-		return fmt.Errorf("check target: list categories: %w", err)
-	}
-	for _, c := range cats {
-		if pathUnder(newPath, db.NormalizeTargetPath(c.Path)) {
-			return nil
-		}
-	}
-	hasPlan, err := tb.repo.HasPlan(tb.sessionID)
-	if err != nil {
-		return fmt.Errorf("check target: read plan: %w", err)
-	}
-	if hasPlan {
-		return nil
-	}
-	if len(cats) == 0 {
-		return rejectf("目标 %s 不在任何分类路径下，而当前还没有任何分类：请先建立分类（create_category）或让用户在方案中定义目标结构，再设置目标", newPath)
-	}
-	paths := make([]string, len(cats))
-	for i, c := range cats {
-		paths[i] = fmt.Sprintf("%s (%s)", c.Name, db.NormalizeTargetPath(c.Path))
-	}
-	return rejectf("目标 %s 不在任何分类路径下，未写入。目标必须是某个分类路径下的路径（分类路径/子目录/文件名）。现有分类：%s。请改用其中之一，或在确有必要时先创建分类", newPath, strings.Join(paths, "、"))
-}
-
-// pathUnder reports whether p equals dir or lies below it ("/"-rooted paths).
-func pathUnder(p, dir string) bool {
-	if dir == "/" {
-		return true
-	}
-	return p == dir || strings.HasPrefix(p, dir+"/")
 }
 
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {

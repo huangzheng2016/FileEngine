@@ -67,9 +67,9 @@ func TestCreateCategoryDescCategoryPolicyTwoStates(t *testing.T) {
 	if desc := toolDesc(t, tools, "create_category"); !strings.HasSuffix(desc, "\n\n分类规范：\n"+testCategoryPolicy) {
 		t.Fatalf("autotag create_category desc must end with the policy text: %q", desc)
 	}
-	instructTools, err := withPolicy.BuildInstructTools()
+	instructTools, err := withPolicy.BuildChatTools()
 	if err != nil {
-		t.Fatalf("BuildInstructTools: %v", err)
+		t.Fatalf("BuildChatTools: %v", err)
 	}
 	if desc := toolDesc(t, instructTools, "create_category"); !strings.HasSuffix(desc, "\n\n分类规范：\n"+testCategoryPolicy) {
 		t.Fatalf("instruct create_category desc must end with the policy text: %q", desc)
@@ -99,7 +99,7 @@ func TestRunScriptDescCategoryPolicyTwoStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool info: %v", err)
 	}
-	if !strings.Contains(info.Desc, "同名/同路径拒绝）\n\n分类规范：\n"+testCategoryPolicy) {
+	if !strings.Contains(info.Desc, "rename_category(name, new_name)\n\n分类规范：\n"+testCategoryPolicy) {
 		t.Fatalf("run_script desc must append the policy to the create_category builtin: %q", info.Desc)
 	}
 

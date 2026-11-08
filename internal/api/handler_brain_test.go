@@ -175,9 +175,6 @@ func TestPreviewAndResetEndpoints(t *testing.T) {
 	if _, _, err := repo.SetTargetUnique(1, "Design/logo.psd", "/设计/logo.psd", "file"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkTaggedAtomic(1, "Design/logo.psd", 1); err != nil {
-		t.Fatal(err)
-	}
 
 	code, after := doModelRequest(t, s, http.MethodGet, "/api/v1/sessions/1/preview/tree?side=after", nil)
 	items := after["items"].([]any)

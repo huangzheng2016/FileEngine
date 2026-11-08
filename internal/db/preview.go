@@ -21,16 +21,21 @@ const (
 // virtual target path; FileID/OriginalPath are set for a single planned entry.
 // Before side: Path is the original path, Status says what happens to it.
 type PreviewItem struct {
-	Name         string `json:"name"`
-	Path         string `json:"path"`
-	IsDir        bool   `json:"is_dir"`
-	FileCount    int64  `json:"file_count"`
-	Size         int64  `json:"size"`
-	FileID       uint   `json:"file_id,omitempty"`
-	OriginalPath string `json:"original_path,omitempty"`
-	Status       string `json:"status,omitempty"`
-	NewPath      string `json:"new_path,omitempty"`
-	MovedCount   int64  `json:"moved_count,omitempty"`
+	Name         string  `json:"name"`
+	Path         string  `json:"path"`
+	IsDir        bool    `json:"is_dir"`
+	FileCount    int64   `json:"file_count"`
+	Size         int64   `json:"size"`
+	FileID       uint    `json:"file_id,omitempty"`
+	OriginalPath string  `json:"original_path,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	NewPath      string  `json:"new_path,omitempty"`
+	MovedCount   int64   `json:"moved_count,omitempty"`
+	Role         string  `json:"role,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	NeedsReview  bool    `json:"needs_review,omitempty"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	Sensitive    bool    `json:"sensitive,omitempty"`
 }
 
 // PreviewPage is one page of a preview directory listing.
@@ -90,14 +95,12 @@ func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error)
 			s.files += row.Cnt
 			s.size += row.Size
 			stats[p] = s
-			if p == "" || p == "." || p == "/" {
+			if p == "" || p == "/" {
 				break
 			}
-			next := path.Dir(p)
-			if next == p {
-				break
+			if p = path.Dir(p); p == "." {
+				p = ""
 			}
-			p = next
 		}
 	}
 	dirStatsCache.Lock()
@@ -233,7 +236,7 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 	leaves := map[uint]FileEntry{}
 	if len(leafIDs) > 0 {
 		var rows []FileEntry
-		if err := r.db.Select("id", "original_path", "file_type", "size").Where("id IN ?", leafIDs).Find(&rows).Error; err != nil {
+		if err := r.db.Select("id", "original_path", "file_type", "size", "role", "reason", "needs_review", "confidence", "sensitive").Where("id IN ?", leafIDs).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, f := range rows {
@@ -247,6 +250,7 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 		if leaf, ok := leaves[g.MinID]; ok && g.Nested == 0 && g.Cnt == 1 {
 			item.FileID = leaf.ID
 			item.OriginalPath = leaf.OriginalPath
+			item.withEntry(&leaf)
 			item.IsDir = leaf.FileType == "directory"
 		} else {
 			item.IsDir = true
@@ -272,6 +276,7 @@ func (r *Repository) previewRealChildren(sessionID uint, orig, virtualDir string
 	page := &PreviewPage{Items: make([]PreviewItem, 0, len(rows)), Total: total}
 	for _, f := range rows {
 		item := PreviewItem{Name: f.Name, Path: virtualDir + "/" + f.Name, IsDir: f.FileType == "directory", FileID: f.ID, OriginalPath: f.OriginalPath}
+		item.withEntry(&f)
 		if item.IsDir {
 			s := stats[f.OriginalPath]
 			item.FileCount, item.Size = s.files, s.size
@@ -343,6 +348,7 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 	page := &PreviewPage{Items: make([]PreviewItem, 0, len(rows)), Total: total}
 	for _, f := range rows {
 		item := PreviewItem{Name: f.Name, Path: f.OriginalPath, IsDir: f.FileType == "directory", FileID: f.ID, OriginalPath: f.OriginalPath}
+		item.withEntry(&f)
 		if item.IsDir {
 			s := stats[f.OriginalPath]
 			item.FileCount, item.Size = s.files, s.size
@@ -386,4 +392,30 @@ func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]FileEn
 	var rows []FileEntry
 	err := r.db.Where("scan_session_id = ? AND original_path IN ?", sessionID, paths).Find(&rows).Error
 	return rows, err
+}
+
+// DirStats returns the recursive file count and size under dir ("" = root).
+func (r *Repository) DirStats(sessionID uint, dir string) (files, size int64, err error) {
+	stats, err := r.sessionDirStats(sessionID)
+	if err != nil {
+		return 0, 0, err
+	}
+	s := stats[dir]
+	return s.files, s.size, nil
+}
+
+// ListChildren returns the direct children of parent ("" = root),
+// directories first, then by name; limit <= 0 means all.
+func (r *Repository) ListChildren(sessionID uint, parent string, limit int) ([]FileEntry, error) {
+	q := r.db.Where("scan_session_id = ? AND parent_path = ?", sessionID, parent).Order("file_type ASC, name ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var rows []FileEntry
+	err := q.Find(&rows).Error
+	return rows, err
+}
+
+func (it *PreviewItem) withEntry(e *FileEntry) {
+	it.Role, it.Reason, it.NeedsReview, it.Confidence, it.Sensitive = e.Role, e.Reason, e.NeedsReview, e.Confidence, e.Sensitive
 }

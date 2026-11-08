@@ -57,7 +57,7 @@ func TestAgentDefaultsStillApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Agent.BatchSize != 200 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
+	if cfg.Agent.Concurrency != 6 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
 		t.Fatalf("agent defaults not applied: %+v", cfg.Agent)
 	}
 	if cfg.Agent.RateLimitMaxRetries != 8 || cfg.Agent.RetryBaseDelay != 2 || cfg.Agent.RetryMaxDelay != 60 {

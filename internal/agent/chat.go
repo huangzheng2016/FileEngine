@@ -61,7 +61,7 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	tracker := newTokenTrackingModel(chatModel)
 	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tb.RunID = logger.RunID()
-	tools, err := tb.BuildInstructTools()
+	tools, err := tb.BuildChatTools()
 	if err != nil {
 		return "", fmt.Errorf("build tools: %w", err)
 	}
@@ -75,7 +75,7 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	}
 	// Shared notes are tagging-time working state: main-model runs get the
 	// long-term context only (notes stay reachable through recall).
-	shared, err := BuildSharedContext(a.repo, a.session, nil, "")
+	shared, err := BuildSharedContext(a.repo, a.session)
 	if err != nil {
 		return "", err
 	}

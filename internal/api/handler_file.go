@@ -40,6 +40,17 @@ func (s *Server) listFiles(c *gin.Context) {
 	if cp := c.Query("category_path"); cp != "" {
 		q.CategoryPath = &cp
 	}
+	if v := c.Query("needs_review"); v != "" {
+		b := v == "true"
+		q.NeedsReview = &b
+	}
+	if v := c.Query("sensitive"); v != "" {
+		b := v == "true"
+		q.Sensitive = &b
+	}
+	if v, ok := c.GetQuery("role"); ok {
+		q.Role = &v
+	}
 	if page := c.Query("page"); page != "" {
 		q.Page, _ = strconv.Atoi(page)
 	}
@@ -110,12 +121,20 @@ func (s *Server) updateFile(c *gin.Context) {
 			return
 		}
 		oldTarget := file.NewPath
-		final, _, err := s.repo.SetTargetUnique(file.ScanSessionID, file.OriginalPath, *req.NewPath, file.FileType)
+		role := db.RoleFile
+		if *req.NewPath == "" {
+			role = db.RoleUndecided
+		}
+		res, err := s.repo.Decide(file.ScanSessionID, db.Decision{Path: file.OriginalPath, Role: role, NewPath: *req.NewPath, Reason: "用户修改", Override: true})
+		if db.IsRejection(err) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		if err := s.learnCorrection(*file, oldTarget, final); err != nil {
+		if err := s.learnCorrection(*file, oldTarget, res.NewPath); err != nil {
 			log.Printf("file %d: record correction memory: %v", file.ID, err)
 		}
 	}

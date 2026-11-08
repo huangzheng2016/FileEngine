@@ -198,11 +198,9 @@ type FileQuery struct {
 	Page         int
 	PageSize     int
 	MinID        uint // cursor-based pagination: only return rows with id > MinID
-	// IDMod/IDModRem shard the result set deterministically by primary key
-	// (id % IDMod = IDModRem); harness workers pull disjoint shards of the
-	// untagged queue this way. IDMod <= 1 disables sharding.
-	IDMod    int
-	IDModRem int
+	Role         *string
+	NeedsReview  *bool
+	Sensitive    *bool
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
@@ -255,11 +253,17 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	if q.CategoryPath != nil {
 		tx = tx.Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(*q.CategoryPath)+"%")
 	}
+	if q.Role != nil {
+		tx = tx.Where("role = ?", *q.Role)
+	}
+	if q.NeedsReview != nil {
+		tx = tx.Where("needs_review = ?", *q.NeedsReview)
+	}
+	if q.Sensitive != nil {
+		tx = tx.Where("sensitive = ?", *q.Sensitive)
+	}
 	if q.Search != "" {
 		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
-	}
-	if q.IDMod > 1 {
-		tx = tx.Where("id % ? = ?", q.IDMod, q.IDModRem)
 	}
 	return tx
 }
@@ -300,49 +304,6 @@ func (r *Repository) UpdateDescription(sessionID uint, path, description string)
 	return r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
 		Update("description", description).Error
-}
-
-func (r *Repository) GetUntaggedDirectories(sessionID uint, batchSize int) ([]FileEntry, error) {
-	var dirs []FileEntry
-	err := r.db.Where("scan_session_id = ? AND file_type = 'directory' AND tagged = ?", sessionID, false).
-		Order("depth DESC").
-		Limit(batchSize).
-		Find(&dirs).Error
-	return dirs, err
-}
-
-func (r *Repository) GetUntaggedDirectoriesAtDepth(sessionID uint, depth int) ([]FileEntry, error) {
-	var dirs []FileEntry
-	err := r.db.Where("scan_session_id = ? AND file_type = 'directory' AND tagged = ? AND depth = ?",
-		sessionID, false, depth).
-		Find(&dirs).Error
-	return dirs, err
-}
-
-func (r *Repository) GetMaxDepth(sessionID uint) (int, error) {
-	var maxDepth *int
-	err := r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ?", sessionID).
-		Select("MAX(depth)").
-		Scan(&maxDepth).Error
-	if err != nil {
-		return 0, err
-	}
-	if maxDepth == nil {
-		return 0, nil
-	}
-	return *maxDepth, nil
-}
-
-func (r *Repository) IsFileTagged(sessionID uint, path string) (bool, error) {
-	var f FileEntry
-	err := r.db.Select("tagged").
-		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
-		First(&f).Error
-	if err != nil {
-		return false, err
-	}
-	return f.Tagged, nil
 }
 
 // TaggedStatusByIDs returns the tagged flag for each given file ID. It backs
@@ -391,44 +352,6 @@ func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, err
 	return b, err
 }
 
-// ClaimDirectory atomically claims an untagged directory for processing by setting its batch_index.
-// Returns true if the claim succeeded (directory was untagged), false if already claimed or tagged.
-func (r *Repository) ClaimDirectory(sessionID uint, path string, batchIndex int) (bool, error) {
-	result := r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND original_path = ? AND tagged = ?", sessionID, path, false).
-		Updates(map[string]interface{}{"batch_index": batchIndex})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return result.RowsAffected > 0, nil
-}
-
-func (r *Repository) MarkChildrenTagged(sessionID uint, parentPath string, batchIndex int) error {
-	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(parentPath)).
-		Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
-}
-
-// MarkTaggedAtomic atomically marks a directory and all its children as tagged within a transaction.
-func (r *Repository) MarkTaggedAtomic(sessionID uint, path string, batchIndex int) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
-			Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(path)).
-			Updates(map[string]interface{}{"tagged": true, "batch_index": batchIndex}).Error
-	})
-}
-
-func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) error {
-	return r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(parentPath)).
-		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
-}
-
 // MarkJunkEntries auto-ignores well-known system junk before tagging: files
 // whose base name matches fileNames (ASCII-lowered) or the AppleDouble "._*"
 // prefix, and directories matching dirNames with all their descendants.
@@ -439,26 +362,30 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 	var total int64
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND tagged = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+likeEscapeClause+")", sessionID, false, fileNames).
-			Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾文件（自动忽略）"})
+			Where("scan_session_id = ? AND role = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+likeEscapeClause+")", sessionID, RoleUndecided, fileNames).
+			Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾文件", "batch_index": JunkBatchIndex})
 		if res.Error != nil {
 			return res.Error
 		}
 		total += res.RowsAffected
 
 		var dirs []FileEntry
-		if err := tx.Where("scan_session_id = ? AND tagged = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, false, dirNames).
+		if err := tx.Where("scan_session_id = ? AND role = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, RoleUndecided, dirNames).
 			Find(&dirs).Error; err != nil {
 			return err
 		}
 		for _, d := range dirs {
+			if err := tx.Model(&FileEntry{}).Where("id = ?", d.ID).
+				Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾目录", "batch_index": JunkBatchIndex}).Error; err != nil {
+				return err
+			}
 			res := tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND tagged = ? AND (original_path = ? OR original_path LIKE ?"+likeEscapeClause+")", sessionID, false, d.OriginalPath, childPathPattern(d.OriginalPath)).
-				Updates(map[string]interface{}{"tagged": true, "batch_index": JunkBatchIndex, "description": "系统垃圾目录（自动忽略）"})
+				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(d.OriginalPath)).
+				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "reason": MemberReason(d.OriginalPath, RoleSkip), "new_path": "", "operation": "", "batch_index": JunkBatchIndex})
 			if res.Error != nil {
 				return res.Error
 			}
-			total += res.RowsAffected
+			total += res.RowsAffected + 1
 		}
 		return nil
 	})
@@ -498,7 +425,7 @@ func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath st
 
 func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
 	var files []FileEntry
-	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ?", sessionID, false).
+	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ? AND needs_review = ?", sessionID, false, false).
 		Find(&files).Error
 	return files, err
 }
@@ -657,19 +584,6 @@ func (r *Repository) DeleteModelProvider(id uint) error {
 }
 
 // ============ Batch cursor ============
-
-// MaxBatchIndex returns the largest agent batch index stamped on the
-// session's entries (0 when none) — the base for a new tagging run's cursor.
-func (r *Repository) MaxBatchIndex(sessionID uint) int {
-	var maxBatch *int
-	r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND batch_index > 0", sessionID).
-		Select("MAX(batch_index)").Scan(&maxBatch)
-	if maxBatch == nil {
-		return 0
-	}
-	return *maxBatch
-}
 
 // NextManualBatchIndex returns a fresh negative batch index for a
 // user-directed run, below JunkBatchIndex and every manual index in use.

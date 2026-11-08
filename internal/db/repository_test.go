@@ -272,7 +272,7 @@ func TestTaggedStatusByIDs(t *testing.T) {
 // LIKE wildcards in directory names must match literally: marking children of
 // "in/my_dir" must not cascade into the sibling "in/myXdir" (an unescaped '_'
 // is a single-character wildcard in every dialect).
-func TestMarkChildrenTaggedLiteralUnderscore(t *testing.T) {
+func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
@@ -292,18 +292,18 @@ func TestMarkChildrenTaggedLiteralUnderscore(t *testing.T) {
 		}
 	}
 
-	if err := r.MarkChildrenTagged(1, "in/my_dir", 1); err != nil {
+	if err := pgUnit(r, 1, "in/my_dir"); err != nil {
 		t.Fatalf("MarkChildrenTagged: %v", err)
 	}
 
-	tagged, err := r.IsFileTagged(1, "in/my_dir/a.txt")
+	tagged, err := pgTagged(r, 1, "in/my_dir/a.txt")
 	if err != nil {
 		t.Fatalf("IsFileTagged a.txt: %v", err)
 	}
 	if !tagged {
 		t.Fatal("child of my_dir must be tagged")
 	}
-	sibling, err := r.IsFileTagged(1, "in/myXdir/b.txt")
+	sibling, err := pgTagged(r, 1, "in/myXdir/b.txt")
 	if err != nil {
 		t.Fatalf("IsFileTagged b.txt: %v", err)
 	}
