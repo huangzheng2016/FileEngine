@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,7 +18,7 @@ func (s *Server) listCategories(c *gin.Context) {
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, cats)
@@ -42,7 +42,7 @@ func (s *Server) createCategory(c *gin.Context) {
 	// Category paths become new_path prefixes when files are planned under
 	// them; enforce the same root-confinement check as the agent tool layer
 	// so the REST API cannot bypass it.
-	if err := agent.ValidateFSPath(req.Path); err != nil {
+	if err := pathutil.ValidateFSPath(req.Path); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
 		return
 	}
@@ -55,7 +55,7 @@ func (s *Server) createCategory(c *gin.Context) {
 		Description:  req.Description,
 	}
 	if err := s.repo.CreateCategory(cat); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, cat)
@@ -82,7 +82,7 @@ func (s *Server) updateCategory(c *gin.Context) {
 
 	// Same root-confinement check as the tool layer: the new path cascades
 	// into planned files' new_path.
-	if err := agent.ValidateFSPath(req.Path); err != nil {
+	if err := pathutil.ValidateFSPath(req.Path); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
 		return
 	}
@@ -95,7 +95,7 @@ func (s *Server) updateCategory(c *gin.Context) {
 	cat.Description = req.Description
 
 	if err := s.repo.UpdateCategoryPath(cat, oldPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, cat)
@@ -115,7 +115,7 @@ func (s *Server) deleteCategory(c *gin.Context) {
 	// Clear planned files under this category and reset tagged for re-classification
 	_ = s.repo.ClearPlannedByTargetPath(cat.FilesystemID, cat.Path)
 	if err := s.repo.DeleteCategory(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
@@ -136,7 +136,7 @@ func (s *Server) exportCategories(c *gin.Context) {
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	items := make([]CategoryExportItem, len(cats))
@@ -164,7 +164,7 @@ func (s *Server) importCategories(c *gin.Context) {
 	for _, item := range items {
 		// Skip entries that the tool layer would also refuse (empty fields or
 		// a path that could escape the filesystem root).
-		if item.Name == "" || item.Path == "" || agent.ValidateFSPath(item.Path) != nil {
+		if item.Name == "" || item.Path == "" || pathutil.ValidateFSPath(item.Path) != nil {
 			skipped++
 			continue
 		}

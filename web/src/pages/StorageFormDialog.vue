@@ -136,8 +136,13 @@ async function submit() {
   if (!v.validate() || saving.value) return
   saving.value = true
   try {
-    if (props.editing) await updateFilesystem(props.editing.id, body())
-    else await createFilesystem(body())
+    const b = body()
+    const target = remote.value ? `${b.host}${b.port ? `:${b.port}` : ''}` : b.base_path
+    if (b.protocol === 'sftp' && tested.value?.hostKey && tested.value.target === target) {
+      b.host_key = tested.value.hostKey
+    }
+    if (props.editing) await updateFilesystem(props.editing.id, b)
+    else await createFilesystem(b)
     toast.success(props.editing ? '已保存' : '已添加')
     guard.reset()
     emit('saved')

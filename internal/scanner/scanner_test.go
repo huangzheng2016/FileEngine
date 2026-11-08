@@ -55,7 +55,7 @@ func TestScan_SMB(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
+	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)
@@ -83,7 +83,7 @@ func TestScan_FTP(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
+	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)
@@ -111,7 +111,7 @@ func TestScan_SFTP(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: ".", Status: "scanning"}
+	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)

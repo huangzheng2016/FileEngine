@@ -1,7 +1,13 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -14,8 +20,13 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port" json:"port"`
+	Port int `yaml:"port" json:"port"`
+	// Host is the bind address. Default 127.0.0.1 (loopback only); listening
+	// on all interfaces (0.0.0.0) is an explicit opt-in.
 	Host string `yaml:"host" json:"host"`
+	// Token is the API bearer token, generated on first start (EnsureToken)
+	// and printed once to the log. Never exposed through the API.
+	Token string `yaml:"token" json:"-"`
 }
 
 type DatabaseConfig struct {
@@ -24,7 +35,7 @@ type DatabaseConfig struct {
 	// a go-sql-driver DSN for MySQL, a libpq keyword/value string (or
 	// postgres:// URL) for PostgreSQL.
 	Driver string `yaml:"driver" json:"driver"`
-	DSN    string `yaml:"dsn" json:"dsn"`
+	DSN    string `yaml:"dsn" json:"-"` // may carry a password: never exposed through the API
 }
 
 // RemoteFSConfig is the internal representation used by remotefs.NewFromConfig().
@@ -36,6 +47,9 @@ type RemoteFSConfig struct {
 	Username string
 	Password string
 	KeyPath  string
+	// HostKey is the pinned SFTP server key fingerprint ("SHA256:…"). SFTP
+	// connections refuse to start without one and fail on mismatch.
+	HostKey string
 }
 
 type AgentConfig struct {
@@ -105,7 +119,7 @@ type AgentConfig struct {
 	ArchivePromptDisabled   bool `yaml:"archive_prompt_disabled" json:"archive_prompt_disabled"`
 	ArchivePromptMaxEntries int  `yaml:"archive_prompt_max_entries" json:"archive_prompt_max_entries"` // names per hint, default 6
 	// CategoryPolicy is a free-text category-creation policy injected into
-	// the default system prompt (as a 分类规范 section) and appended to the
+	// the default system prompt (as a category-policy section) and appended to the
 	// create_category tool / run_script builtin descriptions. Empty falls
 	// back to DefaultCategoryPolicy; hot-reloaded like every other knob
 	// (each agent run re-reads config.Get()).
@@ -123,10 +137,13 @@ const DefaultCategoryPolicy = `分类创建规范：
 - 拿不准一律进 /uncategorized`
 
 var (
-	global *Config
-	mu     sync.RWMutex
+	global     *Config
+	loadedPath string
+	mu         sync.RWMutex
 )
 
+// Load reads the config file and remembers its path: Save always writes back
+// to the file that was loaded, never to a CWD-relative guess.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -137,10 +154,22 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	setDefaults(&cfg)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
 	mu.Lock()
 	global = &cfg
+	loadedPath = abs
 	mu.Unlock()
 	return &cfg, nil
+}
+
+// Path is the absolute path of the loaded config file ("" before Load).
+func Path() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return loadedPath
 }
 
 func Get() *Config {
@@ -156,15 +185,93 @@ func Update(cfg *Config) {
 	mu.Unlock()
 }
 
-func Save(path string) error {
+// UpdateAgentJSON merges a partial JSON object into the agent section and
+// installs the result: fields absent from raw keep their current values.
+// Server and database sections are never touched (read-only via the API).
+func UpdateAgentJSON(raw []byte) (*Config, error) {
+	cur := Get()
+	if cur == nil {
+		return nil, errors.New("config not loaded")
+	}
+	next := *cur
+	if err := json.Unmarshal(raw, &next.Agent); err != nil {
+		return nil, err
+	}
+	Update(&next)
+	return &next, nil
+}
+
+// Save writes the current config back to the loaded file with mode 0600
+// (it holds the API token and possibly a DSN password). The write goes
+// through a temp file + rename so a crash never leaves a truncated config.
+func Save() error {
 	mu.RLock()
-	cfg := global
+	cfg, path := global, loadedPath
 	mu.RUnlock()
+	if cfg == nil || path == "" {
+		return errors.New("config not loaded")
+	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// EnsureToken generates the API token on first start (32 random bytes,
+// base64url) and persists it. generated reports whether this call created it
+// — the caller prints it once; it is shown nowhere else.
+func EnsureToken() (token string, generated bool, err error) {
+	cur := Get()
+	if cur == nil {
+		return "", false, errors.New("config not loaded")
+	}
+	if cur.Server.Token != "" {
+		return cur.Server.Token, false, nil
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", false, err
+	}
+	next := *cur
+	next.Server.Token = base64.RawURLEncoding.EncodeToString(b)
+	Update(&next)
+	if err := Save(); err != nil {
+		return "", false, err
+	}
+	return next.Server.Token, true, nil
+}
+
+// DataDir is where FileEngine keeps its own state (secret.key, backups):
+// the directory of the SQLite file, or the config file's directory for
+// server databases. Filesystem connections may never reach into it.
+func DataDir(cfg *Config) string {
+	if cfg.Database.Driver == "sqlite" && cfg.Database.DSN != "" && !strings.HasPrefix(cfg.Database.DSN, ":memory:") && !strings.HasPrefix(cfg.Database.DSN, "file:") {
+		if abs, err := filepath.Abs(cfg.Database.DSN); err == nil {
+			return filepath.Dir(abs)
+		}
+	}
+	if p := Path(); p != "" {
+		return filepath.Dir(p)
+	}
+	wd, _ := os.Getwd()
+	return wd
 }
 
 func setDefaults(cfg *Config) {
@@ -172,7 +279,7 @@ func setDefaults(cfg *Config) {
 		cfg.Server.Port = 8080
 	}
 	if cfg.Server.Host == "" {
-		cfg.Server.Host = "0.0.0.0"
+		cfg.Server.Host = "127.0.0.1"
 	}
 	if cfg.Database.Driver == "" {
 		cfg.Database.Driver = "sqlite"

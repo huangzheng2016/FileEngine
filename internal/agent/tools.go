@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"path"
 	"strings"
 	"sync/atomic"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 	"FileEngine/internal/remotefs"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -324,7 +324,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build get_file_info: %w", err)
 	}
 
-	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
+	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
 	if err != nil {
 		return nil, fmt.Errorf("build read_file: %w", err)
 	}
@@ -453,7 +453,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	allTools = append(allTools, deleteCat)
 
 	if tb.session.AllowReadFile {
-		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
+		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
 		if err != nil {
 			return nil, err
 		}
@@ -492,35 +492,6 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 // normalizePath strips leading slash to match DB storage format.
 func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
-}
-
-// ValidateFSPath checks that a target/category path is a legal, root-confined
-// slash path. The executor resolves stored paths against the filesystem root
-// (RemoteFS BasePath), so anything that could escape that root is rejected
-// here instead of being written to the DB. It is shared by the agent tool
-// layer and the REST category handlers so neither can bypass it. Rules:
-//   - "" is allowed for set_target (clears the target); callers reject it for
-//     category paths via their own required-field handling
-//   - no NUL bytes
-//   - no ".." segments (absolute-form paths like "/../etc" would escape the
-//     root on SFTP-style backends that treat leading "/" as host-absolute)
-//   - must name an entry — the bare root ("/", ".") is not a valid target
-func ValidateFSPath(p string) error {
-	if p == "" {
-		return nil
-	}
-	if strings.ContainsRune(p, 0) {
-		return fmt.Errorf("path %q contains a NUL byte", p)
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return fmt.Errorf("path %q contains '..' and could escape the filesystem root", p)
-		}
-	}
-	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
-		return fmt.Errorf("path %q does not name a file or directory", p)
-	}
-	return nil
 }
 
 func ptrStr(s string) *string {
@@ -581,7 +552,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		summaries := tb.archiveSummaries(ctx, files)
 		for i, f := range files {
 			if s := summaries[f.ID]; s != "" {
-				items[i].ArchiveSummary = s
+				items[i].ArchiveSummary = SanitizeUntrustedName(s)
 			}
 		}
 	}
@@ -615,7 +586,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	// Archive entry syntax: "path/to/archive.zip::entry/inside.txt". Split
 	// first; the filesystem-facing part is validated like every other path.
 	archivePath, entryName, hasEntry := strings.Cut(input.Path, "::")
-	if err := ValidateFSPath(archivePath); err != nil {
+	if err := pathutil.ValidateFSPath(archivePath); err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
 	if hasEntry && entryName == "" {
@@ -726,8 +697,8 @@ func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, ar
 		return log(&ReadFileOutput{Content: content, Truncated: cut})
 	}
 
-	// zip: random access required. Entry reads are gated on the archive size
-	// ("包整体过大时只列目录"), listing is not — the central directory alone
+	// zip: random access required. Entry reads are gated on the archive size;
+	// listing is not — the central directory alone
 	// is cheap on random-access backends.
 	size := int64(-1)
 	if st, serr := tb.fs.Stat(ctx, normalizePath(archivePath)); serr == nil {
@@ -886,7 +857,7 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
-	if err := ValidateFSPath(newPath); err != nil {
+	if err := pathutil.ValidateFSPath(newPath); err != nil {
 		return "", 0, rejectf("invalid new_path: %v", err)
 	}
 	newPath = db.NormalizeTargetPath(newPath)
@@ -915,7 +886,7 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 }
 
 // checkTargetInCategories requires a target to lie under a known category
-// path. The only exception is a session with a plan (方案): the plan may
+// path. The only exception is a session with a plan: the plan may
 // define destinations outside every category, so such targets are accepted.
 func (tb *ToolBuilder) checkTargetInCategories(newPath string) error {
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
@@ -976,7 +947,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 
 	// Category paths become new_path prefixes for planned files; apply the
 	// same root-confinement rules as set_target.
-	if err := ValidateFSPath(input.Path); err != nil || input.Path == "" {
+	if err := pathutil.ValidateFSPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
 		}
@@ -1085,7 +1056,7 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	// A changed category path cascades into planned files' new_path; apply the
 	// same root-confinement rules as set_target.
 	if input.NewPath != "" {
-		if err := ValidateFSPath(input.NewPath); err != nil {
+		if err := pathutil.ValidateFSPath(input.NewPath); err != nil {
 			return reject(fmt.Sprintf("invalid new_path: %v", err))
 		}
 	}

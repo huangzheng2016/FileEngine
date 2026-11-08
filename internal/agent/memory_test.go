@@ -102,7 +102,7 @@ func TestCorrectionMemory(t *testing.T) {
 	if CorrectionMemory(f, "/a/logo.PSD", "/a/logo-v2.PSD", 3) != nil {
 		t.Fatal("a rename in the same directory teaches nothing")
 	}
-	d := CorrectionMemory(db.FileEntry{Name: "proj", FileType: "directory", ParentPath: "."}, "", "/代码/proj", 3)
+	d := CorrectionMemory(db.FileEntry{Name: "proj", FileType: "directory", ParentPath: ""}, "", "/代码/proj", 3)
 	if d == nil || d.Key != "correction:dir@/" || strings.Contains(d.Content, "而不是") || !strings.Contains(d.Content, "目录") {
 		t.Fatalf("directory correction from root: %+v", d)
 	}

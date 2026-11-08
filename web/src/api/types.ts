@@ -175,6 +175,7 @@ export interface Filesystem {
   username: string
   password_set: boolean
   key_path: string
+  host_key: string
   created_at: string
   updated_at: string
 }

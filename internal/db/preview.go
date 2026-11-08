@@ -295,7 +295,7 @@ func (r *Repository) previewRealChildren(sessionID uint, orig, virtualDir string
 // ancestor's target), partial (a directory with some planned descendants) or
 // kept.
 func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset, limit int) (*PreviewPage, error) {
-	if dir == "" {
+	if dir == "" || dir == "." || dir == "/" {
 		dir = rootPath
 	}
 	if limit <= 0 {
@@ -324,7 +324,7 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 	movedBelow := map[string]int64{}
 	if movedAnc == nil {
 		prefix := dir + "/"
-		if dir == "." {
+		if dir == "" {
 			prefix = ""
 		}
 		var groups []segmentGroup

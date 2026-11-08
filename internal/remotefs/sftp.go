@@ -2,6 +2,8 @@ package remotefs
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,9 +36,74 @@ type SFTPFS struct {
 	basePath string
 }
 
+// ErrHostKeyNotPinned is returned when an SFTP connection has no pinned host
+// key fingerprint (test the connection first; creation pins it).
+var ErrHostKeyNotPinned = errors.New("未固定 SFTP 服务器指纹：请先测试连接并保存")
+
+// HostKeyMismatchError reports that the server presented a different key than
+// the pinned fingerprint — a possible man-in-the-middle, or a reinstalled
+// server. The user must review and re-pin explicitly.
+type HostKeyMismatchError struct {
+	Expected, Got string
+}
+
+func (e *HostKeyMismatchError) Error() string {
+	return fmt.Sprintf("服务器指纹已变化（已固定 %s，当前 %s）：请确认服务器身份后重新固定指纹", e.Expected, e.Got)
+}
+
+func pinnedHostKey(expected string) ssh.HostKeyCallback {
+	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		got := ssh.FingerprintSHA256(key)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
+			return &HostKeyMismatchError{Expected: expected, Got: got}
+		}
+		return nil
+	}
+}
+
+var errHostKeyCaptured = errors.New("host key captured")
+
+// FetchSSHHostKey connects to an SSH server just far enough to read its host
+// key and returns the SHA256 fingerprint (no authentication is attempted).
+// Used to show the fingerprint to the user and to pin it on first use.
+func FetchSSHHostKey(host string, port int) (string, error) {
+	if port == 0 {
+		port = 22
+	}
+	timeout := opTimeout()
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return "", &OpError{Protocol: "sftp", Op: "dial", Path: host, Err: err}
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+	var fp string
+	_, _, _, err = ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			fp = ssh.FingerprintSHA256(key)
+			return errHostKeyCaptured
+		},
+	})
+	if fp != "" {
+		return fp, nil
+	}
+	if err == nil {
+		err = errors.New("server presented no host key")
+	}
+	return "", &OpError{Protocol: "sftp", Op: "hostkey", Path: host, Err: err}
+}
+
 func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
+	if cfg.HostKey == "" {
+		return nil, ErrHostKeyNotPinned
+	}
 	var authMethods []ssh.AuthMethod
 	if cfg.KeyPath != "" {
+		// Key files are host-local reads: confined by the LocalPolicy.
+		if err := CheckLocalPath(cfg.KeyPath); err != nil {
+			return nil, fmt.Errorf("SFTP 私钥文件: %w", err)
+		}
 		key, err := os.ReadFile(cfg.KeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("read key file: %w", err)
@@ -70,7 +137,7 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	sshTransport, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: pinnedHostKey(cfg.HostKey),
 	})
 	if err != nil {
 		conn.Close()

@@ -124,7 +124,7 @@ func TestPreviewBeforeStatuses(t *testing.T) { checkPreviewBefore(t, previewFixt
 
 func checkPreviewBefore(t *testing.T, r *Repository) {
 	t.Helper()
-	root, err := r.PreviewBefore(1, ".", "", 0, 0)
+	root, err := r.PreviewBefore(1, "", "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,14 +136,14 @@ func checkPreviewBefore(t *testing.T, r *Repository) {
 		t.Fatalf("photos: %+v", it)
 	}
 
-	photos, _ := r.PreviewBefore(1, ".", "photos", 0, 0)
+	photos, _ := r.PreviewBefore(1, "", "photos", 0, 0)
 	pg := itemsByName(photos)
 	if pg["keep.txt"].Status != PreviewKept || pg["2023"].Status != PreviewPartial || pg["2023"].MovedCount != 2 {
 		t.Fatalf("photos children: %+v", photos.Items)
 	}
 
 	// Under a directory moved whole, every child moves with it.
-	inProj, _ := r.PreviewBefore(1, ".", "proj/pkg", 0, 0)
+	inProj, _ := r.PreviewBefore(1, "", "proj/pkg", 0, 0)
 	if inProj.Total != 1 || inProj.Items[0].Status != PreviewMoved || inProj.Items[0].NewPath != "/代码/proj/pkg/util.go" {
 		t.Fatalf("inside moved dir: %+v", inProj)
 	}
@@ -166,7 +166,7 @@ func TestPreviewScales(t *testing.T) {
 	if err != nil || page.Total != 10 || page.Items[0].FileCount != 500 {
 		t.Fatalf("scaled after: %+v %v", page, err)
 	}
-	before, err := r.PreviewBefore(1, ".", "in/d001", 0, 20)
+	before, err := r.PreviewBefore(1, "", "in/d001", 0, 20)
 	if err != nil || before.Total != 50 || len(before.Items) != 20 || before.Items[0].Status != PreviewMoved {
 		t.Fatalf("scaled before: %+v %v", before, err)
 	}
