@@ -109,6 +109,11 @@ func debugSections(path string) []string {
 	if f, err := pe.Open(path); err == nil {
 		defer f.Close()
 		for _, s := range f.Sections {
+			// The Go linker always emits a .symtab stub for PE; it only matters
+			// when COFF symbols remain.
+			if s.Name == ".symtab" && len(f.Symbols) == 0 {
+				continue
+			}
 			collect(s.Name)
 		}
 	}
