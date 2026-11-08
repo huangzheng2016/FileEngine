@@ -40,12 +40,9 @@ func doModelRequest(t *testing.T, s *Server, method, path string, body any) (int
 	return w.Code, resp
 }
 
-// context_window is optional: absent on create applies the default, absent on
-// update keeps the stored value; tiers and custom values are accepted.
 func TestModelProviderContextWindow(t *testing.T) {
 	s := setupModelTestServer(t)
 
-	// Create without context_window -> default applied.
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
 		"name": "plain", "provider": "openai", "model": "gpt-4o", "max_tokens": 4096,
 	})
@@ -60,7 +57,6 @@ func TestModelProviderContextWindow(t *testing.T) {
 	}
 	id := created["id"]
 
-	// Create with an explicit custom value.
 	code, created = doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
 		"name": "custom", "provider": "claude", "model": "claude-sonnet-4", "context_window": 500000,
 	})
@@ -71,7 +67,6 @@ func TestModelProviderContextWindow(t *testing.T) {
 		t.Fatalf("custom create context_window: got %v, want 500000", got)
 	}
 
-	// Full-form update without context_window must not clobber it.
 	code, updated := doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
 		"name": "custom", "provider": "claude", "model": "claude-sonnet-4", "max_tokens": 8192,
 	})
@@ -82,7 +77,6 @@ func TestModelProviderContextWindow(t *testing.T) {
 		t.Fatalf("context_window clobbered by update: got %v, want 500000", got)
 	}
 
-	// Update with context_window.
 	code, updated = doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
 		"name": "custom", "provider": "claude", "model": "claude-sonnet-4", "context_window": 1000000,
 	})
@@ -93,7 +87,6 @@ func TestModelProviderContextWindow(t *testing.T) {
 		t.Fatalf("update context_window: got %v, want 1000000", got)
 	}
 
-	// Negative values are rejected.
 	code, _ = doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
 		"name": "bad", "provider": "openai", "model": "gpt-4o", "context_window": -1,
 	})
@@ -101,7 +94,6 @@ func TestModelProviderContextWindow(t *testing.T) {
 		t.Fatalf("negative context_window: got code %d, want 400", code)
 	}
 
-	// The first row reports the default window.
 	code, got := doModelRequest(t, s, http.MethodGet, "/api/v1/models/1", nil)
 	if code != http.StatusOK {
 		t.Fatalf("get: code %d", code)
@@ -114,14 +106,9 @@ func TestModelProviderContextWindow(t *testing.T) {
 	}
 }
 
-// reasoning_effort is a free-form pass-through: "" (model default), the
-// suggested levels (none/low/medium/high/max), or any other value an
-// OpenAI-compatible backend might accept are all stored verbatim; only the
-// charset/length guard ([a-zA-Z0-9_-]{1,32}) rejects with 400.
 func TestModelProviderReasoningEffortPassthrough(t *testing.T) {
 	s := setupModelTestServer(t)
 
-	// Accepted: empty, suggested levels, and unknown-but-legal custom values.
 	for _, v := range []string{"", "none", "low", "medium", "high", "max", "xhigh_v2-9", "X-High_2"} {
 		code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
 			"name": "effort-" + v, "provider": "openai", "model": "gpt-4o", "reasoning_effort": v,
@@ -134,7 +121,6 @@ func TestModelProviderReasoningEffortPassthrough(t *testing.T) {
 		}
 	}
 
-	// Update accepts "max" and custom levels.
 	code, updated := doModelRequest(t, s, http.MethodPut, "/api/v1/models/1", map[string]any{
 		"name": "effort-", "provider": "openai", "model": "gpt-4o", "reasoning_effort": "max",
 	})
@@ -145,8 +131,6 @@ func TestModelProviderReasoningEffortPassthrough(t *testing.T) {
 		t.Fatalf("update to max: stored %v", got)
 	}
 
-	// Charset/length violations are rejected on create and update, and a
-	// rejected update leaves the stored value untouched.
 	bad := []string{"has space", "bad!chars", "chinese中文", "this-value-is-way-too-long-to-pass32"}
 	for _, v := range bad {
 		code, _ = doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
@@ -170,7 +154,6 @@ func TestModelProviderReasoningEffortPassthrough(t *testing.T) {
 		t.Fatalf("stored reasoning_effort after rejected updates: got %v, want max", got["reasoning_effort"])
 	}
 
-	// The test-connection path validates identically (before any network I/O).
 	code, resp := doModelRequest(t, s, http.MethodPost, "/api/v1/models/test", map[string]any{
 		"name": "t", "provider": "openai", "model": "gpt-4o", "reasoning_effort": "has space",
 	})
@@ -198,7 +181,6 @@ func TestModelProviderUpdateRejectsNonPositiveContextWindow(t *testing.T) {
 		}
 	}
 
-	// Stored value unchanged after rejected updates.
 	code, got := doModelRequest(t, s, http.MethodGet, "/api/v1/models/1", nil)
 	if code != http.StatusOK {
 		t.Fatalf("get: code %d", code)

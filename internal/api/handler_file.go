@@ -85,12 +85,8 @@ type UpdateFileRequest struct {
 	NewPath     *string `json:"new_path"`
 }
 
-// updateFile is the user's manual edit of one entry. A changed target goes
-// through the same validation and plan-time collision resolution as the
-// agent's set_target, and is learned as a filesystem-scope correction memory
-// so later runs classify that kind of file the user's way. A target equal to
-// the entry's own path keeps it in place: the target is cleared and nothing
-// is learned.
+// A target equal to the entry's own path keeps it in place: the target is
+// cleared and nothing is learned.
 func (s *Server) updateFile(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -144,8 +140,6 @@ func (s *Server) updateFile(c *gin.Context) {
 	c.JSON(http.StatusOK, updated)
 }
 
-// learnCorrection records a user re-targeting as a correction memory of the
-// session's filesystem (no-op when there is nothing to learn).
 func (s *Server) learnCorrection(f db.FileEntry, oldTarget, newTarget string) error {
 	session, err := s.repo.GetSession(f.ScanSessionID)
 	if err != nil {
@@ -237,7 +231,6 @@ func (s *Server) getFileTree(c *gin.Context) {
 		return
 	}
 
-	// Count subdirectories for each node to determine leaf status
 	subDirCounts := make(map[string]int)
 	if len(files) > 0 {
 		paths := make([]string, len(files))

@@ -25,8 +25,6 @@ func setupSessionTestServer(t *testing.T) *Server {
 	return NewServer(repo, nil)
 }
 
-// waitForScanDone polls the session until the background scan leaves the
-// "scanning" state (or the deadline hits).
 func waitForScanDone(t *testing.T, s *Server, id uint) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -43,13 +41,9 @@ func waitForScanDone(t *testing.T, s *Server, id uint) {
 	t.Fatalf("session %d still scanning after deadline (status matters for test determinism)", id)
 }
 
-// allow_vision follows the per-session switch pattern (like allow_script and
-// allow_auto_category, which default ON) but is created off by default:
-// toggleable via PATCH, untouched by unrelated patches.
 func TestSessionAllowVisionToggle(t *testing.T) {
 	s := setupSessionTestServer(t)
 
-	// Create -> allow_vision defaults to false.
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
 		"filesystem_id": 1,
 	})
@@ -60,12 +54,10 @@ func TestSessionAllowVisionToggle(t *testing.T) {
 		t.Fatalf("create allow_vision: got %v, want false", created["allow_vision"])
 	}
 
-	// Creating a session kicks off a background scan that writes the session
-	// row (stale struct). Wait for it to finish so later PATCH assertions are
-	// not racing its writes.
+	// The background scan writes the session row; wait so later PATCH assertions
+	// do not race it.
 	waitForScanDone(t, s, 1)
 
-	// Toggle on.
 	code, patched := doModelRequest(t, s, http.MethodPatch, "/api/v1/sessions/1", map[string]any{
 		"allow_vision": true,
 	})
@@ -76,7 +68,6 @@ func TestSessionAllowVisionToggle(t *testing.T) {
 		t.Fatalf("patch allow_vision: got %v, want true", patched["allow_vision"])
 	}
 
-	// Unrelated patch must not clobber it.
 	code, patched = doModelRequest(t, s, http.MethodPatch, "/api/v1/sessions/1", map[string]any{
 		"filter_mode": "whitelist",
 	})
@@ -87,7 +78,6 @@ func TestSessionAllowVisionToggle(t *testing.T) {
 		t.Fatalf("allow_vision clobbered by unrelated patch: got %v, want true", patched["allow_vision"])
 	}
 
-	// GET reflects the stored value.
 	code, got := doModelRequest(t, s, http.MethodGet, "/api/v1/sessions/1", nil)
 	if code != http.StatusOK {
 		t.Fatalf("get session: code %d", code)
@@ -96,7 +86,6 @@ func TestSessionAllowVisionToggle(t *testing.T) {
 		t.Fatalf("get allow_vision: got %v, want true", got["allow_vision"])
 	}
 
-	// Toggle back off.
 	code, patched = doModelRequest(t, s, http.MethodPatch, "/api/v1/sessions/1", map[string]any{
 		"allow_vision": false,
 	})

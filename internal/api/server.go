@@ -18,8 +18,6 @@ type Server struct {
 	limiter  *rateLimiter
 }
 
-// NewServer builds the router. opts is optional; see Options for the token
-// and Host-guard fallbacks.
 func NewServer(repo *db.Repository, frontend fs.FS, opts ...Options) *Server {
 	s := &Server{
 		repo:     repo,
@@ -50,7 +48,6 @@ func (s *Server) setupRouter() {
 		api.GET("/auth/bootstrap", s.bootstrap)
 		api.POST("/admin/backup", s.backup)
 
-		// Sessions
 		api.POST("/sessions", s.createSession)
 		api.GET("/sessions", s.listSessions)
 		api.GET("/sessions/:id", s.getSession)
@@ -59,7 +56,6 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/rescan", s.rescanSession)
 		api.GET("/sessions/:id/stats", s.getSessionStats)
 
-		// Runs (agent / executor activity); each start returns {run_id}
 		api.POST("/sessions/:id/tag", s.startTagging)
 		api.POST("/sessions/:id/chat", s.postChat)
 		api.GET("/sessions/:id/chat", s.listChat)
@@ -68,7 +64,6 @@ func (s *Server) setupRouter() {
 		api.GET("/runs/:run_id", s.getRun)
 		api.POST("/runs/:run_id/stop", s.stopRun)
 
-		// Session event stream: persisted history + SSE (replay + live)
 		api.GET("/sessions/:id/events", s.listSessionEvents)
 		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 
@@ -81,33 +76,28 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/preview/tree", s.previewTree)
 		api.POST("/sessions/:id/review/confirm", s.confirmReview)
 
-		// Rules
 		api.GET("/sessions/:id/rules", s.listRules)
 		api.POST("/sessions/:id/rules", s.createRule)
 		api.POST("/sessions/:id/rules/apply", s.applyRules)
 		api.PUT("/rules/:id", s.updateRule)
 		api.DELETE("/rules/:id", s.deleteRule)
 
-		// Session plan
 		api.GET("/sessions/:id/plan", s.getPlan)
 		api.PUT("/sessions/:id/plan", s.updatePlan)
 		api.POST("/sessions/:id/plan/approve", s.approvePlan)
 		api.POST("/sessions/:id/plan/draft", s.draftPlan)
 
-		// Memory
 		api.GET("/memory", s.listMemory)
 		api.POST("/memory", s.createMemory)
 		api.PUT("/memory/:id", s.updateMemory)
 		api.DELETE("/memory/:id", s.deleteMemory)
 
-		// Files
 		api.GET("/files", s.listFiles)
 		api.GET("/files/tree", s.getFileTree)
 		api.GET("/files/:id", s.getFile)
 		api.PATCH("/files/:id", s.updateFile)
 		api.GET("/files/:id/content", s.getFileContent)
 
-		// Categories
 		api.GET("/categories", s.listCategories)
 		api.POST("/categories", s.createCategory)
 		api.PUT("/categories/:id", s.updateCategory)
@@ -115,7 +105,6 @@ func (s *Server) setupRouter() {
 		api.GET("/categories/export", s.exportCategories)
 		api.POST("/categories/import", s.importCategories)
 
-		// Filesystems
 		api.GET("/filesystems", s.listFilesystems)
 		api.POST("/filesystems", s.createFilesystem)
 		api.GET("/filesystems/:id", s.getFilesystem)
@@ -123,7 +112,6 @@ func (s *Server) setupRouter() {
 		api.DELETE("/filesystems/:id", s.deleteFilesystem)
 		api.POST("/filesystems/test", s.rateLimited("filesystems/test"), s.testFilesystemConnection)
 
-		// Model Providers
 		api.GET("/models", s.listModelProviders)
 		api.POST("/models", s.createModelProvider)
 		api.GET("/models/:id", s.getModelProvider)
@@ -131,16 +119,13 @@ func (s *Server) setupRouter() {
 		api.DELETE("/models/:id", s.deleteModelProvider)
 		api.POST("/models/test", s.rateLimited("models/test"), s.testModelProvider)
 
-		// Config
 		api.GET("/config", s.getConfig)
 		api.PUT("/config", s.updateConfig)
 
-		// Prompt
 		api.GET("/prompt", s.getPrompt)
 		api.PUT("/prompt", s.updatePrompt)
 	}
 
-	// Serve frontend static files
 	if s.frontend != nil {
 		r.NoRoute(func(c *gin.Context) {
 			f, err := http.FS(s.frontend).Open(c.Request.URL.Path)
@@ -156,8 +141,6 @@ func (s *Server) setupRouter() {
 	s.router = r
 }
 
-// Handler returns the complete HTTP surface (REST API, SSE stream and the
-// SPA fallback) for an http.Server owned by the caller (internal/app).
 func (s *Server) Handler() http.Handler {
 	return s.router
 }

@@ -64,7 +64,6 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Fatalf("me unauthenticated = %d", w.Code)
 	}
 
-	// Login sets an HttpOnly SameSite=Strict cookie that authenticates.
 	if w := do(s, "POST", "/api/v1/auth/login", map[string]string{"token": "nope"}, nil); w.Code != http.StatusUnauthorized {
 		t.Fatalf("bad login = %d", w.Code)
 	}
@@ -81,7 +80,6 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Fatalf("me with cookie = %d", w.Code)
 	}
 
-	// Bootstrap link: cookie + redirect; bad token refused.
 	if w := do(s, "GET", BootstrapPath+"?token=bad", nil, nil); w.Code != http.StatusForbidden {
 		t.Fatalf("bad bootstrap = %d", w.Code)
 	}
@@ -90,7 +88,6 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Fatalf("bootstrap = %d", w.Code)
 	}
 
-	// Health is public; security headers everywhere; no CORS.
 	w = do(s, "GET", "/healthz", nil, nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("healthz = %d", w.Code)
@@ -135,7 +132,6 @@ func TestCrossSiteAndHostGuards(t *testing.T) {
 		t.Fatalf("same-origin = %d", w.Code)
 	}
 	if w := do(s, "GET", "/api/v1/sessions", nil, func(r *http.Request) { ok(r); r.Host = "localhost:8080" }); w.Code == http.StatusForbidden {
-		// Origin no longer matches the host — expected 403 from the origin check, not the host guard.
 		if !strings.Contains(w.Body.String(), "跨站") {
 			t.Fatalf("localhost host rejected by host guard: %s", w.Body)
 		}
@@ -162,7 +158,6 @@ func TestSecretReuseRules(t *testing.T) {
 	s := newSecTestServer(t, Options{})
 	auth := bearer(s.opts.Token)
 
-	// Model provider: api_key_set instead of the key; omit = keep.
 	w := do(s, "POST", "/api/v1/models", map[string]any{"name": "m", "provider": "openai", "model": "x", "base_url": "http://a.invalid/v1", "api_key": "sk-stored"}, auth)
 	if w.Code != http.StatusCreated || strings.Contains(w.Body.String(), "sk-stored") {
 		t.Fatalf("create model = %d %s", w.Code, w.Body)
@@ -181,7 +176,6 @@ func TestSecretReuseRules(t *testing.T) {
 	if m.APIKey != "sk-stored" {
 		t.Fatalf("omitted api_key changed the stored key: %q", m.APIKey)
 	}
-	// Changing base_url without a key would redirect the stored key: refused.
 	w = do(s, "PUT", "/api/v1/models/"+itoa(id), map[string]any{"name": "m2", "provider": "openai", "model": "x", "base_url": "http://evil.invalid/v1"}, auth)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("redirect stored key on update = %d", w.Code)
@@ -191,7 +185,6 @@ func TestSecretReuseRules(t *testing.T) {
 		t.Fatalf("test endpoint reused key for a different base_url: %d %s", w.Code, w.Body)
 	}
 
-	// Filesystem: password_set; test endpoint reuse only for the same endpoint.
 	dir := t.TempDir()
 	w = do(s, "POST", "/api/v1/filesystems", map[string]any{"name": "f", "protocol": "local", "base_path": dir, "host": "h", "username": "u", "password": "pw-stored"}, auth)
 	if w.Code != http.StatusCreated || strings.Contains(w.Body.String(), "pw-stored") || !strings.Contains(w.Body.String(), `"password_set":true`) {
@@ -212,7 +205,6 @@ func TestSecretReuseRules(t *testing.T) {
 		t.Fatalf("endpoint change keeping password = %d", w.Code)
 	}
 
-	// Secrets are encrypted at rest.
 	var raw string
 	s.repo.DB().Raw("SELECT password FROM filesystems WHERE id = ?", fsID).Scan(&raw)
 	if raw == "" || strings.Contains(raw, "pw-stored") {
@@ -223,7 +215,6 @@ func TestSecretReuseRules(t *testing.T) {
 		t.Fatalf("api key stored in plaintext: %q", raw)
 	}
 
-	// LOCAL base paths outside the allowed roots are refused.
 	w = do(s, "POST", "/api/v1/filesystems", map[string]any{"name": "etc", "protocol": "local", "base_path": "/etc"}, auth)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("local /etc = %d", w.Code)

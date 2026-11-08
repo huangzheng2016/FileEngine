@@ -8,8 +8,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// brainServer is a server with one scanned session (id 1, filesystem 1) and
-// a few entries, without a background scan.
 func brainServer(t *testing.T) (*Server, *db.Repository) {
 	t.Helper()
 	s := setupSessionTestServer(t)
@@ -130,8 +128,6 @@ func TestMemoryEndpoints(t *testing.T) {
 	}
 }
 
-// A user's manual re-target is validated, collision-resolved and learned as a
-// filesystem correction memory.
 func TestFilePatchCapturesCorrection(t *testing.T) {
 	s, repo := brainServer(t)
 	logo, _ := repo.GetFileByPath(1, "Design/logo.psd")
@@ -150,7 +146,6 @@ func TestFilePatchCapturesCorrection(t *testing.T) {
 		t.Fatalf("correction memory: %+v", items)
 	}
 
-	// Same target for a sibling: collision resolved, same correction key updated.
 	code, f = doModelRequest(t, s, http.MethodPatch, fmt.Sprintf("/api/v1/files/%d", icon.ID), map[string]any{"new_path": "/设计/源文件/logo.psd", "description": "图标"})
 	if code != http.StatusOK || f["new_path"] != "/设计/源文件/logo (2).psd" || f["description"] != "图标" {
 		t.Fatalf("collision: %d %v", code, f)
@@ -162,7 +157,6 @@ func TestFilePatchCapturesCorrection(t *testing.T) {
 	if code, _ := doModelRequest(t, s, http.MethodPatch, fmt.Sprintf("/api/v1/files/%d", icon.ID), map[string]any{"new_path": "/../escape"}); code != http.StatusBadRequest {
 		t.Fatalf("illegal path: %d", code)
 	}
-	// Description-only edits learn nothing and keep the target.
 	code, f = doModelRequest(t, s, http.MethodPatch, fmt.Sprintf("/api/v1/files/%d", logo.ID), map[string]any{"description": "标志"})
 	if code != http.StatusOK || f["new_path"] != "/设计/源文件/logo.psd" {
 		t.Fatalf("description only: %v", f)

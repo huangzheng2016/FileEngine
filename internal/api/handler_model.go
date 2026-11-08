@@ -58,25 +58,22 @@ func (s *Server) listModelProviders(c *gin.Context) {
 }
 
 type ModelProviderRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Provider string `json:"provider" binding:"required"`
-	// APIKey omitted keeps the stored key on update.
+	Name        string  `json:"name" binding:"required"`
+	Provider    string  `json:"provider" binding:"required"`
 	APIKey      *string `json:"api_key"`
 	Model       string  `json:"model" binding:"required"`
 	BaseURL     string  `json:"base_url"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
-	// The optional fields are pointers: absent (nil) means "not provided" —
-	// create applies the default, update keeps the stored value.
+	// Optional fields are pointers: nil means create applies the default and
+	// update keeps the stored value.
 	ContextWindow   *int    `json:"context_window"` // tokens; tiers are UI suggestions, any positive value is accepted
 	VisionEnabled   *bool   `json:"vision_enabled"`
 	ThinkingEnabled *bool   `json:"thinking_enabled"`
 	ReasoningEffort *string `json:"reasoning_effort"` // "" = model default; free-form level (low/medium/high/max/...)
 }
 
-// reasoningEffortPattern bounds the free-form thinking strength: providers
-// keep inventing levels, so only charset/length are checked. "" means "use
-// the model default".
+// Providers keep inventing levels, so only charset and length are checked.
 var reasoningEffortPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
 func resolveReasoningEffort(v *string, fallback string) (string, error) {
@@ -89,7 +86,6 @@ func resolveReasoningEffort(v *string, fallback string) (string, error) {
 	return *v, nil
 }
 
-// resolveContextWindow validates an optional context_window value.
 func resolveContextWindow(v *int, fallback int) (int, error) {
 	if v == nil {
 		return fallback, nil
@@ -215,8 +211,6 @@ func (s *Server) deleteModelProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
-// ModelTestRequest tests a provider. ID names a stored provider whose API key
-// may be reused — only when provider and base_url are unchanged.
 type ModelTestRequest struct {
 	ModelProviderRequest
 	ID uint `json:"id"`
@@ -274,7 +268,6 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": "模型配置无效：" + err.Error()})
 		return
 	}
-	// Send a test message to verify the model actually works
 	result, err := chatModel.Generate(c.Request.Context(), []*schema.Message{
 		{Role: schema.User, Content: "Hi"},
 	})

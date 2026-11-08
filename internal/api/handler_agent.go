@@ -18,7 +18,6 @@ import (
 
 var errSessionNoFilesystem = errors.New("会话关联的文件系统不存在")
 
-// resolveFSConfig resolves the RemoteFSConfig for a session via its Filesystem entity.
 func (s *Server) resolveFSConfig(session *db.ScanSession) (config.RemoteFSConfig, error) {
 	if session.FilesystemID == 0 {
 		return config.RemoteFSConfig{}, errSessionNoFilesystem
@@ -33,7 +32,6 @@ func (s *Server) resolveFSConfig(session *db.ScanSession) (config.RemoteFSConfig
 	return filesystem.ToRemoteFSConfig(), nil
 }
 
-// fsConfigFailed answers a failed resolveFSConfig.
 func fsConfigFailed(c *gin.Context, err error) {
 	if errors.Is(err, errSessionNoFilesystem) {
 		badRequest(c, err.Error())
@@ -42,8 +40,7 @@ func fsConfigFailed(c *gin.Context, err error) {
 	internalError(c, err)
 }
 
-// agentForSession resolves everything an agent run of the session needs. On
-// failure it has already answered the request.
+// On failure it has already answered the request.
 func (s *Server) agentForSession(c *gin.Context) (*db.ScanSession, *agent.Agent, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -76,7 +73,6 @@ func (s *Server) agentForSession(c *gin.Context) (*db.ScanSession, *agent.Agent,
 	return session, agent.New(s.repo, fsCfg, session.ID, modelProvider, session), true
 }
 
-// startTagging starts a tagging run: POST /sessions/:id/tag → {run_id}.
 func (s *Server) startTagging(c *gin.Context) {
 	session, a, ok := s.agentForSession(c)
 	if !ok {
@@ -98,7 +94,6 @@ func (s *Server) getPlans(c *gin.Context) {
 		return
 	}
 
-	// DryRun only reads from DB, no FS connection needed
 	e := executor.New(s.repo, nil)
 	plans, err := e.DryRun(uint(id))
 	if err != nil {

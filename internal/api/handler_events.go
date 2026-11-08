@@ -12,12 +12,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// sseHeartbeatInterval is a var so tests can shrink it.
 var sseHeartbeatInterval = 20 * time.Second
 
 const replayPageSize = 500
 
-// eventItem is one persisted event in the history API.
 type eventItem struct {
 	Seq       uint            `json:"seq"`
 	Type      string          `json:"type"`
@@ -37,9 +35,6 @@ func queryUint(c *gin.Context, key string) (uint, error) {
 	return uint(n), nil
 }
 
-// listSessionEvents serves GET /sessions/:id/events?run_id=&after=&before=&limit=
-// → {items (ascending seq), has_more}. With only before set it pages
-// backwards (the newest events below before).
 func (s *Server) listSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -71,13 +66,9 @@ func (s *Server) listSessionEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "has_more": more})
 }
 
-// streamSessionEvents serves the session event stream over SSE
-// (GET /sessions/:id/events/stream[?run_id=]). Frames carry `id: <seq>`.
-// Resume point: the Last-Event-ID header or ?after=<seq>; without either the
-// replay starts at the latest run's first event. The handler subscribes
-// first, replays persisted events after the resume point, then follows the
-// live broadcast, dropping live events it already replayed. A subscriber
-// that lagged (dropped events) re-reads the gap from the database.
+// Subscribes first, replays persisted events after the resume point, then
+// follows the live broadcast, dropping live events it already replayed. A
+// lagging subscriber re-reads the gap from the database.
 func (s *Server) streamSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {

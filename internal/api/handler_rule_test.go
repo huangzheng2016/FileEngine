@@ -84,7 +84,6 @@ func TestReviewConfirmAndFileFilters(t *testing.T) {
 		t.Fatal("empty confirm")
 	}
 
-	// Manual edits under a unit conflict with the decision model.
 	if _, err := repo.Decide(1, db.Decision{Path: "Design", Role: db.RoleUnit, NewPath: "/设计/Design", Override: true}); err != nil {
 		t.Fatal(err)
 	}

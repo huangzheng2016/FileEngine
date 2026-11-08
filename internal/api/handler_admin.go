@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GET /healthz (unauthenticated): 200 when the database answers a ping.
 func (s *Server) healthz(c *gin.Context) {
 	sqlDB, err := s.repo.DB().DB()
 	if err == nil {
@@ -31,8 +30,7 @@ func (s *Server) healthz(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// POST /api/v1/admin/backup streams a consistent SQLite snapshot taken with
-// VACUUM INTO (safe while the app keeps writing).
+// VACUUM INTO gives a consistent snapshot while the app keeps writing.
 func (s *Server) backup(c *gin.Context) {
 	if s.repo.DB().Dialector.Name() != "sqlite" {
 		badRequest(c, "仅 SQLite 数据库支持在线备份，MySQL/PostgreSQL 请使用数据库自带工具")
@@ -55,13 +53,9 @@ func (s *Server) backup(c *gin.Context) {
 	c.File(snap)
 }
 
-// drainTimeout bounds how long Shutdown waits for runs to finish.
 const drainTimeout = 30 * time.Second
 
-// Shutdown cancels every running run (agent and executor runs alike; the
-// executor stops before its next step and never mid-delete) and waits until
-// they have all finished, bounded by drainTimeout and ctx. The HTTP server
-// itself is shut down by the caller.
+// The executor stops before its next step, never mid-delete.
 func (s *Server) Shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, drainTimeout)
 	defer cancel()
@@ -80,9 +74,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// contentDisposition builds a header value that cannot be broken by quotes,
-// CR/LF or non-ASCII in the file name; unencodable names fall back to the
-// bare disposition.
 func contentDisposition(disposition, filename string) string {
 	if v := mime.FormatMediaType(disposition, map[string]string{"filename": filename}); v != "" {
 		return v

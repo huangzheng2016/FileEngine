@@ -33,7 +33,6 @@ func (s *Server) updatePrompt(c *gin.Context) {
 
 	cfg := config.Get()
 	updated := *cfg
-	// If the prompt equals the default, store empty to indicate "use default"
 	if req.Prompt == agent.DefaultSystemPrompt {
 		updated.Agent.SystemPrompt = ""
 	} else {

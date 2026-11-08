@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// vision_enabled and thinking_enabled are optional switches: absent on create
-// means false, absent on update keeps the stored value.
 func TestModelProviderSwitches(t *testing.T) {
 	s := setupModelTestServer(t)
 
@@ -33,7 +31,6 @@ func TestModelProviderSwitches(t *testing.T) {
 		t.Fatalf("create smart: %v", created)
 	}
 
-	// Update without the switches keeps them.
 	code, updated := doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
 		"name": "smart", "provider": "claude", "model": "claude-sonnet-4", "max_tokens": 8192,
 	})
@@ -44,7 +41,6 @@ func TestModelProviderSwitches(t *testing.T) {
 		t.Fatalf("switches clobbered by update without them: %v", updated)
 	}
 
-	// Explicit toggles off.
 	code, updated = doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
 		"name": "smart", "provider": "claude", "model": "claude-sonnet-4",
 		"vision_enabled": false, "thinking_enabled": false,

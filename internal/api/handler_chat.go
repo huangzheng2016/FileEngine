@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// chatTitleMaxRunes caps the run title derived from a chat message.
 const chatTitleMaxRunes = 60
 
 type ChatRequest struct {
@@ -22,8 +21,6 @@ type ChatRequest struct {
 	FileIDs []uint `json:"file_ids"`
 }
 
-// postChat starts a chat run for one user message:
-// POST /sessions/:id/chat {content, file_ids?} → {run_id}.
 func (s *Server) postChat(c *gin.Context) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -61,8 +58,6 @@ func chatTitle(content string) string {
 	return t
 }
 
-// listChat returns the persisted conversation:
-// GET /sessions/:id/chat → {items: ChatTurn[]}.
 func (s *Server) listChat(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -79,7 +74,6 @@ func (s *Server) listChat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": turns})
 }
 
-// sessionAgent resolves the agent of a session outside a request.
 func (s *Server) sessionAgent(sessionID uint) (*db.ScanSession, *agent.Agent, error) {
 	session, err := s.repo.GetSession(sessionID)
 	if err != nil {
@@ -99,8 +93,6 @@ func (s *Server) sessionAgent(sessionID uint) (*db.ScanSession, *agent.Agent, er
 	return session, agent.New(s.repo, fsCfg, session.ID, provider, session), nil
 }
 
-// startReviewAfterTagging chains the review run (consistency pass + memory
-// reflection) onto a tagging run that finished done or partial.
 func (s *Server) startReviewAfterTagging(sessionID, taggingRunID uint, status string) {
 	if status != db.RunDone && status != db.RunPartial {
 		return
@@ -110,7 +102,6 @@ func (s *Server) startReviewAfterTagging(sessionID, taggingRunID uint, status st
 	}
 }
 
-// RunReviewAfterTagging starts the review run of a finished tagging run.
 func (s *Server) RunReviewAfterTagging(sessionID, taggingRunID uint) (*db.AgentRun, error) {
 	_, a, err := s.sessionAgent(sessionID)
 	if err != nil {

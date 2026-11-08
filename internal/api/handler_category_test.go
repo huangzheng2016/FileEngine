@@ -8,13 +8,9 @@ import (
 	"FileEngine/internal/db"
 )
 
-// The REST category handlers must enforce the same root-confinement path
-// rules as the agent tool layer (pathutil.ValidateFSPath) — otherwise the API
-// would be a bypass around the tool-level validation.
 func TestCategoryPathValidationREST(t *testing.T) {
 	s := setupSessionTestServer(t)
 
-	// create: an escaping path is rejected with 400 and writes nothing.
 	code, resp := doModelRequest(t, s, http.MethodPost, "/api/v1/categories", map[string]any{
 		"filesystem_id": 1, "name": "Bad", "path": "/../evil",
 	})
@@ -25,7 +21,6 @@ func TestCategoryPathValidationREST(t *testing.T) {
 		t.Fatalf("rejected create must write nothing, got %d categories", len(cats))
 	}
 
-	// create: a legal path passes.
 	code, _ = doModelRequest(t, s, http.MethodPost, "/api/v1/categories", map[string]any{
 		"filesystem_id": 1, "name": "Good", "path": "/organized/good",
 	})
@@ -33,7 +28,6 @@ func TestCategoryPathValidationREST(t *testing.T) {
 		t.Fatalf("create valid: code %d", code)
 	}
 
-	// update: an escaping path is rejected and the stored path is untouched.
 	code, resp = doModelRequest(t, s, http.MethodPut, "/api/v1/categories/1", map[string]any{
 		"filesystem_id": 1, "name": "Good", "path": "/a/../../b",
 	})
@@ -45,7 +39,6 @@ func TestCategoryPathValidationREST(t *testing.T) {
 		t.Fatalf("rejected update must not change path: cat %+v, err %v", cat, err)
 	}
 
-	// update: a legal path passes.
 	code, _ = doModelRequest(t, s, http.MethodPut, "/api/v1/categories/1", map[string]any{
 		"filesystem_id": 1, "name": "Good", "path": "/organized/better",
 	})
@@ -53,7 +46,6 @@ func TestCategoryPathValidationREST(t *testing.T) {
 		t.Fatalf("update valid: code %d", code)
 	}
 
-	// import: illegal items are skipped, legal ones created.
 	code, resp = doModelRequest(t, s, http.MethodPost, "/api/v1/categories/import?filesystem_id=1", []map[string]any{
 		{"name": "Imported", "path": "/imported"},
 		{"name": "Evil", "path": "/../evil"},

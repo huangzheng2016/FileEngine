@@ -18,9 +18,8 @@ const (
 	importBodyLimit  = 8 << 20 // category import
 )
 
-// securityHeaders applies to every response. API responses get a deny-all
-// CSP (they are JSON/streams, never documents); the SPA only forbids framing
-// so the bundle's own scripts/styles keep working.
+// API responses get a deny-all CSP (they are never documents); the SPA only
+// forbids framing so its own scripts and styles keep working.
 func securityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
@@ -36,8 +35,6 @@ func securityHeaders() gin.HandlerFunc {
 	}
 }
 
-// bodyLimit caps request bodies (1MB, 8MB for category import) so a single
-// request cannot exhaust memory through JSON binding.
 func bodyLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Body == nil {
@@ -57,8 +54,7 @@ func bodyLimit() gin.HandlerFunc {
 	}
 }
 
-// requestLogger logs one line per request through slog — path only, never
-// the query string (the bootstrap URL carries the token).
+// Path only, never the query string: the bootstrap URL carries the token.
 func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -68,9 +64,8 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-// rateLimiter is a tiny fixed-window limiter keyed by endpoint. FileEngine is
-// a single-user app, so a global (not per-client) budget is enough to stop a
-// leaked cookie or a runaway script from hammering outbound test endpoints.
+// A single-user app, so one global budget is enough to stop a leaked cookie
+// or a runaway script from hammering outbound test endpoints.
 type rateLimiter struct {
 	mu     sync.Mutex
 	limit  int

@@ -11,8 +11,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// Error responses are {error: <Chinese>}; internal failures never leak the
-// database error.
 func TestErrorEnvelope(t *testing.T) {
 	s := setupSessionTestServer(t)
 	cases := []struct {
@@ -55,8 +53,6 @@ func TestErrorEnvelope(t *testing.T) {
 	}
 }
 
-// A target equal to the entry's own path keeps it in place: the target is
-// cleared and no correction is learned. User edits are marked 用户修改.
 func TestFilePatchKeepInPlace(t *testing.T) {
 	s, repo := brainServer(t)
 	logo, _ := repo.GetFileByPath(1, "Design/logo.psd")
@@ -87,9 +83,6 @@ func TestFilePatchKeepInPlace(t *testing.T) {
 	}
 }
 
-// End to end through the API: check carries notes under a lower-case key,
-// locate answers "/"-rooted targets, and reverting a move removes the
-// directories the run created.
 func TestExecuteRevertAndLocate(t *testing.T) {
 	s := setupSessionTestServer(t)
 	repo := s.repo

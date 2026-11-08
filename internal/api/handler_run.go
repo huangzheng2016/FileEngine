@@ -14,19 +14,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// runOutcome is what a run's work function reports back to launchRun.
 type runOutcome struct {
 	Summary string
-	Partial bool // tagging finished with failed batches
+	Partial bool
 	Err     error
 	Tokens  db.TokenCounts
-	// Then, when set, runs after the run is finished with its final status
-	// (e.g. tagging chains the review run).
-	Then func(status string)
+	Then    func(status string)
 }
 
-// runStopWait bounds how long POST /runs/:id/stop waits for the run to wind
-// down before answering. A var so tests can shrink it.
 var runStopWait = 30 * time.Second
 
 var runDone = struct {
@@ -34,10 +29,6 @@ var runDone = struct {
 	m  map[uint]chan struct{}
 }{m: make(map[uint]chan struct{})}
 
-// launchRun creates a run of the session (db.ErrSessionBusy when another run
-// is running) and executes work in the background on a stoppable context.
-// The run ends done / partial / stopped (context canceled) / error according
-// to the outcome; FinishRun emits the terminal events.
 func (s *Server) launchRun(sessionID uint, phase, title string, work func(ctx context.Context, run *db.AgentRun) runOutcome) (*db.AgentRun, error) {
 	run, err := s.repo.CreateRun(sessionID, phase, title)
 	if err != nil {
@@ -79,8 +70,6 @@ func (s *Server) launchRun(sessionID uint, phase, title string, work func(ctx co
 	return run, nil
 }
 
-// respondRunStart answers a run-starting request: {run_id} on success, 409
-// when the session is busy.
 func respondRunStart(c *gin.Context, run *db.AgentRun, err error) {
 	if errors.Is(err, db.ErrSessionBusy) {
 		conflict(c, err.Error())
@@ -124,9 +113,7 @@ func (s *Server) getRun(c *gin.Context) {
 	c.JSON(http.StatusOK, run)
 }
 
-// stopRun cancels a running run and waits (bounded) for it to wind down; it
-// answers with the run as stored afterwards. A running row without a live
-// goroutine is finished as stopped directly.
+// A running row without a live goroutine is finished as stopped directly.
 func (s *Server) stopRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
@@ -160,8 +147,6 @@ func (s *Server) stopRun(c *gin.Context) {
 	c.JSON(http.StatusOK, run)
 }
 
-// stopSessionRuns stops every running run of a session (used before the
-// session is deleted).
 func (s *Server) stopSessionRuns(sessionID uint) {
 	runs, err := s.repo.RunningRuns(sessionID)
 	if err != nil {

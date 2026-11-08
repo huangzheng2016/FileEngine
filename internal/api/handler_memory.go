@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// listMemory lists memory items: GET /memory?scope=&scope_id= → {items}.
 func (s *Server) listMemory(c *gin.Context) {
 	scope := c.Query("scope")
 	if scope != "" && !db.ValidMemoryScope(scope) {
@@ -48,8 +47,6 @@ type CreateMemoryRequest struct {
 	Pinned  bool   `json:"pinned"`
 }
 
-// createMemory writes a user memory; an existing (scope, scope_id, key) is
-// updated in place (200), a new one is created (201).
 func (s *Server) createMemory(c *gin.Context) {
 	var req CreateMemoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -79,8 +76,8 @@ type UpdateMemoryRequest struct {
 	Pinned  *bool   `json:"pinned"`
 }
 
-// updateMemory edits one item; the user becomes its source (user-curated
-// items are protected from reflection).
+// The user becomes the source: user-curated items are protected from
+// reflection.
 func (s *Server) updateMemory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -149,8 +146,6 @@ func writeMemoryError(c *gin.Context, err error) {
 	}
 }
 
-// emitMemoryChange publishes memory_updated for session-scoped items (the
-// only ones tied to a session stream).
 func emitMemoryChange(m *db.MemoryItem) {
 	if m.Scope == db.MemoryScopeSession {
 		db.Emit(m.ScopeID, 0, db.EvMemoryUpdated, db.MemoryUpdatedData{Scope: m.Scope, ID: m.ID})

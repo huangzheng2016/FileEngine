@@ -12,8 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// installRuleHook re-runs the deterministic pre-pass (scope, sensitive flags,
-// rules) after every successful scan.
 func installRuleHook(repo *db.Repository) {
 	scanner.ApplyRulesHook = func(sessionID uint) {
 		if err := repo.PrepareSession(sessionID); err != nil {
@@ -72,7 +70,6 @@ func writeRuleError(c *gin.Context, err error) {
 	}
 }
 
-// listRules: GET /sessions/:id/rules → {items}.
 func (s *Server) listRules(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -89,7 +86,6 @@ func (s *Server) listRules(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": rules})
 }
 
-// createRule: POST /sessions/:id/rules → created rule.
 func (s *Server) createRule(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -109,7 +105,6 @@ func (s *Server) createRule(c *gin.Context) {
 	c.JSON(http.StatusCreated, rule)
 }
 
-// updateRule: PUT /rules/:id (partial) → rule.
 func (s *Server) updateRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -142,8 +137,6 @@ func (s *Server) deleteRule(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
-// applyRules: POST /sessions/:id/rules/apply[?preview=1] →
-// {items: [{rule_id, name, matched, samples: [{original_path, new_path}]}], applied}.
 func (s *Server) applyRules(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -166,7 +159,6 @@ type FileIDsRequest struct {
 	FileIDs []uint `json:"file_ids"`
 }
 
-// confirmReview: POST /sessions/:id/review/confirm {file_ids} → {confirmed}.
 func (s *Server) confirmReview(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {

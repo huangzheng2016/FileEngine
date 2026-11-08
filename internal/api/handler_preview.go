@@ -7,10 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// previewTree lists one directory of the before/after preview:
-// GET /sessions/:id/preview/tree?side=after|before&path=&offset=&limit=
-// → {items, total}. side=after browses the virtual target tree ("/"-rooted
-// paths); side=before browses the scanned tree with a status per item.
+// side=after browses the virtual target tree ("/"-rooted paths); side=before
+// browses the scanned tree with a status per item.
 func (s *Server) previewTree(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -49,9 +47,6 @@ type ResetPlansRequest struct {
 	FileIDs []uint `json:"file_ids"`
 }
 
-// resetPlans clears the targets of the given entries and marks them untagged
-// so the next tagging/chat run redoes them: POST /sessions/:id/plans/reset
-// {file_ids} → {reset}.
 func (s *Server) resetPlans(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {

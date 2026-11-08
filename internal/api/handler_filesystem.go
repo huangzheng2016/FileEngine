@@ -48,8 +48,8 @@ func toFilesystemResponse(fs *db.Filesystem) FilesystemResponse {
 	}
 }
 
-// FilesystemRequest is the create/update/test body. Password and HostKey are
-// pointers: omitted means "keep the stored value" on update.
+// Password and HostKey are pointers: omitted keeps the stored value on
+// update.
 type FilesystemRequest struct {
 	Name        string  `json:"name" binding:"required"`
 	Description string  `json:"description"`
@@ -63,10 +63,8 @@ type FilesystemRequest struct {
 	HostKey     *string `json:"host_key"`
 }
 
-// sameEndpoint reports whether a request targets the same server identity as
-// a stored record — the condition for reusing its stored password. Without
-// it, editing host/port/username would redirect the stored secret to an
-// arbitrary server.
+// Without this check, editing host/port/username would send the stored
+// password to an arbitrary server.
 func sameEndpoint(stored *db.Filesystem, req *FilesystemRequest) bool {
 	return stored.Protocol == req.Protocol && stored.Host == req.Host &&
 		stored.Port == req.Port && stored.Username == req.Username
@@ -74,8 +72,6 @@ func sameEndpoint(stored *db.Filesystem, req *FilesystemRequest) bool {
 
 var validProtocols = map[string]bool{"local": true, "sftp": true, "ftp": true, "smb": true, "nfs": true}
 
-// checkHostPaths validates the host-local paths a request names (LOCAL base
-// path, SFTP key file) against the LocalPolicy.
 func checkHostPaths(req *FilesystemRequest) error {
 	if req.Protocol == "local" {
 		if err := remotefs.CheckLocalPath(req.BasePath); err != nil {
@@ -115,8 +111,8 @@ func (s *Server) listFilesystems(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// pinHostKey sets fs.HostKey for SFTP: an explicit request value wins,
-// otherwise the server's current key is fetched (trust on first use).
+// Without an explicit key the server's current key is pinned (trust on first
+// use).
 func pinHostKey(fs *db.Filesystem, explicit *string) error {
 	if fs.Protocol != "sftp" {
 		fs.HostKey = ""
@@ -258,16 +254,15 @@ func (s *Server) deleteFilesystem(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
-// FilesystemTestRequest tests a connection. ID names a stored filesystem whose
-// password may be reused — only when the request targets the same endpoint.
+// A stored password is reused only when the request targets the same
+// endpoint.
 type FilesystemTestRequest struct {
 	FilesystemRequest
 	ID uint `json:"id"`
 }
 
-// testFilesystemConnection answers {success, error?, host_key?,
-// host_key_changed?}. For SFTP the server fingerprint is always returned so
-// the user can verify it before saving.
+// For SFTP the fingerprint is always returned so the user can verify it
+// before saving.
 func (s *Server) testFilesystemConnection(c *gin.Context) {
 	var req FilesystemTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

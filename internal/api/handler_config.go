@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// configView is the API shape of the config: server and database are
-// informational only (no token, no DSN); agent is the editable section.
+// server and database are informational only (no token, no DSN); agent is
+// the editable section.
 type configView struct {
 	Server struct {
 		Host string `json:"host"`
@@ -39,8 +39,7 @@ func (s *Server) getConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, toConfigView(cfg))
 }
 
-// PUT /config merges a partial {"agent": {...}} into the agent section;
-// absent fields keep their values, server/database are ignored (read-only).
+// Absent fields keep their values; server and database are read-only.
 func (s *Server) updateConfig(c *gin.Context) {
 	var req struct {
 		Agent json.RawMessage `json:"agent"`

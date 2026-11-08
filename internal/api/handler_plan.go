@@ -12,8 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// loadSession resolves the :id session param, writing the error response
-// itself when it fails.
 func (s *Server) loadSession(c *gin.Context) (*db.ScanSession, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -28,7 +26,6 @@ func (s *Server) loadSession(c *gin.Context) (*db.ScanSession, bool) {
 	return session, true
 }
 
-// getPlan returns the session plan; a session without one gets {version: 0}.
 func (s *Server) getPlan(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -44,12 +41,9 @@ func (s *Server) getPlan(c *gin.Context) {
 
 type UpdatePlanRequest struct {
 	Content string `json:"content"`
-	// Version is the plan version the edit is based on (0 when creating).
-	Version int `json:"version"`
+	Version int    `json:"version"`
 }
 
-// updatePlan saves the user's edit of the plan; a stale version is a 409
-// carrying the current plan.
 func (s *Server) updatePlan(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -78,7 +72,6 @@ func (s *Server) updatePlan(c *gin.Context) {
 	c.JSON(http.StatusOK, plan)
 }
 
-// approvePlan marks the plan approved.
 func (s *Server) approvePlan(c *gin.Context) {
 	session, ok := s.loadSession(c)
 	if !ok {
@@ -101,8 +94,6 @@ type DraftPlanRequest struct {
 	Instructions string `json:"instructions"`
 }
 
-// draftPlan starts a survey run that drafts the plan:
-// POST /sessions/:id/plan/draft {instructions?} → {run_id}.
 func (s *Server) draftPlan(c *gin.Context) {
 	var req DraftPlanRequest
 	if c.Request.ContentLength != 0 {

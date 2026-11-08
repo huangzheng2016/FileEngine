@@ -15,9 +15,6 @@ import (
 
 func itoa(id uint) string { return fmt.Sprintf("%d", id) }
 
-// A filesystem whose base path does not exist fails at connect time — the
-// session must end in status=error with the reason in error_message, never
-// silently stuck in "scanning".
 func TestScanConnectErrorSurfaced(t *testing.T) {
 	s := setupSessionTestServer(t)
 	repo := db.NewRepository(db.GetDB())
@@ -48,8 +45,6 @@ func TestScanConnectErrorSurfaced(t *testing.T) {
 	}
 }
 
-// A scan_path that does not exist fails mid-walk — same surfacing contract:
-// status=error plus a descriptive error_message.
 func TestScanWalkErrorSurfaced(t *testing.T) {
 	s := setupSessionTestServer(t)
 
@@ -75,8 +70,6 @@ func TestScanWalkErrorSurfaced(t *testing.T) {
 	}
 }
 
-// A healthy scan lands coherent progress fields: scanned_count converged to
-// total_files, heartbeat cleared, no error message.
 func TestScanSuccessPopulatesProgressFields(t *testing.T) {
 	s := setupSessionTestServer(t)
 	repo := db.NewRepository(db.GetDB())
@@ -115,8 +108,6 @@ func TestScanSuccessPopulatesProgressFields(t *testing.T) {
 	}
 }
 
-// Rescanning a failed session wipes the error state and the stale counters,
-// so a fixed filesystem scans clean.
 func TestRescanClearsErrorAndProgress(t *testing.T) {
 	s := setupSessionTestServer(t)
 	repo := db.NewRepository(db.GetDB())
@@ -133,7 +124,6 @@ func TestRescanClearsErrorAndProgress(t *testing.T) {
 	sessID := uint(created["id"].(float64))
 	waitForScanDone(t, s, sessID)
 
-	// Repair the filesystem (base path now exists with one file), then rescan.
 	if err := os.MkdirAll(missing, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -161,8 +151,6 @@ func TestRescanClearsErrorAndProgress(t *testing.T) {
 	}
 }
 
-// registerFakeScan injects an in-flight scan handle the test controls: the
-// goroutine "exits" when the returned channel is closed.
 func registerFakeScan(t *testing.T, sessionID uint, cancel func()) chan struct{} {
 	t.Helper()
 	done := make(chan struct{})
@@ -180,10 +168,8 @@ func registerFakeScan(t *testing.T, sessionID uint, cancel func()) chan struct{}
 	return done
 }
 
-// rescan must wait for the previous scan goroutine to fully exit before it
-// wipes and restarts: the canceled scan's DB tail (bulk insert + final save)
-// has no ctx checks, so without the wait its writes land on top of the fresh
-// scan (idx_uniq_session_path collisions, status clobbered to "scanned").
+// The canceled scan's DB tail has no ctx checks, so without the wait its
+// writes land on top of the fresh scan.
 func TestRescanWaitsForPreviousScan(t *testing.T) {
 	s := setupSessionTestServer(t)
 	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
@@ -203,8 +189,6 @@ func TestRescanWaitsForPreviousScan(t *testing.T) {
 		rescanDone <- w.Code
 	}()
 
-	// The cancel fires, but the handler must stay blocked while the old scan
-	// is still "running".
 	select {
 	case <-canceled:
 	case <-time.After(2 * time.Second):
@@ -216,7 +200,6 @@ func TestRescanWaitsForPreviousScan(t *testing.T) {
 	case <-time.After(150 * time.Millisecond):
 	}
 
-	// The old goroutine exits → the rescan proceeds with its reset.
 	close(done)
 	select {
 	case rc := <-rescanDone:
@@ -229,8 +212,6 @@ func TestRescanWaitsForPreviousScan(t *testing.T) {
 	waitForScanDone(t, s, 1) // the fresh scan the rescan kicked off
 }
 
-// A wedged scan goroutine must not block rescan forever: after
-// scanStopTimeout the handler logs and proceeds anyway.
 func TestRescanScanStopTimeoutFallback(t *testing.T) {
 	s := setupSessionTestServer(t)
 	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
@@ -255,9 +236,8 @@ func TestRescanScanStopTimeoutFallback(t *testing.T) {
 	waitForScanDone(t, s, 1)
 }
 
-// delete waits for the same reason: the canceled goroutine's final Save
-// would otherwise resurrect a deleted session row (Save inserts when the
-// update matches nothing).
+// The canceled goroutine's final Save would otherwise resurrect the deleted
+// row (Save inserts when the update matches nothing).
 func TestDeleteWaitsForScan(t *testing.T) {
 	s := setupSessionTestServer(t)
 	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})

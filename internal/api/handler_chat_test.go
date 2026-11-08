@@ -15,7 +15,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// stepModel streams the scripted steps in order, then "完成".
 type stepModel struct{ steps []*schema.Message }
 
 func (m *stepModel) next() *schema.Message {
@@ -37,8 +36,6 @@ func (m *stepModel) Stream(context.Context, []*schema.Message, ...einomodel.Opti
 
 func (m *stepModel) BindTools([]*schema.ToolInfo) error { return nil }
 
-// chatServer is brainServer with a model provider on the session and runs
-// driven by model.
 func chatServer(t *testing.T, model *stepModel) (*Server, *db.Repository) {
 	t.Helper()
 	s, repo := brainServer(t)

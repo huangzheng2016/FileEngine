@@ -26,11 +26,9 @@ const (
 	tokenParam    = "token"
 )
 
-// Options configures NewServer.
 type Options struct {
-	// Token is the API token. Empty falls back to config server.token; if that
-	// is empty too a random per-process token is used — auth is never off.
-	// The desktop shell injects a fresh per-launch token here.
+	// Empty falls back to config server.token, then to a random per-process
+	// token: auth is never off.
 	Token string
 	// BindHost is the listen host. A loopback host enables the DNS-rebinding
 	// guard: only localhost / 127.0.0.1 / ::1 Host headers are served.
@@ -42,7 +40,6 @@ type Options struct {
 	AllowedHosts []string
 }
 
-// NewToken returns a 256-bit URL-safe random token.
 func NewToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -77,8 +74,6 @@ func (s *Server) tokenMatches(candidate string) bool {
 	return candidate != "" && subtle.ConstantTimeCompare([]byte(candidate), []byte(s.opts.Token)) == 1
 }
 
-// requestToken extracts the presented credential: bearer header first, then
-// the session cookie.
 func requestToken(r *http.Request) (string, bool) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		if t, ok := strings.CutPrefix(h, "Bearer "); ok {
@@ -171,9 +166,6 @@ var publicAPIPaths = map[string]bool{
 	BootstrapPath:        true,
 }
 
-// apiGuard protects every /api/v1 route: cross-site requests are refused
-// (CSRF), then a valid token is required except on the login/bootstrap
-// endpoints.
 func (s *Server) apiGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !fetchMetadataOK(c.Request) {
@@ -208,7 +200,6 @@ type loginRequest struct {
 	Token string `json:"token" binding:"required"`
 }
 
-// POST /api/v1/auth/login {token} → session cookie.
 func (s *Server) login(c *gin.Context) {
 	if !s.limiter.allow("login") {
 		abortError(c, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
@@ -228,7 +219,6 @@ func (s *Server) login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authenticated": true})
 }
 
-// POST /api/v1/auth/logout clears the session cookie.
 func (s *Server) logout(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: SessionCookie, Value: "", Path: "/", MaxAge: -1,
@@ -237,14 +227,12 @@ func (s *Server) logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authenticated": false})
 }
 
-// GET /api/v1/auth/me → 200 when authenticated (apiGuard already ran).
 func (s *Server) me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authenticated": true})
 }
 
-// GET /api/v1/auth/bootstrap?token=… exchanges the token for the session
-// cookie and redirects to the SPA. The desktop window opens this as its start
-// URL; in server mode it doubles as a one-click login link.
+// The desktop window opens this as its start URL; in server mode it doubles
+// as a one-click login link.
 func (s *Server) bootstrap(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
@@ -256,8 +244,6 @@ func (s *Server) bootstrap(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, "/")
 }
 
-// BootstrapURL is the start URL for origin (e.g. "http://127.0.0.1:43210")
-// that logs the browser in with the server's token.
 func (s *Server) BootstrapURL(origin string) string {
 	return origin + BootstrapPath + "?" + tokenParam + "=" + s.opts.Token
 }

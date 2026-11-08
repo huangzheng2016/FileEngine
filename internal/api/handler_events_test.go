@@ -46,7 +46,6 @@ type sseFrame struct {
 	Data map[string]any
 }
 
-// openStream connects to the SSE endpoint and returns a frame channel.
 func openStream(t *testing.T, srv *httptest.Server, path, lastEventID string) <-chan sseFrame {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -108,8 +107,6 @@ func TestStreamSessionEventsUnknownSession(t *testing.T) {
 	}
 }
 
-// Last-Event-ID resumes after the given seq: persisted events are replayed
-// in order, then live events follow without duplicates.
 func TestStreamSessionEventsReplayLastEventID(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
 	srv := httptest.NewServer(authedHandler(s))
@@ -144,7 +141,6 @@ func TestStreamSessionEventsReplayLastEventID(t *testing.T) {
 	}
 }
 
-// Without a resume point the stream starts at the latest run's first event.
 func TestStreamSessionEventsDefaultsToLatestRun(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
 	srv := httptest.NewServer(authedHandler(s))
@@ -161,7 +157,6 @@ func TestStreamSessionEventsDefaultsToLatestRun(t *testing.T) {
 		t.Fatalf("first frame = %+v, want run_status of run %d", f, second.ID)
 	}
 
-	// ?run_id= restricts the stream to one run.
 	byRun := openStream(t, srv, fmt.Sprintf("/api/v1/sessions/%d/events/stream?run_id=%d", sess.ID, first.ID), "")
 	for _, want := range []string{db.EvRunStatus, db.EvRunStatus, db.EvRunDone} {
 		f := nextFrame(t, byRun)
@@ -201,8 +196,6 @@ func TestListSessionEvents(t *testing.T) {
 	}
 }
 
-// A session with a running run refuses to start another one (409), and an
-// orphaned running run can be stopped through the runs API.
 func TestRunBusyAndStop(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
 	sess := createTestSession(t, repo)
@@ -228,8 +221,6 @@ func TestRunBusyAndStop(t *testing.T) {
 	}
 }
 
-// launchRun runs work on a stoppable context; POST /runs/:id/stop cancels it
-// and answers once the run is stopped.
 func TestLaunchRunStop(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
 	sess := createTestSession(t, repo)

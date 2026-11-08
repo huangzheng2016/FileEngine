@@ -41,7 +41,6 @@ func runStartError(c *gin.Context, err error) {
 	internalError(c, err)
 }
 
-// startExecute: POST /sessions/:id/execute {mode, sample?, category_path?} → {run_id}.
 func (s *Server) startExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -70,8 +69,6 @@ func (s *Server) startExecute(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID})
 }
 
-// checkExecute: GET /sessions/:id/execute/check?mode=&sample=&category_path=
-// → executor.Result (validation only, nothing is changed).
 func (s *Server) checkExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -93,7 +90,6 @@ func (s *Server) checkExecute(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// revertRun: POST /runs/:run_id/revert → {run_id} of the new reverting run.
 func (s *Server) revertRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
@@ -122,7 +118,6 @@ func (s *Server) revertRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID})
 }
 
-// locateEntries: GET /sessions/:id/locate?q= → {items: LocateItem[]}.
 func (s *Server) locateEntries(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {

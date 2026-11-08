@@ -39,9 +39,8 @@ func (s *Server) createCategory(c *gin.Context) {
 		return
 	}
 
-	// Category paths become new_path prefixes when files are planned under
-	// them; enforce the same root-confinement check as the agent tool layer
-	// so the REST API cannot bypass it.
+	// Category paths become new_path prefixes, so the REST API enforces the same
+	// root confinement as the tool layer.
 	if err := pathutil.ValidateFSPath(req.Path); err != nil {
 		badRequest(c, "分类路径非法："+err.Error())
 		return
@@ -80,8 +79,7 @@ func (s *Server) updateCategory(c *gin.Context) {
 		return
 	}
 
-	// Same root-confinement check as the tool layer: the new path cascades
-	// into planned files' new_path.
+	// The new path cascades into planned targets; same check as the tool layer.
 	if err := pathutil.ValidateFSPath(req.Path); err != nil {
 		badRequest(c, "分类路径非法："+err.Error())
 		return
@@ -112,7 +110,6 @@ func (s *Server) deleteCategory(c *gin.Context) {
 		lookupFailed(c, err, msgNoCategory)
 		return
 	}
-	// Clear planned files under this category and reset tagged for re-classification
 	_ = s.repo.ClearPlannedByTargetPath(cat.FilesystemID, cat.Path)
 	if err := s.repo.DeleteCategory(uint(id)); err != nil {
 		internalError(c, err)
@@ -162,8 +159,7 @@ func (s *Server) importCategories(c *gin.Context) {
 	created := 0
 	skipped := 0
 	for _, item := range items {
-		// Skip entries that the tool layer would also refuse (empty fields or
-		// a path that could escape the filesystem root).
+		// Skip entries the tool layer would also refuse.
 		if item.Name == "" || item.Path == "" || pathutil.ValidateFSPath(item.Path) != nil {
 			skipped++
 			continue

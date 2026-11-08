@@ -20,8 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// scanHandle tracks one in-flight scan goroutine: cancel stops its walk,
-// done closes when the goroutine has fully exited (all DB writes included).
+// done closes when the goroutine has fully exited, all DB writes included.
 type scanHandle struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -32,20 +31,16 @@ var (
 	scanners = make(map[uint]*scanHandle)
 )
 
-// scanRootPath computes the FS-relative root path for scanning.
 func scanRootPath(scanPath string) string {
 	return strings.Trim(path.Clean("/"+scanPath), "/")
 }
 
-// startScan launches a background goroutine that connects to the filesystem and scans.
-// This is the single place where scan logic lives — used by both createSession and rescanSession.
 func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig) {
 	// Scan on a copy: the caller may still be serializing its own struct into
 	// the HTTP response while the goroutine mutates status fields — sharing
 	// the pointer is a data race.
 	sess := *session
 	session = &sess
-	// Parse filter dirs from newline-separated string
 	filterMode := session.FilterMode
 	if filterMode == "" {
 		filterMode = "blacklist"
@@ -58,7 +53,6 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 		}
 	}
 
-	// Append category paths to blacklist if enabled
 	if session.ExcludeCategoryDirs && filterMode == "blacklist" {
 		if cats, err := s.repo.ListCategories(session.FilesystemID); err == nil {
 			for _, c := range cats {
@@ -115,14 +109,10 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 	}()
 }
 
-// scanStopTimeout bounds how long rescan/delete wait for a canceled scan
-// goroutine to unwind (its writer flushes the pending batch first). A var so
-// tests can shrink it.
 var scanStopTimeout = 30 * time.Second
 
-// cancelAndWaitScan cancels a running scan (if any) and waits for its
-// goroutine to exit, so its last writes cannot land after the caller's own
-// session update. Returns false when the wait timed out.
+// Waits so the scan's last writes cannot land after the caller's own session
+// update.
 func cancelAndWaitScan(sessionID uint) bool {
 	scanMu.Lock()
 	h := scanners[sessionID]
@@ -150,8 +140,7 @@ type CreateSessionRequest struct {
 	AllowVision         bool   `json:"allow_vision"`
 	ExtractMetadata     *bool  `json:"extract_metadata"` // nil = on
 	DetectDuplicates    bool   `json:"detect_duplicates"`
-	// Goal is the user's organizing intent in their own words.
-	Goal string `json:"goal"`
+	Goal                string `json:"goal"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -248,7 +237,6 @@ func (s *Server) getSession(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	// tokens: totals summed over the session's runs.
 	c.JSON(http.StatusOK, struct {
 		*db.ScanSession
 		Tokens db.TokenCounts `json:"tokens"`
@@ -375,8 +363,6 @@ func (s *Server) rescanSession(c *gin.Context) {
 		log.Printf("rescan session %d: timed out waiting for the previous scan to stop; proceeding anyway", session.ID)
 	}
 
-	// Incremental: the scanner diffs against the existing entries and keeps
-	// decisions of unchanged ones.
 	session.RootPath = scanRootPath(session.ScanPath)
 	session.Status = "scanning"
 	session.ScannedCount = 0
