@@ -10,13 +10,8 @@ import (
 	"FileEngine/internal/config"
 )
 
-// TestSMB_ConcurrentListByHandle hammers one SMBFS with parallel listings —
-// the access pattern of the scanner's worker pool now that SMBFS implements
-// HandleLister. The go-smb2 session multiplexes concurrent requests over the
-// single connection (per-message IDs, credits, locked response dispatch);
-// this fails, or trips -race, if that assumption breaks. It is a manual
-// integration test: all connection details come from the environment so
-// nothing network-specific lives in the repo.
+// Manual integration test: parallel listings over one go-smb2 session, which
+// must multiplex concurrent requests; fails or trips -race if that breaks.
 //
 //	FILEENGINE_TEST_SMB_HOST=nas FILEENGINE_TEST_SMB_USER=u \
 //	FILEENGINE_TEST_SMB_PASSWORD=p FILEENGINE_TEST_SMB_SHARE=share \

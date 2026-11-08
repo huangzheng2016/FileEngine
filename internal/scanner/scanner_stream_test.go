@@ -286,7 +286,6 @@ func TestScanDuplicates_LocalFS(t *testing.T) {
 		t.Error("other.txt flagged as duplicate")
 	}
 
-	// Switching detection off clears every link on the next scan.
 	session.DetectDuplicates = false
 	if err := New(fs, repo, "", nil).Scan(context.Background(), session); err != nil {
 		t.Fatal(err)

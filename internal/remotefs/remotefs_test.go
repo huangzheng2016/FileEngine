@@ -20,8 +20,6 @@ const (
 	testBasePath = "test"
 )
 
-// requireTestNAS skips the test when the env-gated test NAS is not
-// resolvable — these are integration tests that only run on that network.
 func requireTestNAS(t *testing.T) {
 	t.Helper()
 	if _, err := net.LookupHost(testHost); err != nil {
@@ -29,7 +27,6 @@ func requireTestNAS(t *testing.T) {
 	}
 }
 
-// testListRoot verifies that the FS can connect, list root, and has entries.
 func testListRoot(t *testing.T, fs RemoteFS) {
 	t.Helper()
 	ctx := context.Background()
@@ -81,10 +78,8 @@ func TestSFTP_ListRoot(t *testing.T) {
 	testListRoot(t, fs)
 }
 
-// testNFSHost exports "/fs/1000/nfs" as a whole (fnOS style), which exercises
-// the deep-export MNT probe in NewNFSFS. The address comes from
-// FILEENGINE_TEST_NFS_HOST so no LAN address lives in the repo; it falls back
-// to the owner-LAN test NAS hostname and skips when unreachable.
+// testNFSHost exports "/fs/1000/nfs" whole (fnOS style), which exercises the
+// deep-export MNT probe.
 func testNFSHost(t *testing.T) string {
 	t.Helper()
 	if h := os.Getenv("FILEENGINE_TEST_NFS_HOST"); h != "" {
@@ -93,7 +88,6 @@ func testNFSHost(t *testing.T) string {
 	return testHost
 }
 
-// dialTestNFS skips the test when the NFS server is unreachable.
 func dialTestNFS(t *testing.T) {
 	t.Helper()
 	host := testNFSHost(t)
@@ -104,10 +98,8 @@ func dialTestNFS(t *testing.T) {
 	conn.Close()
 }
 
-// TestNFS_ConcurrentReads hammers one NFSFS with parallel Open+Read calls —
-// the access pattern of eino's parallel tool execution. The underlying
-// rpc.Client is a single non-multiplexed stream; without serialization this
-// fails with "xid did not match".
+// The rpc.Client is a single non-multiplexed stream; without serialization
+// parallel reads fail with "xid did not match".
 func TestNFS_ConcurrentReads(t *testing.T) {
 	dialTestNFS(t)
 	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost(t), BasePath: "/fs/1000/nfs"})
@@ -117,7 +109,6 @@ func TestNFS_ConcurrentReads(t *testing.T) {
 	defer fs.Close()
 	ctx := context.Background()
 
-	// Collect a handful of real files to read in parallel.
 	entries, err := fs.List(ctx, "ShareSpace/Project")
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -160,8 +151,6 @@ func TestNFS_ConcurrentReads(t *testing.T) {
 	}
 }
 
-// TestNFS_DeepExport verifies mounting an export whose path is deeper than
-// one segment: NewNFSFS must discover "/fs/1000/nfs" itself is the export.
 func TestNFS_DeepExport(t *testing.T) {
 	dialTestNFS(t)
 	fs, err := NewNFSFS(config.RemoteFSConfig{Host: testNFSHost(t), BasePath: "/fs/1000/nfs"})

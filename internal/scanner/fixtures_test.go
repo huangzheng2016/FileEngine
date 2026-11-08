@@ -34,8 +34,6 @@ type ifdEntry struct {
 	data     []byte // inline when <= 4 bytes, else stored after the IFD
 }
 
-// buildTIFF writes a little-endian TIFF with IFD0 (Model, Exif and GPS
-// pointers), an Exif IFD (DateTimeOriginal) and a GPS IFD.
 func buildTIFF(dateTime, model string) []byte {
 	le := binary.LittleEndian
 	ascii := func(s string) []byte { return append([]byte(s), 0) }
@@ -119,8 +117,6 @@ func buildExifJPEG(t *testing.T, dateTime, model string) []byte {
 	return out.Bytes()
 }
 
-// buildMP4 writes ftyp + mdat(mdatSize) + moov{mvhd}, or moov before mdat
-// when moovFirst.
 func buildMP4(created time.Time, mdatSize int, moovFirst bool) []byte {
 	be := binary.BigEndian
 	box := func(typ string, body []byte) []byte {

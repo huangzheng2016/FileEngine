@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// Plans written straight to the DB (bypassing every validator) with an
-// escaping target are refused before any filesystem operation.
 func TestEscapingTargetNeverExecuted(t *testing.T) {
 	e := newEnv(t)
 	e.write("ok.txt", "ok")

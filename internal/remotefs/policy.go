@@ -22,7 +22,6 @@ type LocalPolicy struct {
 	Denied []string
 }
 
-// EnvLocalRoots names the comma-separated allowlist read by LocalRootsFromEnv.
 const EnvLocalRoots = "FE_LOCAL_ROOTS"
 
 var (
@@ -30,7 +29,6 @@ var (
 	policy   LocalPolicy // resolved (absolute, symlink-free) paths
 )
 
-// LocalRootsFromEnv parses FE_LOCAL_ROOTS (comma-separated, blanks ignored).
 func LocalRootsFromEnv() []string {
 	var roots []string
 	for _, r := range strings.Split(os.Getenv(EnvLocalRoots), ",") {
@@ -41,10 +39,8 @@ func LocalRootsFromEnv() []string {
 	return roots
 }
 
-// SetLocalPolicy installs the process-wide policy. Paths are made absolute
-// and symlink-resolved (nearest existing ancestor) so checks compare like
-// with like. Server mode: Roots = FE_LOCAL_ROOTS. Desktop mode: the user's
-// home directory is added by the embedder.
+// Paths are made absolute and symlink-resolved (nearest existing ancestor) so
+// checks compare like with like.
 func SetLocalPolicy(p LocalPolicy) error {
 	var out LocalPolicy
 	for _, r := range p.Roots {
@@ -84,13 +80,10 @@ func canonical(p string) (string, error) {
 	return resolveExisting(abs)
 }
 
-// ErrLocalDisabled is returned when no local roots are configured.
 var ErrLocalDisabled = errors.New("本机路径访问未启用：请在 FE_LOCAL_ROOTS 中配置允许的目录")
 
-// CheckLocalPath reports whether host path p (a LOCAL base path or an SFTP
-// key file) is allowed: inside some configured root and outside every denied
-// path. A base path may still contain a denied path — LocalFS hides and
-// refuses those per operation.
+// A base path may still contain a denied path: LocalFS hides and refuses
+// those per operation.
 func CheckLocalPath(p string) error {
 	pol := currentPolicy()
 	if len(pol.Roots) == 0 {
@@ -116,7 +109,6 @@ func CheckLocalPath(p string) error {
 	return fmt.Errorf("本机路径 %q 不在允许的目录（FE_LOCAL_ROOTS）内", p)
 }
 
-// newPolicedLocalFS opens a LOCAL backend under the current policy.
 func newPolicedLocalFS(basePath string) (*LocalFS, error) {
 	if err := CheckLocalPath(basePath); err != nil {
 		return nil, err

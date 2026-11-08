@@ -39,7 +39,6 @@ func TestParseRetryAfterHeader(t *testing.T) {
 		})
 	}
 
-	// HTTP-date form: a timestamp ~30s out parses to roughly 30s.
 	future := time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat)
 	if got := parseRetryAfterHeader(future); got < 25*time.Second || got > 31*time.Second {
 		t.Fatalf("http date form: got %v, want ~30s", got)
@@ -152,8 +151,6 @@ func TestHintCaptureTransportPropagatesBaseError(t *testing.T) {
 	}
 }
 
-// Concurrent requests through one shared transport must each record into
-// their own context's store — never into a neighbor's.
 func TestHintCaptureTransportConcurrentIsolation(t *testing.T) {
 	rt := newHintCaptureTransport(&fakeRoundTripper{status: 429, header: http.Header{"Retry-After": {"5"}}})
 	const workers = 20
@@ -185,9 +182,6 @@ func TestHintCaptureTransportConcurrentIsolation(t *testing.T) {
 	wg.Wait()
 }
 
-// End-to-end through the real eino openai chain: an httptest server answers
-// 429 + Retry-After, and the hints attached to the Generate context must
-// surface both — this is the wiring the agent retry loop relies on.
 func TestOpenAIModelCapturesRetryAfterEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

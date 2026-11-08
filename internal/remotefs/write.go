@@ -22,7 +22,6 @@ import (
 //     already exists.
 // Parent directories of a MoveFile/CopyFile dst must already exist.
 
-// ErrIsDir is returned by CopyFile when the source is a directory.
 var ErrIsDir = errors.New("source is a directory")
 
 func existErr(proto, op, p string) error {
@@ -34,7 +33,6 @@ func shortCopyErr(proto, p string, written, want int64) error {
 		Err: fmt.Errorf("short copy: wrote %d of %d bytes", written, want)}
 }
 
-// countingReader counts the bytes read through it.
 type countingReader struct {
 	r io.Reader
 	n int64
@@ -76,7 +74,6 @@ func slidingCtx(parent context.Context, timeout time.Duration) (context.Context,
 	return ctx, touch, cancel
 }
 
-// touchWriter calls touch after every successful write.
 type touchWriter struct {
 	w     io.Writer
 	touch func()

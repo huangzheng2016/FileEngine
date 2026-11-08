@@ -9,12 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// dataDirEnv overrides the per-user data directory, matching the variable the
-// Docker image uses for its data volume.
 const dataDirEnv = "FE_DATA_DIR"
 
-// desktopPaths are the per-user locations of the desktop's state. config.yaml
-// and the SQLite database live together in DataDir.
 type desktopPaths struct {
 	DataDir    string
 	ConfigFile string
@@ -22,8 +18,6 @@ type desktopPaths struct {
 	LogFile    string
 }
 
-// resolveDesktopPaths picks the data directory: the explicit override (flag,
-// then FE_DATA_DIR), else the platform default.
 func resolveDesktopPaths(override string, getenv func(string) string, goos string) (desktopPaths, error) {
 	dir := override
 	if dir == "" {
@@ -47,9 +41,6 @@ func resolveDesktopPaths(override string, getenv func(string) string, goos strin
 	}, nil
 }
 
-// defaultDataDir follows each platform's convention for per-user app data:
-// %LOCALAPPDATA%\FileEngine, ~/Library/Application Support/FileEngine, and
-// $XDG_DATA_HOME/fileengine (default ~/.local/share/fileengine) elsewhere.
 func defaultDataDir(getenv func(string) string, goos string) (string, error) {
 	switch goos {
 	case "windows":
@@ -75,9 +66,6 @@ func defaultDataDir(getenv func(string) string, goos string) (string, error) {
 	}
 }
 
-// prepare creates the directories and, on first launch, a config.yaml that
-// points the SQLite database into the data directory. Everything else falls
-// back to the config package defaults.
 func (p desktopPaths) prepare() error {
 	if err := os.MkdirAll(filepath.Dir(p.LogFile), 0o700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)

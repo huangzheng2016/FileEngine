@@ -34,7 +34,6 @@ func TestRoundTripAndTamper(t *testing.T) {
 	if _, err := Decrypt("plaintext-password"); err == nil {
 		t.Fatal("plaintext must not be accepted")
 	}
-	// Different key cannot open it.
 	_ = SetKey(bytes.Repeat([]byte{8}, 32))
 	if _, err := Decrypt(enc); err == nil {
 		t.Fatal("decrypt with wrong key succeeded")
@@ -56,7 +55,6 @@ func TestInitKeyFileAndEnv(t *testing.T) {
 		t.Fatalf("key file mode %v, want 0600", st.Mode().Perm())
 	}
 	enc, _ := Encrypt("x")
-	// Re-init from the same file decrypts the same data.
 	if _, err := Init(dir); err != nil {
 		t.Fatal(err)
 	}

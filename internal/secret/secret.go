@@ -18,10 +18,8 @@ import (
 	"sync"
 )
 
-// KeyFileName is the generated key file placed next to the database.
 const KeyFileName = "secret.key"
 
-// EnvKey names the environment variable that overrides the key file.
 const EnvKey = "FE_SECRET_KEY"
 
 // prefix versions the ciphertext format so a future algorithm change is a
@@ -33,12 +31,8 @@ var (
 	gcm cipher.AEAD
 )
 
-// ErrNoKey is returned when a secret is encrypted/decrypted before Init/SetKey.
 var ErrNoKey = errors.New("secret key not initialized")
 
-// Init loads the key from FE_SECRET_KEY, or from dir/secret.key — generating
-// that file (0600) on first start. It returns the key file path used ("" when
-// the env var supplied the key).
 func Init(dir string) (string, error) {
 	if v := strings.TrimSpace(os.Getenv(EnvKey)); v != "" {
 		k, err := decodeKey(v)
@@ -83,7 +77,6 @@ func decodeKey(s string) ([]byte, error) {
 	return nil, errors.New("key must be base64 of exactly 32 bytes")
 }
 
-// SetKey installs a raw 32-byte key (tests, embedders).
 func SetKey(k []byte) error {
 	if len(k) != 32 {
 		return errors.New("key must be 32 bytes")
@@ -111,8 +104,8 @@ func aead() (cipher.AEAD, error) {
 	return gcm, nil
 }
 
-// Encrypt seals plain. The empty string stays empty so "no secret set" needs
-// no key and stays distinguishable in the DB.
+// The empty string stays empty so "no secret set" needs no key and stays
+// distinguishable in the DB.
 func Encrypt(plain string) (string, error) {
 	if plain == "" {
 		return "", nil
@@ -129,7 +122,6 @@ func Encrypt(plain string) (string, error) {
 	return prefix + base64.StdEncoding.EncodeToString(sealed), nil
 }
 
-// Decrypt opens a value produced by Encrypt.
 func Decrypt(stored string) (string, error) {
 	if stored == "" {
 		return "", nil

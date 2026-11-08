@@ -46,16 +46,14 @@ type NFSFS struct {
 	poolSize   atomic.Int32 // live pool connections (scan concurrency)
 }
 
-// scanConn is the listing surface of one pooled scan connection — an
-// interface so tests can inject failing connections into the pool.
+// An interface so tests can inject failing connections into the pool.
 type scanConn interface {
 	ReadDirPlus(path string) ([]*nfsclient.EntryPlus, error)
 	ReadDirPlusByHandle(handle []byte) ([]*nfsclient.EntryPlus, error)
 	Close()
 }
 
-// nfsScanConn is one extra mount connection dedicated to scan-time directory
-// listing. Exclusivity comes from the pool channel, not a mutex.
+// Exclusivity comes from the pool channel, not a mutex.
 type nfsScanConn struct {
 	mount  *nfsclient.Mount
 	target *nfsclient.Target
@@ -74,9 +72,7 @@ func (c *nfsScanConn) Close() {
 	c.mount.Close()
 }
 
-// dialNFSScanConn dials and mounts one scan-pool connection with the same
-// per-RPC timeout semantics as the primary connection. It is a package
-// variable so tests can stub the dial.
+// A package variable so tests can stub the dial.
 var dialNFSScanConn = func(host, exportPath string, auth rpc.Auth) (scanConn, error) {
 	mount, err := nfsclient.DialMount(host)
 	if err != nil {
@@ -93,9 +89,8 @@ var dialNFSScanConn = func(host, exportPath string, auth rpc.Auth) (scanConn, er
 	return &nfsScanConn{mount: mount, target: target}, nil
 }
 
-// scanConnCount reads FE_NFS_SCAN_CONNS (default 8, clamped to 1..32): how
-// many extra mount connections the scan pool dials for concurrent listing.
-// Home NASes accept far more; the limit keeps Tailscale/NAT memory sane.
+// Home NASes accept far more connections; the limit keeps Tailscale/NAT
+// memory sane.
 func scanConnCount() int {
 	n := 8
 	if v := os.Getenv("FE_NFS_SCAN_CONNS"); v != "" {
@@ -131,9 +126,8 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 	if err != nil {
 		return nil, &OpError{Protocol: "nfs", Op: "dial", Path: cfg.Host, Err: err}
 	}
-	// Bound every RPC on the mount connection: without a timeout the
-	// vendored transport reads with no deadline and a silently dead TCP
-	// connection hangs the call forever (observed 18+ min in production).
+	// Without a timeout the vendored transport reads with no deadline, and a
+	// silently dead TCP connection hangs the call forever.
 	mount.SetTimeout(timeout)
 
 	auth := rpc.NewAuthUnix("fileengine", 0, 0)
@@ -177,9 +171,8 @@ func NewNFSFS(cfg config.RemoteFSConfig) (*NFSFS, error) {
 	}, nil
 }
 
-// ensurePool lazily dials the scan-listing pool on first use. Failures
-// degrade gracefully: fewer (or no) pool connections just mean less (or no)
-// scan concurrency — the primary connection path is unaffected.
+// Failures only reduce scan concurrency; the primary connection path is
+// unaffected.
 func (n *NFSFS) ensurePool() {
 	n.poolOnce.Do(func() {
 		want := scanConnCount()
@@ -196,9 +189,8 @@ func (n *NFSFS) ensurePool() {
 	})
 }
 
-// replenish replaces a discarded pool connection in the background. On
-// failure the pool simply stays smaller (logged, same graceful degradation
-// as ensurePool); checked-out workers then serialize on fewer connections.
+// On failure the pool simply stays smaller; checked-out workers then
+// serialize on fewer connections.
 func (n *NFSFS) replenish() {
 	c, err := dialNFSScanConn(n.host, n.exportPath, n.auth)
 	if err != nil {
@@ -217,20 +209,17 @@ func (n *NFSFS) replenish() {
 	n.poolSize.Add(1)
 }
 
-// discard drops a poisoned pool connection: an operation that timed out may
-// have left the single-stream connection desynced (a late reply would be
-// misread as the next response's XID), so it must not be returned for the
-// next checkout. The pool is replenished asynchronously.
+// A timed-out operation may have left the single-stream connection desynced
+// (a late reply would be misread as the next response's XID), so it must not
+// be returned for the next checkout.
 func (n *NFSFS) discard(c scanConn) {
 	c.Close()
 	n.poolSize.Add(-1)
 	go n.replenish()
 }
 
-// resolve maps a caller path to an export-relative slash path confined to
-// basePath (the sub-path inside the export; the server already confines us to
-// the export itself). Absolute paths must stay inside basePath; ".." and
-// absolute escapes are rejected.
+// The server already confines us to the export; this confines to the
+// sub-path inside it.
 func (n *NFSFS) resolve(p string) (string, error) {
 	var full string
 	if path.IsAbs(p) {
@@ -258,9 +247,8 @@ func (n *NFSFS) List(_ context.Context, p string) ([]FileInfo, error) {
 	return entriesToFileInfo(entries, p), nil
 }
 
-// ListConcurrency reports how many scan-listing calls may run in parallel —
-// one per pooled connection. 1 means "no pool, list serially". The first
-// call dials the pool (lazy), so call it once before sizing a worker pool.
+// The first call dials the pool, so call it once before sizing a worker
+// pool.
 func (n *NFSFS) ListConcurrency() int {
 	n.ensurePool()
 	if size := n.poolSize.Load(); size > 0 {
@@ -269,18 +257,10 @@ func (n *NFSFS) ListConcurrency() int {
 	return 1
 }
 
-// ListByHandle lists a directory for the scanner, on a pooled connection.
-// When handle is non-nil (from a previous listing's FileInfo.Handle) the
-// READDIRPLUS goes straight to the server-held file handle and skips the
-// LOOKUP-per-path-component walk entirely; on any handle failure it falls
-// back to the path-based walk. The path is still resolved through confine
-// checks so lexical-confinement semantics match every other method. With no
-// pool (pool dialing failed at startup) it degrades to the mutex-serialized
-// primary connection.
-//
-// A connection whose operation timed out is potentially desynced and is
-// discarded (closed, asynchronously replaced) instead of returned to the
-// pool — the XID check in the vendored client remains as the backstop.
+// A non-nil handle (from a previous listing) lets READDIRPLUS skip the
+// LOOKUP-per-component walk; any handle failure falls back to the path walk.
+// A connection whose operation timed out may be desynced, so it is discarded
+// and replaced instead of returned to the pool.
 func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]FileInfo, error) {
 	fullPath, err := n.resolve(p)
 	if err != nil {
@@ -303,8 +283,6 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 					// fallback succeeds: the late handle reply could arrive
 					// later and be misread as a future response.
 					timedOut = IsTimeout(err)
-					// Stale or rejected handle: retry via the path walk
-					// before giving up on the directory.
 					entries, err = c.ReadDirPlus(fullPath)
 				}
 			} else {
@@ -324,7 +302,6 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 		}
 	}
 
-	// No pool: serial fallback on the primary connection, same locking as List.
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	entries, err := n.target.ReadDirPlus(fullPath)
@@ -334,8 +311,8 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 	return entriesToFileInfo(entries, p), nil
 }
 
-// entriesToFileInfo maps READDIRPLUS entries to FileInfo, preserving the
-// server-returned file handle so child listings can skip the LOOKUP walk.
+// Keeps the server-returned handle so child listings can skip the LOOKUP
+// walk.
 func entriesToFileInfo(entries []*nfsclient.EntryPlus, p string) []FileInfo {
 	var result []FileInfo
 	for _, entry := range entries {
@@ -515,7 +492,6 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// Delete removes one file or one empty directory.
 func (n *NFSFS) Delete(_ context.Context, p string) error {
 	fullPath, err := n.resolve(p)
 	if err != nil {
@@ -537,7 +513,6 @@ func (n *NFSFS) Delete(_ context.Context, p string) error {
 	return nil
 }
 
-// MkdirAll creates each missing level; existing directories are fine.
 func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 	fullPath, err := n.resolve(p)
 	if err != nil {

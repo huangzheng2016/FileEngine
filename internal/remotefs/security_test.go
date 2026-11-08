@@ -16,10 +16,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Every operation of every remote backend — reads, writes, both sides of a
-// rename/copy, MkdirAll — must refuse a path escaping BasePath before any
-// I/O. The backends are constructed bare (no client): reaching the client
-// would panic, so a clean error proves the check runs first.
+// The backends are constructed bare (no client): reaching the client would
+// panic, so a clean error proves the check runs before any I/O.
 func TestBackendOpsRejectEscapesBeforeIO(t *testing.T) {
 	ctx := context.Background()
 	backends := map[string]RemoteFS{
@@ -75,7 +73,6 @@ func TestLocalPolicy(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = SetLocalPolicy(LocalPolicy{}) })
 
-	// Default (no roots): LOCAL disabled.
 	_ = SetLocalPolicy(LocalPolicy{})
 	if _, err := NewFromConfig(config.RemoteFSConfig{Protocol: "local", BasePath: docs}); !errors.Is(err, ErrLocalDisabled) {
 		t.Fatalf("LOCAL with no roots: got %v, want ErrLocalDisabled", err)
@@ -90,8 +87,6 @@ func TestLocalPolicy(t *testing.T) {
 	if _, err := NewFromConfig(config.RemoteFSConfig{Protocol: "local", BasePath: data}); err == nil {
 		t.Fatal("base path inside the data dir accepted")
 	}
-	// A base that contains the data dir is allowed, but the data dir is
-	// hidden from listings and refused per operation.
 	fs, err := NewFromConfig(config.RemoteFSConfig{Protocol: "local", BasePath: root})
 	if err != nil {
 		t.Fatal(err)
@@ -112,15 +107,12 @@ func TestLocalPolicy(t *testing.T) {
 		t.Fatalf("legal read refused: %v", err)
 	}
 
-	// SFTP key files follow the same policy (checked before any dial).
 	_, err = NewFromConfig(config.RemoteFSConfig{Protocol: "sftp", Host: "127.0.0.1", Port: 1, HostKey: "SHA256:x", KeyPath: filepath.Join(data, "fileengine.db")})
 	if err == nil || !strings.Contains(err.Error(), "私钥") {
 		t.Fatalf("key path in data dir: got %v", err)
 	}
 }
 
-// startSSHServer runs a bare SSH server (no auth, no channels) presenting a
-// fresh ed25519 host key; returns its address and host key fingerprint.
 func startSSHServer(t *testing.T) (string, int, string) {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -183,8 +175,8 @@ func TestSFTPHostKeyTOFU(t *testing.T) {
 		t.Fatalf("mismatch: got %v", err)
 	}
 
-	// Matching pin passes the host-key check; the bare server then refuses
-	// the sftp channel, so the failure must not be a host-key error.
+	// The bare server refuses the sftp channel, so the failure must not be a
+	// host-key error.
 	ok := base
 	ok.HostKey = fp
 	_, err = NewSFTPFS(ok)

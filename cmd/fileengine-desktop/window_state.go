@@ -16,8 +16,6 @@ const (
 	windowStateDebounce = 400 * time.Millisecond
 )
 
-// windowState is the last normal (non-maximised) window geometry plus whether the
-// window was maximised, persisted next to the database.
 type windowState struct {
 	X         int  `json:"x"`
 	Y         int  `json:"y"`
@@ -51,9 +49,8 @@ func saveWindowState(dataDir string, state windowState) error {
 	return os.Rename(tmp, path)
 }
 
-// applyWindowState overlays a saved state on the default options. The position is
-// only reused when the window still overlaps a connected screen, so an unplugged
-// monitor cannot leave it off-screen; the size is always reused, clamped to the minimum.
+// The saved position is only reused while the window still overlaps a
+// connected screen, so an unplugged monitor cannot leave it off-screen.
 func applyWindowState(opts application.WebviewWindowOptions, state windowState, screens []application.Rect) application.WebviewWindowOptions {
 	opts.Width = max(state.Width, opts.MinWidth)
 	opts.Height = max(state.Height, opts.MinHeight)
@@ -71,7 +68,6 @@ func applyWindowState(opts application.WebviewWindowOptions, state windowState, 
 	return opts
 }
 
-// overlaps requires a usable strip of the window (its top-left area) to be on screen.
 func overlaps(win, screen application.Rect) bool {
 	const margin = 80
 	return win.X+win.Width > screen.X+margin && win.X < screen.X+screen.Width-margin &&
@@ -86,8 +82,6 @@ func screenBounds(app *application.App) []application.Rect {
 	return rects
 }
 
-// trackWindowState saves geometry shortly after the last move, resize or maximise
-// change, and once more when the application shuts down.
 func trackWindowState(window *application.WebviewWindow, dataDir string, initial windowState, report func(error)) {
 	var mu sync.Mutex
 	state := initial

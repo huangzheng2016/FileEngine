@@ -23,10 +23,8 @@ type SMBFS struct {
 	basePath string
 }
 
-// smbScanConns reads FE_SMB_SCAN_CONNS (default 8, clamped to 1..32): how
-// many directory listings the scanner may run in parallel over the
-// multiplexed SMB2 session. Named after the NFS knob to keep scan tuning
-// symmetrical, though no connection pool is involved here.
+// Named after the NFS knob for symmetric scan tuning, though no connection
+// pool is involved.
 func smbScanConns() int {
 	n := 8
 	if v := os.Getenv("FE_SMB_SCAN_CONNS"); v != "" {
@@ -102,10 +100,8 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 		conn.Close()
 		return nil, &OpError{Protocol: "smb", Op: "mount", Path: shareName, Err: err}
 	}
-	// go-smb2's Mount does not propagate the session context into the share
-	// (it returns Share{ctx: context.Background()}), so later operations
-	// already start from a clean context; re-base anyway as cheap defense in
-	// case that behavior ever changes.
+	// Defensive: go-smb2's Mount currently returns a share on a Background
+	// context, so this only matters if that ever changes.
 	share = share.WithContext(context.Background())
 
 	return &SMBFS{
@@ -116,10 +112,8 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 	}, nil
 }
 
-// resolve maps a caller path to a share-relative slash path confined to
-// basePath (the sub-path inside the share; the server already confines us to
-// the share itself). Absolute paths must stay inside basePath; ".." and
-// absolute escapes are rejected.
+// The server already confines us to the share; this confines to the sub-path
+// inside it.
 func (s *SMBFS) resolve(p string) (string, error) {
 	var joined string
 	if path.IsAbs(p) {
@@ -176,19 +170,13 @@ func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 	return result, nil
 }
 
-// ListConcurrency reports how many scan-listing calls may run in parallel.
-// The go-smb2 connection multiplexes concurrent requests over the single
-// TCP stream (per-message IDs, credits, locked response dispatch), so
-// concurrent Share operations are safe without the connection pool the NFS
-// backend needs; this only sizes the scanner's worker pool.
+// go-smb2 multiplexes concurrent requests over one TCP stream, so no
+// connection pool is needed; this only sizes the scanner's worker pool.
 func (s *SMBFS) ListConcurrency() int {
 	return smbScanConns()
 }
 
-// ListByHandle lists a directory for the scanner. SMB exposes no resumable
-// directory handle to chain on, so handle is ignored and the listing always
-// walks the path; the concurrency win comes from the multiplexed session,
-// not from skipping path resolution.
+// SMB exposes no resumable directory handle, so handle is ignored.
 func (s *SMBFS) ListByHandle(ctx context.Context, p string, _ []byte) ([]FileInfo, error) {
 	return s.List(ctx, p)
 }
@@ -235,8 +223,6 @@ func (s *SMBFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
 	return &smbReadCloser{f: f, cancel: cancel, path: p}, nil
 }
 
-// smbReadCloser pairs an opened SMB file with the cancel func of the stream
-// context that bounds its reads.
 type smbReadCloser struct {
 	f      *smb2.File
 	cancel context.CancelFunc
@@ -343,7 +329,6 @@ func (s *SMBFS) CopyFile(ctx context.Context, src, dst string) error {
 	return nil
 }
 
-// Delete removes one file or one empty directory.
 func (s *SMBFS) Delete(ctx context.Context, p string) error {
 	fullPath, err := s.resolve(p)
 	if err != nil {

@@ -36,8 +36,6 @@ func (c *throttledConn) Write(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
-// startSFTPServer serves the real filesystem over an in-process SSH server
-// and returns a config pinned to its host key.
 func startSFTPServer(t *testing.T, slow *atomic.Bool) config.RemoteFSConfig {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -111,8 +109,6 @@ func serveSFTPConn(c net.Conn, cfg *ssh.ServerConfig) {
 	}
 }
 
-// A transfer that keeps progressing must outlive the per-operation timeout:
-// the armed deadline slides with IO on the ssh transport.
 func TestSFTPDeadlineSlidesDuringTransfers(t *testing.T) {
 	t.Setenv("FE_REMOTEFS_TIMEOUT_SEC", "1")
 	var slow atomic.Bool
@@ -143,9 +139,6 @@ func TestSFTPDeadlineSlidesDuringTransfers(t *testing.T) {
 	}
 }
 
-// Write operations run serialized on one connection and stay correct when
-// called concurrently (eino runs tool calls and the executor lists in
-// parallel on a shared backend).
 func TestSFTPConcurrentWrites(t *testing.T) {
 	var slow atomic.Bool
 	cfg := startSFTPServer(t, &slow)

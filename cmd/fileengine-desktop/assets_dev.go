@@ -9,14 +9,10 @@ import (
 	"path/filepath"
 )
 
-// defaultWebRoot is the Vite output relative to the repository root, where
-// `go run ./cmd/fileengine-desktop` is started during development.
 const defaultWebRoot = "web/dist"
 
-// desktopFrontend serves the SPA from disk in development builds, so a
-// frontend rebuild shows up on reload without recompiling Go. The root is
-// resolved to an absolute path before the desktop changes into its data
-// directory.
+// Served from disk so a frontend rebuild shows up on reload without
+// recompiling Go.
 func desktopFrontend(webRoot string) (fs.FS, error) {
 	if webRoot == "" {
 		webRoot = defaultWebRoot

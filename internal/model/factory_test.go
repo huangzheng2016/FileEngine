@@ -7,8 +7,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// TestNewChatModelFromProvider_Construction verifies providers construct
-// without network I/O, with and without thinking.
 func TestNewChatModelFromProvider_Construction(t *testing.T) {
 	ctx := context.Background()
 	cases := []db.ModelProvider{

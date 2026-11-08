@@ -85,8 +85,6 @@ func wailsHostsForGOOS(goos string) []string {
 	return []string{"localhost", "wails"}
 }
 
-// hostIsWails compares the request host name, ignoring case and any port such as the one the dev
-// server adds, with the exact names in hosts.
 func hostIsWails(host string, hosts []string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
@@ -99,8 +97,6 @@ func hostIsWails(host string, hosts []string) bool {
 	return false
 }
 
-// antiFramingWriter adds the headers that stop any document from embedding a response, just before
-// the headers are sent.
 type antiFramingWriter struct {
 	http.ResponseWriter
 	applied bool

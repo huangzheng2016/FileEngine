@@ -18,7 +18,6 @@ import (
 // cookie by the window's start URL (api.BootstrapPath), the Host header
 // pinned to the listener address, and cross-site requests refused.
 
-// listenLoopback binds a random free port on the IPv4 loopback interface.
 func listenLoopback() (net.Listener, error) {
 	return net.Listen("tcp", "127.0.0.1:0")
 }

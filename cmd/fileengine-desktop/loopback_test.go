@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestLoopbackStreamsIncrementally pins the reason for the loopback design:
-// an SSE event written and flushed reaches the client before the handler
-// returns.
+// Pins the reason for the loopback design: a flushed SSE event reaches the
+// client before the handler returns.
 func TestLoopbackStreamsIncrementally(t *testing.T) {
 	release := make(chan struct{})
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

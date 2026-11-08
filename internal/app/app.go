@@ -1,7 +1,5 @@
-// Package app wires config, database and the HTTP API into one runnable unit
-// shared by the server binary (main.go) and the desktop shell
-// (cmd/fileengine-desktop). Both serve the same Gin handler from an
-// in-process http.Server; only the listener and the request guard differ.
+// Package app wires config, database and the HTTP API into one unit shared
+// by the server binary and the desktop shell.
 package app
 
 import (
@@ -28,25 +26,15 @@ const (
 	idleTimeout       = 120 * time.Second
 )
 
-// Options configures New.
 type Options struct {
-	// ConfigPath is the config.yaml to load; a missing file is created with defaults.
 	ConfigPath string
-	// Frontend holds the built SPA (index.html at its root). Nil serves the
-	// API only.
-	Frontend fs.FS
-	// Token overrides the persisted server.token (desktop: per launch).
-	Token string
-	// AllowedHosts pins the Host header (desktop: its listener address).
+	// Nil serves the API only.
+	Frontend     fs.FS
+	Token        string
 	AllowedHosts []string
-	// LocalRoots are added to FE_LOCAL_ROOTS as host directories LOCAL
-	// filesystems and SFTP key files may use (desktop: the user's home).
-	LocalRoots []string
+	LocalRoots   []string
 }
 
-// App is a loaded FileEngine instance: config applied, database migrated and
-// the API router built. Start serves it; Shutdown stops serving and closes
-// the database.
 type App struct {
 	cfg    *config.Config
 	server *api.Server
@@ -57,7 +45,6 @@ type App struct {
 	cancelReqs context.CancelFunc
 }
 
-// New loads the config, initializes the database and builds the API server.
 func New(opts Options) (*App, error) {
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
@@ -103,23 +90,18 @@ func New(opts Options) (*App, error) {
 	}, nil
 }
 
-// Server exposes the API server (desktop: BootstrapURL).
 func (a *App) Server() *api.Server { return a.server }
 
-// Config returns the configuration loaded by New.
 func (a *App) Config() *config.Config { return a.cfg }
 
-// Handler returns the unguarded API + SPA handler.
 func (a *App) Handler() http.Handler { return a.server.Handler() }
 
-// Addr returns the configured server listen address (server.host:server.port).
 func (a *App) Addr() string {
 	return net.JoinHostPort(a.cfg.Server.Host, fmt.Sprint(a.cfg.Server.Port))
 }
 
-// Start serves handler on ln in the background. Request contexts derive from
-// ctx and are cancelled when Shutdown begins, so long-lived SSE streams end
-// instead of holding the graceful shutdown open. Wait reports the outcome.
+// Request contexts derive from ctx and are cancelled when Shutdown begins, so
+// long-lived SSE streams do not hold the graceful shutdown open.
 func (a *App) Start(ctx context.Context, ln net.Listener, handler http.Handler) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -152,8 +134,6 @@ func (a *App) Start(ctx context.Context, ln net.Listener, handler http.Handler) 
 	return nil
 }
 
-// Wait blocks until the server started by Start stops and returns its error
-// (nil after a graceful Shutdown).
 func (a *App) Wait() error {
 	a.mu.Lock()
 	served := a.served
@@ -166,9 +146,6 @@ func (a *App) Wait() error {
 	return err
 }
 
-// Shutdown cancels running agent runs and lets executors finish their current
-// file operation, then stops accepting requests, cancels in-flight request
-// contexts and waits for handlers (all bounded by ctx), then closes the DB.
 func (a *App) Shutdown(ctx context.Context) error {
 	a.mu.Lock()
 	srv, cancel := a.httpServer, a.cancelReqs

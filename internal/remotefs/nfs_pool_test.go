@@ -12,8 +12,6 @@ import (
 	"github.com/vmware/go-nfs-client/nfs/rpc"
 )
 
-// fakeScanConn is a test double for the pool's scanConn interface: canned
-// errors per entry point and a Close flag the test can assert on.
 type fakeScanConn struct {
 	entries      []*nfsclient.EntryPlus
 	plusErr      error
@@ -31,11 +29,8 @@ func (f *fakeScanConn) ReadDirPlusByHandle([]byte) ([]*nfsclient.EntryPlus, erro
 
 func (f *fakeScanConn) Close() { f.closed.Store(true) }
 
-// stubScanConnDialer replaces the pool dialer: every dial consumes one
-// connection the test fed into supply (first ensurePool, then each
-// replenish). Feeding exactly as many connections as the test expects dials
-// also bounds runaway dialing — an unexpected dial blocks and fails the test
-// by timeout.
+// An unexpected dial blocks and fails the test by timeout, which bounds
+// runaway dialing.
 func stubScanConnDialer(t *testing.T) (supply chan<- *fakeScanConn, calls *atomic.Int32) {
 	t.Helper()
 	sup := make(chan *fakeScanConn, 16)
@@ -49,9 +44,8 @@ func stubScanConnDialer(t *testing.T) (supply chan<- *fakeScanConn, calls *atomi
 	return sup, calls
 }
 
-// newPoolTestNFSFS builds an NFSFS without any network: ensurePool dials
-// through the stubbed dialer. FE_NFS_SCAN_CONNS=1 keeps the pool a single
-// connection so discard/replenish is directly observable.
+// FE_NFS_SCAN_CONNS=1 keeps the pool a single connection so discard and
+// replenish are directly observable.
 func newPoolTestNFSFS(t *testing.T) *NFSFS {
 	t.Helper()
 	t.Setenv("FE_NFS_SCAN_CONNS", "1")
@@ -69,8 +63,6 @@ func waitForCond(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// A timeout on a checked-out pool connection must not return it to the
-// pool: the connection is closed and a replacement is dialed.
 func TestNFSPoolDiscardsTimedOutConn(t *testing.T) {
 	supply, calls := stubScanConnDialer(t)
 	poison := &fakeScanConn{plusErr: os.ErrDeadlineExceeded}
@@ -95,13 +87,10 @@ func TestNFSPoolDiscardsTimedOutConn(t *testing.T) {
 		t.Fatal("timed-out connection was not closed (poison returned to pool?)")
 	}
 
-	// The pool is replenished asynchronously with a fresh connection.
 	waitForCond(t, "pool replenishment", func() bool {
 		return calls.Load() == 2 && n.poolSize.Load() == 1
 	})
 
-	// The replacement serves the next checkout and, being healthy, goes
-	// back to the pool (no further dials).
 	entries, err := n.ListByHandle(ctx, ".", nil)
 	if err != nil {
 		t.Fatalf("ListByHandle on replacement conn: %v", err)
@@ -117,9 +106,6 @@ func TestNFSPoolDiscardsTimedOutConn(t *testing.T) {
 	}
 }
 
-// Even when the path-walk fallback succeeds, a timeout on the handle attempt
-// poisons the connection: the late handle reply could surface later and be
-// misread as a future response's XID.
 func TestNFSPoolDiscardsConnWhenHandleTimeoutRecovers(t *testing.T) {
 	supply, calls := stubScanConnDialer(t)
 	flaky := &fakeScanConn{
@@ -145,8 +131,6 @@ func TestNFSPoolDiscardsConnWhenHandleTimeoutRecovers(t *testing.T) {
 	})
 }
 
-// A non-timeout failure (e.g. NFS3ERR_NOENT) is not poisoning: the
-// connection goes straight back to the pool.
 func TestNFSPoolReturnsConnOnOrdinaryError(t *testing.T) {
 	supply, calls := stubScanConnDialer(t)
 	ordinary := &fakeScanConn{plusErr: errors.New("NFS3ERR_NOENT")}
@@ -165,7 +149,6 @@ func TestNFSPoolReturnsConnOnOrdinaryError(t *testing.T) {
 	if got := n.poolSize.Load(); got != 1 {
 		t.Fatalf("poolSize = %d, want 1", got)
 	}
-	// The same connection serves the next checkout (returned, not replaced).
 	if _, err := n.ListByHandle(context.Background(), ".", nil); err == nil {
 		t.Fatal("expected the ordinary error to surface again")
 	}

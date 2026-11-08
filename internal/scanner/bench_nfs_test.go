@@ -56,7 +56,6 @@ func TestNFSBench(t *testing.T) {
 		t.Fatalf("Scan: %v", err)
 	}
 
-	// Progress lines in the log carry the rate; here the final tally.
 	var n int64
 	if err := repo.DB().Model(&db.FileEntry{}).
 		Where("scan_session_id = ?", 1).Count(&n).Error; err != nil {

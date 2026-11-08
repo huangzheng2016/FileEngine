@@ -18,7 +18,6 @@ import (
 	"github.com/rwcarlsen/goexif/exif"
 )
 
-// Date sources recorded in FileEntry.DateSource.
 const (
 	DateSourceExif     = "exif"
 	DateSourceVideo    = "video"
@@ -42,7 +41,6 @@ func extOf(name string) string {
 	return strings.ToLower(strings.TrimPrefix(path.Ext(name), "."))
 }
 
-// mediaInfo is the result of one file's metadata extraction.
 type mediaInfo struct {
 	takenAt *time.Time
 	camera  string
@@ -54,10 +52,8 @@ func (m mediaInfo) cols() map[string]any {
 	return map[string]any{"taken_at": m.takenAt, "camera": m.camera, "has_gps": m.hasGPS, "date_source": m.source}
 }
 
-// extractMetadata runs the post-walk media pass over every image/video row
-// not yet extracted (unchanged rows of a rescan keep theirs). Per-file read
-// or parse failures fall back to the file name / mtime; they never fail the
-// scan. Only cancellation and DB errors do.
+// Per-file read or parse failures fall back to the file name or mtime; only
+// cancellation and DB errors fail the scan.
 func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 	jobs := make(chan db.MediaCandidate, 64)
 	pass, cancel := context.WithCancel(ctx)
@@ -109,8 +105,6 @@ func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 	return ctx.Err()
 }
 
-// mediaMeta extracts one file's capture date: EXIF / MP4 header first, then a
-// date in the file name, then mtime.
 func (s *Scanner) mediaMeta(ctx context.Context, c db.MediaCandidate) mediaInfo {
 	ext := extOf(c.Name)
 	var info mediaInfo
@@ -138,8 +132,6 @@ func (s *Scanner) mediaMeta(ctx context.Context, c db.MediaCandidate) mediaInfo 
 	return info
 }
 
-// randomAccess returns a ReaderAt over an opened remote file when the backend
-// supports one (local/SFTP natively, NFS through Seek), else nil.
 func randomAccess(rc io.ReadCloser) io.ReaderAt {
 	if ra, ok := rc.(io.ReaderAt); ok {
 		return ra
@@ -163,8 +155,8 @@ func (a *seekReaderAt) ReadAt(p []byte, off int64) (int, error) {
 // so year/month templates see the wall-clock date.
 const exifTimeLayout = "2006:01:02 15:04:05"
 
-// parseImageMeta decodes EXIF from a header buffer: JPEG APP1, TIFF-based
-// raws (DNG/CR2/NEF/ARW), and the embedded EXIF blob of HEIC / PNG eXIf.
+// JPEG APP1, TIFF-based raws (DNG/CR2/NEF/ARW), and the embedded EXIF blob of
+// HEIC / PNG eXIf.
 func parseImageMeta(buf []byte) (info mediaInfo) {
 	defer func() {
 		if recover() != nil {
@@ -214,12 +206,10 @@ func parseImageMeta(buf []byte) (info mediaInfo) {
 	return info
 }
 
-// mp4Epoch is the ISO-BMFF time origin.
 var mp4Epoch = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// parseVideoMeta reads the movie creation time from moov/mvhd. The header
-// buffer covers files whose moov comes first; when moov sits after the media
-// data the top-level box chain is followed through ra (no ReaderAt → skip).
+// When moov sits after the media data the top-level box chain is followed
+// through ra; without a ReaderAt it is skipped.
 func parseVideoMeta(head []byte, size int64, ra io.ReaderAt) mediaInfo {
 	read := func(off int64, n int) []byte {
 		if off < 0 || n <= 0 {
@@ -273,7 +263,6 @@ func parseVideoMeta(head []byte, size int64, ra io.ReaderAt) mediaInfo {
 	return mediaInfo{}
 }
 
-// mvhdTime finds the mvhd child in a moov body and decodes creation_time.
 func mvhdTime(body []byte) (time.Time, bool) {
 	for off := 0; off+8 <= len(body); {
 		sz := int(binary.BigEndian.Uint32(body[off : off+4]))
@@ -308,14 +297,10 @@ func mvhdTime(body []byte) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// filenameDatePattern finds a yyyy mm dd date (optionally followed by hh mm
-// ss) in names such as IMG_20230105_101500.jpg, 2023-01-05 trip.png,
-// VID_20230105_…, Screenshot_2023-01-05-10-15-00.
 var filenameDatePattern = regexp.MustCompile(
 	`(?:^|\D)((?:19|20)\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])` +
 		`(?:[-_ T.]?([01]\d|2[0-3])[-_.:]?([0-5]\d)[-_.:]?([0-5]\d))?(?:\D|$)`)
 
-// filenameDate parses the first valid date in a file name (UTC wall clock).
 func filenameDate(name string) (time.Time, bool) {
 	for _, m := range filenameDatePattern.FindAllStringSubmatch(name, -1) {
 		n := func(i int) int { v, _ := strconv.Atoi(m[i]); return v }

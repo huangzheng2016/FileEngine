@@ -9,9 +9,8 @@ import (
 	"strings"
 )
 
-// LocalFS needs no timeout machinery: its operations are plain syscalls —
-// there is no dial and no remote peer that can silently stop responding.
-// Errors are still wrapped in OpError for a uniform shape across backends.
+// No timeout machinery: plain syscalls have no remote peer that can stop
+// responding.
 type LocalFS struct {
 	basePath     string
 	resolvedBase string // basePath with symlinks resolved (macOS /var etc.)
@@ -37,15 +36,11 @@ func NewLocalFS(basePath string) (*LocalFS, error) {
 	return &LocalFS{basePath: abs, resolvedBase: resolved}, nil
 }
 
-// withinBase reports whether path is lexically contained in base.
 func withinBase(path, base string) bool {
 	rel, err := filepath.Rel(base, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// resolveExisting resolves symlinks for path; when path does not exist (write
-// destinations), it resolves the nearest existing ancestor and re-appends the
-// remainder.
 func resolveExisting(path string) (string, error) {
 	var suffix []string
 	p := path
@@ -66,10 +61,6 @@ func resolveExisting(path string) (string, error) {
 	}
 }
 
-// resolve maps a caller path to a host path under basePath. Absolute paths are
-// accepted only when they stay inside basePath; anything escaping basePath
-// (absolute, via "..", or via a symlink pointing outside) is rejected,
-// matching the root semantics of the SFTP/SMB implementations.
 func (l *LocalFS) resolve(path string) (string, error) {
 	full := path
 	if filepath.IsAbs(full) {
@@ -258,7 +249,6 @@ func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// Delete removes one file or one empty directory.
 func (l *LocalFS) Delete(_ context.Context, p string) error {
 	fullPath, err := l.resolve(p)
 	if err != nil {

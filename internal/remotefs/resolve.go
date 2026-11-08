@@ -6,17 +6,10 @@ import (
 	"strings"
 )
 
-// confineSlashPath checks that resolved — a slash-separated path a backend
-// produced by joining a caller path onto its basePath — actually stays inside
-// basePath. Both sides are normalized to root-anchored form and compared
-// segment-wise, so sibling prefixes ("/photo" vs "/photos2") do not bleed.
-// An empty base confines nothing: the whole reachable filesystem is the base.
-//
-// This is the remote counterpart of LocalFS.resolve's lexical check. Unlike
-// LocalFS it cannot chase symlinks (FTP/NFS/SMB expose no portable readlink),
-// so a symlink inside the base may still point outside — that residual risk
-// is documented on the RemoteFS interface; the confinement here closes the
-// much larger hole of absolute paths and ".." traversal escaping outright.
+// Both sides are compared segment-wise from the root, so sibling prefixes
+// ("/photo" vs "/photos2") do not bleed; an empty base confines nothing.
+// Unlike LocalFS this cannot chase symlinks (FTP/NFS/SMB expose no portable
+// readlink), so a symlink inside the base may still point outside.
 func confineSlashPath(resolved, base string) error {
 	b := strings.Trim(path.Clean("/"+base), "/")
 	if b == "" {

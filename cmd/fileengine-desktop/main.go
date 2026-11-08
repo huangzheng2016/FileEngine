@@ -135,9 +135,6 @@ func run(args []string) int {
 	return 0
 }
 
-// startServer binds the loopback listener and builds the in-process server
-// with a per-launch token; it returns the window start URL that logs the
-// window in. The Service starts serving when Wails starts.
 func startServer(service *Service, paths desktopPaths, webRoot string) (string, error) {
 	frontend, err := desktopFrontend(webRoot)
 	if err != nil {
@@ -170,10 +167,8 @@ func startServer(service *Service, paths desktopPaths, webRoot string) (string, 
 	return a.Server().BootstrapURL("http://" + ln.Addr().String()), nil
 }
 
-// setupLogging sends the standard logger, Gin's request log and the Wails
-// slog output to the data-dir log file plus stderr. The file comes first in
-// the MultiWriter: a GUI build on Windows has no valid stderr, and a failing
-// writer stops the ones after it.
+// The log file comes first in the MultiWriter: a Windows GUI build has no
+// valid stderr, and a failing writer stops the ones after it.
 func setupLogging(paths desktopPaths, haveDataDir bool) (*slog.Logger, func()) {
 	out := io.Writer(os.Stderr)
 	closeLog := func() {}
@@ -189,8 +184,6 @@ func setupLogging(paths desktopPaths, haveDataDir bool) (*slog.Logger, func()) {
 	return logging.Setup(out), closeLog
 }
 
-// wailsOriginFallback answers requests to the Wails asset origin, which never
-// hosts the UI.
 func wailsOriginFallback(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "FileEngine serves its UI from the loopback server", http.StatusNotFound)
 }

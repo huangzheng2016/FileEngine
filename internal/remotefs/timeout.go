@@ -8,17 +8,9 @@ import (
 	"time"
 )
 
-// defaultOpTimeout bounds a single remote operation (dial, directory-list
-// page, stat, open, read chunk) when FE_REMOTEFS_TIMEOUT_SEC is unset. It
-// exists to cure the "dead connection, zero IO, goroutine blocked forever"
-// failure mode observed in production (an NFS scan hung 18+ minutes on a
-// silently dead TCP connection without surfacing any error): a peer that
-// stops responding must fail the operation, not hang it.
+// A peer that stops responding must fail the operation, not hang it.
 const defaultOpTimeout = 30 * time.Second
 
-// opTimeout reads FE_REMOTEFS_TIMEOUT_SEC (seconds, clamped to 1..600): the
-// per-operation network timeout applied by every remote backend. Dialing
-// uses the same budget.
 func opTimeout() time.Duration {
 	n := int(defaultOpTimeout / time.Second)
 	if v := os.Getenv("FE_REMOTEFS_TIMEOUT_SEC"); v != "" {

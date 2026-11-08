@@ -8,8 +8,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// startupErrorHTML renders a self-contained bilingual page; it must not depend
-// on the server or the SPA, which are exactly what failed to start.
+// Self-contained: it must not depend on the server or the SPA, which are
+// exactly what failed to start.
 func startupErrorHTML(paths desktopPaths, startupErr error) string {
 	esc := html.EscapeString
 	var b strings.Builder
@@ -55,9 +55,6 @@ p { margin: 6px 0; }
 	return b.String()
 }
 
-// showStartupError replaces the main window with a standalone page
-// explaining why the desktop could not start, so a failure is visible instead
-// of the process exiting silently.
 func showStartupError(app *application.App, paths desktopPaths, startupErr error, logger *slog.Logger) int {
 	logger.Error("startup failed", "error", startupErr)
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{

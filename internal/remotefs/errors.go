@@ -7,10 +7,7 @@ import (
 	"os"
 )
 
-// OpError annotates a backend I/O failure with the protocol, the operation,
-// and the path involved, so a surfaced error identifies the failing piece
-// without extra breadcrumbs. Unwrap preserves the original error for
-// errors.Is/errors.As — in particular network timeouts stay recognizable
+// Unwrap preserves the original error, so network timeouts stay recognizable
 // via errors.Is(err, os.ErrDeadlineExceeded).
 type OpError struct {
 	Protocol string // "nfs", "smb", "sftp", "ftp", "local"
@@ -39,11 +36,6 @@ func (e *OpError) Is(target error) bool {
 	return IsTimeout(e.Err)
 }
 
-// IsTimeout reports whether err is an operation timeout. It recognizes OS IO
-// deadlines (net.Conn deadlines in the NFS/FTP/SFTP paths), context
-// deadlines (per-request contexts in the SMB path), and errors that only
-// implement the legacy Timeout() method — and works through OpError
-// wrapping.
 func IsTimeout(err error) bool {
 	if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 		return true

@@ -40,8 +40,6 @@ func NewFTPFS(cfg config.RemoteFSConfig) (*FTPFS, error) {
 	return &FTPFS{conn: conn, basePath: cfg.BasePath, cfg: cfg}, nil
 }
 
-// dialFTP establishes and logs into a control connection — used for the
-// initial dial and for re-dialing after a poisoned connection is dropped.
 func dialFTP(cfg config.RemoteFSConfig) (*ftp.ServerConn, error) {
 	port := cfg.Port
 	if port == 0 {
@@ -76,7 +74,6 @@ func dialFTP(cfg config.RemoteFSConfig) (*ftp.ServerConn, error) {
 	return conn, nil
 }
 
-// ensureConn re-dials when the previous connection was dropped as poisoned.
 // Callers must hold f.mu.
 func (f *FTPFS) ensureConn() error {
 	if !f.broken {
@@ -100,8 +97,6 @@ func (f *FTPFS) dropConnLocked() {
 	f.broken = true
 }
 
-// resolve maps a caller path to a host slash path confined to basePath
-// (absolute paths must stay inside it; ".." escapes are rejected).
 func (f *FTPFS) resolve(p string) (string, error) {
 	var full string
 	if path.IsAbs(p) {
@@ -244,9 +239,8 @@ func (l *ftpLockedResponse) Close() error {
 	return err
 }
 
-// statLocked looks an entry up by full path: MLST when the server supports
-// it, otherwise a LIST of the parent. Missing entries match os.ErrNotExist.
-// Caller holds f.mu with a live connection.
+// MLST when the server supports it, otherwise a LIST of the parent. Caller
+// holds f.mu with a live connection.
 func (f *FTPFS) statLocked(full string) (*ftp.Entry, error) {
 	if e, err := f.conn.GetEntry(full); err == nil {
 		return e, nil
@@ -362,7 +356,6 @@ func (f *FTPFS) CopyFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// Delete removes one file or one empty directory (DELE, then RMD).
 func (f *FTPFS) Delete(_ context.Context, p string) error {
 	fullPath, err := f.resolve(p)
 	if err != nil {
@@ -386,7 +379,6 @@ func (f *FTPFS) Delete(_ context.Context, p string) error {
 	return nil
 }
 
-// MkdirAll creates each missing level; existing directories are fine.
 func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 	fullPath, err := f.resolve(p)
 	if err != nil {

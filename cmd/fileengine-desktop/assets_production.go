@@ -9,8 +9,6 @@ import (
 	"FileEngine/web"
 )
 
-// desktopFrontend serves the SPA embedded at build time (web/dist); the
-// --web-root flag is ignored in production builds.
 func desktopFrontend(string) (fs.FS, error) {
 	files, err := web.Dist()
 	if err != nil {

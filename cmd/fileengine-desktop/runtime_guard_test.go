@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// serveGuard sends a request that carries the canonical Wails host of the platform under test.
 func serveGuard(t *testing.T, method, target string, headers map[string]string) (*httptest.ResponseRecorder, bool) {
 	t.Helper()
 	return serveGuardHost(t, wailsHostsForGOOS(runtime.GOOS)[0], method, target, headers, nil)
@@ -60,14 +59,12 @@ func TestRuntimeRequestGuardChecksHost(t *testing.T) {
 			t.Errorf("host %q: code = %d, next called = %v", host, rec.Code, called)
 		}
 	}
-	// The dev server adds a port to the host; the name still has to match exactly.
 	for _, host := range []string{canonical, strings.ToUpper(canonical), canonical + ":5173"} {
 		rec, called := serveGuardHost(t, host, http.MethodPost, "/wails/runtime", headers, nil)
 		if rec.Code != http.StatusOK || !called {
 			t.Errorf("host %q: code = %d, next called = %v", host, rec.Code, called)
 		}
 	}
-	// Other paths are not host-restricted: the app pages are served only to the webview anyway.
 	rec, called := serveGuardHost(t, "example.com", http.MethodGet, "/assets/app.js", nil, nil)
 	if rec.Code != http.StatusOK || !called {
 		t.Fatalf("static path: code = %d, next called = %v", rec.Code, called)
@@ -105,7 +102,6 @@ func TestRuntimeRequestGuardSetsAntiFramingHeaders(t *testing.T) {
 		t.Fatalf("CSP = %q", got)
 	}
 
-	// An existing policy is extended, never replaced, whether the handler writes a body or not.
 	for name, handler := range map[string]http.HandlerFunc{
 		"write header": func(rw http.ResponseWriter, _ *http.Request) {
 			rw.Header().Set("Content-Security-Policy", "default-src 'self'")
@@ -129,7 +125,6 @@ func TestRuntimeRequestGuardSetsAntiFramingHeaders(t *testing.T) {
 		}
 	}
 
-	// A permissive frame-ancestors from the handler must not win.
 	rec, _ = serveGuard2(t, func(rw http.ResponseWriter, _ *http.Request) {
 		rw.Header().Set("Content-Security-Policy", "frame-ancestors *")
 		rw.WriteHeader(http.StatusOK)
@@ -139,7 +134,6 @@ func TestRuntimeRequestGuardSetsAntiFramingHeaders(t *testing.T) {
 		t.Fatalf("CSP = %q", values)
 	}
 
-	// Rejections carry the headers too.
 	rec, called := serveGuard(t, http.MethodPost, "/wails/runtime", nil)
 	if called || rec.Header().Get("X-Frame-Options") != "DENY" {
 		t.Fatalf("rejected response lacks headers: called=%v %v", called, rec.Header())
@@ -219,7 +213,6 @@ func TestRuntimeRequestGuardStreamAndEventPayload(t *testing.T) {
 	if rec.Code != http.StatusForbidden || called {
 		t.Fatalf("cross-site stream: code = %d, next called = %v", rec.Code, called)
 	}
-	// Event payload fetches carry no custom header; only the fetch metadata is checked.
 	rec, called = serveGuard(t, http.MethodGet, "/wails/eventpayload/abc", nil)
 	if rec.Code != http.StatusOK || !called {
 		t.Fatalf("event payload: code = %d, next called = %v", rec.Code, called)

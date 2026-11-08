@@ -10,8 +10,6 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// Validate runs the same checks as an executing run without touching the
-// filesystem: the issues a run with opts would report up front.
 func (e *Executor) Validate(ctx context.Context, sessionID uint, opts Options) (*Result, error) {
 	e.sessionID = sessionID
 	res := &Result{}
@@ -23,8 +21,6 @@ func (e *Executor) Validate(ctx context.Context, sessionID uint, opts Options) (
 	return res, nil
 }
 
-// plan selects the entries of a run and validates them. Blocked entries are
-// recorded in res (counted as skipped) and left out of the returned list.
 func (e *Executor) plan(ctx context.Context, opts Options, res *Result) ([]db.FileEntry, error) {
 	all, err := e.repo.ListPlannedEntries(e.sessionID)
 	if err != nil {
@@ -98,8 +94,6 @@ func staticIssue(f *db.FileEntry, decided map[string]bool, firstByKey map[string
 	return "", ""
 }
 
-// checkFS validates sources and targets against the live filesystem with one
-// listing per parent directory, listed concurrently.
 func (e *Executor) checkFS(ctx context.Context, entries []db.FileEntry, res *Result) []db.FileEntry {
 	if len(entries) == 0 {
 		return entries

@@ -14,9 +14,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// TestStartServerEndToEnd boots the in-process server exactly as the desktop
-// does (minus the window) and walks the window's request flow: bootstrap URL
-// -> session cookie -> SPA + API; a cookieless client is refused.
 func TestStartServerEndToEnd(t *testing.T) {
 	webRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<!doctype html><title>fe-test</title>"), 0o644); err != nil {

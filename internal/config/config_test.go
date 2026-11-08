@@ -15,8 +15,6 @@ func writeConfig(t *testing.T, content string) string {
 	return p
 }
 
-// agent_timeout defaults to unlimited: an absent value must stay 0 (no
-// timeout), not be replaced by a hard-coded cap.
 func TestAgentTimeoutDefaultsToUnlimited(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "server:\n  port: 9999\n"))
 	if err != nil {
@@ -27,8 +25,6 @@ func TestAgentTimeoutDefaultsToUnlimited(t *testing.T) {
 	}
 }
 
-// Explicit agent_timeout values are preserved as configured, including
-// non-positive values (explicit unlimited) and positive caps.
 func TestAgentTimeoutExplicitValuesPreserved(t *testing.T) {
 	cases := []struct {
 		name string
@@ -51,7 +47,6 @@ func TestAgentTimeoutExplicitValuesPreserved(t *testing.T) {
 	}
 }
 
-// Other agent defaults must still be applied alongside the timeout change.
 func TestAgentDefaultsStillApplied(t *testing.T) {
 	cfg, err := Load(writeConfig(t, ""))
 	if err != nil {
@@ -65,7 +60,6 @@ func TestAgentDefaultsStillApplied(t *testing.T) {
 	}
 }
 
-// retry_max_delay below retry_base_delay is clamped up to the base.
 func TestRetryMaxDelayClampedToBase(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "agent:\n  retry_base_delay: 10\n  retry_max_delay: 5\n"))
 	if err != nil {
@@ -76,8 +70,6 @@ func TestRetryMaxDelayClampedToBase(t *testing.T) {
 	}
 }
 
-// The empty-DSN default follows the driver: PostgreSQL gets a libpq-style
-// DSN, sqlite/mysql keep the historical SQLite file default.
 func TestDatabaseDSNDefaultFollowsDriver(t *testing.T) {
 	cases := []struct {
 		name string
@@ -102,7 +94,6 @@ func TestDatabaseDSNDefaultFollowsDriver(t *testing.T) {
 	}
 }
 
-// An explicit DSN is never replaced by the driver default.
 func TestDatabaseExplicitDSNPreserved(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "database:\n  driver: postgres\n  dsn: postgres://u:p@db.internal:5433/fe?sslmode=require\n"))
 	if err != nil {
@@ -113,7 +104,6 @@ func TestDatabaseExplicitDSNPreserved(t *testing.T) {
 	}
 }
 
-// category_policy defaults to the built-in policy text when the key is absent.
 func TestCategoryPolicyDefaultApplied(t *testing.T) {
 	cfg, err := Load(writeConfig(t, ""))
 	if err != nil {
@@ -124,8 +114,6 @@ func TestCategoryPolicyDefaultApplied(t *testing.T) {
 	}
 }
 
-// An explicit category_policy (custom text) is preserved verbatim, including
-// through the Update path used by the config API (hot reload).
 func TestCategoryPolicyExplicitPreserved(t *testing.T) {
 	custom := "自定义规范：\n- 只按年份建类"
 	cfg, err := Load(writeConfig(t, "agent:\n  category_policy: \"自定义规范：\\n- 只按年份建类\"\n"))
@@ -143,8 +131,6 @@ func TestCategoryPolicyExplicitPreserved(t *testing.T) {
 	}
 }
 
-// A missing config file is created with the defaults, private to the owner,
-// and loads like any other.
 func TestLoadCreatesMissingConfig(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	cfg, err := Load(p)

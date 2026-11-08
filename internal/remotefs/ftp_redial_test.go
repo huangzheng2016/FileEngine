@@ -107,9 +107,6 @@ func (s *fakeFTPServer) handle(conn net.Conn) {
 	}
 }
 
-// End-to-end over a scripted fake server: a stalled command fails with a
-// recognizable timeout, the poisoned control connection is dropped, and the
-// next operation transparently re-dials a fresh one.
 func TestFTPRedialsAfterTimeout(t *testing.T) {
 	t.Setenv("FE_REMOTEFS_TIMEOUT_SEC", "1")
 	srv := newFakeFTPServer(t, 1) // go silent after the first successful LIST
@@ -131,13 +128,10 @@ func TestFTPRedialsAfterTimeout(t *testing.T) {
 		t.Fatalf("List #1: got %v, want [hello.txt]", entries)
 	}
 
-	// The server is now silent: the command must fail with a recognizable
-	// timeout (stall deadline), not hang.
 	if _, err := fs.List(ctx, "."); !IsTimeout(err) {
 		t.Fatalf("List #2: got %v, want a timeout", err)
 	}
 
-	// The poisoned connection was dropped: the next List re-dials and works.
 	entries, err = fs.List(ctx, ".")
 	if err != nil {
 		t.Fatalf("List #3 (after re-dial): %v", err)

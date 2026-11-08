@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// confineSlashPath is the shared lexical basePath confinement behind every
-// remote backend's resolve: absolute paths must stay inside the base, ".."
-// escapes are rejected, sibling prefixes must not bleed.
 func TestConfineSlashPath(t *testing.T) {
 	ok := []struct{ resolved, base string }{
 		{"/data/x", "/data"},
@@ -39,8 +36,8 @@ func TestConfineSlashPath(t *testing.T) {
 	}
 }
 
-// Each backend's resolve must confine to its basePath. resolve is pure (no
-// client I/O), so the backends are constructed bare with only a basePath.
+// resolve is pure, so the backends are constructed bare with only a
+// basePath.
 func TestBackendResolveConfinesToBasePath(t *testing.T) {
 	type resolver interface {
 		resolve(p string) (string, error)
@@ -52,15 +49,12 @@ func TestBackendResolveConfinesToBasePath(t *testing.T) {
 		"smb":  &SMBFS{basePath: "/share/sub"},   // subPath inside the share
 	}
 
-	// In-base paths resolve fine, relative or absolute-in-base.
 	inBase := map[string][]string{
 		"sftp": {"incoming/a.txt", "/vol1/data/incoming/a.txt", "."},
 		"ftp":  {"incoming/a.txt", "/srv/ftp/incoming/a.txt", "."},
 		"nfs":  {"incoming/a.txt", "/exports/data/incoming/a.txt", "."},
 		"smb":  {"incoming/a.txt", "/share/sub/incoming/a.txt", "."},
 	}
-	// Escapes must be rejected: absolute outside, '..' outside, sibling
-	// prefix lookalikes, and the bare host/export/share root.
 	escapes := map[string][]string{
 		"sftp": {"/etc/passwd", "../outside", "/vol1/data2/x", "/vol1", "/"},
 		"ftp":  {"/etc/passwd", "../outside", "/srv/ftp2/x", "/srv", "/"},
@@ -84,8 +78,6 @@ func TestBackendResolveConfinesToBasePath(t *testing.T) {
 	}
 }
 
-// Empty basePath means the whole reachable filesystem is the base — nothing
-// is rejected (SFTP/FTP without a configured root keep their old behavior).
 func TestBackendResolveEmptyBaseAllowsAll(t *testing.T) {
 	sftp := &SFTPFS{}
 	if got, err := sftp.resolve("/etc/passwd"); err != nil || got != "/etc/passwd" {

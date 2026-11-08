@@ -6,7 +6,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// indexEntry is an existing row of the session, loaded before a rescan.
 type indexEntry struct {
 	id       uint
 	size     int64
@@ -17,9 +16,8 @@ type indexEntry struct {
 	seen     atomic.Bool // set by the walk; unseen rows are deleted afterwards
 }
 
-// scanIndex maps original_path to the existing row; nil on a first scan. The
-// map is read-only during the walk (only the atomic seen flags change), so
-// walk workers share it without locking.
+// Read-only during the walk (only the atomic seen flags change), so walk
+// workers share it without locking.
 type scanIndex map[string]*indexEntry
 
 func (s *Scanner) loadIndex(sessionID uint) (scanIndex, error) {
@@ -36,10 +34,9 @@ func (s *Scanner) loadIndex(sessionID uint) (scanIndex, error) {
 	return idx, nil
 }
 
-// emit routes one walked row: insert when new; for an existing row nothing
-// when unchanged, a count/mtime refresh for directories (their mtime moves
-// with every child add/remove, and their decision is about the folder as a
-// whole), and a full reset to undecided for changed files.
+// Directory mtimes move with every child add/remove and their decision is
+// about the folder as a whole, so a changed directory only gets a count/mtime
+// refresh; a changed file is reset to undecided.
 func (idx scanIndex) emit(b *writeBatch, fe db.FileEntry) {
 	ex := idx[fe.OriginalPath]
 	if ex == nil {
@@ -61,8 +58,6 @@ func (idx scanIndex) emit(b *writeBatch, fe db.FileEntry) {
 	}
 }
 
-// resetCols rewrites a changed entry's scan columns and drops every decision
-// and derived value: the content differs, so the plan must be redone.
 func resetCols(fe db.FileEntry) map[string]any {
 	return map[string]any{
 		"size": fe.Size, "mod_time": fe.ModTime, "permissions": fe.Permissions, "file_type": fe.FileType,

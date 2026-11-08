@@ -1,6 +1,5 @@
 package executor
 
-// PlanItem is one planned operation as listed and exported for the user.
 type PlanItem struct {
 	FileID       uint   `json:"file_id"`
 	OriginalPath string `json:"original_path"`
@@ -10,7 +9,6 @@ type PlanItem struct {
 	FileType     string `json:"file_type"`
 }
 
-// DryRun lists the session's pending planned entries in execution order.
 func (e *Executor) DryRun(sessionID uint) ([]PlanItem, error) {
 	files, err := e.repo.ListPlannedEntries(sessionID)
 	if err != nil {

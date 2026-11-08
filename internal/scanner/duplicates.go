@@ -13,16 +13,11 @@ import (
 	"FileEngine/internal/db"
 )
 
-// partialChunk is the size of each end of a file the partial hash reads.
 const partialChunk = 64 << 10
 
-// detectDuplicates groups content-identical files: size buckets (> 1 file,
-// size > 0) → partial hash (first + last 64KB) → full sha256 for partial
-// collisions. Every group's original is the oldest file (then shortest path,
-// then path, then id); the others get DuplicateOf and, when still undecided,
-// role duplicate. Links are recomputed from scratch each scan; full hashes of
-// unchanged files are reused. With enabled=false all links and hashes are
-// cleared. Unreadable files are skipped, never fatal.
+// Each group's original is the oldest file (then shortest path, path, id).
+// Full hashes of unchanged files are reused; unreadable files are skipped,
+// never fatal.
 func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled bool) error {
 	if err := s.repo.ResetDuplicates(sessionID, !enabled); err != nil {
 		return err
@@ -59,8 +54,6 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	return nil
 }
 
-// dedupeBucket hashes one same-size bucket and queues hash / duplicate
-// updates. Returns the number of duplicate groups found.
 func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *scanWriter) int {
 	size := rows[0].Size
 	var need []int // indexes of rows without a stored full hash
@@ -123,8 +116,6 @@ func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *s
 	return groups
 }
 
-// originalFirst is the deterministic "which copy is the original" order:
-// oldest mtime, then shortest path, then path, then id.
 func originalFirst(a, b db.DupCandidate) bool {
 	if !a.ModTime.Equal(b.ModTime) {
 		return a.ModTime.Before(b.ModTime)
@@ -138,8 +129,6 @@ func originalFirst(a, b db.DupCandidate) bool {
 	return a.ID < b.ID
 }
 
-// hashAll hashes rows[idx...] with bounded workers; failed files are left out
-// of the result.
 func (s *Scanner) hashAll(ctx context.Context, rows []db.DupCandidate, idx []int,
 	hash func(context.Context, db.DupCandidate) (string, error)) map[int]string {
 	out := map[int]string{}
@@ -174,8 +163,8 @@ func (s *Scanner) hashAll(ctx context.Context, rows []db.DupCandidate, idx []int
 	return out
 }
 
-// partialHash hashes the first and last 64KB. Backends without random access
-// (FTP) contribute the first chunk only — still a valid pre-filter.
+// Backends without random access (FTP) contribute the first chunk only,
+// still a valid pre-filter.
 func (s *Scanner) partialHash(ctx context.Context, r db.DupCandidate) (string, error) {
 	rc, err := s.fs.ReadFile(ctx, r.OriginalPath)
 	if err != nil {
@@ -199,7 +188,6 @@ func (s *Scanner) partialHash(ctx context.Context, r db.DupCandidate) (string, e
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// fullHash streams the whole file through sha256.
 func (s *Scanner) fullHash(ctx context.Context, r db.DupCandidate) (string, error) {
 	rc, err := s.fs.ReadFile(ctx, r.OriginalPath)
 	if err != nil {
@@ -217,7 +205,6 @@ func (s *Scanner) fullHash(ctx context.Context, r db.DupCandidate) (string, erro
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ctxReader stops a long hash read on cancellation.
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader

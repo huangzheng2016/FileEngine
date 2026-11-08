@@ -29,8 +29,6 @@ func newTestApp(t *testing.T) *App {
 	return a
 }
 
-// TestShutdownEndsStreams pins that Shutdown cancels long-lived responses
-// (the SSE stream) instead of waiting for them until the deadline.
 func TestShutdownEndsStreams(t *testing.T) {
 	a := newTestApp(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -85,9 +83,6 @@ func TestShutdownEndsStreams(t *testing.T) {
 	}
 }
 
-// TestNewSecuritySetup pins the startup security wiring: a token is generated
-// and persisted, the secret key file is created 0600 next to the database, and
-// requests without the token are refused.
 func TestNewSecuritySetup(t *testing.T) {
 	a := newTestApp(t)
 	tok := config.Get().Server.Token

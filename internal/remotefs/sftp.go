@@ -36,13 +36,10 @@ type SFTPFS struct {
 	basePath string
 }
 
-// ErrHostKeyNotPinned is returned when an SFTP connection has no pinned host
-// key fingerprint (test the connection first; creation pins it).
 var ErrHostKeyNotPinned = errors.New("未固定 SFTP 服务器指纹：请先测试连接并保存")
 
-// HostKeyMismatchError reports that the server presented a different key than
-// the pinned fingerprint — a possible man-in-the-middle, or a reinstalled
-// server. The user must review and re-pin explicitly.
+// A possible man-in-the-middle, or a reinstalled server: the user must review
+// and re-pin explicitly.
 type HostKeyMismatchError struct {
 	Expected, Got string
 }
@@ -63,9 +60,6 @@ func pinnedHostKey(expected string) ssh.HostKeyCallback {
 
 var errHostKeyCaptured = errors.New("host key captured")
 
-// FetchSSHHostKey connects to an SSH server just far enough to read its host
-// key and returns the SHA256 fingerprint (no authentication is attempted).
-// Used to show the fingerprint to the user and to pin it on first use.
 func FetchSSHHostKey(host string, port int) (string, error) {
 	if port == 0 {
 		port = 22
@@ -100,7 +94,6 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	}
 	var authMethods []ssh.AuthMethod
 	if cfg.KeyPath != "" {
-		// Key files are host-local reads: confined by the LocalPolicy.
 		if err := CheckLocalPath(cfg.KeyPath); err != nil {
 			return nil, fmt.Errorf("SFTP 私钥文件: %w", err)
 		}
@@ -164,9 +157,6 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	}, nil
 }
 
-// resolve maps a caller path to a host slash path and confines it to
-// basePath: absolute paths are accepted only inside basePath, and ".." or
-// absolute escapes are rejected (matches LocalFS.resolve's lexical check).
 func (s *SFTPFS) resolve(p string) (string, error) {
 	var full string
 	if path.IsAbs(p) {
@@ -300,9 +290,6 @@ func (l *sftpLockedFile) Close() error {
 	return err
 }
 
-// Write operations take the same lock + sliding deadline as reads (see the
-// type comment): one operation at a time on the shared transport.
-
 func (s *SFTPFS) MoveFile(_ context.Context, src, dst string) error {
 	srcFull, err := s.resolve(src)
 	if err != nil {
@@ -377,7 +364,6 @@ func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// Delete removes one file or one empty directory.
 func (s *SFTPFS) Delete(_ context.Context, p string) error {
 	fullPath, err := s.resolve(p)
 	if err != nil {

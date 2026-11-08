@@ -12,9 +12,8 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// Recover settles ops an interrupted run left in an intermediate state:
-// finished steps are completed (a verified move deletes its unchanged
-// source), unfinished ones are rolled back (a partial copy is removed).
+// Finished steps are completed (a verified move deletes its unchanged
+// source); unfinished ones are rolled back (a partial copy is removed).
 func (e *Executor) Recover(ctx context.Context, sessionID uint) error {
 	e.sessionID = sessionID
 	ops, err := e.repo.ListUnfinishedExecOps(sessionID)
@@ -81,8 +80,6 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 	return e.setState(op, db.ExecFailed, interrupted)
 }
 
-// markIfEntryOp marks the decided entry executed when op carried out the
-// entry itself (not one file inside a directory decision).
 func (e *Executor) markIfEntryOp(op *db.ExecOp, mode string) error {
 	if op.EntryID == 0 {
 		return nil
@@ -107,11 +104,9 @@ func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
 	return op.DstModTime.IsZero() || st.ModTime.Unix() == op.DstModTime.Unix()
 }
 
-// Revert reverses the done ops of target in reverse order within run. Each
-// destination must be unchanged since the run wrote it; anything else is
-// skipped and reported. Directories the run created are removed afterwards,
-// deepest first and only when empty. Reverting is idempotent: ops already
-// undone are recognized and settled.
+// Each destination must be unchanged since the run wrote it; anything else is
+// skipped and reported. Reverting is idempotent: ops already undone are
+// recognized and settled.
 func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*Result, error) {
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
 	res := &Result{}
@@ -168,9 +163,8 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 	return res, e.removeCreatedDirs(ctx, mkdirs, res)
 }
 
-// removeCreatedDirs undoes the run's mkdir ops after everything else was
-// moved back: deepest first, and a directory is removed only when a listing
-// shows it empty. Kept directories are reported as notes.
+// A directory is removed only when a listing shows it empty; kept directories
+// are reported as notes.
 func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, res *Result) error {
 	sort.SliceStable(mkdirs, func(i, j int) bool {
 		di, dj := strings.Count(mkdirs[i].Dst, "/"), strings.Count(mkdirs[j].Dst, "/")

@@ -14,7 +14,6 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// memNode is one node in an in-memory filesystem tree.
 type memNode struct {
 	name     string
 	children []*memNode
@@ -31,10 +30,8 @@ func file(name string) *memNode {
 	return &memNode{name: name}
 }
 
-// fakeFS serves an in-memory tree over the plain RemoteFS interface.
 type fakeFS struct {
-	root *memNode
-	// failOn, when non-empty, makes List of any path containing it error.
+	root   *memNode
 	failOn string
 }
 
@@ -105,9 +102,8 @@ func (f *fakeFS) Delete(_ context.Context, p string) error          { return nil
 func (f *fakeFS) MkdirAll(_ context.Context, p string) error        { return nil }
 func (f *fakeFS) Close() error                                      { return nil }
 
-// fakeHandleFS wraps fakeFS with a HandleLister implementation: concurrency 4,
-// handles are just the node path (opaque to the scanner). It counts how many
-// listings resolved via handle vs path to prove handle chaining works.
+// Handles are just the node path; listings resolved via handle vs path are
+// counted to prove handle chaining works.
 type fakeHandleFS struct {
 	*fakeFS
 	mu          sync.Mutex
@@ -155,8 +151,6 @@ func (f *fakeHandleFS) ListByHandle(ctx context.Context, p string, handle []byte
 	return entries, nil
 }
 
-// collectPaths scans and returns the sorted OriginalPath list plus the
-// session row for assertions.
 func runScan(t *testing.T, fs remotefs.RemoteFS, filterMode string, filterDirs []string) ([]string, *db.ScanSession, error) {
 	t.Helper()
 	repo := setupTestDB(t)

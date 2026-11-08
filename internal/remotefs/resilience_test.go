@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-// The timeout knob: unset env yields the 30s default, env overrides in
-// seconds, and out-of-range values clamp to 1..600.
 func TestOpTimeoutEnv(t *testing.T) {
 	if got := opTimeout(); got != defaultOpTimeout {
 		t.Fatalf("unset env: got %v, want default %v", got, defaultOpTimeout)
@@ -35,7 +33,6 @@ func TestOpTimeoutEnv(t *testing.T) {
 	}
 }
 
-// OpError carries protocol/op/path context and unwraps cleanly.
 func TestOpError(t *testing.T) {
 	cause := os.ErrDeadlineExceeded
 	err := &OpError{Protocol: "nfs", Op: "list", Path: "/photos/2024", Err: cause}
@@ -62,9 +59,6 @@ func TestOpError(t *testing.T) {
 	}
 }
 
-// IsTimeout recognizes every timeout flavor the backends can produce: OS
-// deadlines (NFS/FTP/SFTP conn deadlines), context deadlines, and the legacy
-// Timeout()-only shape (go-smb2's ContextError has no Unwrap).
 func TestIsTimeout(t *testing.T) {
 	legacy := &fakeLegacyTimeout{}
 	cases := []struct {
@@ -84,8 +78,6 @@ func TestIsTimeout(t *testing.T) {
 		if got := IsTimeout(tc.err); got != tc.want {
 			t.Errorf("%s: IsTimeout = %v, want %v", tc.name, got, tc.want)
 		}
-		// The timeout sentinels must stay errors.Is-recognizable through
-		// OpError wrapping for every timeout flavor.
 		if tc.want {
 			wrapped := &OpError{Protocol: "smb", Op: "list", Err: tc.err}
 			if !errors.Is(wrapped, os.ErrDeadlineExceeded) {
@@ -102,8 +94,6 @@ type fakeLegacyTimeout struct{}
 func (e *fakeLegacyTimeout) Error() string { return "i/o timeout" }
 func (e *fakeLegacyTimeout) Timeout() bool { return true }
 
-// A Read on a stallConn with a silent peer must fail with a recognizable
-// timeout instead of blocking forever — the core "dead connection" cure.
 func TestStallConnReadTimeout(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -124,8 +114,7 @@ func TestStallConnReadTimeout(t *testing.T) {
 	}
 }
 
-// A Write on a stallConn whose peer never reads must hit the write deadline
-// (net.Pipe is unbuffered, so the write blocks until the peer reads).
+// net.Pipe is unbuffered, so the write blocks until the peer reads.
 func TestStallConnWriteTimeout(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -146,8 +135,6 @@ func TestStallConnWriteTimeout(t *testing.T) {
 	}
 }
 
-// A progressing transfer never trips the stall detector: bytes flow and the
-// deadline stays irrelevant.
 func TestStallConnProgress(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -164,8 +151,6 @@ func TestStallConnProgress(t *testing.T) {
 	}
 }
 
-// The SMB scan-concurrency knob follows the same shape as the NFS one:
-// default 8, clamped to 1..32.
 func TestSMBScanConnsEnv(t *testing.T) {
 	if got := smbScanConns(); got != 8 {
 		t.Fatalf("unset env: got %d, want 8", got)
@@ -184,11 +169,9 @@ func TestSMBScanConnsEnv(t *testing.T) {
 	}
 }
 
-// The activityConn deadline slides with IO progress: a peer that keeps
-// sending (slowly, but steadily) never trips it even when the total transfer
-// far exceeds the timeout; only a full quiet interval does. This is the
-// semantic that keeps a giant-directory ReadDir alive while still catching a
-// silently dead peer.
+// A slowly but steadily sending peer must never trip the sliding deadline: it
+// keeps a giant-directory ReadDir alive while still catching a silently dead
+// peer.
 func TestActivityConnSliding(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -225,16 +208,14 @@ func TestActivityConnSliding(t *testing.T) {
 	}
 }
 
-// While disarmed (no operation in flight) the connection must tolerate
-// arbitrary idle time: the ssh receive loop is always blocked in Read, so an
-// armed deadline there would kill healthy idle sessions.
+// The ssh receive loop is always blocked in Read, so an armed deadline there
+// would kill healthy idle sessions.
 func TestActivityConnDisarmedIdle(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
 	defer c2.Close()
 
 	ac := &activityConn{Conn: c1, timeout: 100 * time.Millisecond}
-	// Never armed: idle far beyond the timeout, then data arrives.
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		c2.Write([]byte("x"))
@@ -243,7 +224,6 @@ func TestActivityConnDisarmedIdle(t *testing.T) {
 		t.Fatalf("Read after disarmed idle: got %v, want nil", err)
 	}
 
-	// Armed then disarmed: same tolerance (no stale deadline left behind).
 	ac.arm()
 	ac.disarm()
 	go func() {
@@ -255,7 +235,6 @@ func TestActivityConnDisarmedIdle(t *testing.T) {
 	}
 }
 
-// opTimeout-scaled stream budget for SMB reads: 10x the per-op budget.
 func TestSMBStreamTimeout(t *testing.T) {
 	t.Setenv("FE_REMOTEFS_TIMEOUT_SEC", "10")
 	if got := smbStreamTimeout(); got != 100*time.Second {

@@ -15,7 +15,6 @@ const redacted = "[REDACTED]"
 
 var sensitiveKeys = []string{"token", "password", "passwd", "secret", "api_key", "apikey", "authorization", "dsn", "cookie"}
 
-// Inline credentials in free-form messages and error strings.
 var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)((?:token|password|passwd|api_key|apikey|secret)\s*[=:]\s*)[^\s&"',;]+`),
@@ -23,7 +22,6 @@ var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\b(sk-)[A-Za-z0-9_-]{8,}`),
 }
 
-// Redact masks credentials found in s.
 func Redact(s string) string {
 	for _, re := range sensitivePatterns {
 		s = re.ReplaceAllStringFunc(s, func(m string) string {
@@ -50,8 +48,6 @@ func isSensitiveKey(k string) bool {
 
 type redactingHandler struct{ next slog.Handler }
 
-// NewRedactingHandler wraps next, masking sensitive attribute values and
-// credential patterns in messages and string values.
 func NewRedactingHandler(next slog.Handler) slog.Handler { return redactingHandler{next} }
 
 func (h redactingHandler) Enabled(ctx context.Context, l slog.Level) bool {
@@ -102,8 +98,6 @@ func redactAttr(a slog.Attr) slog.Attr {
 	return a
 }
 
-// Setup installs a redacting text logger writing to w as the process default
-// (slog and the log package) and returns it.
 func Setup(w io.Writer) *slog.Logger {
 	l := slog.New(NewRedactingHandler(slog.NewTextHandler(w, nil)))
 	slog.SetDefault(l)

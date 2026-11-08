@@ -18,7 +18,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// faultFS wraps a LocalFS with injectable failures.
 type faultFS struct {
 	remotefs.RemoteFS
 	mu        sync.Mutex
@@ -106,7 +105,6 @@ func (e *env) exists(p string) bool {
 	return err == nil
 }
 
-// entry records p as scanned (live size/mtime) and, when target != "", decided.
 func (e *env) entry(p, target string) *db.FileEntry {
 	e.t.Helper()
 	st, err := os.Stat(filepath.Join(e.root, p))
@@ -207,7 +205,6 @@ func TestCopyFailureMidDirNeverDeletesSource(t *testing.T) {
 		t.Fatal("partially moved dir must not be marked executed")
 	}
 
-	// Next run resumes into the dir it already created.
 	e.fs.failCopy = nil
 	res, err = e.run(context.Background(), Options{Mode: ModeMove})
 	if err != nil || res.Success != 1 {
@@ -238,7 +235,6 @@ func TestCancelMidMoveKeepsSources(t *testing.T) {
 		t.Fatalf("deletes after cancel: %v", e.fs.deleted)
 	}
 
-	// The next run finishes the verified copy first, then the rest.
 	e.fs.afterCopy = nil
 	res, err := e.run(context.Background(), Options{Mode: ModeMove})
 	if err != nil {
@@ -363,7 +359,6 @@ func TestRevertRestores(t *testing.T) {
 	if err != nil || runRes.Success != 3 {
 		t.Fatalf("%+v %v", runRes, err)
 	}
-	// A user edit after execution blocks reverting that one file.
 	e.write("docs/new/b.txt", "edited")
 
 	var target db.AgentRun
@@ -418,7 +413,6 @@ func TestRevertRemovesOnlyEmptyCreatedDirs(t *testing.T) {
 	if res, err := e.run(context.Background(), Options{Mode: ModeMove}); err != nil || res.Success != 3 {
 		t.Fatalf("%+v %v", res, err)
 	}
-	// A file the user added after execution keeps its directory.
 	e.write("k/user.txt", "mine")
 
 	var target db.AgentRun
@@ -442,7 +436,6 @@ func TestRevertRemovesOnlyEmptyCreatedDirs(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Notes, "\n"), "目录「k」非空，已保留") {
 		t.Fatalf("notes: %q", res.Notes)
 	}
-	// Reverting again settles nothing new and never touches the kept dir.
 	e.repo.FinishRun(rev, db.RunDone, "", "", db.TokenCounts{})
 	rev2, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
 	if _, err := New(e.repo, e.fs).Revert(context.Background(), rev2, target.ID); err != nil {

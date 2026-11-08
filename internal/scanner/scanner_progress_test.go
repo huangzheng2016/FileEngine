@@ -16,10 +16,9 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// setupFileTestDB mirrors setupTestDB but backs the store with a temp file:
-// the progress tests poll the session row from one goroutine while the scan
-// runs on another, and ":memory:" gives every pooled connection its own
-// private database.
+// Backed by a temp file: the progress tests poll the session row while the
+// scan runs on another goroutine, and ":memory:" gives every pooled
+// connection its own private database.
 func setupFileTestDB(t *testing.T) *db.Repository {
 	t.Helper()
 	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{
@@ -34,9 +33,6 @@ func setupFileTestDB(t *testing.T) *db.Repository {
 	return db.NewRepository(gdb)
 }
 
-// A finished scan leaves the session row coherent: scanned_count converged to
-// total_files, the path heartbeat cleared, and the live counters match the
-// persisted shape.
 func TestScanProgress_FinalState(t *testing.T) {
 	fs := &fakeFS{root: testTree()}
 	repo := setupFileTestDB(t)
@@ -143,9 +139,6 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 	}
 }
 
-// A walk failure still leaves the partial count on the session struct — the
-// API layer persists it together with the error, so "interrupted at N
-// entries" is visible instead of a bare failure.
 func TestScanProgress_FailureKeepsPartialCount(t *testing.T) {
 	fs := &fakeFS{root: testTree(), failOn: "photos"}
 	repo := setupFileTestDB(t)

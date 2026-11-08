@@ -16,9 +16,8 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// ApplyRulesHook runs after every successful scan (first scan and rescans)
-// so the session's plan rules are re-applied to new and reset entries. Set by
-// the agent layer at startup; nil means no rules engine is wired.
+// Set by the agent layer at startup so plan rules are re-applied to new and
+// reset entries after every scan.
 var ApplyRulesHook func(sessionID uint)
 
 type Scanner struct {
@@ -31,9 +30,7 @@ type Scanner struct {
 	commits    int  // walk transactions committed by the last scan
 }
 
-// Progress tracks one scan's live counters. Workers update it concurrently
-// (atomics throughout); the reporter goroutine persists it onto the session
-// row every progressReportInterval.
+// Workers update it concurrently, so every field is atomic.
 type Progress struct {
 	entries int64        // entries kept by the walk so far
 	dirs    int64        // directories listed
@@ -52,8 +49,7 @@ func (p *Progress) CurrentPath() string {
 	return ""
 }
 
-// progressReportInterval is how often the live counters are persisted to the
-// session row. A var so tests can shrink it.
+// A var so tests can shrink it.
 var progressReportInterval = 2 * time.Second
 
 // HandleLister is implemented by backends (NFS, SMB) that list directories
@@ -156,8 +152,6 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	return nil
 }
 
-// startProgressReporter launches the goroutine that persists the live
-// counters to the session row until the returned stop function is called.
 // Stop is idempotent and blocks until the goroutine exits, so no reporter
 // write can land after the caller's own final session save.
 func (s *Scanner) startProgressReporter(sessionID uint) func() {
@@ -196,9 +190,8 @@ func (s *Scanner) startProgressReporter(sessionID uint) func() {
 	}
 }
 
-// walkConcurrency picks the walk pool size and listing function: backends
-// with their own listing pool (NFS, SMB) size it themselves; FTP and SFTP run
-// one operation at a time per connection, so extra workers would only queue.
+// FTP and SFTP run one operation at a time per connection, so extra workers
+// would only queue.
 func (s *Scanner) walkConcurrency() (func(context.Context, string, []byte) ([]remotefs.FileInfo, error), int) {
 	if hl, ok := s.fs.(HandleLister); ok {
 		return hl.ListByHandle, max(1, hl.ListConcurrency())
@@ -211,7 +204,6 @@ func (s *Scanner) walkConcurrency() (func(context.Context, string, []byte) ([]re
 	return list, defaultWorkers
 }
 
-// readConcurrency sizes the per-file read pools (metadata headers, hashes).
 // NFS serializes each RPC on its primary connection; two workers still let
 // one parse while the other waits on the wire.
 func (s *Scanner) readConcurrency() int {
@@ -224,8 +216,8 @@ func (s *Scanner) readConcurrency() int {
 	return defaultWorkers
 }
 
-// dirTask is one directory pending listing. Its own row is emitted when it is
-// listed, so the child counts are known before the row is written.
+// A directory's own row is emitted when it is listed, so the child counts are
+// known before the row is written.
 type dirTask struct {
 	path   string
 	handle []byte
@@ -262,7 +254,6 @@ func (q *dirQueue) push(t dirTask) {
 	q.cond.Signal()
 }
 
-// pop blocks for the next task; ok=false means the walk finished or aborted.
 func (q *dirQueue) pop() (dirTask, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -288,7 +279,6 @@ func (q *dirQueue) taskDone() {
 	}
 }
 
-// abort wakes every waiter so workers exit promptly on error/cancel.
 func (q *dirQueue) abort() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -296,8 +286,6 @@ func (q *dirQueue) abort() {
 	q.cond.Broadcast()
 }
 
-// walk lists the tree with a worker pool and streams rows to the writer. The
-// first listing error aborts the walk.
 func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, index scanIndex, w *scanWriter) error {
 	list, workers := s.walkConcurrency()
 	queue := newDirQueue()
@@ -405,8 +393,6 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, ind
 	return ctx.Err()
 }
 
-// finishRescan deletes entries the walk did not find and folds new or
-// reset entries under units into those units.
 func (s *Scanner) finishRescan(sessionID uint, index scanIndex) error {
 	var gone []uint
 	for _, e := range index {
@@ -426,8 +412,6 @@ func (s *Scanner) finishRescan(sessionID uint, index scanIndex) error {
 	return nil
 }
 
-// shouldPruneJunk reports whether a directory is well-known system junk that
-// the scan prunes at traversal time (never listed, never persisted).
 func (s *Scanner) shouldPruneJunk(name string) bool {
 	if !s.pruneJunk {
 		return false
@@ -441,7 +425,6 @@ func (s *Scanner) shouldPruneJunk(name string) bool {
 	return false
 }
 
-// shouldSkip checks if a directory should be skipped based on filter mode.
 func (s *Scanner) shouldSkip(entryPath string) bool {
 	if len(s.filterDirs) == 0 {
 		return false

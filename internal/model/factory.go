@@ -14,8 +14,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// NewChatModelFromProvider creates a model from a DB ModelProvider entity.
-// Thinking parameters are sent only when ThinkingEnabled is on.
 func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
 	switch p.Provider {
 	case "openai":
@@ -33,17 +31,12 @@ func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.C
 	}
 }
 
-// MarkCacheBreakpoint returns a copy of msg carrying an explicit prompt-cache
-// breakpoint (claude); other providers ignore it. Use it on the shared-context
-// message that precedes per-unit data; system, tools and the rolling last
-// message get breakpoints automatically.
+// Use it on the shared-context message that precedes per-unit data; system,
+// tools and the rolling last message get breakpoints automatically.
 func MarkCacheBreakpoint(msg *schema.Message) *schema.Message {
 	return claude.SetMessageBreakpoint(msg)
 }
 
-// ResolveBulkProvider returns the model provider for the session's bulk work
-// (tagging workers, context summarization): the session's bulk model when
-// set, otherwise main.
 func ResolveBulkProvider(repo *db.Repository, session *db.ScanSession, main *db.ModelProvider) (*db.ModelProvider, error) {
 	if session == nil || session.BulkModelProviderID == 0 || session.BulkModelProviderID == main.ID {
 		return main, nil
@@ -67,12 +60,9 @@ func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
 	}
-	// Inject the hint-capturing transport so error responses' status code and
-	// Retry-After header reach the agent retry classifier via ResponseHints
-	// (the eino/go-openai error types drop response headers). The client is
-	// shared by all workers; the hints store travels per request context, so
-	// concurrent requests never mix. Timeout stays zero, matching eino's
-	// default client when ChatModelConfig.Timeout is unset.
+	// The hint-capturing transport surfaces error status codes and Retry-After
+	// headers, which the eino/go-openai error types drop. The client is shared by
+	// all workers; hints travel per request context, so they never mix.
 	cfg.HTTPClient = &http.Client{Transport: newHintCaptureTransport(nil)}
 	temp := float32(p.Temperature)
 	cfg.Temperature = &temp
@@ -90,8 +80,6 @@ func newClaudeModel(ctx context.Context, p *db.ModelProvider) (model.ChatModel, 
 	return claude.NewChatModel(ctx, claudeConfig(p))
 }
 
-// Claude extended-thinking budgets per effort level; any other level gets
-// claudeMaxBudget.
 var claudeThinkingBudgets = map[string]int{"low": 2048, "medium": 8192, "high": 16384}
 
 const (
@@ -100,9 +88,8 @@ const (
 	claudeAnswerTokens = 4096 // output room kept above the thinking budget
 )
 
-// claudeThinking returns the thinking budget for effort and the max_tokens
-// to send: the budget is capped below maxTokens, and maxTokens is raised
-// when it cannot hold the minimum budget plus an answer.
+// The budget is capped below maxTokens, and maxTokens is raised when it
+// cannot hold the minimum budget plus an answer.
 func claudeThinking(effort string, maxTokens int) (budget, newMaxTokens int) {
 	budget, ok := claudeThinkingBudgets[effort]
 	if !ok {

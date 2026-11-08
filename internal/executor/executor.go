@@ -22,24 +22,19 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// Execution modes.
 const (
 	ModeCopy = "copy"
 	ModeMove = "move"
 )
 
-// DefaultHashLimit is the largest file whose copy is verified by content
-// hash in addition to its size.
 const DefaultHashLimit int64 = 64 << 20
 
-// Options selects what one executing run carries out.
 type Options struct {
 	Mode         string `json:"mode"`                    // copy | move
 	Sample       int    `json:"sample,omitempty"`        // execute only the first N runnable entries
 	CategoryPath string `json:"category_path,omitempty"` // execute only entries targeting this category path
 }
 
-// Issue codes: why an entry was not executed.
 const (
 	IssueInvalidTarget = "invalid_target" // target path illegal or empty
 	IssueIntoSelf      = "into_self"      // target equals or lies inside the source
@@ -51,7 +46,6 @@ const (
 	IssueFailed        = "failed"         // the filesystem operation failed
 )
 
-// Issue reports one entry the run did not (fully) carry out.
 type Issue struct {
 	EntryID      uint   `json:"entry_id"`
 	OriginalPath string `json:"original_path"`
@@ -60,7 +54,6 @@ type Issue struct {
 	Detail       string `json:"detail"`
 }
 
-// Result holds per-entry counters of one run.
 type Result struct {
 	Total   int      `json:"total"`
 	Success int      `json:"success"`
@@ -74,7 +67,6 @@ func (r *Result) issue(f *db.FileEntry, code, detail string) {
 	r.Issues = append(r.Issues, Issue{EntryID: f.ID, OriginalPath: f.OriginalPath, NewPath: f.NewPath, Code: code, Detail: detail})
 }
 
-// skipError marks an entry or file that was left alone on purpose.
 type skipError struct{ code, detail string }
 
 func (e *skipError) Error() string { return e.detail }
@@ -82,11 +74,9 @@ func (e *skipError) Error() string { return e.detail }
 func skip(code, detail string) error { return &skipError{code: code, detail: detail} }
 
 type Executor struct {
-	repo *db.Repository
-	fs   remotefs.RemoteFS
-	// HashLimit: copies up to this size are verified by SHA-256 too.
-	HashLimit int64
-	// ListConcurrency bounds the parallel directory listings of validation.
+	repo            *db.Repository
+	fs              remotefs.RemoteFS
+	HashLimit       int64
 	ListConcurrency int
 
 	sessionID    uint
@@ -100,8 +90,6 @@ func New(repo *db.Repository, fs remotefs.RemoteFS) *Executor {
 	return &Executor{repo: repo, fs: fs, HashLimit: DefaultHashLimit, ListConcurrency: 8}
 }
 
-// cleanPath turns a stored path into the root-relative slash form handed to
-// the RemoteFS ("" is the root).
 func cleanPath(p string) string {
 	return strings.TrimPrefix(path.Clean("/"+p), "/")
 }
@@ -114,7 +102,6 @@ func parentOf(p string) string {
 	return d
 }
 
-// validTarget rejects target paths that cannot be executed safely.
 func validTarget(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("目标路径为空")
@@ -125,9 +112,7 @@ func validTarget(p string) error {
 	return nil
 }
 
-// Start creates an executing run for the session and carries it out in the
-// background. The run owns fs and closes it when it ends; stop it with
-// db.CancelRun(run.ID).
+// The run owns fs and closes it when it ends.
 func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options) (*db.AgentRun, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
@@ -155,7 +140,6 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 	return run, nil
 }
 
-// StartRevert creates an executing run that reverses runID.
 func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.AgentRun, error) {
 	var target db.AgentRun
 	if err := repo.DB().First(&target, runID).Error; err != nil {
@@ -180,7 +164,6 @@ func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.Age
 	return run, nil
 }
 
-// finish records the run's terminal state.
 func (e *Executor) finish(run *db.AgentRun, res *Result, err error, verb string) {
 	if res == nil {
 		res = &Result{}
@@ -204,7 +187,6 @@ func (e *Executor) finish(run *db.AgentRun, res *Result, err error, verb string)
 	}
 }
 
-// emit publishes the run's progress counters, at most every 250ms unless forced.
 func (e *Executor) emit(res *Result, force bool) {
 	if e.run == nil {
 		return
@@ -230,7 +212,6 @@ var issueLabels = map[string]string{
 	IssueFailed:        "操作失败",
 }
 
-// Summary renders a run result as the run's Markdown summary.
 func Summary(verb string, res *Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s结果\n\n共 %d 项：成功 %d，失败 %d，跳过 %d。\n", verb, res.Total, res.Success, res.Failed, res.Skipped)
@@ -257,11 +238,7 @@ func Summary(verb string, res *Result) string {
 	return b.String()
 }
 
-// Execute carries out the session's plan within run: it first finishes or
-// rolls back ops an earlier interrupted run left behind, validates the plan
-// (blocking problems skip their entry), then executes entry by entry in
-// deterministic order. Canceling ctx stops before the next step; it never
-// triggers a delete.
+// Canceling ctx stops before the next step; it never triggers a delete.
 func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) (*Result, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
@@ -309,7 +286,6 @@ func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) 
 	return res, nil
 }
 
-// executeEntry re-checks one entry against the live filesystem and carries it out.
 func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode string) error {
 	// Re-validated right before the operation: rows may change after planning.
 	if err := validTarget(f.NewPath); err != nil {
@@ -349,7 +325,6 @@ func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode strin
 	}
 }
 
-// staleReason compares the live source with the scanned entry.
 func staleReason(f *db.FileEntry, st *remotefs.FileInfo) string {
 	isDir := f.FileType == "directory"
 	if st.IsDir != isDir {
@@ -367,15 +342,12 @@ func staleReason(f *db.FileEntry, st *remotefs.FileInfo) string {
 	return ""
 }
 
-// owned reports whether dst was produced by an earlier op of this session —
-// a directory a previous, interrupted run already started filling.
+// A directory a previous, interrupted run already started filling.
 func (e *Executor) owned(dst string) bool {
 	op, err := e.repo.FindDoneExecOp(e.sessionID, dst)
 	return err == nil && op != nil
 }
 
-// listConcurrent lists dirs with bounded parallelism; failed listings are
-// absent from the result.
 func (e *Executor) listConcurrent(ctx context.Context, dirs []string) map[string][]remotefs.FileInfo {
 	out := make(map[string][]remotefs.FileInfo, len(dirs))
 	var mu sync.Mutex

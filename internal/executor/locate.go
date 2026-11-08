@@ -7,7 +7,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// LocateItem answers "where did my file go" for one entry.
 type LocateItem struct {
 	EntryID      uint       `json:"entry_id"`
 	OriginalPath string     `json:"original_path"`
@@ -21,8 +20,6 @@ type LocateItem struct {
 	OpState      string     `json:"op_state"` // latest journal state of the deciding entry
 }
 
-// Locate finds entries by original path or name and resolves each one's
-// effective target through the nearest decided ancestor-or-self.
 func Locate(repo *db.Repository, sessionID uint, q string, limit int) ([]LocateItem, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

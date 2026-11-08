@@ -34,7 +34,6 @@ func (e *Executor) exists(ctx context.Context, p string) (*remotefs.FileInfo, bo
 	return st, err == nil
 }
 
-// ensureDir makes dir exist, journaling every level it creates.
 func (e *Executor) ensureDir(ctx context.Context, entryID uint, dir string) error {
 	if dir == "" || e.dirs[dir] {
 		return nil
@@ -61,8 +60,6 @@ func (e *Executor) ensureDir(ctx context.Context, entryID uint, dir string) erro
 	return e.setState(op, db.ExecDone, "")
 }
 
-// verify checks dst against the source: size always, content hash up to
-// HashLimit. It returns dst's stat.
 func (e *Executor) verify(ctx context.Context, src, dst string, size int64) (*remotefs.FileInfo, error) {
 	st, err := e.fs.Stat(ctx, dst)
 	if err != nil {
@@ -100,7 +97,6 @@ func (e *Executor) hash(ctx context.Context, p string) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
-// renameOnly moves src by in-place rename with no copy fallback.
 func (e *Executor) renameOnly(ctx context.Context, entryID uint, src, dst string, st *remotefs.FileInfo) error {
 	op, err := e.journal(entryID, db.ExecKindRename, src, dst, st.IsDir, st)
 	if err != nil {
@@ -119,8 +115,8 @@ func (e *Executor) renameOnly(ctx context.Context, entryID uint, src, dst string
 	return e.setState(op, db.ExecDone, "")
 }
 
-// tryRename attempts an in-place rename. handled=false means the backend
-// could not rename (e.g. cross-device) and the caller must copy instead.
+// handled=false means the backend could not rename (e.g. cross-device) and
+// the caller must copy instead.
 func (e *Executor) tryRename(ctx context.Context, entryID uint, src, dst string, st *remotefs.FileInfo) (handled bool, err error) {
 	if e.renameBroken {
 		return false, nil
@@ -151,9 +147,7 @@ func (e *Executor) tryRename(ctx context.Context, entryID uint, src, dst string,
 	return false, nil
 }
 
-// transferFile copies or moves one regular file. A move renames in place
-// when possible; otherwise it copies, verifies, and only then deletes the
-// source. A canceled ctx never reaches the delete.
+// A canceled ctx never reaches the delete.
 func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst string, st *remotefs.FileInfo, mode string) error {
 	if mode == ModeMove {
 		if handled, err := e.tryRename(ctx, entryID, src, dst, st); handled {
@@ -181,7 +175,6 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 	return e.finishCopy(ctx, op)
 }
 
-// finishCopy verifies a copied op and, for moves, deletes the source.
 func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 	if op.State == db.ExecCopied {
 		ds, err := e.verify(ctx, op.Src, op.Dst, op.Size)
@@ -214,9 +207,6 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 	return e.setState(op, db.ExecDone, "")
 }
 
-// transferDir carries out a directory decision: an atomic rename when
-// moving and possible, otherwise a file-by-file walk. resume continues a
-// directory an earlier run already started.
 func (e *Executor) transferDir(ctx context.Context, entryID uint, src, dst, mode string, resume bool) error {
 	if mode == ModeMove && !resume {
 		st, err := e.fs.Stat(ctx, src)
@@ -310,8 +300,7 @@ func (e *Executor) walkFile(ctx context.Context, entryID uint, s, d string, c *r
 	return e.transferFile(ctx, entryID, s, d, c, mode)
 }
 
-// removeEmptyDir removes a source directory the move emptied. Delete never
-// removes a non-empty directory, so leftovers keep it in place.
+// Delete never removes a non-empty directory, so leftovers keep it in place.
 func (e *Executor) removeEmptyDir(ctx context.Context, entryID uint, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
