@@ -110,14 +110,23 @@ type MemoryItem struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
+// Chat turn roles. A summary turn condenses every turn with ID <=
+// CoversThrough; it is prompt history only and never listed to the user.
+const (
+	ChatRoleUser      = "user"
+	ChatRoleAssistant = "assistant"
+	ChatRoleSummary   = "summary"
+)
+
 // ChatTurn is one persisted turn of the session assistant conversation.
 type ChatTurn struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	SessionID uint      `gorm:"index" json:"session_id"`
-	RunID     uint      `json:"run_id"`
-	Role      string    `gorm:"size:16" json:"role"` // user / assistant
-	Content   string    `gorm:"type:text" json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	SessionID     uint      `gorm:"index" json:"session_id"`
+	RunID         uint      `json:"run_id"`
+	Role          string    `gorm:"size:16" json:"role"` // user / assistant / summary
+	Content       string    `gorm:"type:text" json:"content"`
+	CoversThrough uint      `json:"-"` // summary turns only
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Stream event types.
