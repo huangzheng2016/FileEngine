@@ -23,7 +23,7 @@
 
 ```bash
 task build                       # → bin/fileengine
-./bin/fileengine                 # 读取当前目录的 config.yaml（见下方「配置」）
+./bin/fileengine                 # 读取当前目录的 config.yaml，不存在时自动创建
 ```
 
 打开 `http://127.0.0.1:8080`，用启动日志里打印的访问令牌登录，然后添加模型和存储、新建整理任务。
