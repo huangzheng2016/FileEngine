@@ -2,6 +2,8 @@ package remotefs
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,9 +36,74 @@ type SFTPFS struct {
 	basePath string
 }
 
+// ErrHostKeyNotPinned is returned when an SFTP connection has no pinned host
+// key fingerprint (test the connection first; creation pins it).
+var ErrHostKeyNotPinned = errors.New("未固定 SFTP 服务器指纹：请先测试连接并保存")
+
+// HostKeyMismatchError reports that the server presented a different key than
+// the pinned fingerprint — a possible man-in-the-middle, or a reinstalled
+// server. The user must review and re-pin explicitly.
+type HostKeyMismatchError struct {
+	Expected, Got string
+}
+
+func (e *HostKeyMismatchError) Error() string {
+	return fmt.Sprintf("服务器指纹已变化（已固定 %s，当前 %s）：请确认服务器身份后重新固定指纹", e.Expected, e.Got)
+}
+
+func pinnedHostKey(expected string) ssh.HostKeyCallback {
+	return func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		got := ssh.FingerprintSHA256(key)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
+			return &HostKeyMismatchError{Expected: expected, Got: got}
+		}
+		return nil
+	}
+}
+
+var errHostKeyCaptured = errors.New("host key captured")
+
+// FetchSSHHostKey connects to an SSH server just far enough to read its host
+// key and returns the SHA256 fingerprint (no authentication is attempted).
+// Used to show the fingerprint to the user and to pin it on first use.
+func FetchSSHHostKey(host string, port int) (string, error) {
+	if port == 0 {
+		port = 22
+	}
+	timeout := opTimeout()
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return "", &OpError{Protocol: "sftp", Op: "dial", Path: host, Err: err}
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+	var fp string
+	_, _, _, err = ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			fp = ssh.FingerprintSHA256(key)
+			return errHostKeyCaptured
+		},
+	})
+	if fp != "" {
+		return fp, nil
+	}
+	if err == nil {
+		err = errors.New("server presented no host key")
+	}
+	return "", &OpError{Protocol: "sftp", Op: "hostkey", Path: host, Err: err}
+}
+
 func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
+	if cfg.HostKey == "" {
+		return nil, ErrHostKeyNotPinned
+	}
 	var authMethods []ssh.AuthMethod
 	if cfg.KeyPath != "" {
+		// Key files are host-local reads: confined by the LocalPolicy.
+		if err := CheckLocalPath(cfg.KeyPath); err != nil {
+			return nil, fmt.Errorf("SFTP 私钥文件: %w", err)
+		}
 		key, err := os.ReadFile(cfg.KeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("read key file: %w", err)
@@ -70,7 +137,7 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	sshTransport, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: pinnedHostKey(cfg.HostKey),
 	})
 	if err != nil {
 		conn.Close()
@@ -229,19 +296,29 @@ func (l *sftpLockedFile) Close() error {
 	return err
 }
 
-func (s *SFTPFS) MoveFile(ctx context.Context, src, dst string) error {
-	dstFull, err := s.resolve(dst)
-	if err != nil {
-		return err
-	}
+// Write operations take the same lock + sliding deadline as reads (see the
+// type comment): one operation at a time on the shared transport.
+
+func (s *SFTPFS) MoveFile(_ context.Context, src, dst string) error {
 	srcFull, err := s.resolve(src)
 	if err != nil {
 		return err
 	}
-	if err := s.client.MkdirAll(path.Dir(dstFull)); err != nil {
+	dstFull, err := s.resolve(dst)
+	if err != nil {
 		return err
 	}
-	return s.client.Rename(srcFull, dstFull)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conn.arm()
+	defer s.conn.disarm()
+	if _, err := s.client.Lstat(dstFull); err == nil {
+		return existErr("sftp", "move", dst)
+	}
+	if err := s.client.Rename(srcFull, dstFull); err != nil {
+		return &OpError{Protocol: "sftp", Op: "move", Path: src, Err: err}
+	}
+	return nil
 }
 
 func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
@@ -253,33 +330,63 @@ func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-
-	if err := s.client.MkdirAll(path.Dir(dstFull)); err != nil {
-		return err
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conn.arm()
+	defer s.conn.disarm()
 
 	srcFile, err := s.client.Open(srcFull)
 	if err != nil {
-		return err
+		return &OpError{Protocol: "sftp", Op: "open", Path: src, Err: err}
 	}
 	defer srcFile.Close()
-
-	dstFile, err := s.client.Create(dstFull)
+	st, err := srcFile.Stat()
 	if err != nil {
+		return &OpError{Protocol: "sftp", Op: "stat", Path: src, Err: err}
+	}
+	if st.IsDir() {
+		return &OpError{Protocol: "sftp", Op: "copy", Path: src, Err: ErrIsDir}
+	}
+
+	dstFile, err := s.client.OpenFile(dstFull, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		if _, serr := s.client.Lstat(dstFull); serr == nil {
+			return existErr("sftp", "create", dst)
+		}
+		return &OpError{Protocol: "sftp", Op: "create", Path: dst, Err: err}
+	}
+	n, err := io.Copy(dstFile, srcFile)
+	if cerr := dstFile.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n != st.Size() {
+		err = shortCopyErr("sftp", dst, n, st.Size())
+	}
+	if err != nil {
+		s.client.Remove(dstFull)
+		if _, ok := err.(*OpError); !ok {
+			err = &OpError{Protocol: "sftp", Op: "copy", Path: dst, Err: err}
+		}
 		return err
 	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	_ = s.client.Chtimes(dstFull, st.ModTime(), st.ModTime())
+	return nil
 }
 
+// Delete removes one file or one empty directory.
 func (s *SFTPFS) Delete(_ context.Context, p string) error {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return err
 	}
-	return s.client.RemoveAll(fullPath)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conn.arm()
+	defer s.conn.disarm()
+	if err := s.client.Remove(fullPath); err != nil {
+		return &OpError{Protocol: "sftp", Op: "delete", Path: p, Err: err}
+	}
+	return nil
 }
 
 func (s *SFTPFS) MkdirAll(_ context.Context, p string) error {
@@ -287,7 +394,14 @@ func (s *SFTPFS) MkdirAll(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
-	return s.client.MkdirAll(fullPath)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conn.arm()
+	defer s.conn.disarm()
+	if err := s.client.MkdirAll(fullPath); err != nil {
+		return &OpError{Protocol: "sftp", Op: "mkdir", Path: p, Err: err}
+	}
+	return nil
 }
 
 func (s *SFTPFS) Close() error {

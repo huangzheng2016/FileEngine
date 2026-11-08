@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"FileEngine/internal/app"
+	"FileEngine/internal/logging"
 	"FileEngine/web"
 )
 
-const shutdownTimeout = 10 * time.Second
+const shutdownTimeout = 40 * time.Second
 
 func main() {
+	logging.Setup(os.Stderr)
 	cfgPath := "config.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]

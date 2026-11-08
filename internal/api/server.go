@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"time"
 
 	"FileEngine/internal/db"
 
@@ -13,12 +14,18 @@ type Server struct {
 	router   *gin.Engine
 	repo     *db.Repository
 	frontend fs.FS
+	opts     Options
+	limiter  *rateLimiter
 }
 
-func NewServer(repo *db.Repository, frontend fs.FS) *Server {
+// NewServer builds the router. opts is optional; see Options for the token
+// and Host-guard fallbacks.
+func NewServer(repo *db.Repository, frontend fs.FS, opts ...Options) *Server {
 	s := &Server{
 		repo:     repo,
 		frontend: frontend,
+		opts:     resolveOptions(opts),
+		limiter:  newRateLimiter(10, time.Minute),
 	}
 	s.setupRouter()
 	return s
@@ -28,11 +35,20 @@ func (s *Server) setupRouter() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
-	r.Use(gin.Logger())
+	r.Use(requestLogger())
+	r.Use(securityHeaders())
+	r.Use(s.hostGuard())
 
-	api := r.Group("/api/v1")
+	r.GET("/healthz", s.healthz)
+
+	api := r.Group("/api/v1", s.apiGuard(), bodyLimit())
 	{
+		api.POST("/auth/login", s.login)
+		api.POST("/auth/logout", s.logout)
+		api.GET("/auth/me", s.me)
+		api.GET("/auth/bootstrap", s.bootstrap)
+		api.POST("/admin/backup", s.backup)
+
 		// Sessions
 		api.POST("/sessions", s.createSession)
 		api.GET("/sessions", s.listSessions)
@@ -55,13 +71,15 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/events", s.listSessionEvents)
 		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 
-		api.GET("/sessions/:id/execute/validate", s.validatePlans)
+		api.GET("/sessions/:id/execute/check", s.checkExecute)
+		api.POST("/runs/:run_id/revert", s.revertRun)
+		api.GET("/sessions/:id/locate", s.locateEntries)
 		api.GET("/sessions/:id/plans", s.getPlans)
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
 		api.POST("/sessions/:id/plans/reset", s.resetPlans)
 		api.GET("/sessions/:id/preview/tree", s.previewTree)
 
-		// Session plan (整理方案)
+		// Session plan
 		api.GET("/sessions/:id/plan", s.getPlan)
 		api.PUT("/sessions/:id/plan", s.updatePlan)
 		api.POST("/sessions/:id/plan/approve", s.approvePlan)
@@ -94,7 +112,7 @@ func (s *Server) setupRouter() {
 		api.GET("/filesystems/:id", s.getFilesystem)
 		api.PUT("/filesystems/:id", s.updateFilesystem)
 		api.DELETE("/filesystems/:id", s.deleteFilesystem)
-		api.POST("/filesystems/test", s.testFilesystemConnection)
+		api.POST("/filesystems/test", s.rateLimited("filesystems/test"), s.testFilesystemConnection)
 
 		// Model Providers
 		api.GET("/models", s.listModelProviders)
@@ -102,7 +120,7 @@ func (s *Server) setupRouter() {
 		api.GET("/models/:id", s.getModelProvider)
 		api.PUT("/models/:id", s.updateModelProvider)
 		api.DELETE("/models/:id", s.deleteModelProvider)
-		api.POST("/models/test", s.testModelProvider)
+		api.POST("/models/test", s.rateLimited("models/test"), s.testModelProvider)
 
 		// Config
 		api.GET("/config", s.getConfig)

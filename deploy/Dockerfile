@@ -40,8 +40,14 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # /data holds config.yaml + fileengine.db (bind-mounted by compose).
 ENV FE_DATA_DIR=/data
+# Inside the container the server must listen on all interfaces to be
+# reachable through the published port; host exposure is decided by the
+# compose port binding (127.0.0.1 by default).
+ENV FE_SERVER_HOST=0.0.0.0
 VOLUME ["/data"]
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- "http://127.0.0.1:${FE_SERVER_PORT:-8080}/healthz" >/dev/null || exit 1
 
 # Starts as root so the entrypoint can chown the bind-mounted /data, then
 # drops to the fileengine user via su-exec.

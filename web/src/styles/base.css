@@ -1,0 +1,864 @@
+/* Global styles for native elements plus the shared class vocabulary.
+   Pages compose these classes; they do not restyle them. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body.scroll-locked {
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.3;
+}
+h1 {
+  font-size: var(--text-xl);
+}
+h2 {
+  font-size: var(--text-lg);
+}
+h3 {
+  font-size: var(--text-base);
+}
+h4 {
+  font-size: var(--text-md);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+pre {
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  max-height: 480px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+pre code {
+  padding: 0;
+  background: none;
+}
+
+hr {
+  margin: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- buttons ----------
+   button        secondary (the default; most buttons)
+   .primary      the one main action of an area
+   .danger       destructive action, always behind useConfirm
+   .ghost        borderless low-emphasis action (row actions, toolbar icons)
+   .btn-sm       compact, for table rows and toolbars inside cards
+   .btn-icon     square icon-only button, needs aria-label */
+
+button,
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 12px;
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+button:hover:not(:disabled),
+.btn:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+/* A disabled button still receives the pointer so its v-tip (the reason) can show;
+   the browser already blocks its clicks. A disabled link has no such guard. */
+button:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn[aria-disabled='true'] {
+  pointer-events: none;
+}
+
+button.primary,
+.btn.primary {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+button.primary:hover:not(:disabled),
+.btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button.danger,
+.btn.danger {
+  color: var(--on-danger);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+button.danger:hover:not(:disabled),
+.btn.danger:hover {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+button.ghost,
+.btn.ghost {
+  color: var(--text-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+button.ghost:hover:not(:disabled),
+.btn.ghost:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+button.ghost.danger,
+.btn.ghost.danger {
+  color: var(--danger);
+  background: transparent;
+  border-color: transparent;
+}
+button.ghost.danger:hover:not(:disabled),
+.btn.ghost.danger:hover {
+  background: var(--danger-soft);
+}
+
+button.btn-sm,
+.btn.btn-sm {
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  font-size: var(--text-sm);
+}
+
+button.btn-icon,
+.btn.btn-icon {
+  width: var(--control-h);
+  padding: 0;
+}
+button.btn-icon.btn-sm,
+.btn.btn-icon.btn-sm {
+  width: var(--control-h-sm);
+}
+
+/* ---------- form controls ---------- */
+
+input:where(
+  :not([type]),
+  [type='text'],
+  [type='number'],
+  [type='password'],
+  [type='email'],
+  [type='search'],
+  [type='url'],
+  [type='tel'],
+  [type='date'],
+  [type='time'],
+  [type='datetime-local'],
+  [type='month']
+),
+select,
+textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--text);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 6px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+input:hover:not(:disabled, :focus),
+select:hover:not(:disabled, :focus),
+textarea:hover:not(:disabled, :focus) {
+  border-color: var(--text-muted);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* Fields always match :focus-visible; their ring above replaces the generic outline. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--text-muted);
+  background-color: var(--surface-muted);
+  cursor: not-allowed;
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23808080' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+label {
+  font-size: var(--text-md);
+}
+
+/* <fieldset :disabled> makes a whole form read-only (every control, Select and
+   Switch included) without changing its layout */
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* A form field: label text, control, then hint or error. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.required::after {
+  content: ' *';
+  color: var(--danger);
+}
+
+.field-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.field-error {
+  font-size: var(--text-sm);
+  color: var(--danger);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-4);
+}
+.form-grid > .span-2 {
+  grid-column: 1 / -1;
+}
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Page-level forms (settings): stays at the bottom of the viewport while the form
+   scrolls, so 保存 is always reachable and unsaved edits are always visible. */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+}
+.save-bar .spacer {
+  flex: 1;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- page structure ---------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.toolbar :where(input, select) {
+  width: auto;
+}
+.toolbar .search {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+.toolbar .spacer,
+.form-actions .spacer {
+  flex: 1;
+}
+/* Replaces the toolbar while rows are selected: count, batch actions, 取消选择. */
+.toolbar.batch {
+  min-height: var(--control-h);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+}
+.card-head > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.card-desc {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+.stats > .card {
+  gap: var(--space-1);
+}
+.stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.stat-value {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: var(--text-md);
+}
+.kv dt {
+  color: var(--text-muted);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- split (list + detail) ----------
+   The page root is .split. Add .has-detail when a row is selected:
+   under 960px only one pane shows at a time. */
+
+.split {
+  display: flex;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-master,
+.split-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.split-master {
+  flex: 0 0 var(--split-master-width, clamp(420px, 42%, 760px));
+}
+
+.split-master > .table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.split-detail {
+  flex: 1 1 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.split-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+}
+.detail-head > h2 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-back {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .split-master {
+    flex: 1 1 auto;
+  }
+  .split:not(.has-detail) > .split-detail,
+  .split.has-detail > .split-master {
+    display: none;
+  }
+  .split-back {
+    display: inline-flex;
+  }
+}
+
+/* ---------- tables ----------
+   Wrap every table in .table-wrap: it scrolls both ways and keeps the head sticky. */
+
+.table-wrap {
+  overflow: auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-md);
+}
+
+th,
+td {
+  height: 40px;
+  padding: 0 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: 36px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+tr.clickable:hover td {
+  background: var(--surface-hover);
+}
+tr.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+tr.selected td,
+tr.selected:hover td {
+  background: var(--accent-soft);
+}
+tr.selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+th.col-actions,
+td.row-actions {
+  position: sticky;
+  right: 0;
+  text-align: right;
+}
+th.col-actions {
+  z-index: calc(var(--z-sticky) + 1);
+}
+td.row-actions {
+  background: var(--surface-raised);
+}
+td.row-actions > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+th.col-check,
+td.col-check {
+  width: 36px;
+  padding-right: 0;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td.wrap {
+  white-space: normal;
+  min-width: 240px;
+}
+
+.truncate {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* second line in a cell (email under a name); block so it never glues onto the first */
+.cell-sub {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+td.state-cell {
+  height: auto;
+  padding: var(--space-6) var(--space-3);
+  text-align: center;
+  white-space: normal;
+  color: var(--text-muted);
+}
+
+/* a URL filter that has no toolbar control (arrived from a link): name + clear button */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--control-h-sm);
+  padding: 0 2px 0 var(--space-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.filter-chip > button {
+  height: 20px;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+}
+.filter-chip > button:hover {
+  background: var(--surface-hover);
+}
+
+/* ---------- pills ----------
+   State only (never decoration). Rendered by StatusPill from labels.ts. */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+}
+.pill.tone-accent {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.pill.tone-success {
+  color: var(--success);
+  background: var(--success-soft);
+}
+.pill.tone-warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.pill.tone-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.pill.tone-info {
+  color: var(--info);
+  background: var(--info-soft);
+}
+
+/* ---------- text helpers ---------- */
+
+.text-muted {
+  color: var(--text-muted);
+}
+.text-sm {
+  font-size: var(--text-sm);
+}
+.text-danger {
+  color: var(--danger);
+}
+.text-success {
+  color: var(--success);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- code tokens (highlight.ts) ---------- */
+
+.tok-key {
+  color: var(--accent-text);
+}
+.tok-str {
+  color: var(--success);
+}
+.tok-num {
+  color: var(--warning);
+}
+.tok-lit {
+  color: var(--info);
+}
+.tok-comment {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---------- tooltip (tooltip.ts) ---------- */
+
+.tooltip {
+  position: fixed;
+  z-index: var(--z-tooltip);
+  max-width: 320px;
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--surface-raised);
+  background: var(--text);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.tooltip[hidden] {
+  display: none;
+}
+
+/* ---------- misc ---------- */
+
+details > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

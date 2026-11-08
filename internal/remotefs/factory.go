@@ -6,10 +6,13 @@ import (
 	"FileEngine/internal/config"
 )
 
+// NewFromConfig is the single entry point every layer uses to open a
+// filesystem connection. The LocalPolicy (LOCAL base paths, SFTP key files)
+// and the SFTP host-key pin are enforced by the constructors it calls.
 func NewFromConfig(cfg config.RemoteFSConfig) (RemoteFS, error) {
 	switch cfg.Protocol {
 	case "local":
-		return NewLocalFS(cfg.BasePath)
+		return newPolicedLocalFS(cfg.BasePath)
 	case "sftp":
 		return NewSFTPFS(cfg)
 	case "ftp":

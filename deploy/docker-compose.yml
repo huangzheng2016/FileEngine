@@ -1,4 +1,4 @@
-name: fileengine-test
+name: fileengine
 
 services:
   fileengine:
@@ -6,11 +6,11 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     image: fileengine:test
-    container_name: fileengine-test
+    container_name: fileengine
     ports:
-      # Host port is configurable via FE_PORT (deploy/.env); the container
-      # always listens on 8080 internally.
-      - "${FE_PORT:-8080}:8080"
+      # Published on the host loopback only. To expose on the LAN, set
+      # FE_BIND=0.0.0.0 in deploy/.env (the API still requires the token).
+      - "${FE_BIND:-127.0.0.1}:${FE_PORT:-8080}:8080"
     volumes:
       # Persistent state: config.yaml + SQLite DB survive restarts/recreates.
       - ./data:/data
@@ -25,4 +25,6 @@ services:
       FE_AGENT_MAX_FILE_READ_SIZE: "${FE_AGENT_MAX_FILE_READ_SIZE:-102400}"
       # NFS scan connection pool (see deploy/.env.example)
       FE_NFS_SCAN_CONNS: "${FE_NFS_SCAN_CONNS:-8}"
+      # Host dirs LOCAL filesystems may use (mount them into the container).
+      FE_LOCAL_ROOTS: "${FE_LOCAL_ROOTS:-}"
     restart: unless-stopped

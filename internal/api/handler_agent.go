@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"FileEngine/internal/agent"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/executor"
-	"FileEngine/internal/remotefs"
 
 	"github.com/gin-gonic/gin"
 )
@@ -72,109 +70,6 @@ func (s *Server) startTagging(c *gin.Context) {
 			Then: func(status string) { s.startReviewAfterTagging(session.ID, run.ID, status) }}
 	})
 	respondRunStart(c, run, err)
-}
-
-// startExecute starts an executing run: POST /sessions/:id/execute?mode=copy|move
-// → {run_id}. Progress counters stream as progress events (1s poll of the
-// executor's in-memory counters, plus the final counters).
-func (s *Server) startExecute(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
-		return
-	}
-	mode := c.DefaultQuery("mode", "copy")
-	if mode != "copy" && mode != "move" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode 只能是 copy 或 move"})
-		return
-	}
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
-		return
-	}
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	title := "复制到目标位置"
-	if mode == "move" {
-		title = "移动到目标位置"
-	}
-	run, err := s.launchRun(sessionID, db.RunPhaseExecuting, title, func(ctx context.Context, run *db.AgentRun) runOutcome {
-		fs, err := remotefs.NewFromConfig(fsCfg)
-		if err != nil {
-			return runOutcome{Err: fmt.Errorf("连接文件系统失败: %w", err)}
-		}
-		defer fs.Close()
-		e := executor.New(s.repo, fs)
-		emit := func() {
-			p := e.Progress()
-			db.Emit(sessionID, run.ID, db.EvProgress, db.ProgressData{RunID: run.ID, Phase: db.RunPhaseExecuting,
-				Total: p.Total, Success: p.Success, Failed: p.Failed, Skipped: p.Skipped})
-		}
-		stop := make(chan struct{})
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stop:
-					return
-				case <-ticker.C:
-					emit()
-				}
-			}
-		}()
-		err = e.Execute(ctx, sessionID, mode)
-		close(stop)
-		emit()
-		p := e.Progress()
-		return runOutcome{
-			Summary: fmt.Sprintf("共 %d 项：成功 %d，失败 %d，跳过 %d", p.Total, p.Success, p.Failed, p.Skipped),
-			Err:     err,
-		}
-	})
-	respondRunStart(c, run, err)
-}
-
-func (s *Server) validatePlans(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	fs, err := remotefs.NewFromConfig(fsCfg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
-		return
-	}
-	defer fs.Close()
-
-	e := executor.New(s.repo, fs)
-	result, err := e.Validate(c.Request.Context(), sessionID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) getPlans(c *gin.Context) {

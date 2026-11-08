@@ -102,7 +102,7 @@ func TestStreamSessionEventsUnknownSession(t *testing.T) {
 	s, _ := setupEventsTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/999/events/stream", nil)
 	w := httptest.NewRecorder()
-	s.Router().ServeHTTP(w, req)
+	serveAuthed(s, w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status: got %d, want 404", w.Code)
 	}
@@ -112,7 +112,7 @@ func TestStreamSessionEventsUnknownSession(t *testing.T) {
 // in order, then live events follow without duplicates.
 func TestStreamSessionEventsReplayLastEventID(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
-	srv := httptest.NewServer(s.Router())
+	srv := httptest.NewServer(authedHandler(s))
 	t.Cleanup(srv.Close)
 	sess := createTestSession(t, repo)
 
@@ -147,7 +147,7 @@ func TestStreamSessionEventsReplayLastEventID(t *testing.T) {
 // Without a resume point the stream starts at the latest run's first event.
 func TestStreamSessionEventsDefaultsToLatestRun(t *testing.T) {
 	s, repo := setupEventsTestServer(t)
-	srv := httptest.NewServer(s.Router())
+	srv := httptest.NewServer(authedHandler(s))
 	t.Cleanup(srv.Close)
 	sess := createTestSession(t, repo)
 
@@ -211,7 +211,7 @@ func TestRunBusyAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, body := doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%d/execute", sess.ID), nil)
+	code, body := doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%d/execute", sess.ID), map[string]any{"mode": "copy"})
 	if code != http.StatusConflict || body["error"] != db.ErrSessionBusy.Error() {
 		t.Fatalf("busy session: code %d body %v, want 409", code, body)
 	}

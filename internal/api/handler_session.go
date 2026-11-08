@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,12 +31,8 @@ var (
 )
 
 // scanRootPath computes the FS-relative root path for scanning.
-// ScanPath is the user-specified subdirectory; if empty, scan from FS root (".").
 func scanRootPath(scanPath string) string {
-	if scanPath != "" {
-		return scanPath
-	}
-	return "."
+	return strings.Trim(path.Clean("/"+scanPath), "/")
 }
 
 // startScan launches a background goroutine that connects to the filesystem and scans.
@@ -177,7 +174,7 @@ func (s *Server) createSession(c *gin.Context) {
 		AllowVision:         req.AllowVision,
 		Goal:                strings.TrimSpace(req.Goal),
 		FilesystemID:        filesystem.ID,
-		ScanPath:            req.ScanPath,
+		ScanPath:            scanRootPath(req.ScanPath),
 		RootPath:            scanRootPath(req.ScanPath),
 		Protocol:            filesystem.Protocol,
 		Status:              "scanning",

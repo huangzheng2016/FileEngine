@@ -14,11 +14,11 @@ func brainServer(t *testing.T) (*Server, *db.Repository) {
 	t.Helper()
 	s := setupSessionTestServer(t)
 	repo := s.repo
-	if err := repo.CreateSession(&db.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned"}); err != nil {
+	if err := repo.CreateSession(&db.ScanSession{FilesystemID: 1, RootPath: "", Status: "scanned"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range []db.FileEntry{
-		{ScanSessionID: 1, OriginalPath: "Design", Name: "Design", FileType: "directory", ParentPath: "."},
+		{ScanSessionID: 1, OriginalPath: "Design", Name: "Design", FileType: "directory", ParentPath: ""},
 		{ScanSessionID: 1, OriginalPath: "Design/logo.psd", Name: "logo.psd", FileType: "file", ParentPath: "Design", Size: 10},
 		{ScanSessionID: 1, OriginalPath: "Design/icon.psd", Name: "icon.psd", FileType: "file", ParentPath: "Design", Size: 20},
 	} {

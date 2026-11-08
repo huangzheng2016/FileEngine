@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 )
 
@@ -64,13 +65,11 @@ func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, file
 					if n > 1 {
 						candidate = CollisionName(newPath, n)
 					}
-					var taken int64
-					if err := tx.Model(&FileEntry{}).
-						Where("scan_session_id = ? AND new_path = ? AND original_path <> ?", sessionID, candidate, originalPath).
-						Count(&taken).Error; err != nil {
+					taken, err := targetTaken(tx, sessionID, candidate, originalPath)
+					if err != nil {
 						return err
 					}
-					if taken == 0 {
+					if !taken {
 						final, free = candidate, true
 						break
 					}
@@ -98,6 +97,33 @@ func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, file
 		})
 	})
 	return final, cleared, err
+}
+
+// targetTaken reports whether another entry of the session targets a path
+// with the same CollisionKey as candidate. SQL narrows by lower-cased NFC/NFD
+// spellings; the exact key comparison happens in Go.
+func targetTaken(tx *gorm.DB, sessionID uint, candidate, originalPath string) (bool, error) {
+	variants := map[string]bool{}
+	for _, v := range []string{candidate, norm.NFC.String(candidate), norm.NFD.String(candidate)} {
+		variants[strings.ToLower(v)] = true
+	}
+	lowered := make([]string, 0, len(variants))
+	for v := range variants {
+		lowered = append(lowered, v)
+	}
+	var paths []string
+	if err := tx.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND LOWER(new_path) IN ? AND original_path <> ?", sessionID, lowered, originalPath).
+		Pluck("new_path", &paths).Error; err != nil {
+		return false, err
+	}
+	key := CollisionKey(candidate)
+	for _, p := range paths {
+		if CollisionKey(p) == key {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ResetPlans clears the targets of the given entries of a session and marks
