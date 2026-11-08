@@ -30,7 +30,7 @@ const (
 
 // Options configures New.
 type Options struct {
-	// ConfigPath is the config.yaml to load. It must exist.
+	// ConfigPath is the config.yaml to load; a missing file is created with defaults.
 	ConfigPath string
 	// Frontend holds the built SPA (index.html at its root). Nil serves the
 	// API only.

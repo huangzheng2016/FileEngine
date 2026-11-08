@@ -142,3 +142,30 @@ func TestCategoryPolicyExplicitPreserved(t *testing.T) {
 		t.Fatalf("Update must preserve explicit category_policy: got %q", Get().Agent.CategoryPolicy)
 	}
 }
+
+// A missing config file is created with the defaults, private to the owner,
+// and loads like any other.
+func TestLoadCreatesMissingConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Port != 8080 || cfg.Database.Driver != "sqlite" || Path() != p {
+		t.Fatalf("defaults not applied: %+v path=%s", cfg.Server, Path())
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("config not created: %v", err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o, want 600", st.Mode().Perm())
+	}
+	again, err := Load(p)
+	if err != nil || again.Server.Port != 8080 || again.Agent.BatchSize != cfg.Agent.BatchSize {
+		t.Fatalf("reload: %+v %v", again, err)
+	}
+	if _, err := Load(filepath.Join(t.TempDir(), "missing-dir", "config.yaml")); err == nil {
+		t.Fatal("a missing parent directory must fail, not be created")
+	}
+}
