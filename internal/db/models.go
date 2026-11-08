@@ -106,6 +106,7 @@ type ScanSession struct {
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
+	Goal                string    `gorm:"type:text" json:"goal"` // the user's organizing intent, injected into every agent prompt
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -128,7 +129,8 @@ type ModelProvider struct {
 	// charset/length ([a-zA-Z0-9_-]{1,32}) but never hard-rejects unknown
 	// levels — providers keep inventing new ones.
 	ReasoningEffort string    `gorm:"size:32" json:"reasoning_effort"`
-	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"` // model can read images (gates the view_image tool)
+	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"`   // model can read images (gates the view_image tool)
+	ThinkingEnabled bool      `gorm:"default:false" json:"thinking_enabled"` // request model thinking; reasoning_effort applies only when on
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
