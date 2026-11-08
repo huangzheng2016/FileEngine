@@ -13,7 +13,9 @@ type FileEntry struct {
 	NewPath       string     `gorm:"size:1024;index:idx_session_newpath,priority:2" json:"new_path"` // always "/"-rooted when set
 	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"`  // "move" / "copy" / ""
 	Role          string     `gorm:"size:16;index" json:"role"`                                      // decision role, see Role* in contract.go
-	Reason        string     `gorm:"size:1024" json:"reason"`                                        // why this decision was made (agent, rule name or user)
+	Reason        string     `gorm:"size:1024" json:"reason"`
+	NeedsReview   bool       `gorm:"default:false" json:"needs_review"` // low-confidence decision: excluded from execution until the user confirms
+	Sensitive     bool       `gorm:"default:false" json:"sensitive"`    // credentials / identity documents: never read by the agent                                        // why this decision was made (agent, rule name or user)
 	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"

@@ -41,65 +41,6 @@ func CollisionName(p string, n int) string {
 // maxCollisionVariants bounds the "name (n)" search.
 const maxCollisionVariants = 1000
 
-// SetTargetUnique plans an entry's target, resolving collisions at plan time:
-// when another entry of the session already targets newPath, the first free
-// "name (n).ext" variant is used instead. For a directory with a target, the
-// planned descendants are cleared (outer target overrides inner). Returns the
-// final target and how many children were cleared. newPath "" clears.
-func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, fileType string) (string, int64, error) {
-	newPath = NormalizeTargetPath(newPath)
-	op := ""
-	if newPath != "" {
-		op = "planned"
-	}
-	final := newPath
-	var cleared int64
-	err := WithRetry(func() error {
-		return r.db.Transaction(func(tx *gorm.DB) error {
-			final = newPath
-			if newPath != "" {
-				free := false
-				for n := 1; n <= maxCollisionVariants; n++ {
-					candidate := newPath
-					if n > 1 {
-						candidate = CollisionName(newPath, n)
-					}
-					var taken int64
-					if err := tx.Model(&FileEntry{}).
-						Where("scan_session_id = ? AND new_path = ? AND original_path <> ?", sessionID, candidate, originalPath).
-						Count(&taken).Error; err != nil {
-						return err
-					}
-					if taken == 0 {
-						final, free = candidate, true
-						break
-					}
-				}
-				if !free {
-					return fmt.Errorf("no free target name for %s after %d variants", newPath, maxCollisionVariants)
-				}
-			}
-			if err := tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND original_path = ?", sessionID, originalPath).
-				Updates(map[string]any{"new_path": final, "operation": op}).Error; err != nil {
-				return err
-			}
-			cleared = 0
-			if fileType == "directory" && final != "" {
-				res := tx.Model(&FileEntry{}).
-					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(originalPath)).
-					Updates(map[string]any{"new_path": "", "operation": ""})
-				if res.Error != nil {
-					return res.Error
-				}
-				cleared = res.RowsAffected
-			}
-			return nil
-		})
-	})
-	return final, cleared, err
-}
-
 // ResetPlans clears the targets of the given entries of a session and marks
 // them untagged so the next tagging/chat run redoes them; a reset directory
 // also untags its descendants (they were cascade-tagged with it). Returns the
