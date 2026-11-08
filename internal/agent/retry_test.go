@@ -10,10 +10,8 @@ import (
 	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
-	modelfactory "FileEngine/internal/model"
 )
 
 // stubRetryEnv freezes the retry environment: config, jitter source, sleep
@@ -97,7 +95,7 @@ func TestParseRetryAfterMessage(t *testing.T) {
 
 type fakeRetryAfterCarrier struct{ d time.Duration }
 
-func (e *fakeRetryAfterCarrier) Error() string        { return "carrier" }
+func (e *fakeRetryAfterCarrier) Error() string             { return "carrier" }
 func (e *fakeRetryAfterCarrier) RetryAfter() time.Duration { return e.d }
 
 func TestRetryAfterFromError(t *testing.T) {
@@ -205,188 +203,6 @@ func TestBackoffDelayRateLimitStreakBoost(t *testing.T) {
 	}
 }
 
-// fakeAttempts fails with errs[i-1] on the i-th call, then succeeds.
-type fakeAttempts struct {
-	errs  []error
-	calls int
-}
-
-func (f *fakeAttempts) run(_ context.Context) (*schema.Message, error) {
-	f.calls++
-	if f.calls <= len(f.errs) {
-		return nil, f.errs[f.calls-1]
-	}
-	return &schema.Message{Role: schema.Assistant, Content: "ok"}, nil
-}
-
-func runFake(t *testing.T, ctx context.Context, f *fakeAttempts) (*schema.Message, error) {
-	t.Helper()
-	logger := NewLogger(nil, 900, 1)
-	tracker := newTokenTrackingModel(nil)
-	return runWithRetry(ctx, f.run, logger, "test", tracker)
-}
-
-func TestRunWithRetrySuccessFirstTry(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	rateLimitStreak.Store(5) // a prior throttling episode must be forgotten
-	f := &fakeAttempts{}
-	msg, err := runFake(t, context.Background(), f)
-	if err != nil || msg == nil || msg.Content != "ok" {
-		t.Fatalf("got msg=%+v err=%v, want ok", msg, err)
-	}
-	if f.calls != 1 || len(*sleeps) != 0 {
-		t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", f.calls, *sleeps)
-	}
-	if got := rateLimitStreak.Load(); got != 0 {
-		t.Fatalf("streak after success: got %d, want 0", got)
-	}
-}
-
-func TestRunWithRetry429ThenSuccess(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	f := &fakeAttempts{errs: []error{
-		&einoopenai.APIError{HTTPStatusCode: 429, Message: "slow down"},
-	}}
-	msg, err := runFake(t, context.Background(), f)
-	if err != nil || msg == nil {
-		t.Fatalf("got msg=%+v err=%v, want success", msg, err)
-	}
-	if f.calls != 2 || len(*sleeps) != 1 {
-		t.Fatalf("calls=%d sleeps=%v, want 2 calls 1 sleep", f.calls, *sleeps)
-	}
-	// streak 1 → no boost; attempt 1 raw 2s, jitter 0.5 → 1s.
-	if (*sleeps)[0] != time.Second {
-		t.Fatalf("sleep: got %v, want 1s", (*sleeps)[0])
-	}
-	if got := rateLimitStreak.Load(); got != 0 {
-		t.Fatalf("streak after success: got %d, want 0", got)
-	}
-}
-
-func TestRunWithRetry429ExhaustsLargerBudget(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 1, RateLimitMaxRetries: 3, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	throttled := &einoopenai.APIError{HTTPStatusCode: 429, Message: "slow down"}
-	f := &fakeAttempts{errs: []error{throttled, throttled, throttled, throttled}}
-	_, err := runFake(t, context.Background(), f)
-	if err == nil {
-		t.Fatal("want failure after budget exhausted")
-	}
-	// 1 initial + 3 retries from rate_limit_max_retries, NOT max_retries=1.
-	if f.calls != 4 || len(*sleeps) != 3 {
-		t.Fatalf("calls=%d sleeps=%v, want 4 calls 3 sleeps", f.calls, *sleeps)
-	}
-	// Every classified 429 bumps the fleet streak (including the final,
-	// unretried one); nothing reset it.
-	if got := rateLimitStreak.Load(); got != 4 {
-		t.Fatalf("streak: got %d, want 4", got)
-	}
-}
-
-func TestRunWithRetry429RetryAfterSleep(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	f := &fakeAttempts{errs: []error{
-		&einoopenai.APIError{HTTPStatusCode: 429, Message: "rate limit reached, please retry after 7 seconds"},
-	}}
-	if _, err := runFake(t, context.Background(), f); err != nil {
-		t.Fatalf("want success, got %v", err)
-	}
-	if len(*sleeps) != 1 {
-		t.Fatalf("sleeps=%v, want 1", *sleeps)
-	}
-	// 7s hint + jittered base slot (0.5 * 2s).
-	if (*sleeps)[0] != 8*time.Second {
-		t.Fatalf("retry-after sleep: got %v, want 8s", (*sleeps)[0])
-	}
-}
-
-func TestRunWithRetryHardErrorZeroRetries(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{"400", &einoopenai.APIError{HTTPStatusCode: 400, Message: "bad request"}},
-		{"401", &einoopenai.APIError{HTTPStatusCode: 401, Message: "invalid api key"}},
-		{"context length", &einoopenai.APIError{HTTPStatusCode: 400, Message: "context_length_exceeded"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeAttempts{errs: []error{tc.err, tc.err, tc.err, tc.err}}
-			_, err := runFake(t, context.Background(), f)
-			if !errors.Is(err, tc.err) {
-				t.Fatalf("got err=%v, want the original %v", err, tc.err)
-			}
-			if f.calls != 1 || len(*sleeps) != 0 {
-				t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", f.calls, *sleeps)
-			}
-		})
-	}
-}
-
-func TestRunWithRetryServerAndNetworkBudget(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-
-	server := &einoopenai.APIError{HTTPStatusCode: 500, Message: "boom"}
-	f := &fakeAttempts{errs: []error{server, server, server, server}}
-	if _, err := runFake(t, context.Background(), f); err == nil {
-		t.Fatal("want failure after max_retries")
-	}
-	if f.calls != 3 || len(*sleeps) != 2 {
-		t.Fatalf("server: calls=%d sleeps=%v, want 3 calls 2 sleeps", f.calls, *sleeps)
-	}
-
-	*sleeps = nil
-	netErr := &url.Error{Op: "Post", URL: "http://x/v1", Err: &net.DNSError{IsTimeout: true, Name: "x"}}
-	f = &fakeAttempts{errs: []error{netErr, netErr, netErr, netErr}}
-	if _, err := runFake(t, context.Background(), f); err == nil {
-		t.Fatal("want failure after max_retries")
-	}
-	if f.calls != 3 || len(*sleeps) != 2 {
-		t.Fatalf("network: calls=%d sleeps=%v, want 3 calls 2 sleeps", f.calls, *sleeps)
-	}
-	// Network failures must not feed the rate-limit streak.
-	if got := rateLimitStreak.Load(); got != 0 {
-		t.Fatalf("streak: got %d, want 0", got)
-	}
-}
-
-func TestRunWithRetryReclassifiesMidLoop(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	// Throttling turns into a hard 400: the loop must stop immediately
-	// instead of burning the remaining 429 budget.
-	f := &fakeAttempts{errs: []error{
-		&einoopenai.APIError{HTTPStatusCode: 429, Message: "slow down"},
-		&einoopenai.APIError{HTTPStatusCode: 400, Message: "bad request"},
-		&einoopenai.APIError{HTTPStatusCode: 400, Message: "bad request"},
-	}}
-	_, err := runFake(t, context.Background(), f)
-	if err == nil {
-		t.Fatal("want failure")
-	}
-	if f.calls != 2 || len(*sleeps) != 1 {
-		t.Fatalf("calls=%d sleeps=%v, want 2 calls 1 sleep", f.calls, *sleeps)
-	}
-}
-
-func TestRunWithRetryAbortsOnContextCancel(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	logger := NewLogger(nil, 900, 1)
-	tracker := newTokenTrackingModel(nil)
-	calls := 0
-	_, err := runWithRetry(ctx, func(ctx context.Context) (*schema.Message, error) {
-		calls++
-		cancel() // user stop lands while the first failure is being handled
-		return nil, &einoopenai.APIError{HTTPStatusCode: 500, Message: "boom"}
-	}, logger, "test", tracker)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("got err=%v, want context.Canceled", err)
-	}
-	if calls != 1 || len(*sleeps) != 0 {
-		t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", calls, *sleeps)
-	}
-}
-
 func TestClassifyRunErrorWithStatusHint(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -407,61 +223,5 @@ func TestClassifyRunErrorWithStatusHint(t *testing.T) {
 				t.Fatalf("got %s, want %s", got, tc.want)
 			}
 		})
-	}
-}
-
-// The header captured by the hint transport must drive both classification
-// (429 via hints status) and the backoff wait (5s hint + jittered base slot)
-// even when the error itself carries no status at all.
-func TestRunWithRetryUsesTransportHints(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	logger := NewLogger(nil, 900, 1)
-	tracker := newTokenTrackingModel(nil)
-	calls := 0
-	msg, err := runWithRetry(context.Background(), func(ctx context.Context) (*schema.Message, error) {
-		calls++
-		if calls == 1 {
-			h := modelfactory.ResponseHintsFromContext(ctx)
-			if h == nil {
-				t.Error("attempt ctx carries no ResponseHints store")
-				return nil, errors.New("boom")
-			}
-			h.Record(429, 5*time.Second)
-			return nil, errors.New("boom")
-		}
-		return &schema.Message{Role: schema.Assistant, Content: "ok"}, nil
-	}, logger, "test", tracker)
-	if err != nil || msg == nil {
-		t.Fatalf("got msg=%+v err=%v, want success", msg, err)
-	}
-	if calls != 2 || len(*sleeps) != 1 {
-		t.Fatalf("calls=%d sleeps=%v, want 2 calls 1 sleep", calls, *sleeps)
-	}
-	// 5s header hint + jittered base slot (0.5 * 2s); a server-class
-	// misclassification would have slept 1s and ignored the hint.
-	if (*sleeps)[0] != 6*time.Second {
-		t.Fatalf("hint-driven sleep: got %v, want 6s", (*sleeps)[0])
-	}
-}
-
-// A hint-only hard status (401 in the header, no status in the error) fails
-// without any retry.
-func TestRunWithRetryHardStatusFromHints(t *testing.T) {
-	sleeps := stubRetryEnv(t, config.AgentConfig{MaxRetries: 3, RateLimitMaxRetries: 8, RetryBaseDelay: 2, RetryMaxDelay: 60})
-	logger := NewLogger(nil, 900, 1)
-	tracker := newTokenTrackingModel(nil)
-	calls := 0
-	_, err := runWithRetry(context.Background(), func(ctx context.Context) (*schema.Message, error) {
-		calls++
-		if h := modelfactory.ResponseHintsFromContext(ctx); h != nil {
-			h.Record(401, 0)
-		}
-		return nil, errors.New("boom")
-	}, logger, "test", tracker)
-	if err == nil {
-		t.Fatal("want failure")
-	}
-	if calls != 1 || len(*sleeps) != 0 {
-		t.Fatalf("calls=%d sleeps=%v, want 1 call no sleep", calls, *sleeps)
 	}
 }

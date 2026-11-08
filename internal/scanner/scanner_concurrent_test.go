@@ -19,6 +19,8 @@ type memNode struct {
 	name     string
 	children []*memNode
 	isDir    bool
+	size     int64
+	mtime    time.Time
 }
 
 func dir(name string, children ...*memNode) *memNode {
@@ -78,6 +80,7 @@ func (f *fakeFS) List(_ context.Context, p string) ([]remotefs.FileInfo, error) 
 		}
 		out = append(out, remotefs.FileInfo{
 			Name: c.name, Path: joinPath(p, c.name), FileType: ft, IsDir: c.isDir,
+			Size: c.size, ModTime: c.mtime,
 		})
 	}
 	return out, nil

@@ -155,9 +155,6 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 			t.Fatalf("create file: %v", err)
 		}
 	}
-	if err := r.CreateAgentLog(&AgentLog{ScanSessionID: session.ID, Role: "assistant", PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}); err != nil {
-		t.Fatalf("create log: %v", err)
-	}
 
 	// The terminal write of the finished scan lands first (this is the state
 	// the lost update used to clobber).
@@ -183,9 +180,6 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 	if got.TotalFiles != 2 || got.TaggedFiles != 1 || got.PlannedOps != 1 || got.TotalSize != 30 {
 		t.Errorf("counts = total %d tagged %d planned %d size %d, want 2/1/1/30",
 			got.TotalFiles, got.TaggedFiles, got.PlannedOps, got.TotalSize)
-	}
-	if got.TotalTokens != 7 || got.PromptTokens != 3 || got.CompletionTokens != 4 {
-		t.Errorf("tokens = %d/%d/%d, want 7/3/4", got.TotalTokens, got.PromptTokens, got.CompletionTokens)
 	}
 	// Everything else preserved — status above all.
 	if got.Status != "scanned" {

@@ -42,18 +42,34 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/rescan", s.rescanSession)
 		api.GET("/sessions/:id/stats", s.getSessionStats)
 
-		// Agent tasks
+		// Runs (agent / executor activity); each start returns {run_id}
 		api.POST("/sessions/:id/tag", s.startTagging)
-		api.POST("/sessions/:id/tag/stop", s.stopTagging)
-		api.GET("/sessions/:id/tag/status", s.tagStatus)
 		api.POST("/sessions/:id/instruct", s.instructAgent)
-		api.POST("/sessions/:id/instruct/stop", s.stopInstruct)
 		api.POST("/sessions/:id/execute", s.startExecute)
-		api.POST("/sessions/:id/execute/stop", s.stopExecute)
-		api.GET("/sessions/:id/execute/status", s.executeStatus)
+		api.GET("/sessions/:id/runs", s.listRuns)
+		api.GET("/runs/:run_id", s.getRun)
+		api.POST("/runs/:run_id/stop", s.stopRun)
+
+		// Session event stream: persisted history + SSE (replay + live)
+		api.GET("/sessions/:id/events", s.listSessionEvents)
+		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
+
 		api.GET("/sessions/:id/execute/validate", s.validatePlans)
 		api.GET("/sessions/:id/plans", s.getPlans)
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
+		api.POST("/sessions/:id/plans/reset", s.resetPlans)
+		api.GET("/sessions/:id/preview/tree", s.previewTree)
+
+		// Session plan (整理方案)
+		api.GET("/sessions/:id/plan", s.getPlan)
+		api.PUT("/sessions/:id/plan", s.updatePlan)
+		api.POST("/sessions/:id/plan/approve", s.approvePlan)
+
+		// Memory
+		api.GET("/memory", s.listMemory)
+		api.POST("/memory", s.createMemory)
+		api.PUT("/memory/:id", s.updateMemory)
+		api.DELETE("/memory/:id", s.deleteMemory)
 
 		// Files
 		api.GET("/files", s.listFiles)
@@ -93,12 +109,6 @@ func (s *Server) setupRouter() {
 		// Prompt
 		api.GET("/prompt", s.getPrompt)
 		api.PUT("/prompt", s.updatePrompt)
-
-		// Logs
-		api.GET("/logs", s.listLogs)
-
-		// Session event stream (SSE): live agent run events
-		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 	}
 
 	// Serve frontend static files
@@ -117,8 +127,10 @@ func (s *Server) setupRouter() {
 	s.router = r
 }
 
-func (s *Server) Run(addr string) error {
-	return s.router.Run(addr)
+// Handler returns the complete HTTP surface (REST API, SSE stream and the
+// SPA fallback) for an http.Server owned by the caller (internal/app).
+func (s *Server) Handler() http.Handler {
+	return s.router
 }
 
 func (s *Server) Router() *gin.Engine {

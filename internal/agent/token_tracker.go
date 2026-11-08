@@ -6,30 +6,44 @@ import (
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	"FileEngine/internal/db"
 )
 
-// tokenTrackingModel wraps a ChatModel to accumulate token usage across all Generate calls
-// (including intermediate ReAct tool-use rounds).
+// tokenTrackingModel wraps a ChatModel to accumulate token usage across all
+// Generate and Stream calls (including intermediate ReAct tool-use rounds).
 type tokenTrackingModel struct {
-	inner            einomodel.ChatModel
-	promptTokens     int64
-	cachedTokens     int64
-	completionTokens int64
-	totalTokens      int64
+	inner einomodel.ChatModel
+	c     *tokenCounters
+}
+
+type tokenCounters struct {
+	promptTokens     atomic.Int64
+	cachedTokens     atomic.Int64
+	cacheWriteTokens atomic.Int64
+	completionTokens atomic.Int64
+	totalTokens      atomic.Int64
 }
 
 func newTokenTrackingModel(inner einomodel.ChatModel) *tokenTrackingModel {
-	return &tokenTrackingModel{inner: inner}
+	return &tokenTrackingModel{inner: inner, c: &tokenCounters{}}
+}
+
+// sibling wraps another model (e.g. the bulk summarization model) into the
+// same counters, so its usage lands in the same run totals.
+func (m *tokenTrackingModel) sibling(inner einomodel.ChatModel) *tokenTrackingModel {
+	return &tokenTrackingModel{inner: inner, c: m.c}
 }
 
 func (m *tokenTrackingModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
 	result, err := m.inner.Generate(ctx, input, opts...)
 	if err == nil && result != nil && result.ResponseMeta != nil && result.ResponseMeta.Usage != nil {
 		u := result.ResponseMeta.Usage
-		atomic.AddInt64(&m.promptTokens, int64(u.PromptTokens))
-		atomic.AddInt64(&m.cachedTokens, int64(u.PromptTokenDetails.CachedTokens))
-		atomic.AddInt64(&m.completionTokens, int64(u.CompletionTokens))
-		atomic.AddInt64(&m.totalTokens, int64(u.TotalTokens))
+		m.c.promptTokens.Add(int64(u.PromptTokens))
+		m.c.cachedTokens.Add(int64(u.PromptTokenDetails.CachedTokens))
+		m.c.cacheWriteTokens.Add(int64(u.PromptTokenDetails.CacheWriteTokens))
+		m.c.completionTokens.Add(int64(u.CompletionTokens))
+		m.c.totalTokens.Add(int64(u.TotalTokens))
 	}
 	return result, err
 }
@@ -43,26 +57,18 @@ func (m *tokenTrackingModel) Stream(ctx context.Context, input []*schema.Message
 	// counters (e.g. claude ext: message_start + message_delta). Track per-call
 	// state in this closure and add only the delta so cumulative frames are
 	// never double counted.
-	var lastPrompt, lastCached, lastCompletion, lastTotal int64
+	var last [5]int64
+	counters := [5]*atomic.Int64{&m.c.promptTokens, &m.c.cachedTokens, &m.c.cacheWriteTokens, &m.c.completionTokens, &m.c.totalTokens}
 	return schema.StreamReaderWithConvert(sr, func(msg *schema.Message) (*schema.Message, error) {
 		if msg != nil && msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
 			u := msg.ResponseMeta.Usage
-			p, ca, c, t := int64(u.PromptTokens), int64(u.PromptTokenDetails.CachedTokens), int64(u.CompletionTokens), int64(u.TotalTokens)
-			if p > lastPrompt {
-				atomic.AddInt64(&m.promptTokens, p-lastPrompt)
-				lastPrompt = p
-			}
-			if ca > lastCached {
-				atomic.AddInt64(&m.cachedTokens, ca-lastCached)
-				lastCached = ca
-			}
-			if c > lastCompletion {
-				atomic.AddInt64(&m.completionTokens, c-lastCompletion)
-				lastCompletion = c
-			}
-			if t > lastTotal {
-				atomic.AddInt64(&m.totalTokens, t-lastTotal)
-				lastTotal = t
+			cur := [5]int64{int64(u.PromptTokens), int64(u.PromptTokenDetails.CachedTokens),
+				int64(u.PromptTokenDetails.CacheWriteTokens), int64(u.CompletionTokens), int64(u.TotalTokens)}
+			for i := range cur {
+				if cur[i] > last[i] {
+					counters[i].Add(cur[i] - last[i])
+					last[i] = cur[i]
+				}
 			}
 		}
 		return msg, nil
@@ -73,18 +79,23 @@ func (m *tokenTrackingModel) BindTools(tools []*schema.ToolInfo) error {
 	return m.inner.BindTools(tools)
 }
 
-// Usage returns the accumulated counters: prompt tokens (cache hits included),
-// cache-hit tokens (a subset of prompt), completion tokens, and total tokens.
-func (m *tokenTrackingModel) Usage() (prompt, cached, completion, total int) {
-	return int(atomic.LoadInt64(&m.promptTokens)),
-		int(atomic.LoadInt64(&m.cachedTokens)),
-		int(atomic.LoadInt64(&m.completionTokens)),
-		int(atomic.LoadInt64(&m.totalTokens))
+// Usage returns the accumulated counters: prompt tokens (cache hits and
+// writes included), cache-hit and cache-write subsets of prompt, completion
+// and total tokens.
+func (m *tokenTrackingModel) Usage() db.TokenCounts {
+	return db.TokenCounts{
+		Prompt:     int(m.c.promptTokens.Load()),
+		Cached:     int(m.c.cachedTokens.Load()),
+		CacheWrite: int(m.c.cacheWriteTokens.Load()),
+		Completion: int(m.c.completionTokens.Load()),
+		Total:      int(m.c.totalTokens.Load()),
+	}
 }
 
 func (m *tokenTrackingModel) ResetUsage() {
-	atomic.StoreInt64(&m.promptTokens, 0)
-	atomic.StoreInt64(&m.cachedTokens, 0)
-	atomic.StoreInt64(&m.completionTokens, 0)
-	atomic.StoreInt64(&m.totalTokens, 0)
+	m.c.promptTokens.Store(0)
+	m.c.cachedTokens.Store(0)
+	m.c.cacheWriteTokens.Store(0)
+	m.c.completionTokens.Store(0)
+	m.c.totalTokens.Store(0)
 }

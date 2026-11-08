@@ -35,7 +35,7 @@ func scriptTestBuilder(t *testing.T, session *db.ScanSession) (*ToolBuilder, *db
 	if err := repo.CreateCategory(locked); err != nil {
 		t.Fatalf("seed locked category: %v", err)
 	}
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
 	return tb, repo
 }
 
@@ -238,7 +238,7 @@ ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg")
 bad := set_target("incoming/photo2.jpg", "/../escape")
 result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 	v := resultValue(t, out)
-	if v["ok"] != true || v["bad_is_error"] != true {
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["bad_is_error"] != true {
 		t.Fatalf("set_target outcomes: %+v", v)
 	}
 	if !strings.Contains(v["bad_msg"].(string), "invalid new_path") {
@@ -287,7 +287,7 @@ missing_cat := set_category("incoming/photo2.jpg", "不存在")
 missing_file := set_category("nope/x.jpg", "照片")
 result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_file)}`)
 	v := resultValue(t, out)
-	if v["ok"] != true || v["cat_err"] != true || v["file_err"] != true {
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["cat_err"] != true || v["file_err"] != true {
 		t.Fatalf("set_category outcomes: %+v", v)
 	}
 	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
@@ -529,51 +529,8 @@ func TestScriptToolRegistration(t *testing.T) {
 	}
 }
 
-// --- logging ---
-
-// Script execution is persisted to agent_logs as one run_script entry
-// carrying the (bounded) script source and its output; failures are logged
-// with the error.
-func TestScriptLoggedToAgentLogs(t *testing.T) {
-	repo := setupToolTestRepo(t)
-	scriptSeedFile(t, repo, 1, "a.txt", "file")
-	logger := NewLogger(repo, 1, 0)
-	tb := NewToolBuilder(repo, nil, 1, 7, logger, config.AgentConfig{}, &db.ScanSession{AllowScript: true}, false)
-
-	if _, err := tb.runScript(context.Background(), &RunScriptInput{Script: "print(\"logged line\")\nresult = 42"}); err != nil {
-		t.Fatalf("runScript: %v", err)
-	}
-	if out, err := tb.runScript(context.Background(), &RunScriptInput{Script: `boom(`}); err != nil || out.Error == "" {
-		t.Fatalf("compile error must surface as tool-result error: err=%v out=%+v", err, out)
-	}
-	logger.Flush()
-
-	logs, total, err := repo.ListAgentLogs(db.LogQuery{SessionID: 1, ToolName: "run_script"})
-	if err != nil || total != 2 {
-		t.Fatalf("run_script logs: total=%d err=%v", total, err)
-	}
-	var okLog, errLog *db.AgentLog
-	for i := range logs {
-		if strings.Contains(logs[i].ToolOutput, "logged line") {
-			okLog = &logs[i]
-		}
-		if strings.Contains(logs[i].ToolOutput, "error") {
-			errLog = &logs[i]
-		}
-	}
-	if okLog == nil {
-		t.Fatalf("successful run must be logged with its output: %+v", logs)
-	}
-	if !strings.Contains(okLog.ToolInput, "logged line") || !strings.Contains(okLog.ToolOutput, "42") {
-		t.Fatalf("log must carry script source and result: in=%q out=%q", okLog.ToolInput, okLog.ToolOutput)
-	}
-	if errLog == nil {
-		t.Fatalf("failed run must be logged with the error: %+v", logs)
-	}
-}
-
-// The tool name and description stay stable: agent_logs rows and SSE
-// tool_call/tool_result events both key off the registered tool name, and the
+// The tool name and description stay stable: stream
+// tool_call/tool_result events key off the registered tool name, and the
 // description is where the model learns the builtin API.
 func TestScriptToolNameStable(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)

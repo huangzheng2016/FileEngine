@@ -10,7 +10,7 @@ import (
 
 	"FileEngine/internal/db"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -27,7 +27,7 @@ func setupFileTestDB(t *testing.T) *db.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}, &db.AgentLog{}); err != nil {
+	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db.NewRepository(gdb)

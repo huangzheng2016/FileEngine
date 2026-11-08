@@ -32,18 +32,20 @@ type AutoTagAgent struct {
 	modelProvider *db.ModelProvider
 	session       *db.ScanSession
 	sessionID     uint
+	logger        *Logger // run logger; workers derive their lanes via ForWorker
 
 	mu       sync.Mutex
 	failures []BatchFailure
 }
 
-func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint) *AutoTagAgent {
+func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *AutoTagAgent {
 	return &AutoTagAgent{
 		repo:          repo,
 		fsCfg:         fsCfg,
 		modelProvider: modelProvider,
 		session:       session,
 		sessionID:     sessionID,
+		logger:        logger,
 	}
 }
 
@@ -64,7 +66,12 @@ func (a *AutoTagAgent) Failures() []BatchFailure {
 }
 
 func (a *AutoTagAgent) Run(ctx context.Context) error {
-	// Build LLM model (shared across workers, thread-safe)
+	// Workers run on the session's bulk model; the model is shared across workers.
+	bulk, err := modelfactory.ResolveBulkProvider(a.repo, a.session, a.modelProvider)
+	if err != nil {
+		return err
+	}
+	a.modelProvider = bulk
 	chatModel, err := modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
 	if err != nil {
 		return fmt.Errorf("create model: %w", err)
@@ -218,8 +225,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
-	defer workerLogger.Flush()
+	workerLogger := a.logger.ForWorker(workerID)
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tools, err := toolBuilder.BuildTools()
@@ -228,7 +234,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		return
 	}
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow())
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
 	if err != nil {
 		log.Printf("worker %d: failed to create agent: %v", workerID, err)
 		return
@@ -250,7 +256,7 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 			continue
 		}
 
-		workerLogger.EmitPullBegin(dir.OriginalPath, 1, dir.ID)
+		workerLogger.EmitPullBegin(dir.OriginalPath, 0)
 
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
@@ -262,29 +268,23 @@ func (a *AutoTagAgent) runWorker(ctx context.Context, workerID int, workCh <-cha
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildDirectoryPrompt(dir, catSummary)
-		workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
+		workerLogger.LogMessage("user", userMsg)
 
 		messages := []*schema.Message{
 			{Role: schema.User, Content: userMsg},
 		}
 
 		label := fmt.Sprintf("worker %d batch %d", workerID, batchIdx)
-		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
+		_, err = runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
 			log.Printf("%s (%s) failed after retries: %v", label, dir.OriginalPath, err)
 			a.noteFailure(BatchFailure{BatchIndex: int(batchIdx), Target: dir.OriginalPath, Err: err.Error()})
-			workerLogger.EmitPullDone(dir.OriginalPath, 0, 1)
+			workerLogger.EmitPullDone(0, 1)
 			a.emitTagProgress()
 			continue
 		}
 
-		if result != nil {
-			pt, cached, ct, tt := tracker.Usage()
-			workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
-			tracker.ResetUsage()
-		}
-		workerLogger.Flush()
-		workerLogger.EmitPullDone(dir.OriginalPath, 1, 0)
+		workerLogger.EmitPullDone(1, 0)
 		a.emitTagProgress()
 	}
 }
@@ -296,13 +296,7 @@ func (a *AutoTagAgent) emitTagProgress() {
 	if err != nil {
 		return
 	}
-	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: a.sessionID, Payload: db.ProgressPayload{
-		SessionID: a.sessionID,
-		Phase:     db.PhaseTagging,
-		Total:     p.Total,
-		Tagged:    p.Tagged,
-		Planned:   p.Planned,
-	}})
+	a.logger.EmitProgress(db.ProgressData{Phase: db.RunPhaseTagging, Total: p.Total, Tagged: p.Tagged, Planned: p.Planned})
 }
 
 func (a *AutoTagAgent) processRemainingFiles(ctx context.Context, chatModel einomodel.ChatModel, systemPrompt string, batchCounter *int32, filesystemID uint) {
@@ -399,8 +393,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
-	defer workerLogger.Flush()
+	workerLogger := a.logger.ForWorker(workerID)
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tools, err := toolBuilder.BuildTools()
@@ -409,7 +402,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		return
 	}
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow())
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, config.Get().Agent.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
 	if err != nil {
 		log.Printf("remaining worker %d: failed to create agent: %v", workerID, err)
 		return
@@ -423,7 +416,7 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 
 		workerLogger.SetBatch(int(batch.batchIdx))
-		workerLogger.EmitPullBegin(fmt.Sprintf("%d files", len(batch.files)), len(batch.files), minFileID(batch.files))
+		workerLogger.EmitPullBegin(fmt.Sprintf("%d 个文件", len(batch.files)), len(batch.files))
 		usages, err := a.repo.GetCategoryUsageSummary(filesystemID, a.sessionID)
 		if err != nil {
 			log.Printf("remaining worker %d: category usage summary failed, prompt will lack it: %v", workerID, err)
@@ -434,32 +427,26 @@ func (a *AutoTagAgent) runRemainingFilesWorker(ctx context.Context, workerID int
 		}
 		catSummary := buildCategorySummary(usages)
 		userMsg := buildBatchPrompt(batch.files, catSummary, a.archiveHints(ctx, workerFS, batch.files, config.Get().Agent))
-		workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
+		workerLogger.LogMessage("user", userMsg)
 
 		messages := []*schema.Message{
 			{Role: schema.User, Content: userMsg},
 		}
 
 		label := fmt.Sprintf("remaining worker %d batch %d", workerID, batch.batchIdx)
-		result, err := runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
+		_, err = runADKWithRetry(ctx, agentInst, messages, workerLogger, label, tracker)
 		if err != nil {
 			target := fmt.Sprintf("%d files", len(batch.files))
 			log.Printf("%s (%s) failed after retries: %v", label, target, err)
 			a.noteFailure(BatchFailure{BatchIndex: int(batch.batchIdx), Target: target, Err: err.Error()})
-			workerLogger.EmitPullDone(target, 0, len(batch.files))
+			workerLogger.EmitPullDone(0, len(batch.files))
 			a.emitTagProgress()
 			continue
-		}
-		if result != nil {
-			pt, cached, ct, tt := tracker.Usage()
-			workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
-			tracker.ResetUsage()
 		}
 		// Batch-level re-check: a successful run does not guarantee every file
 		// got mark_tagged — verify against the manifest and record misses.
 		missed := a.recheckBatchTagged(int(batch.batchIdx), batch.files)
-		workerLogger.Flush()
-		workerLogger.EmitPullDone(fmt.Sprintf("%d files", len(batch.files)), len(batch.files)-missed, missed)
+		workerLogger.EmitPullDone(len(batch.files)-missed, missed)
 		a.emitTagProgress()
 	}
 }
@@ -515,8 +502,7 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 	}
 	defer workerFS.Close()
 
-	workerLogger := NewLogger(a.repo, a.sessionID, workerID)
-	defer workerLogger.Flush()
+	workerLogger := a.logger.ForWorker(workerID)
 	tracker := newTokenTrackingModel(chatModel)
 	toolBuilder := NewToolBuilder(a.repo, workerFS, a.sessionID, filesystemID, workerLogger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled).
 		withHarness(workerID, numWorkers, batchCounter)
@@ -530,7 +516,7 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 	if maxStep <= 0 {
 		maxStep = 2000
 	}
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, maxStep, a.modelProvider.EffectiveContextWindow())
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPrompt, maxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
 	if err != nil {
 		log.Printf("harness worker %d: failed to create agent: %v", workerID, err)
 		return
@@ -543,10 +529,10 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 		toolBuilder.noteCategoryUsages(usages)
 	}
 	userMsg := buildHarnessPrompt(buildCategorySummary(usages))
-	workerLogger.LogMessage("user", userMsg, 0, 0, 0, 0)
+	workerLogger.LogMessage("user", userMsg)
 
 	label := fmt.Sprintf("harness worker %d", workerID)
-	result, err := runADKWithRetry(ctx, agentInst, []*schema.Message{{Role: schema.User, Content: userMsg}}, workerLogger, label, tracker)
+	_, err = runADKWithRetry(ctx, agentInst, []*schema.Message{{Role: schema.User, Content: userMsg}}, workerLogger, label, tracker)
 	// Settle the last open pull (if any): the run is over, so whatever the
 	// agent pulled and never tagged counts as missed.
 	toolBuilder.harnessSettlePull()
@@ -556,12 +542,6 @@ func (a *AutoTagAgent) runContinuousWorker(ctx context.Context, workerID, numWor
 		a.emitTagProgress()
 		return
 	}
-	if result != nil {
-		pt, cached, ct, tt := tracker.Usage()
-		workerLogger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
-		tracker.ResetUsage()
-	}
-	workerLogger.Flush()
 	a.emitTagProgress()
 }
 
@@ -608,16 +588,4 @@ func (a *AutoTagAgent) recheckBatchTagged(batchIdx int, files []db.FileEntry) in
 			len(missed), len(files), strings.Join(shown, ", "), suffix),
 	})
 	return len(missed)
-}
-
-// minFileID returns the smallest file id of a pulled set — the starting
-// cursor reported in pull_begin.
-func minFileID(files []db.FileEntry) uint {
-	var min uint
-	for i, f := range files {
-		if i == 0 || f.ID < min {
-			min = f.ID
-		}
-	}
-	return min
 }

@@ -71,12 +71,6 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 	}
 
 	result := &schema.ToolResult{}
-	type logEntry struct {
-		Path   string `json:"path"`
-		Status string `json:"status"`
-		Detail string `json:"detail,omitempty"`
-	}
-	logEntries := make([]logEntry, 0, len(input.Paths))
 
 	for _, p := range input.Paths {
 		path := normalizePath(p)
@@ -84,7 +78,6 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 		if format == "" {
 			note := fmt.Sprintf("%s: skipped (unsupported format; supported: jpg/jpeg/png/gif)", path)
 			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
-			logEntries = append(logEntries, logEntry{Path: path, Status: "skipped", Detail: "unsupported format"})
 			continue
 		}
 
@@ -92,19 +85,16 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 		if err != nil {
 			note := fmt.Sprintf("%s: skipped (stat failed: %v)", path, err)
 			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
-			logEntries = append(logEntries, logEntry{Path: path, Status: "error", Detail: err.Error()})
 			continue
 		}
 		if info.IsDir {
 			note := fmt.Sprintf("%s: skipped (is a directory)", path)
 			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
-			logEntries = append(logEntries, logEntry{Path: path, Status: "skipped", Detail: "directory"})
 			continue
 		}
 		if info.Size > int64(maxBytes) {
 			note := fmt.Sprintf("%s: skipped (too large: %d bytes, limit %d)", path, info.Size, maxBytes)
 			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
-			logEntries = append(logEntries, logEntry{Path: path, Status: "skipped", Detail: "too large"})
 			continue
 		}
 
@@ -112,7 +102,6 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 		if err != nil {
 			note := fmt.Sprintf("%s: skipped (%v)", path, err)
 			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
-			logEntries = append(logEntries, logEntry{Path: path, Status: "error", Detail: err.Error()})
 			continue
 		}
 
@@ -126,12 +115,8 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 					MIMEType:   mime,
 				}}},
 		)
-		logEntries = append(logEntries, logEntry{Path: path, Status: "ok",
-			Detail: fmt.Sprintf("%dx%d -> %dx%d %s", origW, origH, thumbW, thumbH, mime)})
 	}
 
-	// Log metadata only — never the base64 payloads.
-	tb.logger.LogToolCall("view_image", input, logEntries)
 	return result, nil
 }
 

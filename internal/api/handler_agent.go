@@ -2,12 +2,9 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"FileEngine/internal/agent"
@@ -17,14 +14,6 @@ import (
 	"FileEngine/internal/remotefs"
 
 	"github.com/gin-gonic/gin"
-)
-
-var (
-	agentMu        sync.Mutex
-	agents         = make(map[uint]*agent.Agent)
-	instructAgents = make(map[uint]*agent.Agent)
-	execMu         sync.Mutex
-	executors      = make(map[uint]*executor.Executor)
 )
 
 // resolveFSConfig resolves the RemoteFSConfig for a session via its Filesystem entity.
@@ -40,79 +29,48 @@ func (s *Server) resolveFSConfig(session *db.ScanSession) (config.RemoteFSConfig
 	return fsCfg, nil
 }
 
-func (s *Server) startTagging(c *gin.Context) {
+// agentForSession resolves everything an agent run of the session needs. On
+// failure it has already answered the request.
+func (s *Server) agentForSession(c *gin.Context) (*db.ScanSession, *agent.Agent, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		return nil, nil, false
 	}
-
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
+	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
+		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
+		return nil, nil, false
 	}
-
-	agentMu.Lock()
-	if a, ok := agents[sessionID]; ok && a.IsRunning() {
-		agentMu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "tagging already running"})
-		return
-	}
-
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		agentMu.Unlock()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	cfg := config.Get()
-
-	// Resolve model provider — required
 	if session.ModelProviderID == 0 {
-		agentMu.Unlock()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no model provider configured for this session"})
-		return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "会话未配置模型"})
+		return nil, nil, false
 	}
 	modelProvider, err := s.repo.GetModelProvider(session.ModelProviderID)
 	if err != nil {
-		agentMu.Unlock()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model provider not found"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "模型不存在"})
+		return nil, nil, false
+	}
+	fsCfg, err := s.resolveFSConfig(session)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return nil, nil, false
+	}
+	return session, agent.New(s.repo, fsCfg, session.ID, modelProvider, session), true
+}
+
+// startTagging starts a tagging run: POST /sessions/:id/tag → {run_id}.
+func (s *Server) startTagging(c *gin.Context) {
+	session, a, ok := s.agentForSession(c)
+	if !ok {
 		return
 	}
-
-	a := agent.New(s.repo, fsCfg, cfg, sessionID, modelProvider, session)
-	agents[sessionID] = a
-	agentMu.Unlock()
-
-	go func() {
-		defer func() {
-			agentMu.Lock()
-			delete(agents, sessionID)
-			agentMu.Unlock()
-		}()
-		// The request ctx is canceled as soon as this handler returns; background
-		// work runs on context.Background() (Stop() has its own cancelFn).
-		report, err := a.RunTagging(context.Background())
-		switch {
-		case err == nil:
-			publishRunDone(sessionID, db.PhaseTagging, db.StatusDone, report)
-		case errors.Is(err, context.Canceled):
-			publishRunDone(sessionID, db.PhaseTagging, db.StatusStopped, "")
-		default:
-			log.Printf("tagging session %d failed: %v", sessionID, err)
-			session, _ := s.repo.GetSession(sessionID)
-			if session != nil && session.Status == "tagging" {
-				session.Status = db.TruncateStatus("error: " + err.Error())
-				s.repo.UpdateSession(session)
-			}
-			publishRunDone(sessionID, db.PhaseTagging, db.StatusError, err.Error())
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{"message": "tagging started", "session_id": sessionID})
+	run, err := s.launchRun(session.ID, db.RunPhaseTagging, "自动整理", func(ctx context.Context, run *db.AgentRun) runOutcome {
+		logger := agent.NewLogger(session.ID, run.ID, 0)
+		report, partial, err := a.RunTagging(ctx, logger)
+		return runOutcome{Summary: report, Partial: partial, Err: err, Tokens: logger.Tokens()}
+	})
+	respondRunStart(c, run, err)
 }
 
 type InstructRequest struct {
@@ -120,146 +78,101 @@ type InstructRequest struct {
 	Prompt  string `json:"prompt" binding:"required"`
 }
 
+// instructAgent starts a chat run over the selected files:
+// POST /sessions/:id/instruct → {run_id}.
 func (s *Server) instructAgent(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
 	var req InstructRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	session, a, ok := s.agentForSession(c)
+	if !ok {
+		return
+	}
+	var files []db.FileEntry
+	for _, fid := range req.FileIDs {
+		if f, err := s.repo.GetFile(fid); err == nil && f.ScanSessionID == session.ID {
+			files = append(files, *f)
+		}
+	}
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未选择有效的文件"})
+		return
+	}
+	run, err := s.launchRun(session.ID, db.RunPhaseChat, req.Prompt, func(ctx context.Context, run *db.AgentRun) runOutcome {
+		logger := agent.NewLogger(session.ID, run.ID, 0)
+		resp, err := a.RunInstruct(ctx, logger, files, req.Prompt)
+		return runOutcome{Summary: resp, Err: err, Tokens: logger.Tokens()}
+	})
+	respondRunStart(c, run, err)
+}
 
+// startExecute starts an executing run: POST /sessions/:id/execute?mode=copy|move
+// → {run_id}. Progress counters stream as progress events (1s poll of the
+// executor's in-memory counters, plus the final counters).
+func (s *Server) startExecute(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		return
+	}
+	mode := c.DefaultQuery("mode", "copy")
+	if mode != "copy" && mode != "move" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode 只能是 copy 或 move"})
+		return
+	}
 	sessionID := uint(id)
 	session, err := s.repo.GetSession(sessionID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
 		return
 	}
-
-	if session.ModelProviderID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no model provider configured"})
-		return
-	}
-	modelProvider, err := s.repo.GetModelProvider(session.ModelProviderID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model provider not found"})
-		return
-	}
-
-	// Fetch selected files
-	var files []db.FileEntry
-	for _, fid := range req.FileIDs {
-		f, err := s.repo.GetFile(fid)
-		if err != nil {
-			continue
-		}
-		files = append(files, *f)
-	}
-	if len(files) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid files selected"})
-		return
-	}
-
 	fsCfg, err := s.resolveFSConfig(session)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	cfg := config.Get()
-	a := agent.New(s.repo, fsCfg, cfg, sessionID, modelProvider, session)
-
-	agentMu.Lock()
-	if _, ok := instructAgents[sessionID]; ok {
-		agentMu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "instruct already running"})
-		return
+	title := "复制到目标位置"
+	if mode == "move" {
+		title = "移动到目标位置"
 	}
-	instructAgents[sessionID] = a
-	agentMu.Unlock()
-
-	go func() {
-		defer func() {
-			agentMu.Lock()
-			delete(instructAgents, sessionID)
-			agentMu.Unlock()
-		}()
-		// The request ctx is canceled as soon as this handler returns; background
-		// work runs on context.Background() (Stop() has its own cancelFn,
-		// registered by RunInstruct like RunTagging). User-initiated stops
-		// surface as context.Canceled and are not failures.
-		resp, err := a.RunInstruct(context.Background(), files, req.Prompt)
-		switch {
-		case err == nil:
-			publishRunDone(sessionID, db.PhaseInstruct, db.StatusDone, resp)
-		case errors.Is(err, context.Canceled):
-			publishRunDone(sessionID, db.PhaseInstruct, db.StatusStopped, "")
-		default:
-			log.Printf("instruct session %d failed: %v", sessionID, err)
-			publishRunDone(sessionID, db.PhaseInstruct, db.StatusError, err.Error())
+	run, err := s.launchRun(sessionID, db.RunPhaseExecuting, title, func(ctx context.Context, run *db.AgentRun) runOutcome {
+		fs, err := remotefs.NewFromConfig(fsCfg)
+		if err != nil {
+			return runOutcome{Err: fmt.Errorf("连接文件系统失败: %w", err)}
 		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{"message": "instruct started"})
-}
-
-func (s *Server) stopTagging(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	agentMu.Lock()
-	a, ok := agents[uint(id)]
-	agentMu.Unlock()
-
-	if !ok || !a.IsRunning() {
-		c.JSON(http.StatusOK, gin.H{"message": "not running"})
-		return
-	}
-	a.Stop()
-	// Wait for the old run to drain: starting a new run on top of a
-	// still-draining one is what left live runs invisible to this endpoint
-	// (the drain's deferred cleanup is identity-guarded, but the session
-	// should only read "stopped" once workers actually exited).
-	select {
-	case <-a.Done():
-	case <-time.After(30 * time.Second):
-		log.Printf("stopTagging session %d: run did not drain within 30s", id)
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
-}
-
-func (s *Server) tagStatus(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	_ = s.repo.RefreshSessionCounts(uint(id))
-	session, err := s.repo.GetSession(uint(id))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	agentMu.Lock()
-	a, ok := agents[uint(id)]
-	agentMu.Unlock()
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":       session.Status,
-		"running":      ok && a.IsRunning(),
-		"total_files":  session.TotalFiles,
-		"tagged_files": session.TaggedFiles,
-		"planned_ops":  session.PlannedOps,
+		defer fs.Close()
+		e := executor.New(s.repo, fs)
+		emit := func() {
+			p := e.Progress()
+			db.Emit(sessionID, run.ID, db.EvProgress, db.ProgressData{RunID: run.ID, Phase: db.RunPhaseExecuting,
+				Total: p.Total, Success: p.Success, Failed: p.Failed, Skipped: p.Skipped})
+		}
+		stop := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					emit()
+				}
+			}
+		}()
+		err = e.Execute(ctx, sessionID, mode)
+		close(stop)
+		emit()
+		p := e.Progress()
+		return runOutcome{
+			Summary: fmt.Sprintf("共 %d 项：成功 %d，失败 %d，跳过 %d", p.Total, p.Success, p.Failed, p.Skipped),
+			Err:     err,
+		}
 	})
+	respondRunStart(c, run, err)
 }
 
 func (s *Server) validatePlans(c *gin.Context) {
@@ -296,194 +209,6 @@ func (s *Server) validatePlans(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
-}
-
-func (s *Server) stopInstruct(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	agentMu.Lock()
-	a, ok := instructAgents[uint(id)]
-	agentMu.Unlock()
-
-	if !ok || !a.IsRunning() {
-		c.JSON(http.StatusOK, gin.H{"message": "not running"})
-		return
-	}
-	a.Stop()
-	// Wait for the old run to drain so a follow-up instruct never starts on
-	// top of a still-draining one (its deferred cleanup is identity-guarded).
-	select {
-	case <-a.Done():
-	case <-time.After(30 * time.Second):
-		log.Printf("stopInstruct session %d: run did not drain within 30s", id)
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
-}
-
-func (s *Server) startExecute(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	// mode: "copy" (default) or "move"
-	mode := c.DefaultQuery("mode", "copy")
-	if mode != "copy" && mode != "move" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'copy' or 'move'"})
-		return
-	}
-
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	fs, err := remotefs.NewFromConfig(fsCfg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
-		return
-	}
-
-	execMu.Lock()
-	if e, ok := executors[sessionID]; ok && e.IsRunning() {
-		execMu.Unlock()
-		fs.Close()
-		c.JSON(http.StatusConflict, gin.H{"error": "execution already running"})
-		return
-	}
-
-	e := executor.New(s.repo, fs)
-	executors[sessionID] = e
-	execMu.Unlock()
-
-	go func() {
-		defer func() {
-			execMu.Lock()
-			delete(executors, sessionID)
-			execMu.Unlock()
-			fs.Close()
-		}()
-		publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStarted, "")
-
-		// Bridge executor progress onto the session bus: the executor keeps
-		// in-memory counters only, so poll them while it runs.
-		progressDone := make(chan struct{})
-		defer close(progressDone)
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-progressDone:
-					return
-				case <-ticker.C:
-					publishExecProgress(sessionID, e.Progress())
-				}
-			}
-		}()
-
-		// The request ctx is canceled as soon as this handler returns; background
-		// work runs on context.Background() (Stop() has its own cancelFn).
-		err := e.Execute(context.Background(), sessionID, mode)
-		publishExecProgress(sessionID, e.Progress()) // final counters
-		switch {
-		case err == nil:
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusDone, "")
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusDone, "")
-		case errors.Is(err, context.Canceled):
-			// User-initiated stop: not a failure — restore the pre-execution
-			// status (mirrors the tagging path) instead of "error: ...".
-			session, _ := s.repo.GetSession(sessionID)
-			if session != nil && session.Status == "executing" {
-				session.Status = "tagged"
-				s.repo.UpdateSession(session)
-			}
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStopped, "")
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusStopped, "")
-		default:
-			log.Printf("execution session %d failed: %v", sessionID, err)
-			session, _ := s.repo.GetSession(sessionID)
-			if session != nil && session.Status == "executing" {
-				session.Status = db.TruncateStatus("error: " + err.Error())
-				s.repo.UpdateSession(session)
-			}
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{"message": "execution started"})
-}
-
-func (s *Server) stopExecute(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	execMu.Lock()
-	e, ok := executors[uint(id)]
-	execMu.Unlock()
-
-	if !ok || !e.IsRunning() {
-		c.JSON(http.StatusOK, gin.H{"message": "not running"})
-		return
-	}
-	e.Stop()
-	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
-}
-
-func (s *Server) executeStatus(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	execMu.Lock()
-	e, ok := executors[uint(id)]
-	execMu.Unlock()
-
-	session, _ := s.repo.GetSession(uint(id))
-
-	result := gin.H{
-		"status":  session.Status,
-		"running": ok && e.IsRunning(),
-	}
-	if ok {
-		progress := e.Progress()
-		result["total"] = progress.Total
-		result["success"] = progress.Success
-		result["failed"] = progress.Failed
-		result["skipped"] = progress.Skipped
-	}
-	c.JSON(http.StatusOK, result)
-}
-
-// publishExecProgress emits a progress event with the executor's counters.
-func publishExecProgress(sessionID uint, p executor.ExecuteResult) {
-	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: sessionID, Payload: db.ProgressPayload{
-		SessionID: sessionID,
-		Phase:     db.PhaseExecuting,
-		Total:     p.Total,
-		Success:   p.Success,
-		Failed:    p.Failed,
-		Skipped:   p.Skipped,
-	}})
 }
 
 func (s *Server) getPlans(c *gin.Context) {

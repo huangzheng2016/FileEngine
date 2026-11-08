@@ -32,6 +32,8 @@ type AgentRun struct {
 	Error            string     `gorm:"type:text" json:"error"`
 	PromptTokens     int        `json:"prompt_tokens"`
 	CachedTokens     int        `json:"cached_tokens"`
+	CacheWriteTokens int        `json:"cache_write_tokens"`
+	CacheHitRate     float64    `gorm:"-" json:"cache_hit_rate"` // cached / prompt, computed
 	CompletionTokens int        `json:"completion_tokens"`
 	TotalTokens      int        `json:"total_tokens"`
 	StartedAt        time.Time  `gorm:"index:idx_run_session,priority:2" json:"started_at"`
@@ -137,6 +139,7 @@ const (
 type TokenCounts struct {
 	Prompt     int `json:"prompt"`
 	Cached     int `json:"cached"`
+	CacheWrite int `json:"cache_write"`
 	Completion int `json:"completion"`
 	Total      int `json:"total"`
 }
@@ -242,6 +245,7 @@ const (
 	RoleMember    = "member"    // inside a unit, follows it
 	RoleFile      = "file"      // loose file with its own decision
 	RoleSkip      = "skip"      // out of scope, junk or explicitly left in place
+	RoleDuplicate = "duplicate" // content duplicate of FileEntry.DuplicateOf (scanner); plan quarantines it, never deletes
 )
 
 // PlanRule is a deterministic classification rule applied in bulk to every
