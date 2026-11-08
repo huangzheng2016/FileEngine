@@ -32,6 +32,9 @@ Linux desktop builds (and `go vet/test ./...`, which compile `cmd/fileengine-des
 - **No backward compatibility** — Do not add legacy fallbacks, compatibility shims, or migration paths. Old data/config formats are not supported. If a schema changes, the old version is simply dropped.
 - **No over-engineering** — Don't add feature flags, version negotiation, or graceful degradation for removed features. If something is removed, delete it completely with no trace.
 - **Single source of truth** — Each piece of data lives in one place. Filesystem connections are in the `Filesystem` DB table. Model providers are in the `ModelProvider` DB table. Categories are scoped to filesystems. Per-session agent config (allow_read_file, allow_auto_category, allow_vision, allow_script, model_provider_id) lives on `ScanSession`.
+- **Few comments, English only** — Code and tests carry the meaning; comments are rare and only explain a non-obvious *why*. Never Chinese in comments, never history ("previously", "no longer"), never comments that restate the code. User-facing strings (UI copy, API error messages) stay Chinese.
+- **Cache-affine prompts** — Every LLM request is assembled from most-stable to most-volatile: tools (fixed per session) → system prompt (no timestamps/ids) → stable shared context (goal, plan, categories sorted by name without counts, memory) → per-unit data last. Never reorder or inject volatile values into the prefix; a change in the prefix must be a real content change.
+- **Stripped release builds** — Release binaries are built with `-trimpath -buildvcs=false -ldflags "-s -w -buildid="` and verified by `go run ./scripts/stripcheck` (no build-host paths, no debug sections, no source maps in `web/dist`).
 
 ### Go
 - Module path: `FileEngine` (not a URL-style path)
