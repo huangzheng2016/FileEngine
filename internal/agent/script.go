@@ -15,7 +15,7 @@ import (
 	"github.com/d5/tengo/v2/stdlib"
 )
 
-// run_script lets the agent run a Tengo script mid-run ("类似 ipy"): bulk
+// run_script lets the agent run a Tengo script mid-run (REPL-like): bulk
 // queries and bulk category operations without one tool round-trip per file.
 //
 // Security model:
