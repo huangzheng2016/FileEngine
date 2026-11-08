@@ -54,6 +54,19 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/execute/validate", s.validatePlans)
 		api.GET("/sessions/:id/plans", s.getPlans)
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
+		api.POST("/sessions/:id/plans/reset", s.resetPlans)
+		api.GET("/sessions/:id/preview/tree", s.previewTree)
+
+		// Session plan (整理方案)
+		api.GET("/sessions/:id/plan", s.getPlan)
+		api.PUT("/sessions/:id/plan", s.updatePlan)
+		api.POST("/sessions/:id/plan/approve", s.approvePlan)
+
+		// Memory
+		api.GET("/memory", s.listMemory)
+		api.POST("/memory", s.createMemory)
+		api.PUT("/memory/:id", s.updateMemory)
+		api.DELETE("/memory/:id", s.deleteMemory)
 
 		// Files
 		api.GET("/files", s.listFiles)

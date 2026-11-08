@@ -46,7 +46,7 @@ type AgentConfig struct {
 	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
 	// BatchSize is the number of loose files per agent batch (default 200,
 	// capped at 500). With the script bulk workflow (run_script: query_files →
-	// batch set_category → mark_tagged loop) step count no longer scales with
+	// batch set_category → mark_tagged loop) step count does not scale with
 	// files per batch, so large batches fit comfortably in the context window;
 	// the prompt steers agents to that workflow for big batches. The per-file
 	// fallback still costs ≥2 tool calls per file — batches it leaves behind

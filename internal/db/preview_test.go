@@ -18,6 +18,12 @@ import (
 //	odd_%/x.txt (7)          → /文档/odd_%/x.txt
 func previewFixture(t *testing.T) *Repository {
 	r := setupBrainRepo(t)
+	seedPreviewFixture(t, r)
+	return r
+}
+
+func seedPreviewFixture(t *testing.T, r *Repository) {
+	t.Helper()
 	for _, e := range []struct {
 		p, typ string
 		size   int64
@@ -41,7 +47,6 @@ func previewFixture(t *testing.T) *Repository {
 			t.Fatal(err)
 		}
 	}
-	return r
 }
 
 func itemsByName(page *PreviewPage) map[string]PreviewItem {
@@ -52,9 +57,10 @@ func itemsByName(page *PreviewPage) map[string]PreviewItem {
 	return m
 }
 
-func TestPreviewAfterAggregates(t *testing.T) {
-	r := previewFixture(t)
+func TestPreviewAfterAggregates(t *testing.T) { checkPreviewAfter(t, previewFixture(t)) }
 
+func checkPreviewAfter(t *testing.T, r *Repository) {
+	t.Helper()
 	root, err := r.PreviewAfter(1, "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -114,9 +120,10 @@ func TestPreviewAfterAggregates(t *testing.T) {
 	}
 }
 
-func TestPreviewBeforeStatuses(t *testing.T) {
-	r := previewFixture(t)
+func TestPreviewBeforeStatuses(t *testing.T) { checkPreviewBefore(t, previewFixture(t)) }
 
+func checkPreviewBefore(t *testing.T, r *Repository) {
+	t.Helper()
 	root, err := r.PreviewBefore(1, ".", "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
