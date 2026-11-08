@@ -86,22 +86,26 @@ const (
 	MemorySourceUser       = "user"
 	MemorySourceAgent      = "agent"
 	MemorySourceCorrection = "correction"
+	MemorySourceReflection = "reflection"
 )
 
 // MemoryItem is one remembered fact. Session-scoped items are working notes
 // shared live by the session's workers; filesystem and global items persist
 // across sessions.
 type MemoryItem struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Scope     string    `gorm:"size:16;index:idx_memory_scope,priority:1" json:"scope"`
-	ScopeID   uint      `gorm:"index:idx_memory_scope,priority:2" json:"scope_id"`
-	Kind      string    `gorm:"size:16" json:"kind"`
-	Content   string    `gorm:"type:text" json:"content"`
-	Path      string    `gorm:"size:1024" json:"path"`
-	Source    string    `gorm:"size:16" json:"source"`
-	Hits      int       `json:"hits"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	Scope      string     `gorm:"size:16;index:idx_memory_scope,priority:1" json:"scope"`
+	ScopeID    uint       `gorm:"index:idx_memory_scope,priority:2" json:"scope_id"`
+	Kind       string     `gorm:"size:16" json:"kind"`
+	Key        string     `gorm:"size:512;index" json:"key"` // normalized subject (e.g. "ext:.psd", "path:照片/2023"); one live item per (scope, scope_id, key)
+	Content    string     `gorm:"type:text" json:"content"`
+	Path       string     `gorm:"size:1024" json:"path"`
+	Source     string     `gorm:"size:16" json:"source"`
+	Pinned     bool       `json:"pinned"`
+	Hits       int        `json:"hits"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // ChatTurn is one persisted turn of the session assistant conversation.
