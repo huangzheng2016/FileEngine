@@ -20,6 +20,9 @@ type runOutcome struct {
 	Partial bool // tagging finished with failed batches
 	Err     error
 	Tokens  db.TokenCounts
+	// Then, when set, runs after the run is finished with its final status
+	// (e.g. tagging chains the review run).
+	Then func(status string)
 }
 
 // runStopWait bounds how long POST /runs/:id/stop waits for the run to wind
@@ -68,6 +71,9 @@ func (s *Server) launchRun(sessionID uint, phase, title string, work func(ctx co
 		}
 		if err := s.repo.FinishRun(run, status, out.Summary, errMsg, out.Tokens); err != nil {
 			log.Printf("finish run %d: %v", run.ID, err)
+		}
+		if out.Then != nil {
+			out.Then(status)
 		}
 	}()
 	return run, nil

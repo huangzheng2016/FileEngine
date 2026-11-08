@@ -44,7 +44,8 @@ func (s *Server) setupRouter() {
 
 		// Runs (agent / executor activity); each start returns {run_id}
 		api.POST("/sessions/:id/tag", s.startTagging)
-		api.POST("/sessions/:id/instruct", s.instructAgent)
+		api.POST("/sessions/:id/chat", s.postChat)
+		api.GET("/sessions/:id/chat", s.listChat)
 		api.POST("/sessions/:id/execute", s.startExecute)
 		api.GET("/sessions/:id/runs", s.listRuns)
 		api.GET("/runs/:run_id", s.getRun)
@@ -64,6 +65,7 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/plan", s.getPlan)
 		api.PUT("/sessions/:id/plan", s.updatePlan)
 		api.POST("/sessions/:id/plan/approve", s.approvePlan)
+		api.POST("/sessions/:id/plan/draft", s.draftPlan)
 
 		// Memory
 		api.GET("/memory", s.listMemory)
