@@ -13,6 +13,8 @@ type FileEntry struct {
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024" json:"new_path"`
 	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"` // "move" / "copy" / ""
+	Role          string     `gorm:"size:16;index" json:"role"`                                     // decision role, see Role* in contract.go
+	Reason        string     `gorm:"size:1024" json:"reason"`                                       // why this decision was made (agent, rule name or user)
 	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"
@@ -106,7 +108,8 @@ type ScanSession struct {
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
-	Goal                string    `gorm:"type:text" json:"goal"` // the user's organizing intent, injected into every agent prompt
+	Goal                string    `gorm:"type:text" json:"goal"`
+	ScopeExts           string    `gorm:"type:text" json:"scope_exts"` // comma-separated extensions to organize; empty = all files; others become role=skip // the user's organizing intent, injected into every agent prompt
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
