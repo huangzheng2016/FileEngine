@@ -287,9 +287,6 @@ func TestResetPlansUntagsDirectorySubtree(t *testing.T) {
 	if _, _, err := r.SetTargetUnique(1, "proj", "/代码/proj", "directory"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.MarkTaggedAtomic(1, "proj", 1); err != nil {
-		t.Fatal(err)
-	}
 	if _, _, err := r.SetTargetUnique(1, "loose.txt", "/文档/loose.txt", "file"); err != nil {
 		t.Fatal(err)
 	}

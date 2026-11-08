@@ -315,6 +315,9 @@ func (tb *ToolBuilder) isSensitivePath(p string) bool {
 	if db.IsSensitiveName(p) {
 		return true
 	}
+	if tb.repo == nil {
+		return false
+	}
 	f, err := tb.repo.GetFileByPath(tb.sessionID, strings.Trim(normalizePath(p), "/"))
 	return err == nil && f.Sensitive
 }

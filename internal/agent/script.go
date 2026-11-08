@@ -107,7 +107,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - set_category(path, 分类名, relative_to?) → 实际目标路径（分类路径 + 相对路径，保留子结构；无 relative_to 时取当前单元根目录下的相对路径，否则只取文件名）
 - decide_dir(path, role, new_path?, reason?) → {role, new_path}；role 为 unit / container / skip
 - apply_rule(规则 id 或名称) → 本次匹配数
-- create_category(name, path, description)%s；rename_category(name, new_name)
+- create_category(name, path, description)；rename_category(name, new_name)%s
 
 文件记录字段：original_path, name, size, file_type, role, reason?, new_path?, description?, child_count?
 约定：失败的内置函数返回 error 值（is_error(x) 判断）；result 已预声明，用 = 赋值；注释用 //；输出和返回值各限 %d 字节，源码限 %d 字节，单次 %d 秒；可 import 的模块：%s`,

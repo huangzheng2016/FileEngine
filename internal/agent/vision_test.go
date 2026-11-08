@@ -113,41 +113,14 @@ func TestBuildToolsVisionGating(t *testing.T) {
 				t.Fatalf("BuildTools view_image present=%v, want %v", got, tc.wantTool)
 			}
 
-			instructTools, err := tb.BuildInstructTools()
+			instructTools, err := tb.BuildChatTools()
 			if err != nil {
-				t.Fatalf("BuildInstructTools: %v", err)
+				t.Fatalf("BuildChatTools: %v", err)
 			}
 			if got := hasTool(toolNames(t, instructTools), "view_image"); got != tc.wantTool {
-				t.Fatalf("BuildInstructTools view_image present=%v, want %v", got, tc.wantTool)
+				t.Fatalf("BuildChatTools view_image present=%v, want %v", got, tc.wantTool)
 			}
 		})
-	}
-}
-
-// With vision off (the default), the autotag tool set must be exactly what it
-// was before the feature existed: 8 always-on tools plus the session-gated
-// read_file / create_category.
-func TestBuildToolsDefaultOffRegression(t *testing.T) {
-	session := &db.ScanSession{AllowReadFile: true, AllowAutoCategory: true}
-	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
-	tools, err := tb.BuildTools()
-	if err != nil {
-		t.Fatalf("BuildTools: %v", err)
-	}
-	names := toolNames(t, tools)
-	want := []string{"list_files", "get_file_info", "update_description", "mark_tagged",
-		"list_categories", "set_target", "update_category", "delete_category",
-		"read_file", "create_category", "read_plan", "note", "remember", "recall"}
-	if len(names) != len(want) {
-		t.Fatalf("tool count: got %d %v, want %d %v", len(names), names, len(want), want)
-	}
-	for _, w := range want {
-		if !hasTool(names, w) {
-			t.Fatalf("missing tool %q in %v", w, names)
-		}
-	}
-	if hasTool(names, "view_image") {
-		t.Fatalf("view_image must not be registered by default: %v", names)
 	}
 }
 

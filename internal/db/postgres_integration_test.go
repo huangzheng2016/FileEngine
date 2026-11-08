@@ -82,19 +82,19 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	// Path-prefix matching is case-sensitive (PG LIKE): marking children of
 	// "Docs" must not touch "docs/..." — and escaped '_' must not leak into
 	// the myXdir sibling either.
-	if err := r.MarkChildrenTagged(session.ID, "Docs", 1); err != nil {
-		t.Fatalf("MarkChildrenTagged Docs: %v", err)
+	if err := pgUnit(r, session.ID, "Docs"); err != nil {
+		t.Fatalf("unit decide Docs: %v", err)
 	}
-	if tagged, _ := r.IsFileTagged(session.ID, "Docs/Report.PDF"); !tagged {
+	if tagged, _ := pgTagged(r, session.ID, "Docs/Report.PDF"); !tagged {
 		t.Fatal("Docs/Report.PDF must be tagged")
 	}
-	if tagged, _ := r.IsFileTagged(session.ID, "docs/notes.txt"); tagged {
+	if tagged, _ := pgTagged(r, session.ID, "docs/notes.txt"); tagged {
 		t.Fatal("docs/notes.txt must NOT be tagged — PG LIKE is case-sensitive, prefix must match exactly")
 	}
-	if err := r.MarkChildrenTagged(session.ID, "my_dir", 2); err != nil {
-		t.Fatalf("MarkChildrenTagged my_dir: %v", err)
+	if err := pgUnit(r, session.ID, "my_dir"); err != nil {
+		t.Fatalf("unit decide my_dir: %v", err)
 	}
-	if tagged, _ := r.IsFileTagged(session.ID, "myXdir/b.txt"); tagged {
+	if tagged, _ := pgTagged(r, session.ID, "myXdir/b.txt"); tagged {
 		t.Fatal("myXdir/b.txt must NOT be tagged — '_' leaked as a LIKE wildcard")
 	}
 
@@ -148,4 +148,17 @@ func TestPostgresBrainQueries(t *testing.T) {
 	if _, err := r.SavePlan(1, "stale", 0, ""); err != ErrPlanVersionConflict {
 		t.Fatalf("stale plan: %v", err)
 	}
+}
+
+func pgUnit(r *Repository, sessionID uint, p string) error {
+	_, err := r.Decide(sessionID, Decision{Path: p, Role: RoleUnit, NewPath: "/归档/" + p, Override: true})
+	return err
+}
+
+func pgTagged(r *Repository, sessionID uint, p string) (bool, error) {
+	e, err := r.GetFileByPath(sessionID, p)
+	if err != nil {
+		return false, err
+	}
+	return e.Tagged, nil
 }
