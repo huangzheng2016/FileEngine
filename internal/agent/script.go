@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -100,7 +101,7 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 	desc := fmt.Sprintf(`运行 Tengo 脚本（类 Go 语法）做批量查询和批量决定，代替逐条工具调用。返回 print 输出和全局变量 result 的 JSON。
 
 内置函数：
-- query_files({parent_path?, file_type?, undecided?, category_path?, offset?, limit?}) → {files, total}（limit 默认 %d，上限 %d）；count_files({同上}) → 整数；sample_files([过滤,] n) → 随机 n 个（上限 %d）
+- query_files({parent_path?, file_type?, undecided?, category_path?, cursor?, limit?}) → {files, has_more, next_cursor}（limit 默认 %d，上限 %d；翻页时把 next_cursor 作为 cursor 传回）；count_files({parent_path?, file_type?, undecided?, category_path?}) → 整数；sample_files([过滤,] n) → 随机 n 个（上限 %d）
 - list_dirs(parent?) → 子目录数组；signals(path) → 目录信号（标记、扩展名、版本组、规模）
 - get_file_info(path)；get_categories()
 - set_targets([{path, new_path, reason, confidence?}]) → {ok, failed, renamed}；set_target(path, new_path) → 实际目标路径
@@ -322,7 +323,7 @@ type scriptFilter struct {
 	fileType     string
 	undecided    bool
 	categoryPath *string
-	offset       int
+	cursor       uint
 	limit        int
 }
 
@@ -365,12 +366,12 @@ func parseScriptFilter(fn string, o tengo.Object) (*scriptFilter, error) {
 				return nil, fmt.Errorf("%s: filter.category_path must be a string", fn)
 			}
 			f.categoryPath = &s.Value
-		case "offset":
+		case "cursor":
 			i, ok := val.(*tengo.Int)
-			if !ok {
-				return nil, fmt.Errorf("%s: filter.offset must be an int", fn)
+			if !ok || i.Value < 0 {
+				return nil, fmt.Errorf("%s: filter.cursor must be a non-negative int", fn)
 			}
-			f.offset = int(i.Value)
+			f.cursor = uint(i.Value)
 		case "limit":
 			i, ok := val.(*tengo.Int)
 			if !ok {
@@ -378,11 +379,8 @@ func parseScriptFilter(fn string, o tengo.Object) (*scriptFilter, error) {
 			}
 			f.limit = int(i.Value)
 		default:
-			return nil, fmt.Errorf("%s: unknown filter key %q (want one of parent_path/file_type/undecided/category_path/offset/limit)", fn, key)
+			return nil, fmt.Errorf("%s: unknown filter key %q (want one of parent_path/file_type/undecided/category_path/cursor/limit)", fn, key)
 		}
-	}
-	if f.offset < 0 {
-		f.offset = 0
 	}
 	if f.limit <= 0 {
 		f.limit = scriptQueryDefault
@@ -403,11 +401,6 @@ func (f *scriptFilter) toFileQuery(sessionID uint) db.FileQuery {
 	if f.undecided {
 		role := db.RoleUndecided
 		q.Role = &role
-	}
-	// Convert offset+limit to page+pageSize, same as the list_files tool.
-	if f.limit > 0 {
-		q.Page = (f.offset / f.limit) + 1
-		q.PageSize = f.limit
 	}
 	return q
 }
@@ -460,16 +453,21 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 		if err != nil {
 			return nil, err
 		}
-		q := filter.toFileQuery(tb.sessionID)
-		files, total, err := tb.repo.ListFiles(q)
-		if err != nil {
+		files, more, err := tb.repo.ListFilesAfter(filter.toFileQuery(tb.sessionID), filter.cursor, filter.limit)
+		if errors.Is(err, db.ErrBadCursor) {
+			return scriptError(fmt.Errorf("cursor 已失效，请不带 cursor 从头查询")), nil
+		} else if err != nil {
 			return scriptError(err), nil
 		}
 		items := make([]interface{}, len(files))
 		for i, f := range files {
 			items[i] = fileToScriptMap(f)
 		}
-		return scriptObject(map[string]interface{}{"files": items, "total": total})
+		out := map[string]interface{}{"files": items, "has_more": more}
+		if more {
+			out["next_cursor"] = int64(files[len(files)-1].ID)
+		}
+		return scriptObject(out)
 	}
 }
 

@@ -126,7 +126,7 @@ cats := get_categories()
 s := sample_files({parent_path: "incoming"}, 1)
 missing := get_file_info("nope/nothere")
 result = {
-	q_total: q.total,
+	q_more: q.has_more,
 	q_len: len(q.files),
 	q_name: q.files[0].name,
 	docs_count: c,
@@ -138,7 +138,7 @@ result = {
 	missing_is_error: is_error(missing)
 }`)
 	v := resultValue(t, out)
-	if v["q_total"].(float64) != 2 || v["q_len"].(float64) != 2 {
+	if v["q_more"] != false || v["q_len"].(float64) != 2 {
 		t.Fatalf("query_files incoming: %+v", v)
 	}
 	if v["q_name"].(string) != "photo1.jpg" {
@@ -164,16 +164,40 @@ result = {
 	}
 }
 
-// query_files pagination follows offset/limit like the list_files tool.
-func TestScriptQueryFilesPagination(t *testing.T) {
+func TestScriptQueryFilesCursorPaging(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
 page1 := query_files({parent_path: "incoming", file_type: "file", limit: 1})
-page2 := query_files({parent_path: "incoming", file_type: "file", limit: 1, offset: 1})
-result = {t: page1.total, n1: page1.files[0].name, n2: page2.files[0].name}`)
+page2 := query_files({parent_path: "incoming", file_type: "file", limit: 1, cursor: page1.next_cursor})
+bad := query_files({parent_path: "incoming", cursor: 999999})
+result = {
+	more1: page1.has_more,
+	more2: page2.has_more,
+	next2: is_undefined(page2.next_cursor),
+	n1: page1.files[0].name,
+	n2: page2.files[0].name,
+	bad: is_error(bad)
+}`)
 	v := resultValue(t, out)
-	if v["t"].(float64) != 2 || v["n1"] == v["n2"] {
-		t.Fatalf("pagination: %+v", v)
+	if v["more1"] != true || v["more2"] != false || v["next2"] != true {
+		t.Fatalf("has_more/next_cursor: %+v", v)
+	}
+	if v["n1"] == v["n2"] {
+		t.Fatalf("second page repeated the first: %+v", v)
+	}
+	if v["bad"] != true {
+		t.Fatalf("stale cursor must return an error value: %+v", v)
+	}
+}
+
+func TestScriptQueryFilesRejectsOffset(t *testing.T) {
+	tb, _ := scriptTestBuilder(t, nil)
+	out, err := runScript(t, tb, `query_files({offset: 1})`)
+	if err != nil {
+		t.Fatalf("runScript: %v", err)
+	}
+	if out.Error == "" || !strings.Contains(out.Error, "unknown filter key") {
+		t.Fatalf("offset must be rejected as an unknown filter key: %+v", out)
 	}
 }
 
