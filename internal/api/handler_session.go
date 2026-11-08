@@ -148,6 +148,7 @@ type CreateSessionRequest struct {
 	FilesystemID        uint   `json:"filesystem_id" binding:"required"`
 	ScanPath            string `json:"scan_path"`
 	ModelProviderID     uint   `json:"model_provider_id"`
+	BulkModelProviderID uint   `json:"bulk_model_provider_id"`
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 	FilterMode          string `json:"filter_mode"`
 	FilterDirs          string `json:"filter_dirs"`
@@ -187,6 +188,7 @@ func (s *Server) createSession(c *gin.Context) {
 		FilterMode:          filterMode,
 		FilterDirs:          req.FilterDirs,
 		ModelProviderID:     req.ModelProviderID,
+		BulkModelProviderID: req.BulkModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -232,7 +234,16 @@ func (s *Server) getSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-	c.JSON(http.StatusOK, session)
+	tokens, err := s.repo.SessionTokens(session.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// tokens: totals summed over the session's runs.
+	c.JSON(http.StatusOK, struct {
+		*db.ScanSession
+		Tokens db.TokenCounts `json:"tokens"`
+	}{session, tokens})
 }
 
 func (s *Server) deleteSession(c *gin.Context) {
@@ -245,6 +256,7 @@ func (s *Server) deleteSession(c *gin.Context) {
 	if !cancelAndWaitScan(uint(id)) {
 		log.Printf("delete session %d: timed out waiting for the scan to stop; proceeding anyway", id)
 	}
+	s.stopSessionRuns(uint(id))
 
 	if err := s.repo.DeleteSession(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -262,6 +274,7 @@ type UpdateSessionRequest struct {
 	FilterMode          *string `json:"filter_mode"`
 	FilterDirs          *string `json:"filter_dirs"`
 	ModelProviderID     *uint   `json:"model_provider_id"`
+	BulkModelProviderID *uint   `json:"bulk_model_provider_id"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -303,6 +316,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	}
 	if req.ModelProviderID != nil {
 		session.ModelProviderID = *req.ModelProviderID
+	}
+	if req.BulkModelProviderID != nil {
+		session.BulkModelProviderID = *req.BulkModelProviderID
 	}
 	if err := s.repo.UpdateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -371,11 +387,16 @@ func (s *Server) getSessionStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	tokens, err := s.repo.SessionTokens(session.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"category_distribution": dist,
 		"total_files":           session.TotalFiles,
 		"tagged_files":          session.TaggedFiles,
 		"planned_ops":           session.PlannedOps,
-		"total_tokens":          session.TotalTokens,
+		"total_tokens":          tokens.Total,
 	})
 }

@@ -42,15 +42,18 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/rescan", s.rescanSession)
 		api.GET("/sessions/:id/stats", s.getSessionStats)
 
-		// Agent tasks
+		// Runs (agent / executor activity); each start returns {run_id}
 		api.POST("/sessions/:id/tag", s.startTagging)
-		api.POST("/sessions/:id/tag/stop", s.stopTagging)
-		api.GET("/sessions/:id/tag/status", s.tagStatus)
 		api.POST("/sessions/:id/instruct", s.instructAgent)
-		api.POST("/sessions/:id/instruct/stop", s.stopInstruct)
 		api.POST("/sessions/:id/execute", s.startExecute)
-		api.POST("/sessions/:id/execute/stop", s.stopExecute)
-		api.GET("/sessions/:id/execute/status", s.executeStatus)
+		api.GET("/sessions/:id/runs", s.listRuns)
+		api.GET("/runs/:run_id", s.getRun)
+		api.POST("/runs/:run_id/stop", s.stopRun)
+
+		// Session event stream: persisted history + SSE (replay + live)
+		api.GET("/sessions/:id/events", s.listSessionEvents)
+		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
+
 		api.GET("/sessions/:id/execute/validate", s.validatePlans)
 		api.GET("/sessions/:id/plans", s.getPlans)
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
@@ -93,12 +96,6 @@ func (s *Server) setupRouter() {
 		// Prompt
 		api.GET("/prompt", s.getPrompt)
 		api.PUT("/prompt", s.updatePrompt)
-
-		// Logs
-		api.GET("/logs", s.listLogs)
-
-		// Session event stream (SSE): live agent run events
-		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 	}
 
 	// Serve frontend static files
