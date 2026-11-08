@@ -69,8 +69,8 @@ type AgentConfig struct {
 	// Retry-After hint replaces the computed wait (clamped to 4*RetryMaxDelay).
 	RetryBaseDelay       int    `yaml:"retry_base_delay" json:"retry_base_delay"`
 	RetryMaxDelay        int    `yaml:"retry_max_delay" json:"retry_max_delay"`
-	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
-	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
+	MaxStep              int    `yaml:"max_step" json:"max_step"`           // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
+	ChatMaxStep          int    `yaml:"chat_max_step" json:"chat_max_step"` // tool-call rounds of one session assistant turn
 	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
 	InstructSystemPrompt string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
 	// AgentTimeout caps one full agent run (the whole ReAct loop) in seconds.
@@ -217,8 +217,8 @@ func setDefaults(cfg *Config) {
 	if cfg.Agent.MaxStep == 0 {
 		cfg.Agent.MaxStep = 150
 	}
-	if cfg.Agent.InstructMaxStep == 0 {
-		cfg.Agent.InstructMaxStep = 30
+	if cfg.Agent.ChatMaxStep == 0 {
+		cfg.Agent.ChatMaxStep = 50
 	}
 	if cfg.Agent.VisionMaxImagesPerBatch == 0 {
 		cfg.Agent.VisionMaxImagesPerBatch = 4
