@@ -1,21 +1,69 @@
-# AGENTS.md
+# FileEngine Agent Guide
 
-FileEngine 项目协作规则（与 CLAUDE.md 互补；CLAUDE.md 管架构与代码风格，本文件管纪律）。
+Reply in the user's language. Keep this file to rules that prevent regressions; code, tests and `Taskfile.yml`
+are the source of truth. How the system fits together: `docs/architecture.md`; security model:
+`docs/security.md`.
 
-## 凭据卫生铁律
+## Project Map
 
-- 所有用户名/密码/API key/内网地址**绝不进仓库**——只放 gitignored 的本地文件（如 `deploy/.env`）。
-- 仓库内只允许 `.env.example` 占位符；写文档举例一律用 `192.168.1.x`、`replace-with-real-key` 这类占位。
-- 提交前必须 `git status` + `git diff --cached` 逐文件自查：无密钥、无内网地址、无运行时数据产物（`*.db*`、日志、`deploy/data/`、`deploy/runs/`）。
+- `main.go`, `internal/app`: server entry and lifecycle. `cmd/fileengine-desktop`: Wails v3 desktop (in-process
+  server on loopback).
+- `internal/api`: Gin handlers, one file per resource; auth, limits and run launching live here.
+- `internal/agent`: tagging pipeline, chat, survey, review, reflection, tools, Tengo scripts, prompts, memory.
+- `internal/db`: GORM models, repository, contract types (`contract.go`), runs and the event bus.
+- `internal/scanner`, `internal/executor`, `internal/remotefs`, `internal/model`, `internal/pathutil`,
+  `internal/config`, `internal/logging`.
+- `web`: Vue 3 frontend on the danceinbox-style design system; `web/src/base` and `web/src/styles` are copied
+  verbatim from the skill (only `app.ts`, `labels.ts`, `icons.ts` are project-owned).
+- `third_party/go-nfs-client`: vendored NFS client. `deploy`: Docker test environment. `scripts`: build checks.
 
-## Git 纪律（当前阶段）
+Toolchain: Go 1.27 (pinned toolchain), Node 24, npm, Wails v3 CLI pinned in `Taskfile.yml`. SQLite is pure Go;
+the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebKitGTK 6.
 
-- **只本地 commit，绝不 push**（无远程授权，业主明确要求）。
-- 小步提交：每个可独立验证的修复立即单独 commit，不攒批；commit message 用 Conventional Commits（参照 git log）。
-- 不 `git reset`/`rebase`/force 操作已提交历史。
+## Working Rules
 
-## 测试环境纪律
+- No backward compatibility: no legacy fallbacks, shims, migrations or data backfills. A fresh database is
+  expected after schema changes. Delete removed features completely.
+- Single source of truth: each fact lives in one table or one config key (see `docs/architecture.md`). Session
+  activity is read from runs, never inferred from `ScanSession.Status`.
+- Comments are rare, English only, and explain a non-obvious why. No history notes, no restating code. UI copy
+  and API error messages are Chinese, with full-width punctuation.
+- Model requests stay cache-affine: fixed ordered tools → static system prompt → byte-identical shared context
+  → append-only history → per-unit data. Never put counts, timestamps or ids in the prefix.
+- Only `db.Emit` publishes events, never inside a DB transaction. Never put image data in events or logs.
+- Retries are per model request; a run is never replayed after the model has answered.
+- One effective decision per path, enforced in the repository; agent-recoverable rejections are tool results
+  (`success:false`), not Go errors.
+- Writes are column-scoped; never `Save` a previously loaded `FileEntry`.
+- Executor: delete a source only after a verified copy; never overwrite; never `RemoveAll`; stop or cancel never
+  deletes; journal each step before it happens; skip sources that changed since the scan.
+- Scanner: writes go through the writer goroutine in batches; a rescan deletes rows only after a completed walk
+  and keeps decisions of unchanged entries; metadata and hash errors are never fatal.
+- Paths: validate with `pathutil.ValidateFSPath`; the scan root is `""`.
+- Frontend: build pages from the danceinbox reference pages; enums through `labels.ts`; Markdown only through
+  `StreamMarkdown`; stream events only through the event buffer and reducer; no hex colors, raw z-index or
+  page restyling of shared classes.
+- Release builds are stripped and reproducible (`-trimpath -buildvcs=false -s -w -buildid=`), checked by
+  `scripts/stripcheck`.
+- Never commit credentials, internal addresses or runtime data (`*.db*`, logs, `deploy/data/`). Examples use
+  placeholders such as `192.168.1.x`.
 
-- 持久环境在 `deploy/`（见 `deploy/README.md`）：`docker compose up -d --build` + `./bootstrap.sh`。
-- 测试环境数据（容器/数据卷/SQLite DB/扫描与打标结果）**全部保留**，供业主随时调研，不清理。
-- **绝不调用 execute 相关端点**（不移动/复制任何真实文件）；评估只用扫描+打标（Phase 1 纯 DB 操作）。
+## Validation
+
+- `task check` is the gate: gofmt, module verification, vet (host and Windows), Go tests, frontend check
+  (prettier, eslint, lint-ui, vitest, vue-tsc) and build. `task build` / `task desktop:build` also run
+  stripcheck.
+- Tests are deterministic. Concurrency changes run the affected packages with `-race -count=50`. An old test
+  that encodes a superseded design is updated or deleted, not worked around.
+- Database behavior is checked on SQLite; PostgreSQL tests run when `FILEENGINE_TEST_PG_DSN` points at a
+  scratch database. Say which backends were not verified.
+- The persistent test environment is `deploy/` (`docker compose up -d --build` + `./bootstrap.sh`). Keep its
+  data; never call execute endpoints against it.
+
+## Git and Collaboration
+
+- Commit locally in small Conventional Commits; never push, rebase or rewrite history.
+- Inspect `git status` and `git diff --cached` before committing.
+- Delegated work uses non-overlapping file ownership and isolated worktrees; integrate on the feature branch and
+  validate the merged tree before reporting.
+- Report findings with location, impact and a concrete fix; say "cause not identified" when it is.
