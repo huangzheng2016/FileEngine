@@ -242,6 +242,7 @@ const (
 	RoleMember    = "member"    // inside a unit, follows it
 	RoleFile      = "file"      // loose file with its own decision
 	RoleSkip      = "skip"      // out of scope, junk or explicitly left in place
+	RoleDuplicate = "duplicate" // content duplicate of FileEntry.DuplicateOf (scanner); plan quarantines it, never deletes
 )
 
 // PlanRule is a deterministic classification rule applied in bulk to every
