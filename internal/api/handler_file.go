@@ -2,7 +2,6 @@ package api
 
 import (
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -69,13 +68,13 @@ func (s *Server) listFiles(c *gin.Context) {
 func (s *Server) getFile(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	file, err := s.repo.GetFile(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		lookupFailed(c, err, msgNoFile)
 		return
 	}
 	c.JSON(http.StatusOK, file)
@@ -89,23 +88,25 @@ type UpdateFileRequest struct {
 // updateFile is the user's manual edit of one entry. A changed target goes
 // through the same validation and plan-time collision resolution as the
 // agent's set_target, and is learned as a filesystem-scope correction memory
-// so later runs classify that kind of file the user's way.
+// so later runs classify that kind of file the user's way. A target equal to
+// the entry's own path keeps it in place: the target is cleared and nothing
+// is learned.
 func (s *Server) updateFile(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	file, err := s.repo.GetFile(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		lookupFailed(c, err, msgNoFile)
 		return
 	}
 
 	var req UpdateFileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 
@@ -121,13 +122,9 @@ func (s *Server) updateFile(c *gin.Context) {
 			return
 		}
 		oldTarget := file.NewPath
-		role := db.RoleFile
-		if *req.NewPath == "" {
-			role = db.RoleUndecided
-		}
-		res, err := s.repo.Decide(file.ScanSessionID, db.Decision{Path: file.OriginalPath, Role: role, NewPath: *req.NewPath, Reason: "用户修改", Override: true})
+		res, err := s.repo.Decide(file.ScanSessionID, db.UserTargetDecision(file, *req.NewPath))
 		if db.IsRejection(err) {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			conflict(c, err.Error())
 			return
 		}
 		if err != nil {
@@ -135,7 +132,7 @@ func (s *Server) updateFile(c *gin.Context) {
 			return
 		}
 		if err := s.learnCorrection(*file, oldTarget, res.NewPath); err != nil {
-			log.Printf("file %d: record correction memory: %v", file.ID, err)
+			slog.Warn("record correction memory", "file", file.ID, "err", err)
 		}
 	}
 
@@ -230,7 +227,7 @@ func (s *Server) getFileTree(c *gin.Context) {
 	parentPath := c.Query("parent_path")
 
 	if sessionID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id required"})
+		badRequest(c, "缺少 session_id")
 		return
 	}
 

@@ -66,7 +66,7 @@ func (e *Executor) ensureDir(ctx context.Context, entryID uint, dir string) erro
 func (e *Executor) verify(ctx context.Context, src, dst string, size int64) (*remotefs.FileInfo, error) {
 	st, err := e.fs.Stat(ctx, dst)
 	if err != nil {
-		return nil, fmt.Errorf("校验目标失败: %w", err)
+		return nil, fmt.Errorf("校验目标失败：%w", err)
 	}
 	if st.Size != size {
 		return nil, fmt.Errorf("校验失败：目标大小 %d，源大小 %d", st.Size, size)
@@ -207,8 +207,8 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 			return skip(IssueSourceChanged, "源文件在复制后被修改，已保留两份")
 		}
 		if err := e.fs.Delete(ctx, op.Src); err != nil {
-			e.setState(op, db.ExecVerified, "删除源失败: "+err.Error())
-			return fmt.Errorf("副本已校验，但删除源失败: %w", err)
+			e.setState(op, db.ExecVerified, "删除源失败："+err.Error())
+			return fmt.Errorf("副本已校验，但删除源失败：%w", err)
 		}
 	}
 	return e.setState(op, db.ExecDone, "")
@@ -283,7 +283,7 @@ func (e *Executor) walk(ctx context.Context, entryID uint, src, dst, mode string
 				code = se.code
 			}
 		}
-		msg := fmt.Sprintf("%d 项未完成，源目录已保留: %s", len(errs), errors.Join(errs...).Error())
+		msg := fmt.Sprintf("%d 项未完成，源目录已保留：%s", len(errs), errors.Join(errs...).Error())
 		if code != "" {
 			return skip(code, msg)
 		}
@@ -300,7 +300,7 @@ func (e *Executor) walkFile(ctx context.Context, entryID uint, s, d string, c *r
 		if op, _ := e.repo.FindDoneExecOp(e.sessionID, d); op != nil && op.Src == s && op.Kind == db.ExecKindCopy {
 			return nil
 		}
-		return skip(IssueTargetExists, "目标位置已有同名文件: "+d)
+		return skip(IssueTargetExists, "目标位置已有同名文件："+d)
 	}
 	if row, err := e.repo.GetFileByPath(e.sessionID, s); err == nil && row != nil {
 		if reason := staleReason(row, c); reason != "" {
@@ -322,7 +322,7 @@ func (e *Executor) removeEmptyDir(ctx context.Context, entryID uint, dir string)
 	}
 	if err := e.fs.Delete(ctx, dir); err != nil {
 		e.setState(op, db.ExecFailed, err.Error())
-		return fmt.Errorf("源目录未清空，已保留: %w", err)
+		return fmt.Errorf("源目录未清空，已保留：%w", err)
 	}
 	return e.setState(op, db.ExecDone, "")
 }

@@ -4,6 +4,7 @@
 package pathutil
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -24,15 +25,15 @@ func ValidateFSPath(p string) error {
 		return nil
 	}
 	if strings.ContainsRune(p, 0) {
-		return fmt.Errorf("path %q contains a NUL byte", p)
+		return errors.New("路径不能包含 NUL 字符")
 	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." {
-			return fmt.Errorf("path %q contains '..' and could escape the filesystem root", p)
+			return fmt.Errorf("路径「%s」不能包含 ..（会越出文件系统根目录）", p)
 		}
 	}
 	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
-		return fmt.Errorf("path %q does not name a file or directory", p)
+		return fmt.Errorf("路径「%s」没有指向具体的文件或目录", p)
 	}
 	return nil
 }
@@ -44,7 +45,7 @@ func ValidateFSPath(p string) error {
 // never reach a backend that would read it as host-absolute.
 func RootRelative(p string) (string, error) {
 	if p == "" {
-		return "", fmt.Errorf("empty path")
+		return "", errors.New("路径为空")
 	}
 	if err := ValidateFSPath(p); err != nil {
 		return "", err

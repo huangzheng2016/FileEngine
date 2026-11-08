@@ -43,25 +43,25 @@ func queryUint(c *gin.Context, key string) (uint, error) {
 func (s *Server) listSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		badRequest(c, "无效的会话 ID")
 		return
 	}
 	q := db.EventQuery{SessionID: uint(id)}
 	for key, dst := range map[string]*uint{"run_id": &q.RunID, "after": &q.After, "before": &q.Before} {
 		if *dst, err = queryUint(c, key); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			badRequest(c, err.Error())
 			return
 		}
 	}
 	limit, err := queryUint(c, "limit")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	q.Limit = int(limit)
 	rows, more, err := s.repo.ListEvents(q)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	items := make([]eventItem, len(rows))
@@ -81,17 +81,17 @@ func (s *Server) listSessionEvents(c *gin.Context) {
 func (s *Server) streamSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		badRequest(c, "无效的会话 ID")
 		return
 	}
 	sessionID := uint(id)
 	if _, err := s.repo.GetSession(sessionID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
+		lookupFailed(c, err, msgNoSession)
 		return
 	}
 	runID, err := queryUint(c, "run_id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	var after uint
@@ -103,20 +103,20 @@ func (s *Server) streamSessionEvents(c *gin.Context) {
 	case resume != "":
 		n, err := strconv.ParseUint(resume, 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Last-Event-ID 无效"})
+			badRequest(c, "Last-Event-ID 无效")
 			return
 		}
 		after = uint(n)
 	case runID == 0:
 		if after, err = s.repo.LatestRunStartSeq(sessionID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 	}
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "不支持流式响应"})
+		abortError(c, http.StatusInternalServerError, "不支持流式响应")
 		return
 	}
 

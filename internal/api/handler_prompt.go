@@ -27,7 +27,7 @@ func (s *Server) updatePrompt(c *gin.Context) {
 		Prompt string `json:"prompt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 

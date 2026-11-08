@@ -1,6 +1,9 @@
 package pathutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateFSPath(t *testing.T) {
 	valid := []string{
@@ -43,6 +46,21 @@ func TestRootRelative(t *testing.T) {
 	for _, bad := range []string{"", "/", "../x", "/a/../../etc"} {
 		if _, err := RootRelative(bad); err == nil {
 			t.Fatalf("RootRelative(%q): got nil error", bad)
+		}
+	}
+}
+
+// Messages reach users and the agent verbatim, so they are Chinese.
+func TestValidateFSPathMessages(t *testing.T) {
+	cases := map[string]string{
+		"a/../b": "不能包含 ..",
+		"a\x00b": "NUL",
+		"/":      "没有指向具体的文件或目录",
+	}
+	for in, want := range cases {
+		err := ValidateFSPath(in)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ValidateFSPath(%q) = %v; want message containing %q", in, err, want)
 		}
 	}
 }

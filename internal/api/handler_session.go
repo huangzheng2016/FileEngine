@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"path"
@@ -16,6 +17,7 @@ import (
 	"FileEngine/internal/scanner"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // scanHandle tracks one in-flight scan goroutine: cancel stops its walk,
@@ -155,13 +157,17 @@ type CreateSessionRequest struct {
 func (s *Server) createSession(c *gin.Context) {
 	var req CreateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 
 	filesystem, err := s.repo.GetFilesystem(req.FilesystemID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		badRequest(c, msgNoFilesystem)
+		return
+	}
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem not found"})
+		internalError(c, err)
 		return
 	}
 
@@ -187,14 +193,14 @@ func (s *Server) createSession(c *gin.Context) {
 		BulkModelProviderID: req.BulkModelProviderID,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	// GORM omits a false bool on insert, so the DB default (on) wins; write it explicitly.
 	session.ExtractMetadata = req.ExtractMetadata == nil || *req.ExtractMetadata
 	if !session.ExtractMetadata {
 		if err := s.repo.DB().Model(session).Update("extract_metadata", false).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 	}
@@ -211,7 +217,7 @@ func (s *Server) listSessions(c *gin.Context) {
 		if id, e := strconv.ParseUint(fsID, 10, 32); e == nil {
 			sessions, err = s.repo.ListSessionsByFilesystem(uint(id))
 		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filesystem_id"})
+			badRequest(c, "filesystem_id 无效")
 			return
 		}
 	} else {
@@ -219,7 +225,7 @@ func (s *Server) listSessions(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, sessions)
@@ -228,19 +234,19 @@ func (s *Server) listSessions(c *gin.Context) {
 func (s *Server) getSession(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	_ = s.repo.RefreshSessionCounts(uint(id))
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
 		return
 	}
 	tokens, err := s.repo.SessionTokens(session.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	// tokens: totals summed over the session's runs.
@@ -253,7 +259,7 @@ func (s *Server) getSession(c *gin.Context) {
 func (s *Server) deleteSession(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
@@ -263,11 +269,11 @@ func (s *Server) deleteSession(c *gin.Context) {
 	s.stopSessionRuns(uint(id))
 
 	if err := s.repo.DeleteSession(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if err := s.repo.DeleteSessionBrainData(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
@@ -291,17 +297,17 @@ type UpdateSessionRequest struct {
 func (s *Server) updateSessionConfig(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
 		return
 	}
 	var req UpdateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	if req.AllowReadFile != nil {
@@ -341,7 +347,7 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 		session.Goal = strings.TrimSpace(*req.Goal)
 	}
 	if err := s.repo.UpdateSession(session); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, session)
@@ -350,13 +356,19 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 func (s *Server) rescanSession(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
+		return
+	}
+
+	fsCfg, err := s.resolveFSConfig(session)
+	if err != nil {
+		fsConfigFailed(c, err)
 		return
 	}
 
@@ -371,37 +383,34 @@ func (s *Server) rescanSession(c *gin.Context) {
 	session.ScannedCount = 0
 	session.CurrentPath = ""
 	session.ErrorMessage = ""
-	s.repo.UpdateSession(session)
-
-	filesystem, err := s.repo.GetFilesystem(session.FilesystemID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "filesystem not found"})
+	if err := s.repo.UpdateSession(session); err != nil {
+		internalError(c, err)
 		return
 	}
 
-	s.startScan(session, filesystem.ToRemoteFSConfig())
+	s.startScan(session, fsCfg)
 	c.JSON(http.StatusOK, session)
 }
 
 func (s *Server) getSessionStats(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
 		return
 	}
 	dist, err := s.repo.GetSessionStats(uint(id), session.FilesystemID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	tokens, err := s.repo.SessionTokens(session.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
