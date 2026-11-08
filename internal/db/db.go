@@ -17,12 +17,30 @@ import (
 
 var DB *gorm.DB
 
+// readDB is the SQLite read-only connection pool (nil on MySQL/PostgreSQL,
+// whose single pool already serves concurrent readers). See ReadDB.
+var readDB *gorm.DB
+
+// readPoolSize bounds the SQLite reader pool. WAL lets readers run alongside
+// the single writer connection without blocking on it.
+const readPoolSize = 4
+
+// ReadDB returns the pool for read-only queries: on SQLite a separate
+// query_only pool so long reads never queue behind the single writer
+// connection (readers see the last committed state); elsewhere the main DB.
+func ReadDB() *gorm.DB {
+	if readDB != nil {
+		return readDB
+	}
+	return DB
+}
+
 func Init(cfg config.DatabaseConfig) error {
 	var dialector gorm.Dialector
 	switch cfg.Driver {
 	case "sqlite":
 		// Enable WAL mode and shared cache via DSN params
-		dsn := cfg.DSN + "?_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL&_cache_size=-20000&_foreign_keys=ON&_txlock=immediate"
+		dsn := cfg.DSN + "?_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL&_cache_size=-65536&_foreign_keys=ON&_txlock=immediate"
 		dialector = sqlite.Open(dsn)
 	case "mysql":
 		dialector = mysql.Open(cfg.DSN)
@@ -66,6 +84,14 @@ func Init(cfg config.DatabaseConfig) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	readDB = nil
+	if cfg.Driver == "sqlite" {
+		// Opened after AutoMigrate: the file exists in WAL mode by now.
+		if readDB, err = openSQLiteReadPool(cfg.DSN); err != nil {
+			return err
+		}
+	}
+
 	// Backfill context_window for providers created before the field existed
 	// (max_tokens was previously misused as the window; it now only caps output).
 	if err := backfillContextWindow(DB); err != nil {
@@ -89,6 +115,27 @@ func backfillContextWindow(db *gorm.DB) error {
 	return db.Model(&ModelProvider{}).
 		Where("context_window IS NULL OR context_window <= 0").
 		Update("context_window", DefaultContextWindow).Error
+}
+
+// openSQLiteReadPool opens the query_only reader pool on the same database
+// file. WAL is a persistent property of the file, so readers need no
+// journal_mode parameter.
+func openSQLiteReadPool(path string) (*gorm.DB, error) {
+	dsn := path + "?_busy_timeout=30000&_cache_size=-65536&_query_only=1"
+	rdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Warn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite read pool: %w", err)
+	}
+	sqlDB, err := rdb.DB()
+	if err != nil {
+		return nil, fmt.Errorf("sqlite read pool: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(readPoolSize)
+	sqlDB.SetMaxIdleConns(readPoolSize)
+	sqlDB.SetConnMaxLifetime(0)
+	return rdb, nil
 }
 
 func GetDB() *gorm.DB {

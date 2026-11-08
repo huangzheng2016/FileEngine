@@ -9,7 +9,7 @@ import (
 
 type FileEntry struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1" json:"scan_session_id"`
+	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1" json:"scan_session_id"`
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024" json:"new_path"`
 	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"` // "move" / "copy" / ""
@@ -27,10 +27,23 @@ type FileEntry struct {
 	Tagged        bool       `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3;index:idx_session_parent,priority:4" json:"tagged"`
 	ParentPath    string     `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
 	Depth         int        `gorm:"index:idx_session_type_tagged_depth,priority:4" json:"depth"`
-	ChildCount    int        `json:"child_count"`
+	ChildCount    int        `json:"child_count"`  // direct children kept by the scan (directories only)
+	SubdirCount   int        `json:"subdir_count"` // direct child directories (directories only)
 	BatchIndex    int        `json:"batch_index"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// Media metadata (scanner post-walk pass, ScanSession.ExtractMetadata):
+	// TakenAt is the capture time as naive wall-clock (stored as UTC) from
+	// EXIF/video headers, else a date in the file name, else mtime.
+	TakenAt    *time.Time `json:"taken_at"`
+	Camera     string     `gorm:"size:128" json:"camera"`
+	HasGPS     bool       `gorm:"default:false" json:"has_gps"`
+	DateSource string     `gorm:"size:16" json:"date_source"` // exif / video / filename / mtime; "" = not extracted
+	// Duplicate detection (ScanSession.DetectDuplicates): Hash is the full
+	// content sha256 (hex), set only for files that share their size with
+	// another file; DuplicateOf points at the group's original.
+	Hash        string    `gorm:"size:64;index:idx_session_hash,priority:2" json:"hash"`
+	DuplicateOf *uint     `json:"duplicate_of"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Category struct {
@@ -105,6 +118,8 @@ type ScanSession struct {
 	AllowAutoCategory   bool      `gorm:"default:true" json:"allow_auto_category"` // create_category tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
 	AllowVision         bool      `gorm:"default:false" json:"allow_vision"`       // session-level switch; view_image requires ModelProvider.VisionEnabled too
 	AllowScript         bool      `gorm:"default:true" json:"allow_script"`        // run_script tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
+	ExtractMetadata     bool      `gorm:"default:true" json:"extract_metadata"`    // media date/camera/GPS pass after the walk; DB default ON — GORM omits the zero value on insert
+	DetectDuplicates    bool      `gorm:"default:false" json:"detect_duplicates"`  // size → partial hash → full hash duplicate grouping after the walk
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
