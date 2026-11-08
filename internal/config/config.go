@@ -58,16 +58,8 @@ type AgentConfig struct {
 	VisionMaxImagesPerBatch int `yaml:"vision_max_images_per_batch" json:"vision_max_images_per_batch"` // max images per view_image call
 	VisionImageMaxPx        int `yaml:"vision_image_max_px" json:"vision_image_max_px"`                 // thumbnail long-edge px
 	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
-	// BatchSize is the number of loose files per agent batch (default 200,
-	// capped at 500). With the script bulk workflow (run_script: query_files →
-	// batch set_category → mark_tagged loop) step count does not scale with
-	// files per batch, so large batches fit comfortably in the context window;
-	// the prompt steers agents to that workflow for big batches. The per-file
-	// fallback still costs ≥2 tool calls per file — batches it leaves behind
-	// are caught by recheckBatchTagged and the end-of-run sweeps.
-	BatchSize       int `yaml:"batch_size" json:"batch_size"`
-	Concurrency     int `yaml:"concurrency" json:"concurrency"`
-	MaxFileReadSize int `yaml:"max_file_read_size" json:"max_file_read_size"`
+	Concurrency             int `yaml:"concurrency" json:"concurrency"`                                 // tagging workers (default 6)
+	MaxFileReadSize         int `yaml:"max_file_read_size" json:"max_file_read_size"`                   // read_file page size in characters (default 8000)
 	// ArchiveEntryMaxSize caps which archive entries read_file will extract
 	// inline via the path::entry syntax (larger entries are listing-only).
 	ArchiveEntryMaxSize int `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
@@ -81,12 +73,11 @@ type AgentConfig struct {
 	// jitter in seconds (defaults 2/60): attempt N sleeps
 	// rand[0, min(RetryMaxDelay, RetryBaseDelay*2^(N-1))]. A server-provided
 	// Retry-After hint replaces the computed wait (clamped to 4*RetryMaxDelay).
-	RetryBaseDelay       int    `yaml:"retry_base_delay" json:"retry_base_delay"`
-	RetryMaxDelay        int    `yaml:"retry_max_delay" json:"retry_max_delay"`
-	MaxStep              int    `yaml:"max_step" json:"max_step"`           // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
-	ChatMaxStep          int    `yaml:"chat_max_step" json:"chat_max_step"` // tool-call rounds of one session assistant turn
-	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
-	InstructSystemPrompt string `yaml:"instruct_system_prompt" json:"instruct_system_prompt"`
+	RetryBaseDelay int    `yaml:"retry_base_delay" json:"retry_base_delay"`
+	RetryMaxDelay  int    `yaml:"retry_max_delay" json:"retry_max_delay"`
+	MaxStep        int    `yaml:"max_step" json:"max_step"`           // tool-call rounds of one agent run (one tagging unit, survey, review)
+	ChatMaxStep    int    `yaml:"chat_max_step" json:"chat_max_step"` // tool-call rounds of one session assistant turn
+	SystemPrompt   string `yaml:"system_prompt" json:"system_prompt"`
 	// AgentTimeout caps one full agent run (the whole ReAct loop) in seconds.
 	// <= 0 or unset means no timeout — the default; a run is then bounded only
 	// by user stop and max_step. Set a positive value to enforce an upper bound.
@@ -102,16 +93,6 @@ type AgentConfig struct {
 	// when false (default) such entries are marked tagged without an agent
 	// batch — no tokens spent — and reported in the run reconciliation.
 	JunkFilterDisabled bool `yaml:"junk_filter_disabled" json:"junk_filter_disabled"`
-	// HarnessDisabled switches the loose-file pass back to the per-batch
-	// dispatcher. By default (false) each worker runs ONE long continuous
-	// agent run that pulls the next untagged batch itself (list_files /
-	// query_files with tagged=false, auto-sharded by id % workers) until the
-	// queue is empty — knowledge carries across batches inside one run, with
-	// the reduction/summarization middlewares bounding context.
-	HarnessDisabled bool `yaml:"harness_disabled" json:"harness_disabled"`
-	// HarnessMaxStep bounds tool-call rounds of one continuous run (default
-	// 2000 — steps scale with total files, not with a single batch).
-	HarnessMaxStep int `yaml:"harness_max_step" json:"harness_max_step"`
 	// ArchivePromptDisabled turns off archive content hints in loose-file
 	// batch prompts. When false (default), zip/tar files get a one-line
 	// listing summary (kind + entry count + first few names) so the agent
@@ -291,17 +272,11 @@ func setDefaults(cfg *Config) {
 			cfg.Database.DSN = "fileengine.db"
 		}
 	}
-	if cfg.Agent.BatchSize == 0 {
-		cfg.Agent.BatchSize = 200
-	}
-	if cfg.Agent.BatchSize > 500 {
-		cfg.Agent.BatchSize = 500
-	}
 	if cfg.Agent.Concurrency == 0 {
-		cfg.Agent.Concurrency = 1
+		cfg.Agent.Concurrency = 6
 	}
 	if cfg.Agent.MaxFileReadSize == 0 {
-		cfg.Agent.MaxFileReadSize = 102400
+		cfg.Agent.MaxFileReadSize = 8000
 	}
 	if cfg.Agent.ArchiveEntryMaxSize == 0 {
 		cfg.Agent.ArchiveEntryMaxSize = 64 * 1024
@@ -343,13 +318,10 @@ func setDefaults(cfg *Config) {
 		cfg.Agent.ScriptTimeout = 10
 	}
 	if cfg.Agent.ScriptMaxResultSize == 0 {
-		cfg.Agent.ScriptMaxResultSize = 32 * 1024
+		cfg.Agent.ScriptMaxResultSize = 8 * 1024
 	}
 	if cfg.Agent.ArchivePromptMaxEntries == 0 {
 		cfg.Agent.ArchivePromptMaxEntries = 6
-	}
-	if cfg.Agent.HarnessMaxStep == 0 {
-		cfg.Agent.HarnessMaxStep = 2000
 	}
 	if cfg.Agent.CategoryPolicy == "" {
 		cfg.Agent.CategoryPolicy = DefaultCategoryPolicy

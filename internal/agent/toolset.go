@@ -15,9 +15,7 @@ type ToolsetKind int
 
 const (
 	ToolsetTagging ToolsetKind = iota
-	ToolsetChat
-	ToolsetSurvey
-	ToolsetReview
+	ToolsetChat                // chat, survey and review
 )
 
 type toolSpec struct {
@@ -84,7 +82,6 @@ func (tb *ToolBuilder) BuildToolset(kind ToolsetKind) ([]tool.BaseTool, error) {
 // BuildTools is the tagging worker tool set.
 func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) { return tb.BuildToolset(ToolsetTagging) }
 
-// BuildInstructTools is the session assistant tool set.
-func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
-	return tb.BuildToolset(ToolsetChat)
-}
+// BuildChatTools is the tool set of the main-model runs (chat, survey,
+// review): the tagging set plus write_plan.
+func (tb *ToolBuilder) BuildChatTools() ([]tool.BaseTool, error) { return tb.BuildToolset(ToolsetChat) }

@@ -306,32 +306,6 @@ func (r *Repository) UpdateDescription(sessionID uint, path, description string)
 		Update("description", description).Error
 }
 
-func (r *Repository) GetMaxDepth(sessionID uint) (int, error) {
-	var maxDepth *int
-	err := r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ?", sessionID).
-		Select("MAX(depth)").
-		Scan(&maxDepth).Error
-	if err != nil {
-		return 0, err
-	}
-	if maxDepth == nil {
-		return 0, nil
-	}
-	return *maxDepth, nil
-}
-
-func (r *Repository) IsFileTagged(sessionID uint, path string) (bool, error) {
-	var f FileEntry
-	err := r.db.Select("tagged").
-		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
-		First(&f).Error
-	if err != nil {
-		return false, err
-	}
-	return f.Tagged, nil
-}
-
 // TaggedStatusByIDs returns the tagged flag for each given file ID. It backs
 // the loose-file batch re-check: a batch can finish successfully while leaving
 // files untagged (set_target does not flip tagged), and such misses must be
@@ -610,19 +584,6 @@ func (r *Repository) DeleteModelProvider(id uint) error {
 }
 
 // ============ Batch cursor ============
-
-// MaxBatchIndex returns the largest agent batch index stamped on the
-// session's entries (0 when none) — the base for a new tagging run's cursor.
-func (r *Repository) MaxBatchIndex(sessionID uint) int {
-	var maxBatch *int
-	r.db.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND batch_index > 0", sessionID).
-		Select("MAX(batch_index)").Scan(&maxBatch)
-	if maxBatch == nil {
-		return 0
-	}
-	return *maxBatch
-}
 
 // NextManualBatchIndex returns a fresh negative batch index for a
 // user-directed run, below JunkBatchIndex and every manual index in use.

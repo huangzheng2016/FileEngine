@@ -46,17 +46,6 @@ func (g *categoryGuard) last() (fp string, set bool) {
 	return g.fp, g.set
 }
 
-// noteCategoryUsages records the fingerprint of a category list the agent is
-// about to receive — called where the batch prompt embeds the category
-// summary (autotag) and inside the list_categories tool.
-func (tb *ToolBuilder) noteCategoryUsages(usages []db.CategoryUsage) {
-	names := make([]string, len(usages))
-	for i, u := range usages {
-		names[i] = u.Name
-	}
-	tb.guard.note(names)
-}
-
 func normalizeCategoryName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }

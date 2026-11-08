@@ -107,42 +107,6 @@ func computeArchiveHint(ctx context.Context, fsys remotefs.RemoteFS, protocol, p
 // realistic batches.
 const harnessArchiveHintsPerPull = 20
 
-// archiveSummaries computes one-line archive listing summaries for up to
-// harnessArchiveHintsPerPull archive files in a pulled batch, keyed by file
-// ID. Same policy and guardrails as the dispatcher-mode batch prompt
-// (archive_prompt_disabled / archive_prompt_max_entries); failures degrade
-// silently to no summary.
-func (tb *ToolBuilder) archiveSummaries(ctx context.Context, files []db.FileEntry) map[uint]string {
-	if tb.cfg.ArchivePromptDisabled {
-		return nil
-	}
-	maxNames := tb.cfg.ArchivePromptMaxEntries
-	if maxNames <= 0 {
-		maxNames = 6
-	}
-	var out map[uint]string
-	opened := 0
-	for _, f := range files {
-		if opened >= harnessArchiveHintsPerPull {
-			break
-		}
-		kind := archiveKind(f.Name)
-		if kind != "zip" && kind != "tar" && kind != "tar.gz" {
-			continue
-		}
-		opened++
-		hint, err := computeArchiveHint(ctx, tb.fs, fsProtocolLabel(tb.fs), f.OriginalPath, f.Size, kind, maxNames)
-		if err != nil || hint == "" {
-			continue
-		}
-		if out == nil {
-			out = make(map[uint]string)
-		}
-		out[f.ID] = hint
-	}
-	return out
-}
-
 // fsProtocolLabel maps an FS instance to its backend label (only used for
 // the FTP archive-degradation notice text).
 func fsProtocolLabel(fsys remotefs.RemoteFS) string {

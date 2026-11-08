@@ -11,37 +11,17 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// buildCategorySummary renders the complete category system for the agent
-// prompt: every category is listed (used and unused alike) with its
-// description and structure rule, so the agent never plans against a partial
-// view and knows what each category is for. Entries are sorted by usage
-// descending then name ascending. usages is sorted in place.
+// buildCategorySummary renders the complete category list (name order, no
+// usage counts) for guard rejections.
 func buildCategorySummary(usages []db.CategoryUsage) string {
 	if len(usages) == 0 {
 		return ""
 	}
-	sort.SliceStable(usages, func(i, j int) bool {
-		if usages[i].FileCount != usages[j].FileCount {
-			return usages[i].FileCount > usages[j].FileCount
-		}
-		return usages[i].Name < usages[j].Name
-	})
-	var sb strings.Builder
-	sb.WriteString("\n## 分类体系（完整列表，含已归入计数）\n")
-	for _, u := range usages {
-		if u.FileCount > 0 {
-			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项\n", u.Name, u.Path, u.FileCount))
-		} else {
-			sb.WriteString(fmt.Sprintf("- %s (%s)\n", u.Name, u.Path))
-		}
-		if d := strings.TrimSpace(u.Description); d != "" {
-			sb.WriteString(fmt.Sprintf("  放什么：%s\n", oneLine(d)))
-		}
-		if st := strings.TrimSpace(u.Structure); st != "" {
-			sb.WriteString(fmt.Sprintf("  目录结构：%s\n", oneLine(st)))
-		}
+	cats := make([]db.Category, len(usages))
+	for i, u := range usages {
+		cats[i] = db.Category{Name: u.Name, Path: u.Path, Description: u.Description, Structure: u.Structure}
 	}
-	return sb.String()
+	return renderCategoryList(cats)
 }
 
 // oneLine collapses whitespace (newlines included) to single spaces.
@@ -87,7 +67,6 @@ func LoadSharedContext(repo *db.Repository, session *db.ScanSession) (SharedCont
 // omitted and the goal leads.
 func RenderSharedContext(c SharedContext) string {
 	var sb strings.Builder
-	sb.WriteString("# 会话共享上下文\n\n")
 	if g := strings.TrimSpace(c.Goal); g != "" {
 		sb.WriteString("## 用户目标\n\n" + g + "\n\n")
 	}
@@ -177,7 +156,7 @@ func BuildSharedContext(repo *db.Repository, session *db.ScanSession) (string, e
 // SharedContextMessage wraps the shared context block as the first user
 // message of a request, marked as a cache breakpoint.
 func SharedContextMessage(text string) *schema.Message {
-	return modelfactory.MarkCacheBreakpoint(schema.UserMessage(text))
+	return modelfactory.MarkCacheBreakpoint(schema.UserMessage("# 会话共享上下文\n\n" + text))
 }
 
 // UnitContext is the per-unit part of a request: described ancestors, memory
