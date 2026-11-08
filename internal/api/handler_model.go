@@ -56,8 +56,8 @@ func (s *Server) listModelProviders(c *gin.Context) {
 }
 
 type ModelProviderRequest struct {
-	Name        string  `json:"name" binding:"required"`
-	Provider    string  `json:"provider" binding:"required"`
+	Name     string `json:"name" binding:"required"`
+	Provider string `json:"provider" binding:"required"`
 	// APIKey omitted keeps the stored key on update.
 	APIKey      *string `json:"api_key"`
 	Model       string  `json:"model" binding:"required"`

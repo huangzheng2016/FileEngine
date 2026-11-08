@@ -327,7 +327,7 @@ func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build get_file_info: %w", err)
 	}
 
-	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
+	readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
 	if err != nil {
 		return nil, fmt.Errorf("build read_file: %w", err)
 	}
@@ -456,7 +456,7 @@ func (tb *ToolBuilder) BuildInstructTools() ([]tool.BaseTool, error) {
 	allTools = append(allTools, deleteCat)
 
 	if tb.session.AllowReadFile {
-		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFile)
+		readFile, err := utils.InferTool("read_file", "从远程文件系统读取文件内容：文本按大小截断；PDF/docx/xlsx/pptx 提取文本（.doc 不支持）；zip/tar/tar.gz 列出包内目录，用 path::entry 语法读取包内小文本条目（rar/7z 不支持；无随机访问的后端超大压缩包不可用）", tb.readFileUntrusted)
 		if err != nil {
 			return nil, err
 		}
@@ -555,7 +555,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		summaries := tb.archiveSummaries(ctx, files)
 		for i, f := range files {
 			if s := summaries[f.ID]; s != "" {
-				items[i].ArchiveSummary = s
+				items[i].ArchiveSummary = SanitizeUntrustedName(s)
 			}
 		}
 	}

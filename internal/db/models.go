@@ -121,7 +121,7 @@ type ModelProvider struct {
 	ID            uint    `gorm:"primaryKey" json:"id"`
 	Name          string  `gorm:"uniqueIndex;size:256" json:"name"`
 	Provider      string  `gorm:"size:32" json:"provider"` // openai / claude / ollama
-	APIKey        string  `gorm:"size:2048;serializer:secret" json:"-"` // AES-GCM encrypted at rest
+	APIKey        string  `gorm:"size:2048;serializer:secret" json:"-"`
 	Model         string  `gorm:"size:256" json:"model"`
 	BaseURL       string  `gorm:"size:512" json:"base_url"`
 	Temperature   float64 `json:"temperature"`
