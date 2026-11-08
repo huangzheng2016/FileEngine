@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -244,6 +245,12 @@ func (e *Executor) walk(ctx context.Context, entryID uint, src, dst, mode string
 			return err
 		}
 		c := &children[i]
+		// Names come from the server: a non-segment name could steer the walk
+		// outside src/dst.
+		if c.Name == "" || c.Name == "." || c.Name == ".." || strings.ContainsAny(c.Name, "/\\\x00") {
+			errs = append(errs, fmt.Errorf("illegal entry name %q in %s", c.Name, src))
+			continue
+		}
 		s, d := path.Join(src, c.Name), path.Join(dst, c.Name)
 		var err error
 		switch {

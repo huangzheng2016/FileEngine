@@ -14,6 +14,8 @@ export interface FilesystemInput {
   // sent only when the user typed a new one
   password?: string
   key_path: string
+  // SFTP fingerprint the user saw in a test; pins (or re-pins) the server key
+  host_key?: string
 }
 
 export async function listFilesystems(signal?: AbortSignal) {

@@ -1,6 +1,6 @@
 // Command fileengine-desktop is the Wails v3 desktop shell. It runs the full
 // FileEngine server in-process (no subprocess) on a random 127.0.0.1 port
-// guarded by a per-launch secret, and points its window at that origin; see
+// guarded by a per-launch token, and points its window at that origin; see
 // loopback.go for why the Wails asset handler is not used to serve the UI.
 package main
 
@@ -15,7 +15,9 @@ import (
 	"os"
 	"runtime"
 
+	"FileEngine/internal/api"
 	"FileEngine/internal/app"
+	"FileEngine/internal/logging"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -97,9 +99,9 @@ func run(args []string) int {
 		},
 	})
 
-	var guard *loopbackGuard
+	var startURL string
 	if startErr == nil {
-		guard, startErr = startServer(service, paths, *webRoot)
+		startURL, startErr = startServer(service, paths, *webRoot)
 	}
 	if startErr != nil {
 		return showStartupError(wailsApp, paths, startErr, logger)
@@ -107,7 +109,7 @@ func run(args []string) int {
 
 	windowOptions := application.WebviewWindowOptions{
 		Title:          "FileEngine",
-		URL:            guard.bootstrapURL(),
+		URL:            startURL,
 		Width:          defaultWindowWidth,
 		Height:         defaultWindowHeight,
 		MinWidth:       minWindowWidth,
@@ -133,33 +135,39 @@ func run(args []string) int {
 	return 0
 }
 
-// startServer builds the in-process server and binds its loopback listener;
-// the Service starts serving when Wails starts. The process changes into the
-// data directory because the API persists config edits to the relative path
-// config.yaml (the same convention as the Docker image's /data).
-func startServer(service *Service, paths desktopPaths, webRoot string) (*loopbackGuard, error) {
+// startServer binds the loopback listener and builds the in-process server
+// with a per-launch token; it returns the window start URL that logs the
+// window in. The Service starts serving when Wails starts.
+func startServer(service *Service, paths desktopPaths, webRoot string) (string, error) {
 	frontend, err := desktopFrontend(webRoot)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if err := os.Chdir(paths.DataDir); err != nil {
-		return nil, fmt.Errorf("enter data directory: %w", err)
-	}
-	a, err := app.New(app.Options{ConfigPath: paths.ConfigFile, Frontend: frontend})
+	token, err := api.NewToken()
 	if err != nil {
-		return nil, err
-	}
-	token, err := newSessionToken()
-	if err != nil {
-		return nil, fmt.Errorf("generate session token: %w", err)
+		return "", fmt.Errorf("generate session token: %w", err)
 	}
 	ln, err := listenLoopback()
 	if err != nil {
-		return nil, fmt.Errorf("listen on loopback: %w", err)
+		return "", fmt.Errorf("listen on loopback: %w", err)
 	}
-	guard := newLoopbackGuard(ln.Addr(), token, a.Handler())
-	service.app, service.ln, service.handler = a, ln, guard
-	return guard, nil
+	var roots []string
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, home)
+	}
+	a, err := app.New(app.Options{
+		ConfigPath:   paths.ConfigFile,
+		Frontend:     frontend,
+		Token:        token,
+		AllowedHosts: []string{ln.Addr().String()},
+		LocalRoots:   roots,
+	})
+	if err != nil {
+		ln.Close()
+		return "", err
+	}
+	service.app, service.ln, service.handler = a, ln, a.Handler()
+	return a.Server().BootstrapURL("http://" + ln.Addr().String()), nil
 }
 
 // setupLogging sends the standard logger, Gin's request log and the Wails
@@ -178,7 +186,7 @@ func setupLogging(paths desktopPaths, haveDataDir bool) (*slog.Logger, func()) {
 	log.SetOutput(out)
 	gin.DefaultWriter = out
 	gin.DefaultErrorWriter = out
-	return slog.New(slog.NewTextHandler(out, nil)), closeLog
+	return logging.Setup(out), closeLog
 }
 
 // wailsOriginFallback answers requests to the Wails asset origin, which never

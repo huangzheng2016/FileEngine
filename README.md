@@ -44,14 +44,15 @@ task desktop:dev                  # 开发模式，直接读取 web/dist
 task check
 ```
 
-服务端启动后访问 `http://localhost:8080`。桌面版的配置和 SQLite 数据库位于用户数据目录（`--data-dir` 或 `FE_DATA_DIR` 可覆盖）。Linux 构建桌面版需要 `libgtk-4-dev libwebkitgtk-6.0-dev`。
+服务端启动后访问 `http://localhost:8080`，使用日志中打印的访问令牌登录。桌面版的配置和 SQLite 数据库位于用户数据目录（`--data-dir` 或 `FE_DATA_DIR` 可覆盖）。Linux 构建桌面版需要 `libgtk-4-dev libwebkitgtk-6.0-dev`。
 
 ## 配置
 
 ```yaml
 server:
   port: 8080
-  host: 0.0.0.0
+  host: 127.0.0.1   # 默认仅本机；对外监听需显式改为 0.0.0.0
+  # token: 首次启动自动生成并只在日志中打印一次
 
 database:
   driver: sqlite    # sqlite | mysql
@@ -67,6 +68,23 @@ agent:
 所有 Agent 设置（并发数、批量大小、重试次数、系统提示词）支持运行时热更新，无需重启。
 
 模型和文件系统连接通过 Web UI 管理。
+
+## 安全
+
+- **访问令牌**：首次启动生成 `server.token`（写入加载的 config.yaml，权限 0600），仅在日志中打印一次。Web UI 登录时输入该令牌；脚本使用 `Authorization: Bearer <token>`。桌面版每次启动自动生成并注入令牌。
+- **监听地址**：默认 `127.0.0.1`。Docker 镜像在容器内监听 `0.0.0.0`，compose 默认只发布到宿主机 `127.0.0.1`（`FE_BIND` 可改）。
+- **凭据加密**：文件系统密码和模型 API Key 以 AES-GCM 加密存储，密钥来自 `FE_SECRET_KEY`（32 字节 base64）或数据库旁自动生成的 `secret.key`。备份数据库时须一并保存密钥，丢失后已存凭据无法解密。
+- **本机路径**：LOCAL 协议和 SFTP 私钥文件只能位于 `FE_LOCAL_ROOTS`（逗号分隔）之内，默认关闭；桌面版允许用户主目录。程序自身数据目录始终不可访问。
+- **SFTP 指纹**：创建时固定服务器指纹，之后指纹变化会拒绝连接（`服务器指纹已变化`），需确认后重新保存。
+- **健康检查**：`GET /healthz`（无需令牌）。
+
+### 备份与恢复（SQLite）
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/v1/admin/backup -o fileengine-backup.db
+```
+
+恢复：停止服务，用备份文件替换 `database.dsn` 指向的数据库文件（同时删除旧的 `-wal`/`-shm` 文件），保留原 `secret.key`（或相同的 `FE_SECRET_KEY`），再启动。MySQL/PostgreSQL 请使用数据库自带的备份工具。
 
 > **提示：** 推荐在 Btrfs / ZFS 等支持 COW（Copy-on-Write）的文件系统上使用复制模式整理文件。COW 文件系统的复制操作近乎零开销且不占用额外磁盘空间，既能保留原始文件结构作为回退，又能获得接近移动的性能。
 

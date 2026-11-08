@@ -16,11 +16,19 @@ if [ -f .env ]; then
     set +a
     PORT="${FE_PORT:-8080}"
 fi
+# API token: FE_TOKEN from .env, else server.token from the generated config
+# (readable only if your host user may read deploy/data/config.yaml; otherwise
+# copy it from `docker compose logs fileengine | grep "access token"`).
+FE_TOKEN="${FE_TOKEN:-$(sed -n 's/^ *token: *//p' data/config.yaml 2>/dev/null || true)}"
+if [ -z "$FE_TOKEN" ]; then
+    echo "FE_TOKEN not set and data/config.yaml unreadable — set FE_TOKEN in deploy/.env" >&2
+    exit 1
+fi
 URL="http://localhost:${PORT}/api/v1/sessions/${SESSION_ID}/events/stream"
 
 echo "watching $URL (Ctrl-C to stop)" >&2
 if [ $# -ge 2 ]; then
-    curl -fsS -N -H 'Accept: text/event-stream' "$URL" | tee -a "$2"
+    curl -fsS -N -H 'Accept: text/event-stream' -H "Authorization: Bearer $FE_TOKEN" "$URL" | tee -a "$2"
 else
-    curl -fsS -N -H 'Accept: text/event-stream' "$URL"
+    curl -fsS -N -H 'Accept: text/event-stream' -H "Authorization: Bearer $FE_TOKEN" "$URL"
 fi

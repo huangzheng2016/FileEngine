@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 	"FileEngine/internal/remotefs"
 )
 
@@ -118,16 +119,8 @@ func validTarget(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("目标路径为空")
 	}
-	if strings.ContainsRune(p, 0) {
-		return errors.New("目标路径包含 NUL 字符")
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return errors.New("目标路径包含 '..'")
-		}
-	}
-	if cleanPath(p) == "" {
-		return errors.New("目标路径不能是根目录")
+	if err := pathutil.ValidateFSPath(p); err != nil {
+		return fmt.Errorf("目标路径非法: %w", err)
 	}
 	return nil
 }
@@ -318,6 +311,13 @@ func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) 
 
 // executeEntry re-checks one entry against the live filesystem and carries it out.
 func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode string) error {
+	// Re-validated right before the operation: rows may change after planning.
+	if err := validTarget(f.NewPath); err != nil {
+		return skip(IssueInvalidTarget, err.Error())
+	}
+	if _, err := pathutil.RootRelative(f.OriginalPath); err != nil {
+		return skip(IssueFailed, "源路径非法: "+err.Error())
+	}
 	src, dst := cleanPath(f.OriginalPath), cleanPath(f.NewPath)
 	st, err := e.fs.Stat(ctx, src)
 	if err != nil {

@@ -25,6 +25,7 @@ type ModelProviderResponse struct {
 	MaxTokens       int     `json:"max_tokens"`
 	ContextWindow   int     `json:"context_window"`
 	ReasoningEffort string  `json:"reasoning_effort"`
+	APIKeySet       bool    `json:"api_key_set"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
 }
@@ -37,6 +38,7 @@ func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 		VisionEnabled:   m.VisionEnabled,
 		ThinkingEnabled: m.ThinkingEnabled,
 		ReasoningEffort: m.ReasoningEffort,
+		APIKeySet:       m.APIKey != "",
 		CreatedAt:       m.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:       m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -45,7 +47,7 @@ func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 func (s *Server) listModelProviders(c *gin.Context) {
 	providers, err := s.repo.ListModelProviders()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	result := make([]ModelProviderResponse, len(providers))
@@ -56,9 +58,10 @@ func (s *Server) listModelProviders(c *gin.Context) {
 }
 
 type ModelProviderRequest struct {
-	Name        string  `json:"name" binding:"required"`
-	Provider    string  `json:"provider" binding:"required"`
-	APIKey      string  `json:"api_key"`
+	Name     string `json:"name" binding:"required"`
+	Provider string `json:"provider" binding:"required"`
+	// APIKey omitted keeps the stored key on update.
+	APIKey      *string `json:"api_key"`
 	Model       string  `json:"model" binding:"required"`
 	BaseURL     string  `json:"base_url"`
 	Temperature float64 `json:"temperature"`
@@ -121,7 +124,7 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		return
 	}
 	m := &db.ModelProvider{
-		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
+		Name: req.Name, Provider: req.Provider, APIKey: deref(req.APIKey),
 		Model: req.Model, BaseURL: req.BaseURL,
 		Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 		ContextWindow: contextWindow, ReasoningEffort: reasoningEffort,
@@ -129,7 +132,7 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		ThinkingEnabled: resolveBool(req.ThinkingEnabled, false),
 	}
 	if err := s.repo.CreateModelProvider(m); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, toModelProviderResponse(m))
@@ -165,6 +168,10 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.APIKey == nil && m.APIKey != "" && !sameModelEndpoint(m, &req) {
+		badRequest(c, "服务地址已变化，请重新输入 API Key")
+		return
+	}
 	m.Name = req.Name
 	m.Provider = req.Provider
 	m.Model = req.Model
@@ -185,11 +192,11 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 	m.ReasoningEffort = reasoningEffort
 	m.VisionEnabled = resolveBool(req.VisionEnabled, m.VisionEnabled)
 	m.ThinkingEnabled = resolveBool(req.ThinkingEnabled, m.ThinkingEnabled)
-	if req.APIKey != "" && req.APIKey != "****" {
-		m.APIKey = req.APIKey
+	if req.APIKey != nil {
+		m.APIKey = *req.APIKey
 	}
 	if err := s.repo.UpdateModelProvider(m); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, toModelProviderResponse(m))
@@ -202,27 +209,51 @@ func (s *Server) deleteModelProvider(c *gin.Context) {
 		return
 	}
 	if err := s.repo.DeleteModelProvider(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// ModelTestRequest tests a provider. ID names a stored provider whose API key
+// may be reused — only when provider and base_url are unchanged.
+type ModelTestRequest struct {
+	ModelProviderRequest
+	ID uint `json:"id"`
+}
+
+// sameModelEndpoint reports whether req still talks to the stored provider's
+// endpoint; otherwise a stored key could be sent to an arbitrary base_url.
+func sameModelEndpoint(m *db.ModelProvider, req *ModelProviderRequest) bool {
+	return m.Provider == req.Provider && m.BaseURL == req.BaseURL
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 func (s *Server) testModelProvider(c *gin.Context) {
-	var req ModelProviderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var treq ModelTestRequest
+	if err := c.ShouldBindJSON(&treq); err != nil {
+		badRequest(c, "请求格式错误："+err.Error())
 		return
 	}
-	apiKey := req.APIKey
-	if apiKey == "****" && req.Name != "" {
-		providers, _ := s.repo.ListModelProviders()
-		for _, p := range providers {
-			if p.Name == req.Name {
-				apiKey = p.APIKey
-				break
-			}
+	req := treq.ModelProviderRequest
+	apiKey := deref(req.APIKey)
+	if req.APIKey == nil && treq.ID != 0 {
+		stored, err := s.repo.GetModelProvider(treq.ID)
+		if err != nil {
+			notFound(c, "模型不存在")
+			return
 		}
+		if stored.APIKey != "" && !sameModelEndpoint(stored, &req) {
+			badRequest(c, "服务地址已变化，请重新输入 API Key")
+			return
+		}
+		apiKey = stored.APIKey
 	}
 	if _, err := resolveContextWindow(req.ContextWindow, db.DefaultContextWindow); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
