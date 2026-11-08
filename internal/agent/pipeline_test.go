@@ -355,8 +355,15 @@ func TestListFilesCompactAndSensitiveRead(t *testing.T) {
 	}
 	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
 	out, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Limit: 2})
-	if err != nil || out.Total != 4 || out.NextOffset != 2 || strings.Count(out.Rows, "\n") != 2 || out.Columns != listColumns {
+	if err != nil || !out.HasMore || out.NextCursor == 0 || strings.Count(out.Rows, "\n") != 2 || out.Columns != listColumns {
 		t.Fatalf("paged TSV: %+v %v", out, err)
+	}
+	rest, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Limit: 2, Cursor: out.NextCursor})
+	if err != nil || rest.HasMore || strings.Count(rest.Rows, "\n") != 2 || strings.Contains(out.Rows, strings.SplitN(rest.Rows, "\t", 2)[0]+"\t") {
+		t.Fatalf("second keyset page: %+v %v", rest, err)
+	}
+	if bad, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Cursor: 999999}); err != nil || bad.Error == "" {
+		t.Fatalf("stale cursor is a recoverable result: %+v %v", bad, err)
 	}
 	all, _ := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "/misc/", Undecided: true})
 	if !strings.Contains(all.Rows, "evil name.txt\tf") || strings.Contains(all.Rows, "misc/") {

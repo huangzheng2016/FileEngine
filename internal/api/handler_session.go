@@ -238,7 +238,6 @@ func (s *Server) getSession(c *gin.Context) {
 		return
 	}
 
-	_ = s.repo.RefreshSessionCounts(uint(id))
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
 		lookupFailed(c, err, msgNoSession)

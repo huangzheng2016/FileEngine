@@ -5,7 +5,6 @@ import (
 	"path"
 	"strings"
 
-	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 )
 
@@ -42,31 +41,22 @@ func CollisionName(p string, n int) string {
 // maxCollisionVariants bounds the "name (n)" search.
 const maxCollisionVariants = 1000
 
+// targetKey is the stored new_path_key of a target ("" for no target).
+func targetKey(newPath string) string {
+	if newPath == "" {
+		return ""
+	}
+	return CollisionKey(newPath)
+}
+
 // targetTaken reports whether another entry of the session targets a path
-// with the same CollisionKey as candidate. SQL narrows by lower-cased NFC/NFD
-// spellings; the exact key comparison happens in Go.
+// with the same CollisionKey as candidate (indexed new_path_key lookup).
 func targetTaken(tx *gorm.DB, sessionID uint, candidate, originalPath string) (bool, error) {
-	variants := map[string]bool{}
-	for _, v := range []string{candidate, norm.NFC.String(candidate), norm.NFD.String(candidate)} {
-		variants[strings.ToLower(v)] = true
-	}
-	lowered := make([]string, 0, len(variants))
-	for v := range variants {
-		lowered = append(lowered, v)
-	}
-	var paths []string
-	if err := tx.Model(&FileEntry{}).
-		Where("scan_session_id = ? AND LOWER(new_path) IN ? AND original_path <> ?", sessionID, lowered, originalPath).
-		Pluck("new_path", &paths).Error; err != nil {
-		return false, err
-	}
-	key := CollisionKey(candidate)
-	for _, p := range paths {
-		if CollisionKey(p) == key {
-			return true, nil
-		}
-	}
-	return false, nil
+	var ids []uint
+	err := tx.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND new_path_key = ? AND original_path <> ?", sessionID, CollisionKey(candidate), originalPath).
+		Limit(1).Pluck("id", &ids).Error
+	return len(ids) > 0, err
 }
 
 // ResetPlans clears the targets of the given entries of a session and marks
@@ -77,6 +67,7 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	defer r.touchCounts(sessionID)
 	var n int64
 	err := WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
@@ -94,15 +85,14 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 				found[i] = e.ID
 			}
 			if err := tx.Model(&FileEntry{}).Where("id IN ?", found).
-				Updates(map[string]any{"role": RoleUndecided, "reason": "", "new_path": "", "operation": "", "tagged": false, "needs_review": false, "confidence": 0}).Error; err != nil {
+				Updates(map[string]any{"role": RoleUndecided, "reason": "", "new_path": "", "new_path_key": "", "operation": "", "tagged": false, "needs_review": false, "confidence": 0}).Error; err != nil {
 				return err
 			}
 			for _, e := range entries {
 				if e.FileType != "directory" {
 					continue
 				}
-				if err := tx.Model(&FileEntry{}).
-					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND role = ?", sessionID, childPathPattern(e.OriginalPath), RoleMember).
+				if err := entriesUnder(tx, sessionID, e.OriginalPath).Where("role = ?", RoleMember).
 					Updates(map[string]any{"role": RoleUndecided, "reason": "", "tagged": false}).Error; err != nil {
 					return err
 				}

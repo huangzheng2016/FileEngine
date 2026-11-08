@@ -268,7 +268,8 @@ func (r *Repository) ruleCandidates(sessionID uint, rule *PlanRule, fn func([]Fi
 			q = q.Where("file_type <> 'symlink'")
 		}
 		if rule.PathPrefix != "" {
-			q = q.Where("original_path LIKE ?"+likeEscapeClause, childPathPattern(rule.PathPrefix))
+			cond, args := subtreeCond(q, "original_path", rule.PathPrefix)
+			q = q.Where(cond, args...)
 		}
 		if rule.MinSize > 0 {
 			q = q.Where("size >= ?", rule.MinSize)

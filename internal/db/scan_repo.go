@@ -1,7 +1,6 @@
 package db
 
 import (
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,26 +19,25 @@ func (r *Repository) Reader() *gorm.DB {
 	return r.db
 }
 
-// maxBindVars stays under SQLite's SQLITE_MAX_VARIABLE_NUMBER (32766);
-// MySQL and PostgreSQL allow 65535 placeholders per statement.
-const maxBindVars = 30000
-
-var (
-	insertRowsOnce sync.Once
-	insertRows     int
-)
+// maxBindVars bounds the placeholders of one multi-row INSERT. The pure-Go
+// SQLite driver binds in O(params^2) per statement, so a few dozen rows per
+// statement is fastest there (900-row statements were 8x slower than 40-row
+// ones for 50k entries); MySQL and PostgreSQL allow 65535 placeholders.
+func maxBindVars(db *gorm.DB) int {
+	if db.Dialector.Name() == "sqlite" {
+		return 1500
+	}
+	return 30000
+}
 
 // InsertBatchRows is the multi-row INSERT size for FileEntry: as many rows as
-// fit under the bind-variable cap given the current column count.
+// fit under the bind-variable budget given the current column count.
 func (r *Repository) InsertBatchRows() int {
-	insertRowsOnce.Do(func() {
-		insertRows = 500
-		stmt := &gorm.Statement{DB: r.db}
-		if err := stmt.Parse(&FileEntry{}); err == nil && len(stmt.Schema.DBNames) > 0 {
-			insertRows = maxBindVars / len(stmt.Schema.DBNames)
-		}
-	})
-	return insertRows
+	stmt := &gorm.Statement{DB: r.db}
+	if err := stmt.Parse(&FileEntry{}); err != nil || len(stmt.Schema.DBNames) == 0 {
+		return 40
+	}
+	return max(1, maxBindVars(r.db)/len(stmt.Schema.DBNames))
 }
 
 // EntryUpdate is one column-scoped FileEntry update by primary key.
@@ -122,6 +120,7 @@ func (r *Repository) DeleteEntriesByIDs(ids []uint) error {
 // members (one effective decision per path). Used after a rescan inserted or
 // reset rows inside units.
 func (r *Repository) AdoptUnitMembers(sessionID uint) (int64, error) {
+	defer r.touchCounts(sessionID)
 	var units []string
 	if err := r.Reader().Model(&FileEntry{}).
 		Where("scan_session_id = ? AND role = ?", sessionID, RoleUnit).
@@ -132,9 +131,7 @@ func (r *Repository) AdoptUnitMembers(sessionID uint) (int64, error) {
 	for _, u := range units {
 		var n int64
 		err := WithRetry(func() error {
-			res := r.db.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND role = ? AND original_path LIKE ?"+likeEscapeClause,
-					sessionID, RoleUndecided, childPathPattern(u)).
+			res := entriesUnder(r.db, sessionID, u).Where("role = ?", RoleUndecided).
 				Updates(map[string]any{"role": RoleMember, "tagged": true})
 			n = res.RowsAffected
 			return res.Error

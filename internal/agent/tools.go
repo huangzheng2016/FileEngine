@@ -22,17 +22,18 @@ type ListFilesInput struct {
 	ParentPath string `json:"parent_path" jsonschema_description:"目录路径；空=扫描根目录"`
 	FileType   string `json:"file_type,omitempty" jsonschema_description:"file / directory"`
 	Undecided  bool   `json:"undecided,omitempty" jsonschema_description:"只列出尚未决定的条目"`
-	Offset     int    `json:"offset,omitempty"`
+	Cursor     uint   `json:"cursor,omitempty" jsonschema_description:"翻页：上一页返回的 next_cursor"`
 	Limit      int    `json:"limit,omitempty" jsonschema_description:"默认 100，最多 500"`
 }
 
 // ListFilesOutput is a compact TSV listing; names are relative to Parent.
 type ListFilesOutput struct {
 	Parent     string `json:"parent"`
-	Total      int64  `json:"total"`
-	NextOffset int    `json:"next_offset,omitempty"`
 	Columns    string `json:"columns"`
 	Rows       string `json:"rows"`
+	HasMore    bool   `json:"has_more,omitempty"`
+	NextCursor uint   `json:"next_cursor,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type GetFileInfoInput struct {
@@ -231,20 +232,23 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 		limit = 100
 	}
 	limit = min(limit, 500)
-	offset := max(input.Offset, 0)
 	parent := strings.Trim(normalizePath(input.ParentPath), "/")
-	q := db.FileQuery{SessionID: tb.sessionID, ParentPath: &parent, FileType: input.FileType, Page: offset/limit + 1, PageSize: limit}
+	q := db.FileQuery{SessionID: tb.sessionID, ParentPath: &parent, FileType: input.FileType}
 	if input.Undecided {
 		role := db.RoleUndecided
 		q.Role = &role
 	}
-	files, total, err := tb.repo.ListFiles(q)
-	if err != nil {
+	out := &ListFilesOutput{Parent: parent, Columns: listColumns}
+	files, more, err := tb.repo.ListFilesAfter(q, input.Cursor, limit)
+	if errors.Is(err, db.ErrBadCursor) {
+		out.Error = "cursor 已失效，请不带 cursor 从头列出"
+		return out, nil
+	} else if err != nil {
 		return nil, err
 	}
-	out := &ListFilesOutput{Parent: parent, Total: total, Columns: listColumns, Rows: entryRows(files)}
-	if next := offset + len(files); int64(next) < total {
-		out.NextOffset = next
+	out.Rows = entryRows(files)
+	if more {
+		out.HasMore, out.NextCursor = true, files[len(files)-1].ID
 	}
 	return out, nil
 }

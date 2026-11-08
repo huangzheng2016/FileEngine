@@ -27,6 +27,13 @@ scan ──▶ (optional) plan draft ──▶ tagging ──▶ review ──�
 The scan root is the empty path `""`; stored paths are relative to the filesystem root and target paths start
 with `/`.
 
+Path columns compare as bytes on every database (SQLite BINARY, MySQL binary table collation, PostgreSQL
+`"C"`), so subtree matches are index ranges (`db.subtreeCond`: `>= dir/` and `< dir0`). `new_path_key`
+(`CollisionKey(new_path)`) backs the indexed case/normalization-insensitive collision check. MySQL indexes use
+key prefixes to fit InnoDB's 3072-byte limit, so `original_path` uniqueness there covers its first 766
+characters. Session counters (`total_files`, `planned_ops`, …) are stored on `ScanSession`: phases refresh them
+when they end and decision writes schedule a coalesced refresh; reads never recompute them.
+
 ## Runs and events
 
 A session runs at most one run at a time (`409 会话正在运行中` otherwise). Phases: `survey`, `tagging`,

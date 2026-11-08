@@ -148,8 +148,9 @@ func (r *Repository) segmentQuery(sessionID uint, column, prefix string, extra s
 	where := "scan_session_id = ? AND operation != ''" + extra
 	args := []any{start, start, start, start, start, sessionID}
 	if prefix != "" {
-		where += " AND " + column + " LIKE ?" + likeEscapeClause
-		args = append(args, likeLiteral(prefix)+"%")
+		cond, cargs := subtreeCond(tx, column, strings.TrimSuffix(prefix, "/"))
+		where += " AND " + cond
+		args = append(args, cargs...)
 	}
 	inner := tx.Raw("SELECT id, size, file_type, "+seg+" AS seg, "+nested+" AS nested FROM file_entries WHERE "+where, args...)
 	return tx.Table("(?) AS t", inner)
@@ -210,8 +211,9 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 	}
 	var plannedDirs []FileEntry
 	if len(groups) > 0 {
+		under, underArgs := subtreeCond(r.db, "new_path", dir)
 		if err := r.db.Select("id", "original_path", "new_path").
-			Where("scan_session_id = ? AND file_type = 'directory' AND operation != '' AND new_path LIKE ?"+likeEscapeClause, sessionID, likeLiteral(prefix)+"%").
+			Where("scan_session_id = ? AND file_type = 'directory' AND operation != ''", sessionID).Where(under, underArgs...).
 			Find(&plannedDirs).Error; err != nil {
 			return nil, err
 		}

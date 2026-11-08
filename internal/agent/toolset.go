@@ -34,7 +34,7 @@ func infer[I, O any](fn func(context.Context, *I) (*O, error)) func(string, stri
 func (tb *ToolBuilder) BuildToolset(kind ToolsetKind) ([]tool.BaseTool, error) {
 	s := tb.session
 	specs := []toolSpec{
-		{"list_files", "列出目录子项（TSV：名称/类型/大小/角色/目标/描述），默认 100 条，用 next_offset 翻页", infer(tb.listFiles), true},
+		{"list_files", "列出目录子项（TSV：名称/类型/大小/角色/目标/描述），默认 100 条，has_more 时用 next_cursor 翻页", infer(tb.listFiles), true},
 		{"get_file_info", "单个条目的详细信息", infer(tb.getFileInfo), true},
 		{"read_file", "读文件内容（默认 8000 字，用 offset 续读）；PDF/Office 提取文本；zip/tar 列目录，路径::条目 读包内文本；敏感文件不读", infer(tb.readFileUntrusted), s.AllowReadFile},
 		{"set_targets", "批量给文件设目标路径（≤200 条，每条带 reason，可带 confidence）；new_path 为空表示撤销决定", infer(tb.setTargets), true},

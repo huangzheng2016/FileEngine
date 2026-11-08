@@ -38,6 +38,10 @@ the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebK
 - Echoed file names go through `SanitizeUntrustedName`; file contents reach the model inside `<data>` blocks;
   sensitive files are never read.
 - Writes are column-scoped; never `Save` a previously loaded `FileEntry`.
+- Database: path-prefix and subtree matches use `subtreeCond`/`atOrUnderCond` ranges, never `LIKE` (LIKE is
+  only for user-facing substring search); every writer of `new_path` also writes `new_path_key`; read
+  endpoints never recompute or write session counters; agent-iterated listings use keyset pagination
+  (`ListFilesAfter`), not OFFSET + COUNT; new indexes must pass `TestMySQLIndexWidths`.
 - Executor: delete a source only after a verified copy; never overwrite; never `RemoveAll`; stop or cancel never
   deletes; journal each step before it happens; skip sources that changed since the scan.
 - Scanner: writes go through the writer goroutine in batches; a rescan deletes rows only after a completed walk

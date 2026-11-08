@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"FileEngine/internal/config"
 )
 
-func setupBrainRepo(t *testing.T) *Repository {
+func setupBrainRepo(t testing.TB) *Repository {
 	t.Helper()
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "test.db")}); err != nil {
 		t.Fatalf("init: %v", err)
@@ -234,7 +235,7 @@ func seedEntry(t *testing.T, r *Repository, sid uint, p, typ string, size int64)
 	if i := strings.LastIndex(p, "/"); i >= 0 {
 		parent = p[:i]
 	}
-	f := &FileEntry{ScanSessionID: sid, OriginalPath: p, Name: p[strings.LastIndex(p, "/")+1:], FileType: typ, ParentPath: parent, Size: size}
+	f := &FileEntry{ScanSessionID: sid, OriginalPath: p, Name: p[strings.LastIndex(p, "/")+1:], FileType: typ, ParentPath: parent, Size: size, ModTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if err := r.CreateFile(f); err != nil {
 		t.Fatal(err)
 	}
