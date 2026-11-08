@@ -28,6 +28,7 @@ func NewServer(repo *db.Repository, frontend fs.FS, opts ...Options) *Server {
 		limiter:  newRateLimiter(10, time.Minute),
 	}
 	s.setupRouter()
+	installRuleHook(repo)
 	return s
 }
 
@@ -78,6 +79,14 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
 		api.POST("/sessions/:id/plans/reset", s.resetPlans)
 		api.GET("/sessions/:id/preview/tree", s.previewTree)
+		api.POST("/sessions/:id/review/confirm", s.confirmReview)
+
+		// Rules
+		api.GET("/sessions/:id/rules", s.listRules)
+		api.POST("/sessions/:id/rules", s.createRule)
+		api.POST("/sessions/:id/rules/apply", s.applyRules)
+		api.PUT("/rules/:id", s.updateRule)
+		api.DELETE("/rules/:id", s.deleteRule)
 
 		// Session plan
 		api.GET("/sessions/:id/plan", s.getPlan)

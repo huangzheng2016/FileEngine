@@ -57,7 +57,7 @@ func TestAgentDefaultsStillApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Agent.BatchSize != 200 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
+	if cfg.Agent.Concurrency != 6 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
 		t.Fatalf("agent defaults not applied: %+v", cfg.Agent)
 	}
 	if cfg.Agent.RateLimitMaxRetries != 8 || cfg.Agent.RetryBaseDelay != 2 || cfg.Agent.RetryMaxDelay != 60 {
@@ -162,7 +162,7 @@ func TestLoadCreatesMissingConfig(t *testing.T) {
 		t.Fatalf("mode = %o, want 600", st.Mode().Perm())
 	}
 	again, err := Load(p)
-	if err != nil || again.Server.Port != 8080 || again.Agent.BatchSize != cfg.Agent.BatchSize {
+	if err != nil || again.Server.Port != 8080 || again.Agent.MaxStep != cfg.Agent.MaxStep {
 		t.Fatalf("reload: %+v %v", again, err)
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing-dir", "config.yaml")); err == nil {

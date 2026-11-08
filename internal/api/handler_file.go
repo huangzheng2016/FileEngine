@@ -39,6 +39,17 @@ func (s *Server) listFiles(c *gin.Context) {
 	if cp := c.Query("category_path"); cp != "" {
 		q.CategoryPath = &cp
 	}
+	if v := c.Query("needs_review"); v != "" {
+		b := v == "true"
+		q.NeedsReview = &b
+	}
+	if v := c.Query("sensitive"); v != "" {
+		b := v == "true"
+		q.Sensitive = &b
+	}
+	if v, ok := c.GetQuery("role"); ok {
+		q.Role = &v
+	}
 	if page := c.Query("page"); page != "" {
 		q.Page, _ = strconv.Atoi(page)
 	}
@@ -111,12 +122,16 @@ func (s *Server) updateFile(c *gin.Context) {
 			return
 		}
 		oldTarget := file.NewPath
-		final, err := s.repo.SetUserTarget(file, *req.NewPath)
+		res, err := s.repo.Decide(file.ScanSessionID, db.UserTargetDecision(file, *req.NewPath))
+		if db.IsRejection(err) {
+			conflict(c, err.Error())
+			return
+		}
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		if err := s.learnCorrection(*file, oldTarget, final); err != nil {
+		if err := s.learnCorrection(*file, oldTarget, res.NewPath); err != nil {
 			slog.Warn("record correction memory", "file", file.ID, "err", err)
 		}
 	}

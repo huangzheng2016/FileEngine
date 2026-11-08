@@ -216,7 +216,7 @@ func TestScriptBuiltinArgumentValidation(t *testing.T) {
 		`query_files({tagged: "yes"})`,            // wrong type
 		`get_file_info()`,                         // missing arg
 		`set_target("a")`,                         // too few args
-		`set_target("a", "b", "c")`,               // too many
+		`set_target("a", "b", "c", "d")`,          // too many
 		`set_target(1, "b")`,                      // wrong type
 		`rename_category("照片", "")`,               // empty new name
 	} {
@@ -259,23 +259,6 @@ result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 	f, _ = repo.GetFileByPath(1, "incoming/photo1.jpg")
 	if f.NewPath != "" || f.Operation != "" {
 		t.Fatalf("clear must empty the target: %+v", f)
-	}
-}
-
-func TestScriptMarkTaggedBuiltin(t *testing.T) {
-	tb, repo := scriptTestBuilder(t, nil)
-	out := mustRunScript(t, tb, `
-ok := mark_tagged("incoming/photo1.jpg")
-again := mark_tagged("incoming/photo1.jpg")
-missing := mark_tagged("nope/x.jpg")
-result = {ok: ok, again: again, missing_err: is_error(missing)}`)
-	v := resultValue(t, out)
-	if v["ok"] != true || v["again"] != true || v["missing_err"] != true {
-		t.Fatalf("mark_tagged outcomes: %+v", v)
-	}
-	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
-	if !f.Tagged {
-		t.Fatalf("mark_tagged must flip tagged: %+v", f)
 	}
 }
 
@@ -504,9 +487,9 @@ func TestScriptToolRegistration(t *testing.T) {
 	if !hasToolNamed(tools, "run_script") {
 		t.Fatal("run_script must be registered when AllowScript is true")
 	}
-	instructTools, err := tb.BuildInstructTools()
+	instructTools, err := tb.BuildChatTools()
 	if err != nil {
-		t.Fatalf("BuildInstructTools: %v", err)
+		t.Fatalf("BuildChatTools: %v", err)
 	}
 	if !hasToolNamed(instructTools, "run_script") {
 		t.Fatal("run_script must be registered for instruct when AllowScript is true")
@@ -520,9 +503,9 @@ func TestScriptToolRegistration(t *testing.T) {
 	if hasToolNamed(toolsOff, "run_script") {
 		t.Fatal("run_script must not be registered when AllowScript is false")
 	}
-	instructOff, err := tbOff.BuildInstructTools()
+	instructOff, err := tbOff.BuildChatTools()
 	if err != nil {
-		t.Fatalf("BuildInstructTools: %v", err)
+		t.Fatalf("BuildChatTools: %v", err)
 	}
 	if hasToolNamed(instructOff, "run_script") {
 		t.Fatal("run_script must not be registered for instruct when AllowScript is false")

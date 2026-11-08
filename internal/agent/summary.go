@@ -55,28 +55,24 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	return sb.String(), nil
 }
 
-// untaggedReconciliationSection renders the end-of-run tagging reconciliation:
-// untagged remainders split by entry type. Untagged directories and symlinks
-// are expected deltas — container directories are described but deliberately
-// left untagged so their children can be classified on their own, and symlinks
-// never participate in tagging. Only a non-zero file count signals real
-// misses, which the failure section above then explains. ignored reports how
-// many entries the junk filter auto-ignored without spending agent tokens.
+// untaggedReconciliationSection renders the end-of-run reconciliation of
+// entries still undecided, split by type (symlinks never take part), plus
+// the junk entries skipped without an LLM call.
 func untaggedReconciliationSection(b db.UntaggedBreakdown, ignored int64) string {
 	miss := ""
-	if b.Files > 0 {
-		miss = "；未打标文件不为 0 表示存在漏标，原因见失败批次与日志"
+	if b.Files+b.Directories > 0 {
+		miss = "；不为 0 表示有遗漏，原因见失败与遗漏的任务"
 	}
 	junk := ""
 	if ignored > 0 {
-		junk = fmt.Sprintf("；已自动忽略系统垃圾文件 %d 项", ignored)
+		junk = fmt.Sprintf("；系统垃圾已自动跳过 %d 项", ignored)
 	}
-	return fmt.Sprintf("\n## 打标对账\n\n- 未打标剩余：文件 %d / 目录 %d / 软链 %d（容器目录与软链属正常差额：容器只描述不打标、软链不参与打标%s%s）\n",
+	return fmt.Sprintf("\n## 决定对账\n\n- 未决定剩余：文件 %d / 目录 %d / 软链 %d（软链不参与整理%s%s）\n",
 		b.Files, b.Directories, b.Symlinks, miss, junk)
 }
 
 // emptyCategoryPruneSection records the AI-created empty categories pruned at
-// run end ("建了不用" — created but never used). Empty input renders nothing.
+// run end (created but never used). Empty input renders nothing.
 func emptyCategoryPruneSection(pruned []string) string {
 	if len(pruned) == 0 {
 		return ""
@@ -89,22 +85,21 @@ func emptyCategoryPruneSection(pruned []string) string {
 	return sb.String()
 }
 
-// failureReportSection renders the failed-batch section appended to a tagging
-// report: total count plus each batch's target and error. Long failure lists
-// are capped so the report stays readable.
+// failureReportSection lists the work units that failed or left entries
+// undecided (capped).
 func failureReportSection(failures []BatchFailure) string {
 	if len(failures) == 0 {
 		return ""
 	}
 	const maxListed = 20
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n## 失败批次（%d）\n\n", len(failures)))
+	sb.WriteString(fmt.Sprintf("\n## 失败与遗漏的任务（%d）\n\n", len(failures)))
 	for i, f := range failures {
 		if i >= maxListed {
-			sb.WriteString(fmt.Sprintf("- … 其余 %d 个批次从略，详见日志\n", len(failures)-maxListed))
+			sb.WriteString(fmt.Sprintf("- … 其余 %d 个从略\n", len(failures)-maxListed))
 			break
 		}
-		sb.WriteString(fmt.Sprintf("- 批次 %d（%s）: %s\n", f.BatchIndex, f.Target, f.Err))
+		sb.WriteString(fmt.Sprintf("- **%s**：%s\n", f.Target, f.Err))
 	}
 	return sb.String()
 }

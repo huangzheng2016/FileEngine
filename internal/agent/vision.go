@@ -74,6 +74,10 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 
 	for _, p := range input.Paths {
 		path := normalizePath(p)
+		if tb.isSensitivePath(path) {
+			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: SanitizeUntrustedName(path) + ": " + sensitiveNotice})
+			continue
+		}
 		format := imageFormatFor(path)
 		if format == "" {
 			note := fmt.Sprintf("%s: skipped (unsupported format; supported: jpg/jpeg/png/gif)", path)

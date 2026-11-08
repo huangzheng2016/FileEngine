@@ -32,8 +32,11 @@ the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebK
   → append-only history → per-unit data. Never put counts, timestamps or ids in the prefix.
 - Only `db.Emit` publishes events, never inside a DB transaction. Never put image data in events or logs.
 - Retries are per model request; a run is never replayed after the model has answered.
-- One effective decision per path, enforced in the repository; agent-recoverable rejections are tool results
-  (`success:false`), not Go errors.
+- One effective decision per path: only `db.Decide` / `DecideBatch` write decisions; nothing is decided under a
+  unit; overriding decided descendants needs `override` and is reported; every decision carries a reason.
+  Agent-recoverable rejections are tool results (`success:false`), not Go errors.
+- Echoed file names go through `SanitizeUntrustedName`; file contents reach the model inside `<data>` blocks;
+  sensitive files are never read.
 - Writes are column-scoped; never `Save` a previously loaded `FileEntry`.
 - Executor: delete a source only after a verified copy; never overwrite; never `RemoveAll`; stop or cancel never
   deletes; journal each step before it happens; skip sources that changed since the scan.

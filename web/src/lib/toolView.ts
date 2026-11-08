@@ -42,9 +42,18 @@ export interface FileRow {
   target: string
 }
 
-// list_files / query_files: the first rows of what the agent saw.
+// list_files / query_files: the first rows of what the agent saw. list_files
+// returns compact TSV rows (名称/类型/大小/角色/目标/描述) relative to `parent`.
 export function fileRows(output: unknown): { rows: FileRow[]; total: number } {
   const o = obj(output)
+  if (typeof o.rows === 'string') {
+    const lines = o.rows.split('\n').filter(Boolean)
+    const rows = lines.slice(0, 8).map((line) => {
+      const [name = '', type = '', , , target = ''] = line.split('\t')
+      return { name, dir: type === 'd', target }
+    })
+    return { rows, total: typeof o.total === 'number' ? o.total : lines.length }
+  }
   const list = Array.isArray(o.files) ? o.files : Array.isArray(o.items) ? o.items : Array.isArray(output) ? output : []
   const rows = list.slice(0, 8).map((f) => {
     const r = obj(f)

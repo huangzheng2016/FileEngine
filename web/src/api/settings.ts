@@ -87,7 +87,6 @@ export async function testModel(body: ModelInput & { id?: number }) {
 
 export interface AgentConfig {
   concurrency: number
-  batch_size: number
   max_step: number
   max_retries: number
   rate_limit_max_retries: number

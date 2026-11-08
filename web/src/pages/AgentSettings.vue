@@ -20,7 +20,6 @@ const confirm = useConfirm()
 
 const form = reactive({
   concurrency: 6,
-  batch_size: 200,
   max_step: 150,
   max_retries: 3,
   agent_timeout: 0,
@@ -34,7 +33,7 @@ const guard = useDirtyGuard(() => form, { route: true })
 
 const v = useFormValidation(() => ({
   concurrency: form.concurrency < 1 || form.concurrency > 32 ? '并行数需在 1 到 32 之间' : '',
-  batch_size: form.batch_size < 1 || form.batch_size > 500 ? '每批文件数需在 1 到 500 之间' : '',
+  max_file_read_size: form.max_file_read_size < 1000 ? '每次读取字数至少 1000' : '',
   max_step: form.max_step < 1 ? '每次最多步数至少为 1' : '',
   max_retries: form.max_retries < 0 || form.max_retries > 10 ? '失败重试需在 0 到 10 次之间' : '',
 }))
@@ -53,7 +52,6 @@ function apply(cfg: AppConfig, def = defaultPrompt.value) {
   const a = cfg.agent
   Object.assign(form, {
     concurrency: a.concurrency,
-    batch_size: a.batch_size,
     max_step: a.max_step,
     max_retries: a.max_retries,
     agent_timeout: a.agent_timeout > 0 ? a.agent_timeout : 0,
@@ -76,7 +74,6 @@ async function save() {
       agent: {
         ...cfg.agent,
         concurrency: form.concurrency,
-        batch_size: form.batch_size,
         max_step: form.max_step,
         max_retries: form.max_retries,
         agent_timeout: form.agent_timeout,
@@ -168,18 +165,6 @@ const saveBlocked = computed(() => (!guard.dirty.value ? '没有修改' : ''))
             <span v-if="v.error('concurrency')" class="field-error">{{ v.error('concurrency') }}</span>
           </label>
           <label class="field">
-            <span class="field-label">每批文件数</span>
-            <input
-              v-model.number="form.batch_size"
-              type="number"
-              min="1"
-              max="500"
-              name="batch_size"
-              :aria-invalid="!!v.error('batch_size')"
-            />
-            <span v-if="v.error('batch_size')" class="field-error">{{ v.error('batch_size') }}</span>
-          </label>
-          <label class="field">
             <span class="field-label">每次最多步数</span>
             <input
               v-model.number="form.max_step"
@@ -207,10 +192,17 @@ const saveBlocked = computed(() => (!guard.dirty.value ? '没有修改' : ''))
             <UnitInput v-model="form.agent_timeout" kind="duration" name="agent_timeout" label="单次运行时限" />
             <span class="field-hint">留空表示不限</span>
           </div>
-          <div class="field">
-            <span class="field-label">读取文件上限</span>
-            <UnitInput v-model="form.max_file_read_size" kind="bytes" name="max_file_read_size" label="读取文件上限" />
-          </div>
+          <label class="field">
+            <span class="field-label">每次读取字数</span>
+            <input
+              v-model.number="form.max_file_read_size"
+              type="number"
+              min="1000"
+              name="max_file_read_size"
+              :aria-invalid="!!v.error('max_file_read_size')"
+            />
+            <span v-if="v.error('max_file_read_size')" class="field-error">{{ v.error('max_file_read_size') }}</span>
+          </label>
         </div>
       </section>
 

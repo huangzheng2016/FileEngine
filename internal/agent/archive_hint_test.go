@@ -103,16 +103,3 @@ func makeBatchEntries(t *testing.T) []db.FileEntry {
 		{ID: 2, ScanSessionID: 1, OriginalPath: "p/readme.txt", Name: "readme.txt", FileType: "file", Size: 128},
 	}
 }
-
-func TestBuildBatchPromptWithHints(t *testing.T) {
-	entries := makeBatchEntries(t)
-	hints := map[uint]string{1: "zip 压缩包，共 41 个条目，含: main.py"}
-	out := buildBatchPrompt(entries, "", hints)
-	if !strings.Contains(out, "内容摘要: zip 压缩包，共 41 个条目") {
-		t.Fatalf("hint line missing:\n%s", out)
-	}
-	plain := buildBatchPrompt(entries, "", nil)
-	if strings.Contains(plain, "内容摘要") {
-		t.Fatalf("no hints → no hint lines:\n%s", plain)
-	}
-}

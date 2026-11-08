@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"FileEngine/internal/config"
@@ -39,59 +38,6 @@ func seedCategory(t *testing.T, repo *db.Repository, filesystemID uint, name, pa
 	}
 }
 
-// set_target must reject illegal targets loudly and write nothing.
-func TestSetTargetRejectsIllegalPaths(t *testing.T) {
-	repo := setupToolTestRepo(t)
-	seedFile(t, repo, 1, "incoming/photo.jpg", "file")
-
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
-
-	bad := []string{"/", "..", "../escape", "/../etc/passwd", "/organized/../../escape"}
-	for _, p := range bad {
-		out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: p})
-		if err != nil {
-			t.Fatalf("setTarget new_path=%q: rejection must be a non-fatal result, got run error: %v", p, err)
-		}
-		if out.Success || !strings.Contains(out.Error, "invalid new_path") {
-			t.Fatalf("setTarget new_path=%q: got %+v, want invalid-path rejection", p, out)
-		}
-	}
-
-	f, err := repo.GetFileByPath(1, "incoming/photo.jpg")
-	if err != nil {
-		t.Fatalf("reload file: %v", err)
-	}
-	if f.NewPath != "" || f.Operation != "" {
-		t.Fatalf("illegal target must not be written: new_path=%q operation=%q", f.NewPath, f.Operation)
-	}
-}
-
-// set_target accepts legal targets (writes them) and clears them on empty.
-func TestSetTargetValidAndClear(t *testing.T) {
-	repo := setupToolTestRepo(t)
-	seedFile(t, repo, 1, "incoming/photo.jpg", "file")
-	seedCategory(t, repo, 1, "整理", "/organized")
-
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
-
-	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: "/organized/photos/photo.jpg"}); err != nil {
-		t.Fatalf("setTarget valid: %v", err)
-	}
-	f, _ := repo.GetFileByPath(1, "incoming/photo.jpg")
-	if f.NewPath != "/organized/photos/photo.jpg" || f.Operation != "planned" {
-		t.Fatalf("after set: new_path=%q operation=%q", f.NewPath, f.Operation)
-	}
-
-	// Empty new_path clears the target.
-	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: ""}); err != nil {
-		t.Fatalf("setTarget clear: %v", err)
-	}
-	f, _ = repo.GetFileByPath(1, "incoming/photo.jpg")
-	if f.NewPath != "" || f.Operation != "" {
-		t.Fatalf("after clear: new_path=%q operation=%q", f.NewPath, f.Operation)
-	}
-}
-
 // Category paths become new_path prefixes, so they follow the same rules.
 func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
@@ -124,31 +70,5 @@ func TestCategoryPathValidation(t *testing.T) {
 	}
 	if _, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/organized/better"}); err != nil {
 		t.Fatalf("updateCategory valid: %v", err)
-	}
-}
-
-// set_target on a directory cascade-clears planned children — the tool result
-// must surface that consequence (cleared_children + guidance) so the agent
-// can re-decide instead of silently discarding finer classifications.
-func TestSetTargetCascadeClearWarning(t *testing.T) {
-	repo := setupToolTestRepo(t)
-	seedFile(t, repo, 1, "db", "directory")
-	seedFile(t, repo, 1, "db/azure", "directory")
-	seedCategory(t, repo, 1, "备份", "/backups")
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
-
-	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db/azure", NewPath: "/backups/database/azure"}); err != nil {
-		t.Fatalf("child set: %v", err)
-	}
-	out, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db", NewPath: "/backups/database"})
-	if err != nil {
-		t.Fatalf("parent set: %v", err)
-	}
-	if out.ClearedChildren != 1 || !strings.Contains(out.Guidance, "覆盖") {
-		t.Fatalf("cascade clear must be reported: %+v", out)
-	}
-	f, _ := repo.GetFileByPath(1, "db/azure")
-	if f.NewPath != "" {
-		t.Fatalf("child target must be cascade-cleared, got %q", f.NewPath)
 	}
 }

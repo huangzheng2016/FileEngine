@@ -42,63 +42,6 @@ func CollisionName(p string, n int) string {
 // maxCollisionVariants bounds the "name (n)" search.
 const maxCollisionVariants = 1000
 
-// SetTargetUnique plans an entry's target, resolving collisions at plan time:
-// when another entry of the session already targets newPath, the first free
-// "name (n).ext" variant is used instead. For a directory with a target, the
-// planned descendants are cleared (outer target overrides inner). Returns the
-// final target and how many children were cleared. newPath "" clears.
-func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, fileType string) (string, int64, error) {
-	newPath = NormalizeTargetPath(newPath)
-	op := ""
-	if newPath != "" {
-		op = "planned"
-	}
-	final := newPath
-	var cleared int64
-	err := WithRetry(func() error {
-		return r.db.Transaction(func(tx *gorm.DB) error {
-			final = newPath
-			if newPath != "" {
-				free := false
-				for n := 1; n <= maxCollisionVariants; n++ {
-					candidate := newPath
-					if n > 1 {
-						candidate = CollisionName(newPath, n)
-					}
-					taken, err := targetTaken(tx, sessionID, candidate, originalPath)
-					if err != nil {
-						return err
-					}
-					if !taken {
-						final, free = candidate, true
-						break
-					}
-				}
-				if !free {
-					return fmt.Errorf("no free target name for %s after %d variants", newPath, maxCollisionVariants)
-				}
-			}
-			if err := tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND original_path = ?", sessionID, originalPath).
-				Updates(map[string]any{"new_path": final, "operation": op}).Error; err != nil {
-				return err
-			}
-			cleared = 0
-			if fileType == "directory" && final != "" {
-				res := tx.Model(&FileEntry{}).
-					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(originalPath)).
-					Updates(map[string]any{"new_path": "", "operation": ""})
-				if res.Error != nil {
-					return res.Error
-				}
-				cleared = res.RowsAffected
-			}
-			return nil
-		})
-	})
-	return final, cleared, err
-}
-
 // targetTaken reports whether another entry of the session targets a path
 // with the same CollisionKey as candidate. SQL narrows by lower-cased NFC/NFD
 // spellings; the exact key comparison happens in Go.
@@ -127,8 +70,8 @@ func targetTaken(tx *gorm.DB, sessionID uint, candidate, originalPath string) (b
 }
 
 // ResetPlans clears the targets of the given entries of a session and marks
-// them untagged so the next tagging/chat run redoes them; a reset directory
-// also untags its descendants (they were cascade-tagged with it). Returns the
+// them undecided so the next tagging/chat run redoes them; a reset unit
+// releases its members. Returns the
 // number of entries reset.
 func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
@@ -151,7 +94,7 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 				found[i] = e.ID
 			}
 			if err := tx.Model(&FileEntry{}).Where("id IN ?", found).
-				Updates(map[string]any{"new_path": "", "operation": "", "tagged": false}).Error; err != nil {
+				Updates(map[string]any{"role": RoleUndecided, "reason": "", "new_path": "", "operation": "", "tagged": false, "needs_review": false, "confidence": 0}).Error; err != nil {
 				return err
 			}
 			for _, e := range entries {
@@ -159,8 +102,8 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 					continue
 				}
 				if err := tx.Model(&FileEntry{}).
-					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(e.OriginalPath)).
-					Update("tagged", false).Error; err != nil {
+					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND role = ?", sessionID, childPathPattern(e.OriginalPath), RoleMember).
+					Updates(map[string]any{"role": RoleUndecided, "reason": "", "tagged": false}).Error; err != nil {
 					return err
 				}
 			}
@@ -175,4 +118,15 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 // never a full-row Save of a stale struct).
 func (r *Repository) UpdateFileFields(id uint, fields map[string]any) error {
 	return r.db.Model(&FileEntry{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// ConfirmReview clears needs_review on the given entries of a session (the
+// user accepts the low-confidence decisions). Returns how many changed.
+func (r *Repository) ConfirmReview(sessionID uint, ids []uint) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND id IN ? AND needs_review = ?", sessionID, ids, true).
+		Update("needs_review", false)
+	return res.RowsAffected, res.Error
 }
