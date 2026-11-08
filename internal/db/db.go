@@ -17,6 +17,24 @@ import (
 
 var DB *gorm.DB
 
+// readDB is the SQLite read-only connection pool (nil on MySQL/PostgreSQL,
+// whose single pool already serves concurrent readers). See ReadDB.
+var readDB *gorm.DB
+
+// readPoolSize bounds the SQLite reader pool. WAL lets readers run alongside
+// the single writer connection without blocking on it.
+const readPoolSize = 4
+
+// ReadDB returns the pool for read-only queries: on SQLite a separate
+// query_only pool so long reads never queue behind the single writer
+// connection (readers see the last committed state); elsewhere the main DB.
+func ReadDB() *gorm.DB {
+	if readDB != nil {
+		return readDB
+	}
+	return DB
+}
+
 func Init(cfg config.DatabaseConfig) error {
 	var dialector gorm.Dialector
 	switch cfg.Driver {
@@ -60,25 +78,30 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 	}
 
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
+		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &ExecOp{}); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
-	if err := DB.AutoMigrate(&SessionPlan{}, &MemoryItem{}); err != nil {
-		return fmt.Errorf("failed to migrate plan/memory tables: %w", err)
-	}
 
-	// Backfill context_window for providers created before the field existed
-	// (max_tokens was previously misused as the window; it now only caps output).
-	if err := backfillContextWindow(DB); err != nil {
-		return fmt.Errorf("failed to backfill context_window: %w", err)
+	readDB = nil
+	if cfg.Driver == "sqlite" {
+		// Opened after AutoMigrate: the file exists in WAL mode by now.
+		if readDB, err = openSQLiteReadPool(cfg.DSN); err != nil {
+			return err
+		}
 	}
-
-	// Zombie sweep: sessions still "scanning" belong to a previous process
-	// lifetime — mark them interrupted so they cannot masquerade as live.
-	if n, err := NewRepository(DB).MarkInterruptedScans(); err != nil {
+	// Zombie sweeps: scans and runs still marked live belong to a previous
+	// process lifetime.
+	repo := NewRepository(DB)
+	if n, err := repo.MarkInterruptedScans(); err != nil {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	} else if n > 0 {
 		log.Printf("db init: marked %d zombie scanning session(s) as interrupted", n)
+	}
+	if n, err := repo.SweepStaleRuns(); err != nil {
+		return fmt.Errorf("failed to sweep stale runs: %w", err)
+	} else if n > 0 {
+		log.Printf("db init: marked %d stale running run(s) as stopped", n)
 	}
 
 	return nil
@@ -92,17 +115,32 @@ func sqliteDSN(path string) string {
 	return path + "?_pragma=busy_timeout(30000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=cache_size(-20000)" +
+		"&_pragma=cache_size(-65536)" +
 		"&_pragma=foreign_keys(1)" +
 		"&_txlock=immediate"
 }
 
-// backfillContextWindow sets the default context window on provider rows that
-// predate the context_window column (NULL / non-positive values).
-func backfillContextWindow(db *gorm.DB) error {
-	return db.Model(&ModelProvider{}).
-		Where("context_window IS NULL OR context_window <= 0").
-		Update("context_window", DefaultContextWindow).Error
+// openSQLiteReadPool opens the query_only reader pool on the same database
+// file. WAL is a persistent property of the file, so readers need no
+// journal_mode pragma.
+func openSQLiteReadPool(path string) (*gorm.DB, error) {
+	dsn := path + "?_pragma=busy_timeout(30000)" +
+		"&_pragma=cache_size(-65536)" +
+		"&_pragma=query_only(1)"
+	rdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Warn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite read pool: %w", err)
+	}
+	sqlDB, err := rdb.DB()
+	if err != nil {
+		return nil, fmt.Errorf("sqlite read pool: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(readPoolSize)
+	sqlDB.SetMaxIdleConns(readPoolSize)
+	sqlDB.SetConnMaxLifetime(0)
+	return rdb, nil
 }
 
 func GetDB() *gorm.DB {

@@ -260,7 +260,7 @@ func (r *smbReadCloser) Close() error {
 	return nil
 }
 
-func (s *SMBFS) MoveFile(_ context.Context, src, dst string) error {
+func (s *SMBFS) MoveFile(ctx context.Context, src, dst string) error {
 	srcFull, err := s.resolve(src)
 	if err != nil {
 		return err
@@ -269,10 +269,24 @@ func (s *SMBFS) MoveFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return s.share.Rename(srcFull, dstFull)
+	opCtx, cancel := smbOpCtx(ctx)
+	defer cancel()
+	share := s.share.WithContext(opCtx)
+	if _, err := share.Lstat(dstFull); err == nil {
+		return existErr("smb", "move", dst)
+	}
+	// go-smb2 renames with ReplaceIfExists=0: the server refuses an
+	// existing target even if it appeared after the check above.
+	if err := share.Rename(srcFull, dstFull); err != nil {
+		return &OpError{Protocol: "smb", Op: "move", Path: src, Err: err}
+	}
+	return nil
 }
 
-func (s *SMBFS) CopyFile(_ context.Context, src, dst string) error {
+// CopyFile runs on a sliding context: go-smb2 binds a file's context at open
+// time, so the deadline is pushed forward by every successful write and only
+// fires after opTimeout without progress (or when ctx is canceled).
+func (s *SMBFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := s.resolve(src)
 	if err != nil {
 		return err
@@ -281,36 +295,79 @@ func (s *SMBFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	srcFile, err := s.share.Open(srcFull)
+	opCtx, touch, cancel := slidingCtx(ctx, opTimeout())
+	defer cancel()
+	share := s.share.WithContext(opCtx)
+
+	srcFile, err := share.Open(srcFull)
 	if err != nil {
-		return err
+		return &OpError{Protocol: "smb", Op: "open", Path: src, Err: err}
 	}
 	defer srcFile.Close()
-
-	dstFile, err := s.share.Create(dstFull)
+	st, err := srcFile.Stat()
 	if err != nil {
+		return &OpError{Protocol: "smb", Op: "stat", Path: src, Err: err}
+	}
+	if st.IsDir() {
+		return &OpError{Protocol: "smb", Op: "copy", Path: src, Err: ErrIsDir}
+	}
+
+	// O_EXCL maps to FILE_CREATE: the server refuses an existing dst.
+	dstFile, err := share.OpenFile(dstFull, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		if _, serr := share.Lstat(dstFull); serr == nil {
+			return existErr("smb", "create", dst)
+		}
+		return &OpError{Protocol: "smb", Op: "create", Path: dst, Err: err}
+	}
+	n, err := io.Copy(&touchWriter{w: dstFile, touch: touch}, srcFile)
+	if cerr := dstFile.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n != st.Size() {
+		err = shortCopyErr("smb", dst, n, st.Size())
+	}
+	if err != nil {
+		// The sliding context may be the thing that failed; clean up on a
+		// fresh bounded one.
+		rmCtx, rmCancel := smbOpCtx(context.Background())
+		s.share.WithContext(rmCtx).Remove(dstFull)
+		rmCancel()
+		if _, ok := err.(*OpError); !ok {
+			err = &OpError{Protocol: "smb", Op: "copy", Path: dst, Err: err}
+		}
 		return err
 	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	touch()
+	_ = share.Chtimes(dstFull, st.ModTime(), st.ModTime())
+	return nil
 }
 
-func (s *SMBFS) Delete(_ context.Context, p string) error {
+// Delete removes one file or one empty directory.
+func (s *SMBFS) Delete(ctx context.Context, p string) error {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return err
 	}
-	return s.share.RemoveAll(fullPath)
+	opCtx, cancel := smbOpCtx(ctx)
+	defer cancel()
+	if err := s.share.WithContext(opCtx).Remove(fullPath); err != nil {
+		return &OpError{Protocol: "smb", Op: "delete", Path: p, Err: err}
+	}
+	return nil
 }
 
-func (s *SMBFS) MkdirAll(_ context.Context, p string) error {
+func (s *SMBFS) MkdirAll(ctx context.Context, p string) error {
 	fullPath, err := s.resolve(p)
 	if err != nil {
 		return err
 	}
-	return s.share.MkdirAll(fullPath, 0755)
+	opCtx, cancel := smbOpCtx(ctx)
+	defer cancel()
+	if err := s.share.WithContext(opCtx).MkdirAll(fullPath, 0755); err != nil {
+		return &OpError{Protocol: "smb", Op: "mkdir", Path: p, Err: err}
+	}
+	return nil
 }
 
 func (s *SMBFS) Close() error {

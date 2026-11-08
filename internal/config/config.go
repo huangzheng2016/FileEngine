@@ -119,7 +119,7 @@ type AgentConfig struct {
 	ArchivePromptDisabled   bool `yaml:"archive_prompt_disabled" json:"archive_prompt_disabled"`
 	ArchivePromptMaxEntries int  `yaml:"archive_prompt_max_entries" json:"archive_prompt_max_entries"` // names per hint, default 6
 	// CategoryPolicy is a free-text category-creation policy injected into
-	// the default system prompt (as a 分类规范 section) and appended to the
+	// the default system prompt (as a category-policy section) and appended to the
 	// create_category tool / run_script builtin descriptions. Empty falls
 	// back to DefaultCategoryPolicy; hot-reloaded like every other knob
 	// (each agent run re-reads config.Get()).

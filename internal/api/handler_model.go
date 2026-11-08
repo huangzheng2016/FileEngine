@@ -15,6 +15,7 @@ import (
 
 type ModelProviderResponse struct {
 	VisionEnabled   bool    `json:"vision_enabled"`
+	ThinkingEnabled bool    `json:"thinking_enabled"`
 	ID              uint    `json:"id"`
 	Name            string  `json:"name"`
 	Provider        string  `json:"provider"`
@@ -35,6 +36,7 @@ func toModelProviderResponse(m *db.ModelProvider) ModelProviderResponse {
 		BaseURL: m.BaseURL, Temperature: m.Temperature, MaxTokens: m.MaxTokens,
 		ContextWindow:   m.EffectiveContextWindow(),
 		VisionEnabled:   m.VisionEnabled,
+		ThinkingEnabled: m.ThinkingEnabled,
 		ReasoningEffort: m.ReasoningEffort,
 		APIKeySet:       m.APIKey != "",
 		CreatedAt:       m.CreatedAt.Format("2006-01-02T15:04:05Z"),
@@ -64,23 +66,17 @@ type ModelProviderRequest struct {
 	BaseURL     string  `json:"base_url"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
-	// ContextWindow is optional and additive: old clients omit it (nil),
-	// new clients may pass a tier (200K/256K/500K/900K/1M) or a custom value.
-	ContextWindow *int `json:"context_window"`
-	// VisionEnabled is additive like context_window: absent (nil) means
-	// "not provided" — create defaults to false, update keeps the stored value.
-	VisionEnabled *bool `json:"vision_enabled"`
-	// ReasoningEffort is additive too: free-form pass-through ("" = model
-	// default; suggested levels none/low/medium/high/max); absent (nil) keeps
-	// the stored value on update, means unset on create.
-	ReasoningEffort *string `json:"reasoning_effort"`
+	// The optional fields are pointers: absent (nil) means "not provided" —
+	// create applies the default, update keeps the stored value.
+	ContextWindow   *int    `json:"context_window"` // tokens; tiers are UI suggestions, any positive value is accepted
+	VisionEnabled   *bool   `json:"vision_enabled"`
+	ThinkingEnabled *bool   `json:"thinking_enabled"`
+	ReasoningEffort *string `json:"reasoning_effort"` // "" = model default; free-form level (low/medium/high/max/...)
 }
 
-// reasoningEffortPattern bounds the free-form pass-through: any value an
-// OpenAI-compatible backend might accept (suggested levels are
-// none/low/medium/high/max, but providers keep inventing new ones — the API
-// must not hard-reject values it does not know). "" means "not set — use the
-// model default".
+// reasoningEffortPattern bounds the free-form thinking strength: providers
+// keep inventing levels, so only charset/length are checked. "" means "use
+// the model default".
 var reasoningEffortPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
 func resolveReasoningEffort(v *string, fallback string) (string, error) {
@@ -88,21 +84,27 @@ func resolveReasoningEffort(v *string, fallback string) (string, error) {
 		return fallback, nil
 	}
 	if *v != "" && !reasoningEffortPattern.MatchString(*v) {
-		return "", fmt.Errorf("reasoning_effort must be empty or 1-32 chars of [a-zA-Z0-9_-] (suggested: none, low, medium, high, max)")
+		return "", fmt.Errorf("思考强度只能为空或 1-32 个字母、数字、_、-（如 low、medium、high、max）")
 	}
 	return *v, nil
 }
 
-// resolveContextWindow validates an optional context_window value. Lenient by
-// design: any positive token count is accepted (tiers are UI suggestions).
+// resolveContextWindow validates an optional context_window value.
 func resolveContextWindow(v *int, fallback int) (int, error) {
 	if v == nil {
 		return fallback, nil
 	}
 	if *v <= 0 {
-		return 0, fmt.Errorf("context_window must be a positive token count")
+		return 0, fmt.Errorf("上下文长度必须是正整数（token 数）")
 	}
 	return *v, nil
+}
+
+func resolveBool(v *bool, fallback bool) bool {
+	if v == nil {
+		return fallback
+	}
+	return *v
 }
 
 func (s *Server) createModelProvider(c *gin.Context) {
@@ -126,9 +128,8 @@ func (s *Server) createModelProvider(c *gin.Context) {
 		Model: req.Model, BaseURL: req.BaseURL,
 		Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 		ContextWindow: contextWindow, ReasoningEffort: reasoningEffort,
-	}
-	if req.VisionEnabled != nil {
-		m.VisionEnabled = *req.VisionEnabled
+		VisionEnabled:   resolveBool(req.VisionEnabled, false),
+		ThinkingEnabled: resolveBool(req.ThinkingEnabled, false),
 	}
 	if err := s.repo.CreateModelProvider(m); err != nil {
 		internalError(c, err)
@@ -177,27 +178,20 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 	m.BaseURL = req.BaseURL
 	m.Temperature = req.Temperature
 	m.MaxTokens = req.MaxTokens
-	// context_window is additive: absent (nil) keeps the stored value so old
-	// clients doing full-form updates never clobber it.
-	if req.ContextWindow != nil {
-		contextWindow, err := resolveContextWindow(req.ContextWindow, m.ContextWindow)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		m.ContextWindow = contextWindow
+	contextWindow, err := resolveContextWindow(req.ContextWindow, m.ContextWindow)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.VisionEnabled != nil {
-		m.VisionEnabled = *req.VisionEnabled
+	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, m.ReasoningEffort)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.ReasoningEffort != nil {
-		reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, m.ReasoningEffort)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		m.ReasoningEffort = reasoningEffort
-	}
+	m.ContextWindow = contextWindow
+	m.ReasoningEffort = reasoningEffort
+	m.VisionEnabled = resolveBool(req.VisionEnabled, m.VisionEnabled)
+	m.ThinkingEnabled = resolveBool(req.ThinkingEnabled, m.ThinkingEnabled)
 	if req.APIKey != nil {
 		m.APIKey = *req.APIKey
 	}
@@ -261,17 +255,19 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		}
 		apiKey = stored.APIKey
 	}
+	if _, err := resolveContextWindow(req.ContextWindow, db.DefaultContextWindow); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	testProvider := &db.ModelProvider{
 		Provider: req.Provider, APIKey: apiKey, Model: req.Model,
 		BaseURL: req.BaseURL, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-	}
-	if req.ReasoningEffort != nil {
-		reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		testProvider.ReasoningEffort = reasoningEffort
+		ThinkingEnabled: resolveBool(req.ThinkingEnabled, false), ReasoningEffort: reasoningEffort,
 	}
 	chatModel, err := modelfactory.NewChatModelFromProvider(c.Request.Context(), testProvider)
 	if err != nil {

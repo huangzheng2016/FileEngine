@@ -14,3 +14,10 @@ func CancelAllRuns() int {
 	}
 	return len(cancels)
 }
+
+// LiveRunCount is the number of runs still registered (not yet finished).
+func LiveRunCount() int {
+	runCancels.mu.Lock()
+	defer runCancels.mu.Unlock()
+	return len(runCancels.m)
+}

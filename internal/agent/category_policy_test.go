@@ -59,7 +59,7 @@ func TestSystemPromptCategoryPolicyTwoStates(t *testing.T) {
 func TestCreateCategoryDescCategoryPolicyTwoStates(t *testing.T) {
 	session := &db.ScanSession{AllowAutoCategory: true}
 
-	withPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
+	withPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
 	tools, err := withPolicy.BuildTools()
 	if err != nil {
 		t.Fatalf("BuildTools: %v", err)
@@ -75,7 +75,7 @@ func TestCreateCategoryDescCategoryPolicyTwoStates(t *testing.T) {
 		t.Fatalf("instruct create_category desc must end with the policy text: %q", desc)
 	}
 
-	noPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
+	noPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
 	tools, err = noPolicy.BuildTools()
 	if err != nil {
 		t.Fatalf("BuildTools: %v", err)
@@ -90,7 +90,7 @@ func TestCreateCategoryDescCategoryPolicyTwoStates(t *testing.T) {
 func TestRunScriptDescCategoryPolicyTwoStates(t *testing.T) {
 	session := &db.ScanSession{AllowScript: true, AllowAutoCategory: true}
 
-	withPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
+	withPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
 	st, err := withPolicy.buildScriptTool()
 	if err != nil || st == nil {
 		t.Fatalf("buildScriptTool: %v, nil=%v", err, st == nil)
@@ -103,7 +103,7 @@ func TestRunScriptDescCategoryPolicyTwoStates(t *testing.T) {
 		t.Fatalf("run_script desc must append the policy to the create_category builtin: %q", info.Desc)
 	}
 
-	noPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
+	noPolicy := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
 	st, err = noPolicy.buildScriptTool()
 	if err != nil || st == nil {
 		t.Fatalf("buildScriptTool: %v, nil=%v", err, st == nil)

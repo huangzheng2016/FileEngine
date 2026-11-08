@@ -2,14 +2,13 @@ package db
 
 import (
 	"time"
-	"unicode/utf8"
 
 	"FileEngine/internal/config"
 )
 
 type FileEntry struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1" json:"scan_session_id"`
+	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1" json:"scan_session_id"`
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024;index:idx_session_newpath,priority:2" json:"new_path"` // always "/"-rooted when set
 	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"`  // "move" / "copy" / ""
@@ -27,10 +26,23 @@ type FileEntry struct {
 	Tagged        bool       `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3;index:idx_session_parent,priority:4" json:"tagged"`
 	ParentPath    string     `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
 	Depth         int        `gorm:"index:idx_session_type_tagged_depth,priority:4" json:"depth"`
-	ChildCount    int        `json:"child_count"`
+	ChildCount    int        `json:"child_count"`  // direct children kept by the scan (directories only)
+	SubdirCount   int        `json:"subdir_count"` // direct child directories (directories only)
 	BatchIndex    int        `json:"batch_index"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// Media metadata (scanner post-walk pass, ScanSession.ExtractMetadata):
+	// TakenAt is the capture time as naive wall-clock (stored as UTC) from
+	// EXIF/video headers, else a date in the file name, else mtime.
+	TakenAt    *time.Time `json:"taken_at"`
+	Camera     string     `gorm:"size:128" json:"camera"`
+	HasGPS     bool       `gorm:"default:false" json:"has_gps"`
+	DateSource string     `gorm:"size:16" json:"date_source"` // exif / video / filename / mtime; "" = not extracted
+	// Duplicate detection (ScanSession.DetectDuplicates): Hash is the full
+	// content sha256 (hex), set only for files that share their size with
+	// another file; DuplicateOf points at the group's original.
+	Hash        string    `gorm:"size:64;index:idx_session_hash,priority:2" json:"hash"`
+	DuplicateOf *uint     `json:"duplicate_of"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Category struct {
@@ -82,7 +94,7 @@ type ScanSession struct {
 	ScanPath     string `gorm:"size:1024" json:"scan_path"`
 	RootPath     string `gorm:"size:1024" json:"root_path"`
 	Protocol     string `gorm:"size:32" json:"protocol"`
-	Status       string `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/tagged_partial/executing/done/error/interrupted (+ legacy "error:..." strings truncated via TruncateStatus)
+	Status       string `gorm:"size:32" json:"status"` // scanning / scanned / error / interrupted; agent activity lives on runs
 	TotalFiles   int    `json:"total_files"`
 	// ScannedCount is the live entries counter during "scanning": the scanner
 	// persists it every few seconds so the UI shows progress before the
@@ -99,20 +111,19 @@ type ScanSession struct {
 	PlannedOps          int       `json:"planned_ops"`
 	ExecutedOps         int       `json:"executed_ops"`
 	TotalSize           int64     `json:"total_size"`
-	PromptTokens        int       `json:"prompt_tokens"`
-	CachedTokens        int       `json:"cached_tokens"` // cache-hit subset of prompt_tokens, as reported by the provider
-	CompletionTokens    int       `json:"completion_tokens"`
-	TotalTokens         int       `json:"total_tokens"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory   bool      `gorm:"default:true" json:"allow_auto_category"` // create_category tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
 	AllowVision         bool      `gorm:"default:false" json:"allow_vision"`       // session-level switch; view_image requires ModelProvider.VisionEnabled too
 	AllowScript         bool      `gorm:"default:true" json:"allow_script"`        // run_script tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
+	ExtractMetadata     bool      `gorm:"default:true" json:"extract_metadata"`    // media date/camera/GPS pass after the walk; DB default ON — GORM omits the zero value on insert
+	DetectDuplicates    bool      `gorm:"default:false" json:"detect_duplicates"`  // size → partial hash → full hash duplicate grouping after the walk
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
 	Goal                string    `gorm:"type:text" json:"goal"`
 	ScopeExts           string    `gorm:"type:text" json:"scope_exts"` // comma-separated extensions to organize; empty = all files; others become role=skip // the user's organizing intent, injected into every agent prompt
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
+	BulkModelProviderID uint      `json:"bulk_model_provider_id"` // tagging workers + summarization; 0 = same as ModelProviderID
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -127,12 +138,10 @@ type ModelProvider struct {
 	Temperature   float64 `json:"temperature"`
 	MaxTokens     int     `json:"max_tokens"`     // output completion cap passed to the LLM API
 	ContextWindow int     `json:"context_window"` // model context window in tokens (drives compaction thresholds)
-	// ReasoningEffort is passed through to OpenAI-compatible APIs as
-	// reasoning_effort: "" keeps the model default, otherwise any free-form
-	// level the backend accepts (suggested none/low/medium/high/max; e.g. low
-	// cuts kimi-k3 thinking tokens ~85% on tool-heavy runs). The API validates
-	// charset/length ([a-zA-Z0-9_-]{1,32}) but never hard-rejects unknown
-	// levels — providers keep inventing new ones.
+	// ReasoningEffort is the thinking strength, used only when ThinkingEnabled:
+	// openai-compatible APIs get it verbatim as reasoning_effort ("" = model
+	// default), claude maps it to an extended-thinking budget. Free-form; the
+	// API validates [a-zA-Z0-9_-]{1,32}.
 	ReasoningEffort string    `gorm:"size:32" json:"reasoning_effort"`
 	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"`   // model can read images (gates the view_image tool)
 	ThinkingEnabled bool      `gorm:"default:false" json:"thinking_enabled"` // request model thinking; reasoning_effort applies only when on
@@ -153,42 +162,7 @@ func (p *ModelProvider) EffectiveContextWindow() int {
 	return DefaultContextWindow
 }
 
-type AgentLog struct {
-	ID            uint `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint `gorm:"index:idx_log_session_batch,priority:1" json:"scan_session_id"`
-	BatchIndex    int  `gorm:"index:idx_log_session_batch,priority:2" json:"batch_index"`
-	// WorkerID identifies the agent worker lane that produced the row (0 for
-	// single-worker instruct runs and for rows written before lanes existed).
-	// default:0 makes AutoMigrate backfill existing rows with 0 on all
-	// dialects — a bare ADD COLUMN would leave NULLs that fail int scans.
-	WorkerID         int       `gorm:"default:0" json:"worker_id"`
-	Role             string    `gorm:"size:32" json:"role"` // "system" / "user" / "assistant" / "tool"
-	ToolName         string    `gorm:"size:128" json:"tool_name"`
-	ToolInput        string    `gorm:"type:text" json:"tool_input"`
-	ToolOutput       string    `gorm:"type:text" json:"tool_output"`
-	Content          string    `gorm:"type:text" json:"content"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CachedTokens     int       `json:"cached_tokens"` // cache-hit subset of PromptTokens; 0 on rows written before it existed
-	CompletionTokens int       `json:"completion_tokens"`
-	TotalTokens      int       `json:"total_tokens"`
-	CreatedAt        time.Time `json:"created_at"`
-}
-
-// StatusMaxLen is the storage limit for ScanSession.Status. Error-derived
-// statuses ("error: ...") must be truncated with TruncateStatus before saving
-// so MySQL strict mode does not reject over-long values.
-const StatusMaxLen = 255
-
 // JunkBatchIndex is the sentinel batch_index stamped on entries the autotag
 // junk filter auto-ignored (system files like .DS_Store, @eaDir) without an
 // agent batch. It distinguishes them from agent-tagged rows for reporting.
 const JunkBatchIndex = -1
-
-// TruncateStatus truncates s to StatusMaxLen runes for safe storage in
-// ScanSession.Status.
-func TruncateStatus(s string) string {
-	if utf8.RuneCountInString(s) <= StatusMaxLen {
-		return s
-	}
-	return string([]rune(s)[:StatusMaxLen])
-}

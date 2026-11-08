@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -15,10 +13,8 @@ import (
 	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
-	modelfactory "FileEngine/internal/model"
 )
 
 // errorClass buckets a failed agent run by its retry semantics. The class is
@@ -29,14 +25,14 @@ type errorClass int
 const (
 	// errClassHard errors can never succeed on retry with the same input:
 	// 4xx client errors (400/401/403/404/413/context-length/…) and caller
-	// cancellation. They fail immediately, saving the old 3 pointless retries.
+	// cancellation. They fail immediately.
 	errClassHard errorClass = iota
 	// errClassRateLimit is HTTP 429. It gets its own (larger) retry budget,
 	// honors server Retry-After hints, and deepens backoff fleet-wide while
 	// throttling persists.
 	errClassRateLimit
 	// errClassServer is HTTP 5xx — plus any unrecognized error, so oddball
-	// transient failures keep the old always-retry behavior.
+	// transient failures stay retryable.
 	errClassServer
 	// errClassNetwork is a transport-level failure: timeouts (including the
 	// per-run agent_timeout), refused/dropped connections, DNS errors.
@@ -107,7 +103,7 @@ func classifyRunErrorWithStatus(err error, statusHint int) errorClass {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return errClassNetwork
 	}
-	// Unknown errors stay retryable — same behavior as the old blind retry.
+	// Unknown errors stay retryable.
 	return errClassServer
 }
 
@@ -271,73 +267,4 @@ var retrySleep = func(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-t.C:
 	}
-}
-
-// runAttemptFunc executes one full agent run under ctx.
-type runAttemptFunc func(ctx context.Context) (*schema.Message, error)
-
-// attemptWithHints runs one attempt under a child context carrying a fresh
-// modelfactory.ResponseHints store and returns what the hint transport
-// captured from that attempt's error response (status 0 / retryAfter 0 when
-// the failure never reached HTTP or carried no header).
-func attemptWithHints(ctx context.Context, attempt runAttemptFunc) (*schema.Message, error, int, time.Duration) {
-	attemptCtx, hints := modelfactory.WithResponseHints(ctx)
-	result, err := attempt(attemptCtx)
-	if hints == nil {
-		return result, err, 0, 0
-	}
-	return result, err, hints.StatusCode(), hints.RetryAfter()
-}
-
-// runWithRetry runs attempt once, then retries failures according to their
-// class: hard errors fail immediately; rate_limit/server/network errors retry
-// with jittered exponential backoff until the class budget is exhausted. The
-// class is re-evaluated after every attempt, so e.g. throttling turning into
-// a 500 switches budget mid-loop. On total failure the last attempt's token
-// usage is attributed to the system row, same as before.
-func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
-	result, err, statusHint, retryAfterHint := attemptWithHints(ctx, attempt)
-	if err == nil {
-		rateLimitStreak.Store(0)
-		return result, nil
-	}
-
-	retriesUsed := 0
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		class := classifyRunErrorWithStatus(err, statusHint)
-		if class == errClassRateLimit {
-			rateLimitStreak.Add(1)
-		}
-		cfg := retryCfg()
-		maxRetries := maxRetriesForClass(class, cfg)
-		if retriesUsed >= maxRetries {
-			if retriesUsed == 0 {
-				log.Printf("%s hard error, failing without retry: %v", label, err)
-			}
-			break
-		}
-		retriesUsed++
-		retryAfter := retryAfterHint
-		if retryAfter <= 0 {
-			retryAfter = retryAfterFromError(err)
-		}
-		delay := backoffDelay(class, retriesUsed, retryAfter, cfg)
-		log.Printf("%s retry %d/%d (%s) in %s: %v", label, retriesUsed, maxRetries, class, delay.Round(time.Millisecond), err)
-		retrySleep(ctx, delay)
-		result, err, statusHint, retryAfterHint = attemptWithHints(ctx, attempt)
-		if err == nil {
-			rateLimitStreak.Store(0)
-			return result, nil
-		}
-	}
-
-	// Attribute the last attempt's token usage to the system row too — a failed
-	// batch otherwise vanishes from the token accounting (batch cards showed
-	// no tokens for failed batches).
-	pt, cached, ct, tt := tracker.Usage()
-	logger.LogMessage("system", fmt.Sprintf("Error after %d retries (%s): %v", retriesUsed, classifyRunErrorWithStatus(err, statusHint), err), pt, cached, ct, tt)
-	return nil, err
 }

@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
-	"sync"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -14,154 +12,41 @@ type fileBatch struct {
 	batchIdx int32
 }
 
+// Agent runs the agent pipelines of one session. Run lifecycle (busy check,
+// stop, terminal status, token totals) belongs to the caller's AgentRun;
+// every event of a pipeline goes through the run's Logger.
 type Agent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
 	modelProvider *db.ModelProvider
 	session       *db.ScanSession
-	logger        *Logger
 	sessionID     uint
-
-	mu       sync.Mutex
-	running  bool
-	cancelFn context.CancelFunc
-	runGen   uint64
-	doneCh   chan struct{}
 }
 
-func New(repo *db.Repository, fsCfg config.RemoteFSConfig, cfg *config.Config, sessionID uint, modelProvider *db.ModelProvider, session *db.ScanSession) *Agent {
+func New(repo *db.Repository, fsCfg config.RemoteFSConfig, sessionID uint, modelProvider *db.ModelProvider, session *db.ScanSession) *Agent {
 	return &Agent{
 		repo:          repo,
 		fsCfg:         fsCfg,
 		modelProvider: modelProvider,
 		session:       session,
 		sessionID:     sessionID,
-		logger:        NewLogger(repo, sessionID, 0),
 	}
 }
 
-func (a *Agent) GetLogger() *Logger {
-	return a.logger
+// RunTagging runs automatic classification and returns the tagging report;
+// partial is true when some batches failed after retries.
+func (a *Agent) RunTagging(ctx context.Context, logger *Logger) (report string, partial bool, err error) {
+	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, logger)
+	report, err = orch.Run(ctx, OrchestratorRequest{Type: RequestAutoTag})
+	return report, orch.Partial(), err
 }
 
-func (a *Agent) IsRunning() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.running
-}
-
-func (a *Agent) Stop() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancelFn != nil {
-		a.cancelFn()
-	}
-	a.running = false
-}
-
-// finishRun clears the running state only when the finishing run is still
-// the CURRENT one: a stopped-and-replaced run (user stopped run A, then run
-// B started on the same Agent before A drained) must not clobber B's flag
-// with A's deferred cleanup — the classic stop→restart ABA race that left
-// live runs invisible to Stop()/tagStatus.
-func (a *Agent) finishRun(gen uint64) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.runGen != gen {
-		return false
-	}
-	a.running = false
-	a.cancelFn = nil
-	return true
-}
-
-// Done returns a channel closed when the current run fully returns, so
-// stopTagging can wait for the drain instead of letting a new run start on
-// top of a still-draining one.
-func (a *Agent) Done() <-chan struct{} {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.doneCh == nil {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return a.doneCh
-}
-
-// RunTagging delegates to AutoTagAgent for automatic file classification.
-// On success it returns the summary report for the run_done event.
-func (a *Agent) RunTagging(ctx context.Context) (string, error) {
-	a.mu.Lock()
-	if a.running {
-		a.mu.Unlock()
-		return "", fmt.Errorf("agent is already running")
-	}
-	a.running = true
-	ctx, cancel := context.WithCancel(ctx)
-	a.cancelFn = cancel
-	a.runGen++
-	gen := a.runGen
-	done := make(chan struct{})
-	a.doneCh = done
-	a.mu.Unlock()
-
-	defer func() {
-		defer close(done)
-		if !a.finishRun(gen) {
-			return // superseded by a newer run — leave its flag and the session status alone
-		}
-		if ctx.Err() != nil {
-			if s, err := a.repo.GetSession(a.sessionID); err == nil && s.Status == "tagging" {
-				s.Status = "tagged"
-				a.repo.UpdateSession(s)
-			}
-		}
-	}()
-
-	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)
-	return orch.Run(ctx, OrchestratorRequest{Type: RequestAutoTag})
-}
-
-// RunInstruct delegates to InstructAgent for user-directed operations.
-func (a *Agent) RunInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
-	a.mu.Lock()
-	if a.running {
-		a.mu.Unlock()
-		return "", fmt.Errorf("agent is already running")
-	}
-	a.running = true
-	ctx, cancel := context.WithCancel(ctx)
-	a.cancelFn = cancel
-	a.runGen++
-	gen := a.runGen
-	done := make(chan struct{})
-	a.doneCh = done
-	a.mu.Unlock()
-
-	defer func() {
-		defer close(done)
-		a.finishRun(gen)
-	}()
-
-	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)
+// RunInstruct runs a user-directed instruction over the selected files.
+func (a *Agent) RunInstruct(ctx context.Context, logger *Logger, files []db.FileEntry, userPrompt string) (string, error) {
+	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, logger)
 	return orch.Run(ctx, OrchestratorRequest{
 		Type:       RequestInstruct,
 		UserPrompt: userPrompt,
 		Files:      files,
 	})
-}
-
-// Legacy helpers kept for backward compatibility.
-
-// RunTaggingDirect runs the auto-tagging pipeline directly without orchestration.
-func (a *Agent) RunTaggingDirect(ctx context.Context) error {
-	autoTag := NewAutoTagAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID)
-	return autoTag.Run(ctx)
-}
-
-// RunInstructDirect runs the instruct pipeline directly without orchestration.
-func (a *Agent) RunInstructDirect(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
-	instruct := NewInstructAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, a.logger)
-	return instruct.Run(ctx, files, userPrompt)
 }

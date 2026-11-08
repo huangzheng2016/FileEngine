@@ -1,12 +1,14 @@
 package remotefs
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path"
+	"strings"
 	"sync"
 
 	"FileEngine/internal/config"
@@ -242,6 +244,28 @@ func (l *ftpLockedResponse) Close() error {
 	return err
 }
 
+// statLocked looks an entry up by full path: MLST when the server supports
+// it, otherwise a LIST of the parent. Missing entries match os.ErrNotExist.
+// Caller holds f.mu with a live connection.
+func (f *FTPFS) statLocked(full string) (*ftp.Entry, error) {
+	if e, err := f.conn.GetEntry(full); err == nil {
+		return e, nil
+	} else if IsTimeout(err) {
+		return nil, err
+	}
+	entries, err := f.conn.List(path.Dir(full))
+	if err != nil {
+		return nil, err
+	}
+	base := path.Base(full)
+	for _, e := range entries {
+		if e.Name == base {
+			return e, nil
+		}
+	}
+	return nil, os.ErrNotExist
+}
+
 func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 	srcFull, err := f.resolve(src)
 	if err != nil {
@@ -256,30 +280,46 @@ func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 	if err := f.ensureConn(); err != nil {
 		return err
 	}
-	err = f.conn.Rename(srcFull, dstFull)
-	if IsTimeout(err) {
-		f.dropConnLocked()
+	// RNTO replaces an existing file on most servers; refuse instead.
+	if _, err := f.statLocked(dstFull); err == nil {
+		return existErr("ftp", "move", dst)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		if IsTimeout(err) {
+			f.dropConnLocked()
+		}
+		return &OpError{Protocol: "ftp", Op: "stat", Path: dst, Err: err}
 	}
-	return err
+	if err := f.conn.Rename(srcFull, dstFull); err != nil {
+		if IsTimeout(err) {
+			f.dropConnLocked()
+		}
+		return &OpError{Protocol: "ftp", Op: "move", Path: src, Err: err}
+	}
+	return nil
 }
 
-func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
-	// Confine the destination before reading anything: an escaping target
-	// must fail without first transferring the source.
+// CopyFile streams the source over a dedicated control connection (RETR)
+// straight into STOR on the primary one — one control connection cannot
+// carry both transfers, and buffering the whole file in memory is not an
+// option for large media.
+func (f *FTPFS) CopyFile(_ context.Context, src, dst string) error {
+	srcFull, err := f.resolve(src)
+	if err != nil {
+		return err
+	}
 	dstFull, err := f.resolve(dst)
 	if err != nil {
 		return err
 	}
-	reader, err := f.ReadFile(ctx, src)
+	srcConn, err := dialFTP(f.cfg)
 	if err != nil {
 		return err
 	}
-	data, err := io.ReadAll(reader)
-	// Close BEFORE Stor: ReadFile holds the control-connection lock for the
-	// transfer's lifetime; Stor needs it too (Close is idempotent).
-	_ = reader.Close()
+	defer srcConn.Quit()
+	// SIZE fails on directories, which doubles as the directory check.
+	size, err := srcConn.FileSize(srcFull)
 	if err != nil {
-		return err
+		return &OpError{Protocol: "ftp", Op: "size", Path: src, Err: err}
 	}
 
 	f.mu.Lock()
@@ -287,13 +327,42 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	if err := f.ensureConn(); err != nil {
 		return err
 	}
-	err = f.conn.Stor(dstFull, bytes.NewReader(data))
-	if IsTimeout(err) {
-		f.dropConnLocked()
+	if _, err := f.statLocked(dstFull); err == nil {
+		return existErr("ftp", "create", dst)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		if IsTimeout(err) {
+			f.dropConnLocked()
+		}
+		return &OpError{Protocol: "ftp", Op: "stat", Path: dst, Err: err}
 	}
-	return err
+
+	resp, err := srcConn.Retr(srcFull)
+	if err != nil {
+		return &OpError{Protocol: "ftp", Op: "open", Path: src, Err: err}
+	}
+	cr := &countingReader{r: resp}
+	err = f.conn.Stor(dstFull, cr)
+	if rerr := resp.Close(); err == nil {
+		err = rerr
+	}
+	if err == nil && cr.n != size {
+		err = shortCopyErr("ftp", dst, cr.n, size)
+	}
+	if err != nil {
+		if IsTimeout(err) {
+			f.dropConnLocked()
+		} else {
+			f.conn.Delete(dstFull)
+		}
+		if _, ok := err.(*OpError); !ok {
+			err = &OpError{Protocol: "ftp", Op: "copy", Path: dst, Err: err}
+		}
+		return err
+	}
+	return nil
 }
 
+// Delete removes one file or one empty directory (DELE, then RMD).
 func (f *FTPFS) Delete(_ context.Context, p string) error {
 	fullPath, err := f.resolve(p)
 	if err != nil {
@@ -305,12 +374,19 @@ func (f *FTPFS) Delete(_ context.Context, p string) error {
 		return err
 	}
 	err = f.conn.Delete(fullPath)
-	if IsTimeout(err) {
-		f.dropConnLocked()
+	if err != nil && !IsTimeout(err) {
+		err = f.conn.RemoveDir(fullPath)
 	}
-	return err
+	if err != nil {
+		if IsTimeout(err) {
+			f.dropConnLocked()
+		}
+		return &OpError{Protocol: "ftp", Op: "delete", Path: p, Err: err}
+	}
+	return nil
 }
 
+// MkdirAll creates each missing level; existing directories are fine.
 func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 	fullPath, err := f.resolve(p)
 	if err != nil {
@@ -321,11 +397,33 @@ func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 	if err := f.ensureConn(); err != nil {
 		return err
 	}
-	err = f.conn.MakeDir(fullPath)
-	if IsTimeout(err) {
-		f.dropConnLocked()
+	cur := ""
+	if path.IsAbs(fullPath) {
+		cur = "/"
 	}
-	return err
+	for _, seg := range strings.Split(strings.Trim(fullPath, "/"), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		cur = path.Join(cur, seg)
+		mkErr := f.conn.MakeDir(cur)
+		if mkErr == nil {
+			continue
+		}
+		if IsTimeout(mkErr) {
+			f.dropConnLocked()
+			return &OpError{Protocol: "ftp", Op: "mkdir", Path: p, Err: mkErr}
+		}
+		e, err := f.statLocked(cur)
+		if err == nil && e.Type == ftp.EntryTypeFolder {
+			continue
+		}
+		if err == nil {
+			mkErr = fmt.Errorf("%s exists and is not a directory", cur)
+		}
+		return &OpError{Protocol: "ftp", Op: "mkdir", Path: p, Err: mkErr}
+	}
+	return nil
 }
 
 func (f *FTPFS) Close() error {

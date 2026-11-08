@@ -10,9 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
-	"FileEngine/internal/executor"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,58 +55,26 @@ func (s *Server) backup(c *gin.Context) {
 	c.File(snap)
 }
 
-// drainTimeout bounds how long Shutdown waits for runs and executors.
+// drainTimeout bounds how long Shutdown waits for runs to finish.
 const drainTimeout = 30 * time.Second
 
-// Shutdown stops all running work so the process can exit cleanly: run
-// contexts are cancelled, legacy agents are stopped, and executors are asked
-// to stop after their current file operation. It waits for those to drain,
-// bounded by ctx. The HTTP server itself is shut down by the caller.
+// Shutdown cancels every running run (agent and executor runs alike; the
+// executor stops before its next step and never mid-delete) and waits until
+// they have all finished, bounded by drainTimeout and ctx. The HTTP server
+// itself is shut down by the caller.
 func (s *Server) Shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, drainTimeout)
 	defer cancel()
 	if n := db.CancelAllRuns(); n > 0 {
 		slog.Info("shutdown: cancelled runs", "count", n)
 	}
-
-	agentMu.Lock()
-	var running []*agent.Agent
-	for _, m := range []map[uint]*agent.Agent{agents, instructAgents} {
-		for _, a := range m {
-			if a.IsRunning() {
-				a.Stop()
-				running = append(running, a)
-			}
-		}
-	}
-	agentMu.Unlock()
-
-	execMu.Lock()
-	var execs []*executor.Executor
-	for _, e := range executors {
-		if e.IsRunning() {
-			e.Stop()
-			execs = append(execs, e)
-		}
-	}
-	execMu.Unlock()
-
-	for _, a := range running {
-		select {
-		case <-a.Done():
-		case <-ctx.Done():
-			return fmt.Errorf("agents did not stop: %w", ctx.Err())
-		}
-	}
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
-	for _, e := range execs {
-		for e.IsRunning() {
-			select {
-			case <-tick.C:
-			case <-ctx.Done():
-				return fmt.Errorf("executor did not finish its current operation: %w", ctx.Err())
-			}
+	for db.LiveRunCount() > 0 {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			return fmt.Errorf("%d run(s) did not finish: %w", db.LiveRunCount(), ctx.Err())
 		}
 	}
 	return nil

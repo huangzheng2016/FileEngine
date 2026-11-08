@@ -231,11 +231,10 @@ type harnessContext struct {
 	workerID     int
 	numWorkers   int
 	batchCounter *int32
-	// lastPull remembers the most recent non-empty untagged pull (file ids
-	// and label) so the next pull — or harnessSettlePull at run end — can
+	// lastPullIDs remembers the file ids of the most recent non-empty untagged
+	// pull so the next pull — or harnessSettlePull at run end — can
 	// close it out with a pull_done event (tagged/missed settlement).
-	lastPullIDs   []uint
-	lastPullLabel string
+	lastPullIDs []uint
 }
 
 // withHarness marks the builder as a continuous worker's toolset.
@@ -273,9 +272,8 @@ func (tb *ToolBuilder) harnessNotePull(label string, files []db.FileEntry) {
 	for i, f := range files {
 		ids[i] = f.ID
 	}
-	tb.logger.EmitPullBegin(label, len(files), minFileID(files))
+	tb.logger.EmitPullBegin(label, len(files))
 	tb.harness.lastPullIDs = ids
-	tb.harness.lastPullLabel = label
 }
 
 // harnessSettlePull closes out the last open pull with a pull_done event:
@@ -287,7 +285,6 @@ func (tb *ToolBuilder) harnessSettlePull() {
 		return
 	}
 	ids := tb.harness.lastPullIDs
-	label := tb.harness.lastPullLabel
 	tb.harness.lastPullIDs = nil
 	tagged, err := tb.repo.TaggedStatusByIDs(ids)
 	if err != nil {
@@ -300,7 +297,7 @@ func (tb *ToolBuilder) harnessSettlePull() {
 			taggedCount++
 		}
 	}
-	tb.logger.EmitPullDone(label, taggedCount, len(ids)-taggedCount)
+	tb.logger.EmitPullDone(taggedCount, len(ids)-taggedCount)
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -561,7 +558,6 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 	}
 
 	out := &ListFilesOutput{Files: items, Total: total}
-	tb.logger.LogToolCall("list_files", input, out)
 	return out, nil
 }
 
@@ -583,7 +579,6 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 		ParentPath:   f.ParentPath,
 		ChildCount:   f.ChildCount,
 	}
-	tb.logger.LogToolCall("get_file_info", input, out)
 	return out, nil
 }
 
@@ -637,7 +632,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 		if err != nil {
 			return nil, err
 		}
-		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
@@ -648,7 +642,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	}
 	if len(peek) > 0 && !isTextContent(string(peek)) {
 		out := &ReadFileOutput{Content: "[binary file - content not displayable]", Truncated: false}
-		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
@@ -658,7 +651,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	}
 
 	out := &ReadFileOutput{Content: string(data), Truncated: truncated}
-	tb.logger.LogToolCall("read_file", input, out)
 	return out, nil
 }
 
@@ -670,7 +662,6 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 // an explicit degradation notice, never a silent retry.
 func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, archivePath, entryName, kind string, maxChars int) (*ReadFileOutput, error) {
 	log := func(out *ReadFileOutput) (*ReadFileOutput, error) {
-		tb.logger.LogToolCall("read_file", input, out)
 		return out, nil
 	}
 
@@ -706,8 +697,8 @@ func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, ar
 		return log(&ReadFileOutput{Content: content, Truncated: cut})
 	}
 
-	// zip: random access required. Entry reads are gated on the archive size
-	// ("包整体过大时只列目录"), listing is not — the central directory alone
+	// zip: random access required. Entry reads are gated on the archive size;
+	// listing is not — the central directory alone
 	// is cheap on random-access backends.
 	size := int64(-1)
 	if st, serr := tb.fs.Stat(ctx, normalizePath(archivePath)); serr == nil {
@@ -760,14 +751,12 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		out := &UpdateDescriptionOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
-		tb.logger.LogToolCall("update_description", input, out)
 		return out, nil
 	}
 
 	// Idempotency check: description already matches
 	if f.Description == input.Description {
 		out := &UpdateDescriptionOutput{Success: true}
-		tb.logger.LogToolCall("update_description", input, out)
 		return out, nil
 	}
 
@@ -779,7 +768,6 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 	}
 
 	out := &UpdateDescriptionOutput{Success: true}
-	tb.logger.LogToolCall("update_description", input, out)
 	return out, nil
 }
 
@@ -788,14 +776,12 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
 		out := &MarkTaggedOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
-		tb.logger.LogToolCall("mark_tagged", input, out)
 		return out, nil
 	}
 
 	// Idempotency check: already tagged, skip DB write
 	if f.Tagged {
 		out := &MarkTaggedOutput{Success: true}
-		tb.logger.LogToolCall("mark_tagged", input, out)
 		return out, nil
 	}
 
@@ -805,7 +791,6 @@ func (tb *ToolBuilder) markTagged(ctx context.Context, input *MarkTaggedInput) (
 	}
 
 	out := &MarkTaggedOutput{Success: true}
-	tb.logger.LogToolCall("mark_tagged", input, out)
 	return out, nil
 }
 
@@ -836,7 +821,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 	tb.guard.note(names)
 
 	out := &ListCategoriesOutput{Categories: items}
-	tb.logger.LogToolCall("list_categories", input, out)
 	return out, nil
 }
 
@@ -846,7 +830,6 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		var rj *rejectError
 		if errors.As(err, &rj) {
 			out := &SetTargetOutput{Error: rj.msg}
-			tb.logger.LogToolCall("set_target", input, out)
 			return out, nil
 		}
 		return nil, err
@@ -861,7 +844,6 @@ func (tb *ToolBuilder) setTarget(ctx context.Context, input *SetTargetInput) (*S
 		guidance = append(guidance, fmt.Sprintf("已级联覆盖并清除 %d 个子项的既有规划路径（外层目标覆盖内层）。若这些子项需要更细的独立归类，请对它们重新 set_target；若本目录就应作为整体归类，则无需处理", cleared))
 	}
 	out.Guidance = strings.Join(guidance, "；")
-	tb.logger.LogToolCall("set_target", input, out)
 	return out, nil
 }
 
@@ -904,7 +886,7 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 }
 
 // checkTargetInCategories requires a target to lie under a known category
-// path. The only exception is a session with a plan (方案): the plan may
+// path. The only exception is a session with a plan: the plan may
 // define destinations outside every category, so such targets are accepted.
 func (tb *ToolBuilder) checkTargetInCategories(newPath string) error {
 	cats, err := tb.repo.ListCategories(tb.filesystemID)
@@ -950,12 +932,10 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 		var rj *rejectError
 		if errors.As(err, &rj) {
 			out := &CreateCategoryOutput{Error: rj.msg}
-			tb.logger.LogToolCall("create_category", input, out)
 			return out, nil
 		}
 		return nil, err
 	}
-	tb.logger.LogToolCall("create_category", input, out)
 	return out, nil
 }
 
@@ -1056,7 +1036,6 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 	reject := func(msg string) (*UpdateCategoryOutput, error) {
 		out := &UpdateCategoryOutput{Error: msg}
-		tb.logger.LogToolCall("update_category", input, out)
 		return out, nil
 	}
 
@@ -1101,7 +1080,6 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	}
 
 	out := &UpdateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
-	tb.logger.LogToolCall("update_category", input, out)
 	return out, nil
 }
 
@@ -1109,7 +1087,6 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 
 	reject := func(msg string) (*DeleteCategoryOutput, error) {
 		out := &DeleteCategoryOutput{Error: msg}
-		tb.logger.LogToolCall("delete_category", input, out)
 		return out, nil
 	}
 
@@ -1132,7 +1109,6 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 	}
 
 	out := &DeleteCategoryOutput{Success: true}
-	tb.logger.LogToolCall("delete_category", input, out)
 	return out, nil
 }
 

@@ -77,7 +77,8 @@ func TestTokenTrackingStreamCumulativeFrames(t *testing.T) {
 	}
 	drainStream(t, sr)
 
-	p, ca, c, tt := tracker.Usage()
+	u := tracker.Usage()
+	p, ca, c, tt := u.Prompt, u.Cached, u.Completion, u.Total
 	if p != 100 || ca != 40 || c != 50 || tt != 150 {
 		t.Fatalf("cumulative frames double counted: got (%d, %d, %d, %d), want (100, 40, 50, 150)", p, ca, c, tt)
 	}
@@ -96,7 +97,8 @@ func TestTokenTrackingStreamAccumulatesAcrossCalls(t *testing.T) {
 		drainStream(t, sr)
 	}
 
-	p, ca, c, tt := tracker.Usage()
+	u := tracker.Usage()
+	p, ca, c, tt := u.Prompt, u.Cached, u.Completion, u.Total
 	if p != 200 || ca != 80 || c != 100 || tt != 300 {
 		t.Fatalf("two calls: got (%d, %d, %d, %d), want (200, 80, 100, 300)", p, ca, c, tt)
 	}
@@ -116,7 +118,8 @@ func TestTokenTrackingStreamFramesWithoutUsage(t *testing.T) {
 	}
 	drainStream(t, sr)
 
-	p, ca, c, tt := tracker.Usage()
+	u := tracker.Usage()
+	p, ca, c, tt := u.Prompt, u.Cached, u.Completion, u.Total
 	if p != 0 || ca != 0 || c != 0 || tt != 0 {
 		t.Fatalf("frames without usage: got (%d, %d, %d, %d), want (0, 0, 0, 0)", p, ca, c, tt)
 	}
@@ -139,7 +142,8 @@ func TestTokenTrackingGenerateWithCachedTokens(t *testing.T) {
 	if _, err := tracker.Generate(context.Background(), nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	p, ca, c, tt := tracker.Usage()
+	u := tracker.Usage()
+	p, ca, c, tt := u.Prompt, u.Cached, u.Completion, u.Total
 	if p != 100 || ca != 40 || c != 50 || tt != 150 {
 		t.Fatalf("generate with cached: got (%d, %d, %d, %d), want (100, 40, 50, 150)", p, ca, c, tt)
 	}

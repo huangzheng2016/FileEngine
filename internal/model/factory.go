@@ -7,36 +7,62 @@ import (
 
 	"FileEngine/internal/db"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	claude "github.com/cloudwego/eino-ext/components/model/claude"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 // NewChatModelFromProvider creates a model from a DB ModelProvider entity.
+// Thinking parameters are sent only when ThinkingEnabled is on.
 func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
-	return newModel(ctx, p.Provider, p.APIKey, p.Model, p.BaseURL, p.Temperature, p.MaxTokens, p.ReasoningEffort)
-}
-
-func newModel(ctx context.Context, provider, apiKey, modelName, baseURL string, temperature float64, maxTokens int, reasoningEffort string) (model.ChatModel, error) {
-	switch provider {
+	switch p.Provider {
 	case "openai":
-		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens, reasoningEffort)
+		return newOpenAIModel(ctx, p, p.BaseURL)
 	case "claude":
-		return newClaudeModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens)
+		return newClaudeModel(ctx, p)
 	case "ollama":
+		baseURL := p.BaseURL
 		if baseURL == "" {
 			baseURL = "http://localhost:11434/v1"
 		}
-		return newOpenAIModel(ctx, apiKey, modelName, baseURL, temperature, maxTokens, reasoningEffort)
+		return newOpenAIModel(ctx, p, baseURL)
 	default:
-		return nil, fmt.Errorf("unsupported model provider: %s", provider)
+		return nil, fmt.Errorf("unsupported model provider: %s", p.Provider)
 	}
 }
 
-func newOpenAIModel(ctx context.Context, apiKey, modelName, baseURL string, temperature float64, maxTokens int, reasoningEffort string) (model.ChatModel, error) {
+// MarkCacheBreakpoint returns a copy of msg carrying an explicit prompt-cache
+// breakpoint (claude); other providers ignore it. Use it on the shared-context
+// message that precedes per-unit data; system, tools and the rolling last
+// message get breakpoints automatically.
+func MarkCacheBreakpoint(msg *schema.Message) *schema.Message {
+	return claude.SetMessageBreakpoint(msg)
+}
+
+// ResolveBulkProvider returns the model provider for the session's bulk work
+// (tagging workers, context summarization): the session's bulk model when
+// set, otherwise main.
+func ResolveBulkProvider(repo *db.Repository, session *db.ScanSession, main *db.ModelProvider) (*db.ModelProvider, error) {
+	if session == nil || session.BulkModelProviderID == 0 || session.BulkModelProviderID == main.ID {
+		return main, nil
+	}
+	p, err := repo.GetModelProvider(session.BulkModelProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("批量模型不存在: %w", err)
+	}
+	return p, nil
+}
+
+func newOpenAIModel(ctx context.Context, p *db.ModelProvider, baseURL string) (model.ChatModel, error) {
+	return openai.NewChatModel(ctx, openAIConfig(p, baseURL))
+}
+
+func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	cfg := &openai.ChatModelConfig{
-		Model:  modelName,
-		APIKey: apiKey,
+		Model:  p.Model,
+		APIKey: p.APIKey,
 	}
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
@@ -48,27 +74,74 @@ func newOpenAIModel(ctx context.Context, apiKey, modelName, baseURL string, temp
 	// concurrent requests never mix. Timeout stays zero, matching eino's
 	// default client when ChatModelConfig.Timeout is unset.
 	cfg.HTTPClient = &http.Client{Transport: newHintCaptureTransport(nil)}
-	temp := float32(temperature)
+	temp := float32(p.Temperature)
 	cfg.Temperature = &temp
-	if maxTokens > 0 {
+	if p.MaxTokens > 0 {
+		maxTokens := p.MaxTokens
 		cfg.MaxTokens = &maxTokens
 	}
-	if reasoningEffort != "" {
-		cfg.ReasoningEffort = openai.ReasoningEffortLevel(reasoningEffort)
+	if p.ThinkingEnabled && p.ReasoningEffort != "" {
+		cfg.ReasoningEffort = openai.ReasoningEffortLevel(p.ReasoningEffort)
 	}
-	return openai.NewChatModel(ctx, cfg)
+	return cfg
 }
 
-func newClaudeModel(ctx context.Context, apiKey, modelName, baseURL string, temperature float64, maxTokens int) (model.ChatModel, error) {
-	cfg := &claude.Config{
-		APIKey:    apiKey,
-		Model:     modelName,
-		MaxTokens: maxTokens,
+func newClaudeModel(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
+	return claude.NewChatModel(ctx, claudeConfig(p))
+}
+
+// Claude extended-thinking budgets per effort level; any other level gets
+// claudeMaxBudget.
+var claudeThinkingBudgets = map[string]int{"low": 2048, "medium": 8192, "high": 16384}
+
+const (
+	claudeMinBudget    = 1024 // API minimum budget_tokens
+	claudeMaxBudget    = 32768
+	claudeAnswerTokens = 4096 // output room kept above the thinking budget
+)
+
+// claudeThinking returns the thinking budget for effort and the max_tokens
+// to send: the budget is capped below maxTokens, and maxTokens is raised
+// when it cannot hold the minimum budget plus an answer.
+func claudeThinking(effort string, maxTokens int) (budget, newMaxTokens int) {
+	budget, ok := claudeThinkingBudgets[effort]
+	if !ok {
+		budget = claudeMaxBudget
 	}
-	if baseURL != "" {
+	if maxTokens <= 0 {
+		return budget, budget + claudeAnswerTokens
+	}
+	if budget > maxTokens-claudeAnswerTokens {
+		budget = maxTokens - claudeAnswerTokens
+	}
+	if budget < claudeMinBudget {
+		return claudeMinBudget, claudeMinBudget + claudeAnswerTokens
+	}
+	return budget, maxTokens
+}
+
+func claudeConfig(p *db.ModelProvider) *claude.Config {
+	cfg := &claude.Config{
+		APIKey:    p.APIKey,
+		Model:     p.Model,
+		MaxTokens: p.MaxTokens,
+		// Prompt caching: cache breakpoints on system, tools and the last
+		// message of each turn, so ReAct rounds re-read the shared prefix.
+		AutoCacheControl: &claude.CacheControl{},
+	}
+	if p.BaseURL != "" {
+		baseURL := p.BaseURL
 		cfg.BaseURL = &baseURL
 	}
-	temp := float32(temperature)
+	if p.ThinkingEnabled {
+		// Extended thinking only accepts the default temperature, so none is sent.
+		budget, maxTokens := claudeThinking(p.ReasoningEffort, p.MaxTokens)
+		cfg.MaxTokens = maxTokens
+		thinking := anthropic.ThinkingConfigParamOfEnabled(int64(budget))
+		cfg.ThinkingConfig = &thinking
+		return cfg
+	}
+	temp := float32(p.Temperature)
 	cfg.Temperature = &temp
-	return claude.NewChatModel(ctx, cfg)
+	return cfg
 }
