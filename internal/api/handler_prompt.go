@@ -41,7 +41,7 @@ func (s *Server) updatePrompt(c *gin.Context) {
 	}
 	config.Update(&updated)
 
-	if err := config.Save("config.yaml"); err != nil {
+	if err := config.Save(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "save config: " + err.Error()})
 		return
 	}

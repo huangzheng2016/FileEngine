@@ -9,7 +9,7 @@ import (
 )
 
 // The REST category handlers must enforce the same root-confinement path
-// rules as the agent tool layer (agent.ValidateFSPath) — otherwise the API
+// rules as the agent tool layer (pathutil.ValidateFSPath) — otherwise the API
 // would be a bypass around the tool-level validation.
 func TestCategoryPathValidationREST(t *testing.T) {
 	s := setupSessionTestServer(t)

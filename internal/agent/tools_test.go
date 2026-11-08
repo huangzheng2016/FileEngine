@@ -10,44 +10,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-func TestValidateFSPath(t *testing.T) {
-	valid := []string{
-		"", // set_target: empty clears the target
-		"/organized/photos",
-		"organized/photos",
-		"/a/b/c.txt",
-		"/中文 分类/相册 2024",
-		"/a.b/c-d_e(f)",
-		"relative/dir",
-	}
-	for _, p := range valid {
-		if err := ValidateFSPath(p); err != nil {
-			t.Fatalf("ValidateFSPath(%q): got error %v, want nil", p, err)
-		}
-	}
-
-	invalid := []string{
-		"/",         // bare root names nothing
-		".",         // ditto
-		"..",        // escapes root
-		"../x",      // escapes root
-		"/..",       // escapes root (host-absolute on SFTP-style backends)
-		"/a/../b",   // '..' segment
-		"a/../../b", // escapes root
-		"//../x",    // still contains a '..' segment
-		"a/b/../../../c",
-	}
-	for _, p := range invalid {
-		if err := ValidateFSPath(p); err == nil {
-			t.Fatalf("ValidateFSPath(%q): got nil, want error", p)
-		}
-	}
-
-	if err := ValidateFSPath("a\x00b"); err == nil {
-		t.Fatal("ValidateFSPath with NUL byte: got nil, want error")
-	}
-}
-
 func setupToolTestRepo(t *testing.T) *db.Repository {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")

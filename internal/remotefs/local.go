@@ -15,6 +15,11 @@ import (
 type LocalFS struct {
 	basePath     string
 	resolvedBase string // basePath with symlinks resolved (macOS /var etc.)
+	// denied are resolved host paths (app data dir, DB, config, key file)
+	// that stay unreachable even when they lie inside basePath: resolve
+	// rejects them and List hides them. Set by NewFromConfig from the
+	// LocalPolicy; nil for a bare NewLocalFS.
+	denied []string
 }
 
 func NewLocalFS(basePath string) (*LocalFS, error) {
@@ -85,7 +90,19 @@ func (l *LocalFS) resolve(path string) (string, error) {
 	if !withinBase(resolved, l.resolvedBase) {
 		return "", fmt.Errorf("path %q escapes base path %q via symlink", path, l.basePath)
 	}
+	if l.isDenied(resolved) {
+		return "", fmt.Errorf("path %q is inside FileEngine's own data directory", path)
+	}
 	return full, nil
+}
+
+func (l *LocalFS) isDenied(resolved string) bool {
+	for _, d := range l.denied {
+		if withinBase(resolved, d) {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *LocalFS) List(_ context.Context, path string) ([]FileInfo, error) {
@@ -98,11 +115,27 @@ func (l *LocalFS) List(_ context.Context, path string) ([]FileInfo, error) {
 		return nil, &OpError{Protocol: "local", Op: "list", Path: path, Err: err}
 	}
 
+	// Hide denied entries from listings (access is refused by resolve in any
+	// case); only directories that contain a denied path pay for the check.
+	hide := false
+	if dir, err := resolveExisting(fullPath); err == nil {
+		for _, d := range l.denied {
+			if withinBase(d, dir) {
+				hide = true
+			}
+		}
+	}
+
 	var result []FileInfo
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			continue
+		}
+		if hide {
+			if r, err := resolveExisting(filepath.Join(fullPath, entry.Name())); err != nil || l.isDenied(r) {
+				continue
+			}
 		}
 		ft := FileTypeFile
 		if entry.IsDir() {

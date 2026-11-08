@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"path"
 	"strings"
 	"sync/atomic"
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 	"FileEngine/internal/remotefs"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -475,35 +475,6 @@ func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-// ValidateFSPath checks that a target/category path is a legal, root-confined
-// slash path. The executor resolves stored paths against the filesystem root
-// (RemoteFS BasePath), so anything that could escape that root is rejected
-// here instead of being written to the DB. It is shared by the agent tool
-// layer and the REST category handlers so neither can bypass it. Rules:
-//   - "" is allowed for set_target (clears the target); callers reject it for
-//     category paths via their own required-field handling
-//   - no NUL bytes
-//   - no ".." segments (absolute-form paths like "/../etc" would escape the
-//     root on SFTP-style backends that treat leading "/" as host-absolute)
-//   - must name an entry — the bare root ("/", ".") is not a valid target
-func ValidateFSPath(p string) error {
-	if p == "" {
-		return nil
-	}
-	if strings.ContainsRune(p, 0) {
-		return fmt.Errorf("path %q contains a NUL byte", p)
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return fmt.Errorf("path %q contains '..' and could escape the filesystem root", p)
-		}
-	}
-	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
-		return fmt.Errorf("path %q does not name a file or directory", p)
-	}
-	return nil
-}
-
 func ptrStr(s string) *string {
 	return &s
 }
@@ -598,7 +569,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	// Archive entry syntax: "path/to/archive.zip::entry/inside.txt". Split
 	// first; the filesystem-facing part is validated like every other path.
 	archivePath, entryName, hasEntry := strings.Cut(input.Path, "::")
-	if err := ValidateFSPath(archivePath); err != nil {
+	if err := pathutil.ValidateFSPath(archivePath); err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
 	if hasEntry && entryName == "" {
@@ -875,7 +846,7 @@ func (tb *ToolBuilder) setTargetCore(ctx context.Context, path, newPath string) 
 	// Validate before any DB access: an illegal target must be rejected
 	// loudly, never written. The executor resolves new_path against the
 	// filesystem root, so anything that could escape it is refused here.
-	if err := ValidateFSPath(newPath); err != nil {
+	if err := pathutil.ValidateFSPath(newPath); err != nil {
 		return 0, rejectf("invalid new_path: %v", err)
 	}
 
@@ -927,7 +898,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 
 	// Category paths become new_path prefixes for planned files; apply the
 	// same root-confinement rules as set_target.
-	if err := ValidateFSPath(input.Path); err != nil || input.Path == "" {
+	if err := pathutil.ValidateFSPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
 		}
@@ -1037,7 +1008,7 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	// A changed category path cascades into planned files' new_path; apply the
 	// same root-confinement rules as set_target.
 	if input.NewPath != "" {
-		if err := ValidateFSPath(input.NewPath); err != nil {
+		if err := pathutil.ValidateFSPath(input.NewPath); err != nil {
 			return reject(fmt.Sprintf("invalid new_path: %v", err))
 		}
 	}

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 	"FileEngine/internal/remotefs"
 )
 
@@ -65,7 +67,7 @@ func (e *Executor) Stop() {
 type ValidationIssue struct {
 	OriginalPath string `json:"original_path"`
 	NewPath      string `json:"new_path"`
-	Issue        string `json:"issue"` // "conflict" / "duplicate"
+	Issue        string `json:"issue"` // "conflict" / "duplicate" / "invalid"
 	Detail       string `json:"detail"`
 }
 
@@ -107,7 +109,18 @@ func (e *Executor) Validate(ctx context.Context, sessionID uint) (*ValidationRes
 			if f.NewPath == "" || f.Executed {
 				continue
 			}
-			if _, err := e.fs.Stat(ctx, f.NewPath); err == nil {
+			target, err := pathutil.RootRelative(f.NewPath)
+			if err != nil {
+				result.OK = false
+				result.Issues = append(result.Issues, ValidationIssue{
+					OriginalPath: f.OriginalPath,
+					NewPath:      f.NewPath,
+					Issue:        "invalid",
+					Detail:       err.Error(),
+				})
+				continue
+			}
+			if _, err := e.fs.Stat(ctx, target); err == nil {
 				result.OK = false
 				result.Issues = append(result.Issues, ValidationIssue{
 					OriginalPath: f.OriginalPath,
@@ -234,8 +247,29 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 	return e.repo.UpdateSession(session)
 }
 
+// checkedPaths re-validates a plan's source and target right before the
+// operation and returns their root-relative forms. Plans come from the DB,
+// which the agent, the REST API and older rows all write — the executor never
+// trusts that every writer validated, so an escaping path fails here instead
+// of reaching a backend.
+func checkedPaths(src, dst string) (string, string, error) {
+	s, err := pathutil.RootRelative(src)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid source path: %w", err)
+	}
+	d, err := pathutil.RootRelative(dst)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid target path: %w", err)
+	}
+	return s, d, nil
+}
+
 // executeFile handles a single file copy or move.
 func (e *Executor) executeFile(ctx context.Context, src, dst, op string) error {
+	src, dst, err := checkedPaths(src, dst)
+	if err != nil {
+		return err
+	}
 	if err := e.fs.MkdirAll(ctx, parentDir(dst)); err != nil {
 		log.Printf("mkdir error for %s: %v", dst, err)
 	}
@@ -253,6 +287,10 @@ func (e *Executor) executeFile(ctx context.Context, src, dst, op string) error {
 // Move: try rename first (fast, atomic). If rename fails, fall back to recursive copy + delete.
 // Copy: always recursive.
 func (e *Executor) executeDir(ctx context.Context, src, dst, op string) error {
+	src, dst, err := checkedPaths(src, dst)
+	if err != nil {
+		return err
+	}
 	if err := e.fs.MkdirAll(ctx, parentDir(dst)); err != nil {
 		log.Printf("mkdir error for %s: %v", dst, err)
 	}
@@ -294,6 +332,13 @@ func (e *Executor) recursiveCopy(ctx context.Context, src, dst string) error {
 	}
 
 	for _, entry := range entries {
+		// Entry names come from the remote server: refuse anything that is
+		// not a single path segment so a hostile listing cannot steer the
+		// copy outside src/dst.
+		if entry.Name == "" || entry.Name == "." || entry.Name == ".." || strings.ContainsAny(entry.Name, "/\\\x00") {
+			log.Printf("recursive copy %s: skipping illegal entry name %q", src, entry.Name)
+			continue
+		}
 		srcPath := path.Join(src, entry.Name)
 		dstPath := path.Join(dst, entry.Name)
 

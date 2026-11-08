@@ -264,6 +264,12 @@ func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 }
 
 func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
+	// Confine the destination before reading anything: an escaping target
+	// must fail without first transferring the source.
+	dstFull, err := f.resolve(dst)
+	if err != nil {
+		return err
+	}
 	reader, err := f.ReadFile(ctx, src)
 	if err != nil {
 		return err
@@ -276,10 +282,6 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 		return err
 	}
 
-	dstFull, err := f.resolve(dst)
-	if err != nil {
-		return err
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.ensureConn(); err != nil {
