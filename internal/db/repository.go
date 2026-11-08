@@ -516,22 +516,37 @@ func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath st
 	return n, err
 }
 
-// ClearPlannedByTargetPath clears new_path/operation and resets tagged for files
-// whose new_path falls under the given category path, across all sessions of a filesystem.
+// ClearPlannedByTargetPath returns every entry targeted at or under the
+// category path, across all sessions of a filesystem, to undecided; members of
+// a cleared unit are released with it.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {
 	sessions, err := r.filesystemSessionIDs(filesystemID)
 	if err != nil || len(sessions) == 0 {
 		return err
 	}
-	cond, args := targetCond(r.db, categoryPath)
-	if err := r.db.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
-		Updates(map[string]interface{}{"new_path": "", "new_path_key": "", "operation": "", "tagged": false}).Error; err != nil {
-		return err
-	}
-	for _, id := range sessions {
-		r.touchCounts(id)
-	}
-	return nil
+	defer func() {
+		for _, id := range sessions {
+			r.touchCounts(id)
+		}
+	}()
+	return WithRetry(func() error {
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			cond, args := targetCond(tx, categoryPath)
+			var units []FileEntry
+			if err := tx.Select("scan_session_id", "original_path").
+				Where("scan_session_id IN ? AND role = ?", sessions, RoleUnit).Where(cond, args...).
+				Find(&units).Error; err != nil {
+				return err
+			}
+			for _, u := range units {
+				if err := releaseMembers(tx, u.ScanSessionID, u.OriginalPath).Error; err != nil {
+					return err
+				}
+			}
+			return tx.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+				Updates(undecidedFields()).Error
+		})
+	})
 }
 
 func (r *Repository) filesystemSessionIDs(filesystemID uint) ([]uint, error) {

@@ -321,3 +321,29 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 		}
 	}
 }
+
+func TestClearPlannedByTargetPathUndecides(t *testing.T) {
+	r := decisionFixture(t)
+	if err := r.CreateSession(&ScanSession{ID: 1, FilesystemID: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleUnit, NewPath: "/代码/proj", Reason: "Go 项目", Confidence: 0.4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Decide(1, Decision{Path: "loose.txt", Role: RoleFile, NewPath: "/文档/loose.txt", Reason: "文本", Confidence: 0.9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ClearPlannedByTargetPath(7, "/代码"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"proj", "proj/main.go", "proj/pkg", "proj/pkg/u.go"} {
+		e := entry(t, r, p)
+		if e.Role != RoleUndecided || e.Tagged || e.NewPath != "" || e.Operation != "" ||
+			e.Reason != "" || e.Confidence != 0 || e.NeedsReview {
+			t.Fatalf("%s must be undecided without residue: %+v", p, e)
+		}
+	}
+	if e := entry(t, r, "loose.txt"); e.Role != RoleFile || e.NewPath != "/文档/loose.txt" {
+		t.Fatalf("entry outside the category must keep its decision: %+v", e)
+	}
+}

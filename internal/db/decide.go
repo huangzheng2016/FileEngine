@@ -196,14 +196,23 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 			}
 			res.Members = q.RowsAffected
 		case e.Role == RoleUnit || e.Role == RoleSkip:
-			// The directory stopped owning its subtree: members become undecided.
-			if err := under.Where("role = ?", RoleMember).
-				Updates(map[string]any{"role": RoleUndecided, "tagged": false}).Error; err != nil {
+			if err := releaseMembers(tx, sessionID, p).Error; err != nil {
 				return nil, err
 			}
 		}
 	}
 	return res, nil
+}
+
+// undecidedFields resets an entry to undecided with no decision residue.
+func undecidedFields() map[string]any {
+	return map[string]any{"role": RoleUndecided, "new_path": "", "new_path_key": "", "operation": "", "reason": "",
+		"tagged": false, "needs_review": false, "confidence": 0}
+}
+
+// releaseMembers returns the members of the directory p to undecided.
+func releaseMembers(tx *gorm.DB, sessionID uint, p string) *gorm.DB {
+	return entriesUnder(tx, sessionID, p).Where("role = ?", RoleMember).Updates(undecidedFields())
 }
 
 // MemberReason is the reason stored on members of a unit or skipped directory.
@@ -298,8 +307,7 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 			}).Error; err != nil {
 				return err
 			}
-			q := entriesUnder(tx, sessionID, p).Where("role = ?", RoleMember).
-				Updates(map[string]any{"role": RoleUndecided, "tagged": false})
+			q := releaseMembers(tx, sessionID, p)
 			released = q.RowsAffected
 			return q.Error
 		})
