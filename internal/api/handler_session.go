@@ -117,17 +117,13 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 }
 
 // scanStopTimeout bounds how long rescan/delete wait for a canceled scan
-// goroutine to unwind. The scan's DB tail (bulk insert + final save) never
-// consults ctx, so a huge tree can take seconds to finish writing — but a
-// wedged goroutine must not block the API forever. A var so tests can shrink.
+// goroutine to unwind (its writer flushes the pending batch first). A var so
+// tests can shrink it.
 var scanStopTimeout = 30 * time.Second
 
 // cancelAndWaitScan cancels a running scan (if any) and waits for its
-// goroutine to exit. The canceled scan's DB tail has no ctx checks; without
-// this wait its bulk insert and final save can land AFTER the caller's own
-// reset — the rescan then hits idx_uniq_session_path duplicates and its
-// "scanning" status gets clobbered by the old goroutine's "scanned". Returns
-// false when the wait timed out (caller logs and proceeds anyway).
+// goroutine to exit, so its last writes cannot land after the caller's own
+// session update. Returns false when the wait timed out.
 func cancelAndWaitScan(sessionID uint) bool {
 	scanMu.Lock()
 	h := scanners[sessionID]
@@ -151,10 +147,9 @@ type CreateSessionRequest struct {
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 	FilterMode          string `json:"filter_mode"`
 	FilterDirs          string `json:"filter_dirs"`
-	// AllowVision is additive: old clients omit it (nil → false). When set it
-	// configures the session's vision switch at creation, so the frontend no
-	// longer needs a compensating PATCH after create.
-	AllowVision *bool `json:"allow_vision"`
+	AllowVision         *bool  `json:"allow_vision"`
+	ExtractMetadata     *bool  `json:"extract_metadata"`
+	DetectDuplicates    *bool  `json:"detect_duplicates"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -187,10 +182,19 @@ func (s *Server) createSession(c *gin.Context) {
 		FilterMode:          filterMode,
 		FilterDirs:          req.FilterDirs,
 		ModelProviderID:     req.ModelProviderID,
+		DetectDuplicates:    req.DetectDuplicates != nil && *req.DetectDuplicates,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// GORM omits a false bool on insert, so the DB default (on) wins; write it explicitly.
+	session.ExtractMetadata = req.ExtractMetadata == nil || *req.ExtractMetadata
+	if !session.ExtractMetadata {
+		if err := s.repo.DB().Model(session).Update("extract_metadata", false).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	s.startScan(session, filesystem.ToRemoteFSConfig())
@@ -262,6 +266,8 @@ type UpdateSessionRequest struct {
 	FilterMode          *string `json:"filter_mode"`
 	FilterDirs          *string `json:"filter_dirs"`
 	ModelProviderID     *uint   `json:"model_provider_id"`
+	ExtractMetadata     *bool   `json:"extract_metadata"`
+	DetectDuplicates    *bool   `json:"detect_duplicates"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -304,6 +310,12 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	if req.ModelProviderID != nil {
 		session.ModelProviderID = *req.ModelProviderID
 	}
+	if req.ExtractMetadata != nil {
+		session.ExtractMetadata = *req.ExtractMetadata
+	}
+	if req.DetectDuplicates != nil {
+		session.DetectDuplicates = *req.DetectDuplicates
+	}
 	if err := s.repo.UpdateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -328,21 +340,12 @@ func (s *Server) rescanSession(c *gin.Context) {
 		log.Printf("rescan session %d: timed out waiting for the previous scan to stop; proceeding anyway", session.ID)
 	}
 
-	if err := s.repo.DeleteFilesBySession(session.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Recompute RootPath from ScanPath (fixes sessions created with old logic)
-	session.RootPath = scanRootPath(session.ScanPath)
+	// Incremental: the scanner diffs against the existing entries and keeps
+	// decisions of unchanged ones.
 	session.Status = "scanning"
-	session.TotalFiles = 0
 	session.ScannedCount = 0
 	session.CurrentPath = ""
 	session.ErrorMessage = ""
-	session.TaggedFiles = 0
-	session.PlannedOps = 0
-	session.ExecutedOps = 0
 	s.repo.UpdateSession(session)
 
 	filesystem, err := s.repo.GetFilesystem(session.FilesystemID)
