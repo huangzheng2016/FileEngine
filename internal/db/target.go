@@ -70,8 +70,8 @@ func targetTaken(tx *gorm.DB, sessionID uint, candidate, originalPath string) (b
 }
 
 // ResetPlans clears the targets of the given entries of a session and marks
-// them untagged so the next tagging/chat run redoes them; a reset directory
-// also untags its descendants (they were cascade-tagged with it). Returns the
+// them undecided so the next tagging/chat run redoes them; a reset unit
+// releases its members. Returns the
 // number of entries reset.
 func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
@@ -94,7 +94,7 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 				found[i] = e.ID
 			}
 			if err := tx.Model(&FileEntry{}).Where("id IN ?", found).
-				Updates(map[string]any{"new_path": "", "operation": "", "tagged": false}).Error; err != nil {
+				Updates(map[string]any{"role": RoleUndecided, "reason": "", "new_path": "", "operation": "", "tagged": false, "needs_review": false, "confidence": 0}).Error; err != nil {
 				return err
 			}
 			for _, e := range entries {
@@ -102,8 +102,8 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 					continue
 				}
 				if err := tx.Model(&FileEntry{}).
-					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(e.OriginalPath)).
-					Update("tagged", false).Error; err != nil {
+					Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND role = ?", sessionID, childPathPattern(e.OriginalPath), RoleMember).
+					Updates(map[string]any{"role": RoleUndecided, "reason": "", "tagged": false}).Error; err != nil {
 					return err
 				}
 			}
@@ -118,4 +118,15 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 // never a full-row Save of a stale struct).
 func (r *Repository) UpdateFileFields(id uint, fields map[string]any) error {
 	return r.db.Model(&FileEntry{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// ConfirmReview clears needs_review on the given entries of a session (the
+// user accepts the low-confidence decisions). Returns how many changed.
+func (r *Repository) ConfirmReview(sessionID uint, ids []uint) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND id IN ? AND needs_review = ?", sessionID, ids, true).
+		Update("needs_review", false)
+	return res.RowsAffected, res.Error
 }

@@ -193,7 +193,7 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	res.NeedsReview = res.NewPath != "" && d.Confidence > 0 && d.Confidence < ReviewConfidence
 	if err := tx.Model(&FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
 		"role": role, "new_path": res.NewPath, "operation": op, "reason": d.Reason,
-		"tagged": role != RoleUndecided, "needs_review": res.NeedsReview,
+		"tagged": role != RoleUndecided, "needs_review": res.NeedsReview, "confidence": d.Confidence,
 	}).Error; err != nil {
 		return nil, err
 	}
@@ -202,7 +202,8 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 		under := tx.Model(&FileEntry{}).Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(p))
 		switch {
 		case ownsSubtree:
-			q := under.Updates(map[string]any{"role": RoleMember, "new_path": "", "operation": "", "reason": "", "tagged": true, "needs_review": false})
+			q := under.Updates(map[string]any{"role": RoleMember, "new_path": "", "operation": "", "reason": MemberReason(p, role),
+				"tagged": true, "needs_review": false, "confidence": 0})
 			if q.Error != nil {
 				return nil, q.Error
 			}
@@ -216,6 +217,14 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 		}
 	}
 	return res, nil
+}
+
+// MemberReason is the reason stored on members of a unit or skipped directory.
+func MemberReason(owner, ownerRole string) string {
+	if ownerRole == RoleSkip {
+		return "随「" + owner + "」整体保持原位"
+	}
+	return "随「" + owner + "」整体移动"
 }
 
 // governingAncestor returns the nearest strict ancestor that owns its

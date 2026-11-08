@@ -244,8 +244,8 @@ func RenderRuleTarget(rule *PlanRule, e *FileEntry) (string, error) {
 
 // RuleSample is one entry a rule would decide.
 type RuleSample struct {
-	Path   string `json:"path"`
-	Target string `json:"target"`
+	Path   string `json:"original_path"`
+	Target string `json:"new_path"`
 }
 
 // RuleApplyStat is the outcome of one rule in an apply or a preview.

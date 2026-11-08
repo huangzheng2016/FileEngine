@@ -198,6 +198,9 @@ type FileQuery struct {
 	Page         int
 	PageSize     int
 	MinID        uint // cursor-based pagination: only return rows with id > MinID
+	Role         *string
+	NeedsReview  *bool
+	Sensitive    *bool
 }
 
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
@@ -249,6 +252,15 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	}
 	if q.CategoryPath != nil {
 		tx = tx.Where("new_path LIKE ?"+likeEscapeClause, likeLiteral(*q.CategoryPath)+"%")
+	}
+	if q.Role != nil {
+		tx = tx.Where("role = ?", *q.Role)
+	}
+	if q.NeedsReview != nil {
+		tx = tx.Where("needs_review = ?", *q.NeedsReview)
+	}
+	if q.Sensitive != nil {
+		tx = tx.Where("sensitive = ?", *q.Sensitive)
 	}
 	if q.Search != "" {
 		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
@@ -395,7 +407,7 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 			}
 			res := tx.Model(&FileEntry{}).
 				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause, sessionID, childPathPattern(d.OriginalPath)).
-				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "new_path": "", "operation": "", "batch_index": JunkBatchIndex})
+				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "reason": MemberReason(d.OriginalPath, RoleSkip), "new_path": "", "operation": "", "batch_index": JunkBatchIndex})
 			if res.Error != nil {
 				return res.Error
 			}
