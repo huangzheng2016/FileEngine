@@ -13,6 +13,7 @@ import (
 
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
+	"FileEngine/internal/remotefs"
 )
 
 // fakeStep is one streamed answer of fakeModel: text and/or tool calls.
@@ -71,8 +72,13 @@ func brainAgent(t *testing.T, model *fakeModel) (*db.Repository, *Agent, *db.Sca
 	old := config.Get()
 	config.Update(&config.Config{Agent: config.AgentConfig{MaxStep: 20, ChatMaxStep: 20, MaxRetries: 1}})
 	restore := SetModelFactory(func(context.Context, *db.ModelProvider) (einomodel.ChatModel, error) { return model, nil })
+	fsRoot := t.TempDir()
+	if err := remotefs.SetLocalPolicy(remotefs.LocalPolicy{Roots: []string{fsRoot}}); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		restore()
+		_ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{})
 		if old != nil {
 			config.Update(old)
 		}
@@ -82,7 +88,7 @@ func brainAgent(t *testing.T, model *fakeModel) (*db.Repository, *Agent, *db.Sca
 		t.Fatal(err)
 	}
 	provider := &db.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
-	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: t.TempDir()}, session.ID, provider, session)
+	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session)
 	return repo, a, session
 }
 
