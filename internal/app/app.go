@@ -81,12 +81,17 @@ func (a *App) Start(ctx context.Context, ln net.Listener, handler http.Handler) 
 		return errors.New("app: already started")
 	}
 	reqCtx, cancel := context.WithCancel(ctx)
+	fresh := newFreshConns()
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return reqCtx },
+		ConnState:         fresh.track,
 	}
 	srv.RegisterOnShutdown(cancel)
+	// http.Server treats a connection that never sent a request as active for
+	// 5s, so speculative client dials would stall Shutdown that long.
+	srv.RegisterOnShutdown(fresh.closeAll)
 	a.httpServer = srv
 	a.cancelReqs = cancel
 	a.served = make(chan error, 1)
@@ -136,4 +141,31 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+type freshConns struct {
+	mu    sync.Mutex
+	conns map[net.Conn]struct{}
+}
+
+func newFreshConns() *freshConns {
+	return &freshConns{conns: make(map[net.Conn]struct{})}
+}
+
+func (f *freshConns) track(c net.Conn, state http.ConnState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if state == http.StateNew {
+		f.conns[c] = struct{}{}
+	} else {
+		delete(f.conns, c)
+	}
+}
+
+func (f *freshConns) closeAll() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for c := range f.conns {
+		_ = c.Close()
+	}
 }
