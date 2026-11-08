@@ -33,7 +33,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 	mk("未分类", "/uncategorized", false) // fallback, empty → kept
 
 	seedFile(t, repo, session.ID, "in/a.tar.gz", "file")
-	if _, err := repo.SetTargetAtomic(session.ID, "in/a.tar.gz", "/website/a.tar.gz", "planned", "file"); err != nil {
+	if _, _, err := repo.SetTargetUnique(session.ID, "in/a.tar.gz", "/website/a.tar.gz", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 
 	// Planned file under 历史分类, but ONLY in session A.
 	seedFile(t, repo, sessA.ID, "in/site.tar.gz", "file")
-	if _, err := repo.SetTargetAtomic(sessA.ID, "in/site.tar.gz", "/history-used/site.tar.gz", "planned", "file"); err != nil {
+	if _, _, err := repo.SetTargetUnique(sessA.ID, "in/site.tar.gz", "/history-used/site.tar.gz", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 

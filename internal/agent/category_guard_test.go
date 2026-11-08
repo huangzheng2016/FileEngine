@@ -102,7 +102,7 @@ func TestCreateCategorySimilarityHardReject(t *testing.T) {
 	mustCreateCategory(t, repo, 7, "Photos", "/photos")
 	// One planned file under /photos so the reference info has a real count.
 	seedFile(t, repo, 1, "incoming/a.jpg", "file")
-	if _, err := repo.SetTargetAtomic(1, "incoming/a.jpg", "/photos/a.jpg", "planned", "file"); err != nil {
+	if _, _, err := repo.SetTargetUnique(1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	// Prime the version guard so only the similarity guard can fire.
@@ -153,7 +153,7 @@ func TestCreateCategorySimilaritySoftReference(t *testing.T) {
 	mustCreateCategory(t, repo, 7, "Photos", "/photos")
 	mustCreateCategory(t, repo, 7, "工作文档", "/docs/work")
 	seedFile(t, repo, 1, "incoming/a.jpg", "file")
-	if _, err := repo.SetTargetAtomic(1, "incoming/a.jpg", "/photos/a.jpg", "planned", "file"); err != nil {
+	if _, _, err := repo.SetTargetUnique(1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	if _, err := tb.listCategories(ctx, &ListCategoriesInput{}); err != nil {

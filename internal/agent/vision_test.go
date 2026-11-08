@@ -137,7 +137,7 @@ func TestBuildToolsDefaultOffRegression(t *testing.T) {
 	names := toolNames(t, tools)
 	want := []string{"list_files", "get_file_info", "update_description", "mark_tagged",
 		"list_categories", "set_target", "update_category", "delete_category",
-		"read_file", "create_category"}
+		"read_file", "create_category", "read_plan", "note", "remember", "recall"}
 	if len(names) != len(want) {
 		t.Fatalf("tool count: got %d %v, want %d %v", len(names), names, len(want), want)
 	}

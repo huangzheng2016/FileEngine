@@ -433,29 +433,6 @@ func (r *Repository) ClearChildrenTarget(sessionID uint, parentPath string) erro
 		Updates(map[string]interface{}{"new_path": "", "operation": ""}).Error
 }
 
-// SetTargetAtomic atomically sets a file's target and clears children's targets (for directories) within a transaction.
-// It returns how many already-planned children the cascade cleared (outer
-// overrides inner) so the caller can surface that consequence to the agent.
-func (r *Repository) SetTargetAtomic(sessionID uint, path string, newPath string, operation string, fileType string) (int64, error) {
-	var cleared int64
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND original_path = ?", sessionID, path).
-			Updates(map[string]interface{}{"new_path": newPath, "operation": operation}).Error; err != nil {
-			return err
-		}
-		if fileType == "directory" && newPath != "" {
-			res := tx.Model(&FileEntry{}).
-				Where("scan_session_id = ? AND original_path LIKE ?"+likeEscapeClause+" AND operation != ''", sessionID, childPathPattern(path)).
-				Updates(map[string]interface{}{"new_path": "", "operation": ""})
-			cleared = res.RowsAffected
-			return res.Error
-		}
-		return nil
-	})
-	return cleared, err
-}
-
 // MarkJunkEntries auto-ignores well-known system junk before tagging: files
 // whose base name matches fileNames (ASCII-lowered) or the AppleDouble "._*"
 // prefix, and directories matching dirNames with all their descendants.
@@ -577,9 +554,11 @@ func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*Categor
 
 // CategoryUsage holds a category's name, path, and how many files are planned under it.
 type CategoryUsage struct {
-	Name      string
-	Path      string
-	FileCount int64
+	Name        string
+	Path        string
+	Description string
+	Structure   string
+	FileCount   int64
 }
 
 // GetCategoryUsageSummary returns every category of the filesystem with the
@@ -601,7 +580,7 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 			Count(&count).Error; err != nil {
 			return nil, err
 		}
-		result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, FileCount: count})
+		result = append(result, CategoryUsage{Name: c.Name, Path: c.Path, Description: c.Description, Structure: c.Structure, FileCount: count})
 	}
 	return result, nil
 }

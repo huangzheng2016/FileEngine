@@ -46,7 +46,7 @@ type AgentConfig struct {
 	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
 	// BatchSize is the number of loose files per agent batch (default 200,
 	// capped at 500). With the script bulk workflow (run_script: query_files →
-	// batch set_category → mark_tagged loop) step count no longer scales with
+	// batch set_category → mark_tagged loop) step count does not scale with
 	// files per batch, so large batches fit comfortably in the context window;
 	// the prompt steers agents to that workflow for big batches. The per-file
 	// fallback still costs ≥2 tool calls per file — batches it leaves behind
@@ -56,8 +56,8 @@ type AgentConfig struct {
 	MaxFileReadSize int `yaml:"max_file_read_size" json:"max_file_read_size"`
 	// ArchiveEntryMaxSize caps which archive entries read_file will extract
 	// inline via the path::entry syntax (larger entries are listing-only).
-	ArchiveEntryMaxSize  int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
-	MaxRetries           int    `yaml:"max_retries" json:"max_retries"`
+	ArchiveEntryMaxSize int `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
+	MaxRetries          int `yaml:"max_retries" json:"max_retries"`
 	// RateLimitMaxRetries is the retry budget for HTTP 429 rate-limit failures
 	// only (default 8) — separate from MaxRetries (default 3, used for 5xx and
 	// network errors) so brief throttling does not fail a long tagging run.
@@ -67,8 +67,8 @@ type AgentConfig struct {
 	// jitter in seconds (defaults 2/60): attempt N sleeps
 	// rand[0, min(RetryMaxDelay, RetryBaseDelay*2^(N-1))]. A server-provided
 	// Retry-After hint replaces the computed wait (clamped to 4*RetryMaxDelay).
-	RetryBaseDelay int `yaml:"retry_base_delay" json:"retry_base_delay"`
-	RetryMaxDelay  int `yaml:"retry_max_delay" json:"retry_max_delay"`
+	RetryBaseDelay       int    `yaml:"retry_base_delay" json:"retry_base_delay"`
+	RetryMaxDelay        int    `yaml:"retry_max_delay" json:"retry_max_delay"`
 	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
 	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`
@@ -116,7 +116,7 @@ type AgentConfig struct {
 // agent.category_policy is unset.
 const DefaultCategoryPolicy = `分类创建规范：
 - 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
-- 按"内容类型"建分类，不按人名/时间/设备名建
+- 默认按"内容类型"建分类；用户目标或整理方案要求按时间/人物/项目等组织时，以目标为准
 - 名称用语义化中文（网站备份/数据库备份/照片视频/项目代码/文档资料），路径用小写英文短横线（/website-backups）
 - 同义近义必须合并，禁止一词多类
 - 预期少于 5 个文件就不新建，归入更宽的上级分类

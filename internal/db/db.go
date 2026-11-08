@@ -8,9 +8,9 @@ import (
 
 	"FileEngine/internal/config"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -21,9 +21,7 @@ func Init(cfg config.DatabaseConfig) error {
 	var dialector gorm.Dialector
 	switch cfg.Driver {
 	case "sqlite":
-		// Enable WAL mode and shared cache via DSN params
-		dsn := cfg.DSN + "?_journal_mode=WAL&_busy_timeout=30000&_synchronous=NORMAL&_cache_size=-20000&_foreign_keys=ON&_txlock=immediate"
-		dialector = sqlite.Open(dsn)
+		dialector = sqlite.Open(sqliteDSN(cfg.DSN))
 	case "mysql":
 		dialector = mysql.Open(cfg.DSN)
 	case "postgres":
@@ -82,6 +80,19 @@ func Init(cfg config.DatabaseConfig) error {
 	}
 
 	return nil
+}
+
+// sqliteDSN appends the per-connection pragmas for the pure-Go SQLite driver
+// (glebarez/sqlite on modernc.org/sqlite). Every _pragma runs on each new
+// connection, busy_timeout first so the remaining pragmas already wait on a
+// locked database; _txlock=immediate makes BEGIN take the write lock up front.
+func sqliteDSN(path string) string {
+	return path + "?_pragma=busy_timeout(30000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=cache_size(-20000)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_txlock=immediate"
 }
 
 func GetDB() *gorm.DB {

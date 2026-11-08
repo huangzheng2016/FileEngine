@@ -38,7 +38,7 @@ func TestSystemPromptCategoryPolicyTwoStates(t *testing.T) {
 	}
 
 	with := defaultSystemPrompt(true, true, testCategoryPolicy)
-	if !strings.Contains(with, "## 分类规范\n\n"+testCategoryPolicy) {
+	if !strings.Contains(with, "## 分类规范\n\n") || !strings.Contains(with, "以目标和方案为准）\n\n"+testCategoryPolicy) {
 		t.Fatal("non-empty policy must appear verbatim under a 分类规范 section")
 	}
 

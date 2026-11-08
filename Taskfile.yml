@@ -1,0 +1,141 @@
+version: '3'
+
+# Run with `task <name>` or, without installing go-task, through the pinned
+# Wails CLI: `wails3 task <name>` (CI does the latter).
+#
+# Shell note: the interpreter embedded in `wails3 task` mis-evaluates `!` and
+# `if`, so commands use `test ... || ...` instead.
+
+env:
+  GOTOOLCHAIN: go1.27.2
+  GOFLAGS: -mod=readonly
+  # WebKitGTK/GTK4 headers trigger deprecation warnings inside the Wails cgo
+  # sources; keep the default optimisation flags and silence only those.
+  CGO_CFLAGS: -O2 -g -Wno-deprecated-declarations
+
+vars:
+  BIN_DIR: bin
+  WAILS_VERSION: v3.0.0-beta.27
+  # CI passes VERSION (the release tag without "v"); local builds describe git.
+  VERSION:
+    sh: test -n "$VERSION" && echo "$VERSION" || git describe --tags --always --dirty 2>/dev/null || echo dev
+  # Target OS: GOOS from the environment (cross builds), else the host.
+  TARGET_OS: '{{env "GOOS" | default OS}}'
+  EXE: '{{if eq .TARGET_OS "windows"}}.exe{{end}}'
+  LDFLAGS: -s -w -buildid= -X main.Version={{.VERSION}}
+
+tasks:
+  fmt:
+    desc: Format all Go sources
+    cmds:
+      - '"$(go env GOROOT)/bin/gofmt" -w ./cmd ./internal ./web/embed.go ./main.go'
+
+  fmt:check:
+    desc: Fail when any Go source needs gofmt
+    cmds:
+      - |
+        files="$("$(go env GOROOT)/bin/gofmt" -l ./cmd ./internal ./web/embed.go ./main.go)"
+        test -z "$files" || { printf 'gofmt required:\n%s\n' "$files" >&2; exit 1; }
+
+  mod:verify:
+    desc: Verify module checksums and that go.mod/go.sum are tidy
+    cmds:
+      - go mod verify
+      - go mod tidy -diff
+
+  web:install:
+    desc: Install frontend dependencies from the lockfile
+    dir: web
+    sources: [package.json, package-lock.json]
+    generates: [node_modules/.package-lock.json]
+    cmds:
+      - npm ci --loglevel=error --fund=false --audit=false
+
+  web:check:
+    desc: Run the frontend's own lint/typecheck/test scripts when it defines them
+    dir: web
+    deps: [web:install]
+    cmds:
+      - npm run --if-present lint
+      - npm run --if-present typecheck
+      - npm run --if-present test
+
+  web:build:
+    desc: Build the frontend into web/dist (embedded by the Go binaries)
+    dir: web
+    deps: [web:install]
+    cmds:
+      - npm run build
+
+  web:stub:
+    desc: Write a placeholder web/dist/index.html when no frontend build exists (Go-only checks)
+    status:
+      - test -f web/dist/index.html
+    cmds:
+      - mkdir -p web/dist
+      - printf '<!doctype html><title>FileEngine (frontend not built)</title>\n' > web/dist/index.html
+
+  vet:
+    desc: Run go vet for the host platform
+    deps: [web:stub]
+    cmds:
+      - go vet ./...
+
+  vet:cross:
+    desc: Vet the Windows build (desktop included) with CGO disabled
+    deps: [web:stub]
+    env:
+      GOOS: windows
+      CGO_ENABLED: '0'
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run all Go tests
+    deps: [web:stub]
+    cmds:
+      - go test ./...
+
+  check:
+    desc: Full local gate (CI runs the same) — Go format/modules/vet/tests, then the frontend
+    cmds:
+      - task: fmt:check
+      - task: mod:verify
+      - task: vet
+      - task: vet:cross
+      - task: test
+      - task: web:check
+      - task: web:build
+
+  build:
+    desc: Build the static server binary (CGO_ENABLED=0; cross-compile with GOOS/GOARCH)
+    deps: [web:build]
+    env:
+      CGO_ENABLED: '0'
+    cmds:
+      - go build -trimpath -buildvcs=false -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/fileengine{{.EXE}} .
+      - go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine{{.EXE}} web/dist
+
+  desktop:dev:
+    desc: Run the desktop in development mode, serving web/dist from disk
+    cmds:
+      - go run ./cmd/fileengine-desktop {{.CLI_ARGS}}
+
+  desktop:build:
+    desc: Build the production desktop (embedded frontend). Linux/macOS need cgo on a native host (macOS may switch GOARCH); Windows builds with CGO_ENABLED=0 from any host via GOOS=windows
+    deps: [web:build]
+    env:
+      CGO_ENABLED: '{{if eq .TARGET_OS "windows"}}0{{else}}1{{end}}'
+    cmds:
+      - go build -tags production -trimpath -buildvcs=false -ldflags "{{.LDFLAGS}}{{if eq .TARGET_OS "windows"}} -H windowsgui{{end}}" -o {{.BIN_DIR}}/fileengine-desktop{{.EXE}} ./cmd/fileengine-desktop
+      - go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine-desktop{{.EXE}}
+
+  wails:install:
+    desc: Install the pinned Wails v3 CLI (wails3) into GOBIN
+    cmds:
+      - go install github.com/wailsapp/wails/v3/cmd/wails3@{{.WAILS_VERSION}}
+
+  wails:doctor:
+    desc: Check the host's desktop build dependencies with the pinned Wails CLI
+    cmds:
+      - wails3 doctor

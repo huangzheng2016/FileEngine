@@ -9,10 +9,10 @@ import (
 )
 
 // buildCategorySummary renders the complete category system for the agent
-// prompt: every category is listed (used and unused alike) so the agent never
-// plans against a partial view. Entries are sorted by usage descending then
-// name ascending, keeping the most relevant categories at the top when the
-// list is long. usages is sorted in place.
+// prompt: every category is listed (used and unused alike) with its
+// description and structure rule, so the agent never plans against a partial
+// view and knows what each category is for. Entries are sorted by usage
+// descending then name ascending. usages is sorted in place.
 func buildCategorySummary(usages []db.CategoryUsage) string {
 	if len(usages) == 0 {
 		return ""
@@ -31,8 +31,158 @@ func buildCategorySummary(usages []db.CategoryUsage) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("- %s (%s)\n", u.Name, u.Path))
 		}
+		if d := strings.TrimSpace(u.Description); d != "" {
+			sb.WriteString(fmt.Sprintf("  放什么：%s\n", oneLine(d)))
+		}
+		if st := strings.TrimSpace(u.Structure); st != "" {
+			sb.WriteString(fmt.Sprintf("  目录结构：%s\n", oneLine(st)))
+		}
 	}
 	return sb.String()
+}
+
+// oneLine collapses whitespace (newlines included) to single spaces.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// planPromptMaxRunes caps the plan injected into a prompt; read_plan returns
+// the full text.
+const planPromptMaxRunes = 8000
+
+// SharedContext is everything every agent prompt (survey, tagging, review,
+// chat) shares: the user's goal, the plan, long-term memory, live notes from
+// other workers, the category system and the descriptions of the unit's
+// parent directories.
+type SharedContext struct {
+	Goal       string
+	Plan       *db.SessionPlan // nil or Version 0 = no plan
+	Memory     []db.MemoryItem // long-term (global + filesystem) candidates
+	Notes      string          // pre-rendered notes block (ToolBuilder.TakeNewNotes)
+	Categories []db.CategoryUsage
+	// ParentChain is the unit's ancestor directories (any order); only those
+	// with a description are rendered, top-down.
+	ParentChain []db.FileEntry
+	// UnitPaths are the source paths of the work unit (directory path, or
+	// the loose files' parent directory) — they select path-specific memory.
+	UnitPaths []string
+}
+
+// RenderSharedContext renders the shared context block. Sections without
+// content are omitted; the goal leads because it outranks everything else.
+func RenderSharedContext(c SharedContext) string {
+	var sb strings.Builder
+	if g := strings.TrimSpace(c.Goal); g != "" {
+		sb.WriteString("## 用户目标\n\n")
+		sb.WriteString(g)
+		sb.WriteString("\n\n")
+	}
+	if c.Plan != nil && c.Plan.Version > 0 && strings.TrimSpace(c.Plan.Content) != "" {
+		status := "草稿，用户尚未确认"
+		if c.Plan.Status == db.PlanApproved {
+			status = "用户已确认"
+		}
+		sb.WriteString(fmt.Sprintf("## 整理方案（第 %d 版，%s）\n\n", c.Plan.Version, status))
+		content := strings.TrimSpace(c.Plan.Content)
+		if r := []rune(content); len(r) > planPromptMaxRunes {
+			content = string(r[:planPromptMaxRunes]) + "\n\n（方案过长已截断，用 read_plan 读取全文）"
+		}
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+	if block := BuildMemoryBlock(c.Memory, c.UnitPaths, memoryBlockTokenBudget); block != "" {
+		sb.WriteString(block)
+		sb.WriteString("\n")
+	}
+	if n := strings.TrimSpace(c.Notes); n != "" {
+		sb.WriteString(n)
+		sb.WriteString("\n\n")
+	}
+	if cats := strings.TrimSpace(buildCategorySummary(c.Categories)); cats != "" {
+		sb.WriteString(cats)
+		sb.WriteString("\n\n")
+	}
+	if chain := renderParentChain(c.ParentChain); chain != "" {
+		sb.WriteString(chain)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// renderParentChain lists the described ancestors top-down (shallowest
+// first) under "## 上级目录".
+func renderParentChain(entries []db.FileEntry) string {
+	var described []db.FileEntry
+	for _, e := range entries {
+		if strings.TrimSpace(e.Description) != "" {
+			described = append(described, e)
+		}
+	}
+	if len(described) == 0 {
+		return ""
+	}
+	sort.SliceStable(described, func(i, j int) bool { return len(described[i].OriginalPath) < len(described[j].OriginalPath) })
+	var sb strings.Builder
+	sb.WriteString("## 上级目录\n\n")
+	for _, e := range described {
+		sb.WriteString(fmt.Sprintf("- %s：%s\n", e.OriginalPath, oneLine(e.Description)))
+	}
+	return sb.String()
+}
+
+// sourceAncestors returns the ancestor directories of a source path
+// ("a/b/c.txt" → [a/b, a]); the scan root "." is excluded.
+func sourceAncestors(p string) []string {
+	var out []string
+	p = strings.Trim(p, "/")
+	for {
+		i := strings.LastIndex(p, "/")
+		if i <= 0 {
+			return out
+		}
+		p = p[:i]
+		out = append(out, p)
+	}
+}
+
+// LoadSharedContext gathers the shared context for one work unit of a
+// session. unitPaths are the unit's source paths (a directory unit: its own
+// path; a loose-file group: the files' parent directory). notes is the
+// caller's pre-rendered notes block (ToolBuilder.TakeNewNotes; "" for none).
+func LoadSharedContext(repo *db.Repository, session *db.ScanSession, unitPaths []string, notes string) (SharedContext, error) {
+	c := SharedContext{Goal: session.Goal, Notes: notes, UnitPaths: unitPaths}
+	plan, err := repo.GetPlan(session.ID)
+	if err != nil {
+		return c, fmt.Errorf("shared context: plan: %w", err)
+	}
+	c.Plan = plan
+	if c.Memory, err = repo.ListLongTermMemory(session.FilesystemID); err != nil {
+		return c, fmt.Errorf("shared context: memory: %w", err)
+	}
+	if c.Categories, err = repo.GetCategoryUsageSummary(session.FilesystemID, session.ID); err != nil {
+		return c, fmt.Errorf("shared context: categories: %w", err)
+	}
+	seen := map[string]bool{}
+	var ancestors []string
+	for _, u := range unitPaths {
+		for _, a := range append([]string{strings.Trim(u, "/")}, sourceAncestors(u)...) {
+			if a != "" && a != "." && !seen[a] {
+				seen[a] = true
+				ancestors = append(ancestors, a)
+			}
+		}
+	}
+	if c.ParentChain, err = repo.GetEntriesByPaths(session.ID, ancestors); err != nil {
+		return c, fmt.Errorf("shared context: parent chain: %w", err)
+	}
+	return c, nil
+}
+
+// BuildSharedContext loads and renders the shared context block in one call.
+func BuildSharedContext(repo *db.Repository, session *db.ScanSession, unitPaths []string, notes string) (string, error) {
+	c, err := LoadSharedContext(repo, session, unitPaths, notes)
+	if err != nil {
+		return "", err
+	}
+	return RenderSharedContext(c), nil
 }
 
 func buildDirectoryPrompt(dir db.FileEntry, categorySummary string) string {

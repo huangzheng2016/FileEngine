@@ -70,6 +70,13 @@ func seedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fileType 
 	}
 }
 
+func seedCategory(t *testing.T, repo *db.Repository, filesystemID uint, name, path string) {
+	t.Helper()
+	if err := repo.CreateCategory(&db.Category{FilesystemID: filesystemID, Name: name, Path: path}); err != nil {
+		t.Fatalf("seed category %s: %v", name, err)
+	}
+}
+
 // set_target must reject illegal targets loudly and write nothing.
 func TestSetTargetRejectsIllegalPaths(t *testing.T) {
 	repo := setupToolTestRepo(t)
@@ -101,6 +108,7 @@ func TestSetTargetRejectsIllegalPaths(t *testing.T) {
 func TestSetTargetValidAndClear(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	seedFile(t, repo, 1, "incoming/photo.jpg", "file")
+	seedCategory(t, repo, 1, "整理", "/organized")
 
 	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 
@@ -164,6 +172,7 @@ func TestSetTargetCascadeClearWarning(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	seedFile(t, repo, 1, "db", "directory")
 	seedFile(t, repo, 1, "db/azure", "directory")
+	seedCategory(t, repo, 1, "备份", "/backups")
 	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 
 	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db/azure", NewPath: "/backups/database/azure"}); err != nil {

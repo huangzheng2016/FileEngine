@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version stamped into binaries (without the leading v); empty uses git describe
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOTOOLCHAIN: go1.27.2
+  GOFLAGS: -mod=readonly
+  NODE_VERSION: "24"
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  check:
+    name: Quality gate (Go + frontend)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # go vet/test ./... compile the desktop, whose Wails sources link GTK/WebKitGTK.
+      - uses: ./.github/actions/linux-gui-deps
+      - uses: ./.github/actions/go-toolchain
+        with:
+          build-cache: check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: ./.github/actions/wails-cli
+      - name: fmt:check, mod:verify, vet, vet:cross, test, frontend check + build
+        run: wails3 task check
+
+  server:
+    name: Server ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/go-toolchain
+        with:
+          build-cache: server-${{ matrix.goos }}-${{ matrix.goarch }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The CLI must be built for the runner, not the GOOS/GOARCH target.
+      - uses: ./.github/actions/wails-cli
+        env:
+          GOOS: ""
+          GOARCH: ""
+      - name: Build the static server (CGO_ENABLED=0)
+        run: wails3 task build
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="fileengine_${GOOS}_${GOARCH}"
+          mkdir -p dist
+          if [ "$GOOS" = windows ]; then
+            cp bin/fileengine.exe "dist/$name.exe"
+            (cd dist && zip -q "$name.zip" "$name.exe" && rm "$name.exe")
+          else
+            cp bin/fileengine "dist/$name"
+            tar -C dist -czf "dist/$name.tar.gz" "$name" && rm "dist/$name"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux and macOS link the native webview through cgo: build on a
+          # matching host (macOS switches architecture with GOARCH alone).
+          - { goos: linux, goarch: amd64, runner: ubuntu-24.04 }
+          - { goos: linux, goarch: arm64, runner: ubuntu-24.04-arm }
+          - { goos: darwin, goarch: arm64, runner: macos-15 }
+          - { goos: darwin, goarch: amd64, runner: macos-15 }
+          # Windows needs no cgo (pure-Go SQLite, WebView2 via syscalls).
+          - { goos: windows, goarch: amd64, runner: ubuntu-24.04 }
+          - { goos: windows, goarch: arm64, runner: ubuntu-24.04 }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - if: matrix.goos == 'linux'
+        uses: ./.github/actions/linux-gui-deps
+      - uses: ./.github/actions/go-toolchain
+        with:
+          build-cache: desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: ./.github/actions/wails-cli
+        env:
+          GOOS: ""
+          GOARCH: ""
+      - name: Build the production desktop
+        run: wails3 task desktop:build
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="fileengine-desktop_${GOOS}_${GOARCH}"
+          mkdir -p dist
+          if [ "$GOOS" = windows ]; then
+            cp bin/fileengine-desktop.exe "dist/$name.exe"
+            (cd dist && zip -q "$name.zip" "$name.exe" && rm "$name.exe")
+          else
+            cp bin/fileengine-desktop "dist/$name"
+            tar -C dist -czf "dist/$name.tar.gz" "$name" && rm "dist/$name"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Single required status check for branch protection.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [check, server, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reject failed, cancelled or skipped jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          failed="$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')"
+          if [ -n "$failed" ]; then
+            echo "::error::CI jobs not successful: $failed"
+            exit 1
+          fi

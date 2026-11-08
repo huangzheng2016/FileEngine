@@ -111,3 +111,41 @@ func TestPostgresDialectSemantics(t *testing.T) {
 			reloaded.TotalFiles, reloaded.TaggedFiles, len(entries))
 	}
 }
+
+// The plan/memory/preview queries use dialect-specific pieces (ILIKE recall,
+// quoted "key" column, strpos segment aggregation) — run them on PostgreSQL.
+func TestPostgresBrainQueries(t *testing.T) {
+	dsn := postgresTestDSN(t)
+	if err := Init(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
+		t.Fatalf("init postgres: %v", err)
+	}
+	if err := DB.Migrator().DropTable(&FileEntry{}, &SessionPlan{}, &MemoryItem{}); err != nil {
+		t.Fatalf("drop tables: %v", err)
+	}
+	if err := DB.AutoMigrate(&FileEntry{}, &SessionPlan{}, &MemoryItem{}); err != nil {
+		t.Fatalf("re-migrate: %v", err)
+	}
+	r := NewRepository(DB)
+
+	seedPreviewFixture(t, r)
+	checkPreviewAfter(t, r)
+	checkPreviewBefore(t, r)
+
+	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.PSD", Content: "设计源文件"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.psd", Content: "设计源文件 v2"}); err != nil {
+		t.Fatalf("upsert same key: %v", err)
+	}
+	got, err := r.SearchMemory(MemorySearch{Query: "PSD", Scopes: []MemoryScopeRef{{Scope: MemoryScopeFilesystem, ScopeID: 1}}})
+	if err != nil || len(got) != 1 || got[0].Content != "设计源文件 v2" {
+		t.Fatalf("case-insensitive recall on postgres: %+v %v", got, err)
+	}
+
+	if _, err := r.SavePlan(1, "# 方案", 0, ""); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+	if _, err := r.SavePlan(1, "stale", 0, ""); err != ErrPlanVersionConflict {
+		t.Fatalf("stale plan: %v", err)
+	}
+}
