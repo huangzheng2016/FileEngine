@@ -1,7 +1,6 @@
 package db
 
 import (
-	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -174,24 +173,4 @@ func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]FileE
 func CollisionKey(p string) string {
 	p = strings.TrimPrefix(path.Clean("/"+p), "/")
 	return strings.ToLower(norm.NFC.String(p))
-}
-
-// CollisionFreePath returns p, or p with the smallest " (n)" suffix (before
-// the extension) whose CollisionKey is not taken. Plan-time naming uses it so
-// that execution never meets two decisions for one target.
-func CollisionFreePath(p string, taken func(key string) bool) string {
-	if !taken(CollisionKey(p)) {
-		return p
-	}
-	dir, base := path.Split(p)
-	stem, ext := base, ""
-	if i := strings.LastIndex(base, "."); i > 0 {
-		stem, ext = base[:i], base[i:]
-	}
-	for n := 1; ; n++ {
-		cand := dir + fmt.Sprintf("%s (%d)%s", stem, n, ext)
-		if !taken(CollisionKey(cand)) {
-			return cand
-		}
-	}
 }

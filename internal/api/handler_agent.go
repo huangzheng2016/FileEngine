@@ -14,7 +14,6 @@ import (
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/executor"
-	"FileEngine/internal/remotefs"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,8 +22,6 @@ var (
 	agentMu        sync.Mutex
 	agents         = make(map[uint]*agent.Agent)
 	instructAgents = make(map[uint]*agent.Agent)
-	execMu         sync.Mutex
-	executors      = make(map[uint]*executor.Executor)
 )
 
 // resolveFSConfig resolves the RemoteFSConfig for a session via its Filesystem entity.
@@ -262,42 +259,6 @@ func (s *Server) tagStatus(c *gin.Context) {
 	})
 }
 
-func (s *Server) validatePlans(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	fs, err := remotefs.NewFromConfig(fsCfg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
-		return
-	}
-	defer fs.Close()
-
-	e := executor.New(s.repo, fs)
-	result, err := e.Validate(c.Request.Context(), sessionID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
 func (s *Server) stopInstruct(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -322,168 +283,6 @@ func (s *Server) stopInstruct(c *gin.Context) {
 		log.Printf("stopInstruct session %d: run did not drain within 30s", id)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
-}
-
-func (s *Server) startExecute(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	// mode: "copy" (default) or "move"
-	mode := c.DefaultQuery("mode", "copy")
-	if mode != "copy" && mode != "move" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'copy' or 'move'"})
-		return
-	}
-
-	sessionID := uint(id)
-	session, err := s.repo.GetSession(sessionID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	fsCfg, err := s.resolveFSConfig(session)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	fs, err := remotefs.NewFromConfig(fsCfg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
-		return
-	}
-
-	execMu.Lock()
-	if e, ok := executors[sessionID]; ok && e.IsRunning() {
-		execMu.Unlock()
-		fs.Close()
-		c.JSON(http.StatusConflict, gin.H{"error": "execution already running"})
-		return
-	}
-
-	e := executor.New(s.repo, fs)
-	executors[sessionID] = e
-	execMu.Unlock()
-
-	go func() {
-		defer func() {
-			execMu.Lock()
-			delete(executors, sessionID)
-			execMu.Unlock()
-			fs.Close()
-		}()
-		publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStarted, "")
-
-		// Bridge executor progress onto the session bus: the executor keeps
-		// in-memory counters only, so poll them while it runs.
-		progressDone := make(chan struct{})
-		defer close(progressDone)
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-progressDone:
-					return
-				case <-ticker.C:
-					publishExecProgress(sessionID, e.Progress())
-				}
-			}
-		}()
-
-		// The request ctx is canceled as soon as this handler returns; background
-		// work runs on context.Background() (Stop() has its own cancelFn).
-		err := e.Execute(context.Background(), sessionID, mode)
-		publishExecProgress(sessionID, e.Progress()) // final counters
-		switch {
-		case err == nil:
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusDone, "")
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusDone, "")
-		case errors.Is(err, context.Canceled):
-			// User-initiated stop: not a failure — restore the pre-execution
-			// status (mirrors the tagging path) instead of "error: ...".
-			session, _ := s.repo.GetSession(sessionID)
-			if session != nil && session.Status == "executing" {
-				session.Status = "tagged"
-				s.repo.UpdateSession(session)
-			}
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusStopped, "")
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusStopped, "")
-		default:
-			log.Printf("execution session %d failed: %v", sessionID, err)
-			session, _ := s.repo.GetSession(sessionID)
-			if session != nil && session.Status == "executing" {
-				session.Status = db.TruncateStatus("error: " + err.Error())
-				s.repo.UpdateSession(session)
-			}
-			publishRunStatus(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
-			publishRunDone(sessionID, db.PhaseExecuting, db.StatusError, err.Error())
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{"message": "execution started"})
-}
-
-func (s *Server) stopExecute(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	execMu.Lock()
-	e, ok := executors[uint(id)]
-	execMu.Unlock()
-
-	if !ok || !e.IsRunning() {
-		c.JSON(http.StatusOK, gin.H{"message": "not running"})
-		return
-	}
-	e.Stop()
-	c.JSON(http.StatusOK, gin.H{"message": "stopping"})
-}
-
-func (s *Server) executeStatus(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-
-	execMu.Lock()
-	e, ok := executors[uint(id)]
-	execMu.Unlock()
-
-	session, _ := s.repo.GetSession(uint(id))
-
-	result := gin.H{
-		"status":  session.Status,
-		"running": ok && e.IsRunning(),
-	}
-	if ok {
-		progress := e.Progress()
-		result["total"] = progress.Total
-		result["success"] = progress.Success
-		result["failed"] = progress.Failed
-		result["skipped"] = progress.Skipped
-	}
-	c.JSON(http.StatusOK, result)
-}
-
-// publishExecProgress emits a progress event with the executor's counters.
-func publishExecProgress(sessionID uint, p executor.ExecuteResult) {
-	db.PublishEvent(db.Event{Type: db.EventProgress, SessionID: sessionID, Payload: db.ProgressPayload{
-		SessionID: sessionID,
-		Phase:     db.PhaseExecuting,
-		Total:     p.Total,
-		Success:   p.Success,
-		Failed:    p.Failed,
-		Skipped:   p.Skipped,
-	}})
 }
 
 func (s *Server) getPlans(c *gin.Context) {
