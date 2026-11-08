@@ -120,7 +120,7 @@ func validTarget(p string) error {
 		return errors.New("目标路径为空")
 	}
 	if err := pathutil.ValidateFSPath(p); err != nil {
-		return fmt.Errorf("目标路径非法: %w", err)
+		return fmt.Errorf("目标路径非法：%w", err)
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ func validTarget(p string) error {
 // db.CancelRun(run.ID).
 func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options) (*db.AgentRun, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
-		return nil, fmt.Errorf("mode must be %q or %q", ModeCopy, ModeMove)
+		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
 	title := map[string]string{ModeCopy: "执行：复制", ModeMove: "执行：移动"}[opts.Mode]
 	switch {
@@ -159,7 +159,7 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.AgentRun, error) {
 	var target db.AgentRun
 	if err := repo.DB().First(&target, runID).Error; err != nil {
-		return nil, fmt.Errorf("run not found: %w", err)
+		return nil, fmt.Errorf("读取运行 %d：%w", runID, err)
 	}
 	if target.Phase != db.RunPhaseExecuting {
 		return nil, errors.New("只能撤销执行运行")
@@ -264,12 +264,12 @@ func Summary(verb string, res *Result) string {
 // triggers a delete.
 func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) (*Result, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
-		return nil, fmt.Errorf("mode must be %q or %q", ModeCopy, ModeMove)
+		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
 	res := &Result{}
 	if err := e.Recover(ctx, run.SessionID); err != nil {
-		return res, fmt.Errorf("恢复中断的执行失败: %w", err)
+		return res, fmt.Errorf("恢复中断的执行失败：%w", err)
 	}
 
 	entries, err := e.plan(ctx, opts, res)
@@ -316,12 +316,12 @@ func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode strin
 		return skip(IssueInvalidTarget, err.Error())
 	}
 	if _, err := pathutil.RootRelative(f.OriginalPath); err != nil {
-		return skip(IssueFailed, "源路径非法: "+err.Error())
+		return skip(IssueFailed, "源路径非法："+err.Error())
 	}
 	src, dst := cleanPath(f.OriginalPath), cleanPath(f.NewPath)
 	st, err := e.fs.Stat(ctx, src)
 	if err != nil {
-		return skip(IssueSourceMissing, "源文件不存在或无法访问: "+err.Error())
+		return skip(IssueSourceMissing, "源文件不存在或无法访问："+err.Error())
 	}
 	if changed := staleReason(f, st); changed != "" {
 		return skip(IssueSourceChanged, changed)
