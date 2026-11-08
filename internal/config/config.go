@@ -60,7 +60,7 @@ type AgentConfig struct {
 	VisionMaxImageBytes     int `yaml:"vision_max_image_bytes" json:"vision_max_image_bytes"`           // refuse reading larger source files
 	// BatchSize is the number of loose files per agent batch (default 200,
 	// capped at 500). With the script bulk workflow (run_script: query_files →
-	// batch set_category → mark_tagged loop) step count no longer scales with
+	// batch set_category → mark_tagged loop) step count does not scale with
 	// files per batch, so large batches fit comfortably in the context window;
 	// the prompt steers agents to that workflow for big batches. The per-file
 	// fallback still costs ≥2 tool calls per file — batches it leaves behind
@@ -130,7 +130,7 @@ type AgentConfig struct {
 // agent.category_policy is unset.
 const DefaultCategoryPolicy = `分类创建规范：
 - 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
-- 按"内容类型"建分类，不按人名/时间/设备名建
+- 默认按"内容类型"建分类；用户目标或整理方案要求按时间/人物/项目等组织时，以目标为准
 - 名称用语义化中文（网站备份/数据库备份/照片视频/项目代码/文档资料），路径用小写英文短横线（/website-backups）
 - 同义近义必须合并，禁止一词多类
 - 预期少于 5 个文件就不新建，归入更宽的上级分类

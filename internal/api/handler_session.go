@@ -151,10 +151,9 @@ type CreateSessionRequest struct {
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 	FilterMode          string `json:"filter_mode"`
 	FilterDirs          string `json:"filter_dirs"`
-	// AllowVision is additive: old clients omit it (nil → false). When set it
-	// configures the session's vision switch at creation, so the frontend no
-	// longer needs a compensating PATCH after create.
-	AllowVision *bool `json:"allow_vision"`
+	AllowVision         bool   `json:"allow_vision"`
+	// Goal is the user's organizing intent in their own words.
+	Goal string `json:"goal"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -176,7 +175,8 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
-		AllowVision:         req.AllowVision != nil && *req.AllowVision,
+		AllowVision:         req.AllowVision,
+		Goal:                strings.TrimSpace(req.Goal),
 		FilesystemID:        filesystem.ID,
 		ScanPath:            req.ScanPath,
 		RootPath:            scanRootPath(req.ScanPath),
@@ -250,6 +250,10 @@ func (s *Server) deleteSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if err := s.repo.DeleteSessionBrainData(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
@@ -262,6 +266,7 @@ type UpdateSessionRequest struct {
 	FilterMode          *string `json:"filter_mode"`
 	FilterDirs          *string `json:"filter_dirs"`
 	ModelProviderID     *uint   `json:"model_provider_id"`
+	Goal                *string `json:"goal"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -304,6 +309,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	if req.ModelProviderID != nil {
 		session.ModelProviderID = *req.ModelProviderID
 	}
+	if req.Goal != nil {
+		session.Goal = strings.TrimSpace(*req.Goal)
+	}
 	if err := s.repo.UpdateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -333,7 +341,6 @@ func (s *Server) rescanSession(c *gin.Context) {
 		return
 	}
 
-	// Recompute RootPath from ScanPath (fixes sessions created with old logic)
 	session.RootPath = scanRootPath(session.ScanPath)
 	session.Status = "scanning"
 	session.TotalFiles = 0

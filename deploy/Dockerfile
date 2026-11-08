@@ -25,7 +25,7 @@ COPY . .
 COPY --from=web-builder /build/web/dist ./web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fileengine .
+    CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/fileengine .
 
 # ---------------------------------------------------------------------------
 # Stage 3: runtime — single binary + entrypoint, state lives in /data
