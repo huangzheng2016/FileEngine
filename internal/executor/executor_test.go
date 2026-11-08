@@ -34,7 +34,7 @@ func setupTestDB(t *testing.T) *db.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}, &db.AgentLog{}, &db.ModelProvider{}); err != nil {
+	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}, &db.ModelProvider{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db.NewRepository(gdb)

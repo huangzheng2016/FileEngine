@@ -156,15 +156,6 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 		e.mu.Unlock()
 	}()
 
-	session, err := e.repo.GetSession(sessionID)
-	if err != nil {
-		return err
-	}
-	session.Status = "executing"
-	if err := e.repo.UpdateSession(session); err != nil {
-		return err
-	}
-
 	files, err := e.repo.GetPlannedFiles(sessionID)
 	if err != nil {
 		return err
@@ -228,10 +219,7 @@ func (e *Executor) Execute(ctx context.Context, sessionID uint, mode string) err
 		e.mu.Unlock()
 	}
 
-	_ = e.repo.RefreshSessionCounts(sessionID)
-	session, _ = e.repo.GetSession(sessionID)
-	session.Status = "done"
-	return e.repo.UpdateSession(session)
+	return e.repo.RefreshSessionCounts(sessionID)
 }
 
 // executeFile handles a single file copy or move.

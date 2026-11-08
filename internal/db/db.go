@@ -62,33 +62,26 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 	}
 
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
+		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	// Backfill context_window for providers created before the field existed
-	// (max_tokens was previously misused as the window; it now only caps output).
-	if err := backfillContextWindow(DB); err != nil {
-		return fmt.Errorf("failed to backfill context_window: %w", err)
-	}
-
-	// Zombie sweep: sessions still "scanning" belong to a previous process
-	// lifetime — mark them interrupted so they cannot masquerade as live.
-	if n, err := NewRepository(DB).MarkInterruptedScans(); err != nil {
+	// Zombie sweeps: scans and runs still marked live belong to a previous
+	// process lifetime.
+	repo := NewRepository(DB)
+	if n, err := repo.MarkInterruptedScans(); err != nil {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	} else if n > 0 {
 		log.Printf("db init: marked %d zombie scanning session(s) as interrupted", n)
 	}
+	if n, err := repo.SweepStaleRuns(); err != nil {
+		return fmt.Errorf("failed to sweep stale runs: %w", err)
+	} else if n > 0 {
+		log.Printf("db init: marked %d stale running run(s) as stopped", n)
+	}
 
 	return nil
-}
-
-// backfillContextWindow sets the default context window on provider rows that
-// predate the context_window column (NULL / non-positive values).
-func backfillContextWindow(db *gorm.DB) error {
-	return db.Model(&ModelProvider{}).
-		Where("context_window IS NULL OR context_window <= 0").
-		Update("context_window", DefaultContextWindow).Error
 }
 
 func GetDB() *gorm.DB {

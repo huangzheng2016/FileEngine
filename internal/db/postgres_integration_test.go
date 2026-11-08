@@ -36,10 +36,10 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	}
 
 	// Fresh slate: drop + re-migrate so the test is re-runnable on the same DB.
-	if err := DB.Migrator().DropTable(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.Migrator().DropTable(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
 		t.Fatalf("drop tables: %v", err)
 	}
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
 		t.Fatalf("re-migrate: %v", err)
 	}
 	r := NewRepository(DB)
@@ -109,21 +109,5 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	if reloaded.TotalFiles != len(entries) || reloaded.TaggedFiles != 2 {
 		t.Fatalf("session counts: got total=%d tagged=%d, want total=%d tagged=2",
 			reloaded.TotalFiles, reloaded.TaggedFiles, len(entries))
-	}
-
-	// Backfill SQL (context_window IS NULL OR <= 0) must run on PostgreSQL.
-	legacy := &ModelProvider{Name: "legacy", Provider: "openai", Model: "gpt-x", ContextWindow: 0}
-	if err := r.CreateModelProvider(legacy); err != nil {
-		t.Fatalf("create legacy provider: %v", err)
-	}
-	if err := backfillContextWindow(DB); err != nil {
-		t.Fatalf("backfillContextWindow: %v", err)
-	}
-	reloadedP, err := r.GetModelProvider(legacy.ID)
-	if err != nil {
-		t.Fatalf("reload provider: %v", err)
-	}
-	if reloadedP.ContextWindow != DefaultContextWindow {
-		t.Fatalf("context window backfill: got %d, want %d", reloadedP.ContextWindow, DefaultContextWindow)
 	}
 }
