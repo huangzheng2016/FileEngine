@@ -18,7 +18,7 @@ func TestCategoryPathValidationREST(t *testing.T) {
 	code, resp := doModelRequest(t, s, http.MethodPost, "/api/v1/categories", map[string]any{
 		"filesystem_id": 1, "name": "Bad", "path": "/../evil",
 	})
-	if code != http.StatusBadRequest || !strings.Contains(resp["error"].(string), "invalid category path") {
+	if code != http.StatusBadRequest || !strings.Contains(resp["error"].(string), "分类路径非法") {
 		t.Fatalf("create evil path: code %d, resp %v", code, resp)
 	}
 	if cats, _ := db.NewRepository(db.GetDB()).ListCategories(1); len(cats) != 0 {
@@ -37,7 +37,7 @@ func TestCategoryPathValidationREST(t *testing.T) {
 	code, resp = doModelRequest(t, s, http.MethodPut, "/api/v1/categories/1", map[string]any{
 		"filesystem_id": 1, "name": "Good", "path": "/a/../../b",
 	})
-	if code != http.StatusBadRequest || !strings.Contains(resp["error"].(string), "invalid category path") {
+	if code != http.StatusBadRequest || !strings.Contains(resp["error"].(string), "分类路径非法") {
 		t.Fatalf("update evil path: code %d, resp %v", code, resp)
 	}
 	cat, err := db.NewRepository(db.GetDB()).GetCategory(1)

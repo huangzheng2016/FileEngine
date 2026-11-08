@@ -83,11 +83,11 @@ func (s *Server) launchRun(sessionID uint, phase, title string, work func(ctx co
 // when the session is busy.
 func respondRunStart(c *gin.Context, run *db.AgentRun, err error) {
 	if errors.Is(err, db.ErrSessionBusy) {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		conflict(c, err.Error())
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID})
@@ -96,12 +96,12 @@ func respondRunStart(c *gin.Context, run *db.AgentRun, err error) {
 func (s *Server) listRuns(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		badRequest(c, "无效的会话 ID")
 		return
 	}
 	runs, err := s.repo.ListRuns(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if runs == nil {
@@ -113,12 +113,12 @@ func (s *Server) listRuns(c *gin.Context) {
 func (s *Server) getRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的运行 ID"})
+		badRequest(c, "无效的运行 ID")
 		return
 	}
 	run, err := s.repo.GetRun(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "运行不存在"})
+		lookupFailed(c, err, msgNoRun)
 		return
 	}
 	c.JSON(http.StatusOK, run)
@@ -130,13 +130,13 @@ func (s *Server) getRun(c *gin.Context) {
 func (s *Server) stopRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的运行 ID"})
+		badRequest(c, "无效的运行 ID")
 		return
 	}
 	runID := uint(id)
 	run, err := s.repo.GetRun(runID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "运行不存在"})
+		lookupFailed(c, err, msgNoRun)
 		return
 	}
 	if run.Status == db.RunRunning {
@@ -153,7 +153,7 @@ func (s *Server) stopRun(c *gin.Context) {
 			_ = s.repo.FinishRun(run, db.RunStopped, "", "", db.TokenCounts{})
 		}
 		if run, err = s.repo.GetRun(runID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 	}

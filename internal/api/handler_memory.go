@@ -14,14 +14,14 @@ import (
 func (s *Server) listMemory(c *gin.Context) {
 	scope := c.Query("scope")
 	if scope != "" && !db.ValidMemoryScope(scope) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		badRequest(c, "scope 无效")
 		return
 	}
 	var scopeID *uint
 	if v := c.Query("scope_id"); v != "" {
 		id, err := strconv.ParseUint(v, 10, 32)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope_id"})
+			badRequest(c, "scope_id 无效")
 			return
 		}
 		u := uint(id)
@@ -29,7 +29,7 @@ func (s *Server) listMemory(c *gin.Context) {
 	}
 	items, err := s.repo.ListMemory(scope, scopeID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if items == nil {
@@ -53,7 +53,7 @@ type CreateMemoryRequest struct {
 func (s *Server) createMemory(c *gin.Context) {
 	var req CreateMemoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	m := &db.MemoryItem{Scope: req.Scope, ScopeID: req.ScopeID, Kind: req.Kind, Key: req.Key,
@@ -84,12 +84,12 @@ type UpdateMemoryRequest struct {
 func (s *Server) updateMemory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	var req UpdateMemoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	m, err := s.repo.UpdateMemory(uint(id), func(m *db.MemoryItem) {
@@ -121,7 +121,7 @@ func (s *Server) updateMemory(c *gin.Context) {
 func (s *Server) deleteMemory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	m, err := s.repo.GetMemory(uint(id))
@@ -141,11 +141,11 @@ func writeMemoryError(c *gin.Context, err error) {
 	var invalid *db.MemoryValidationError
 	switch {
 	case errors.Is(err, db.ErrMemoryNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		notFound(c, err.Error())
 	case errors.As(err, &invalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 	}
 }
 

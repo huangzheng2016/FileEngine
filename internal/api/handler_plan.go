@@ -17,12 +17,12 @@ import (
 func (s *Server) loadSession(c *gin.Context) (*db.ScanSession, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return nil, false
 	}
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
 		return nil, false
 	}
 	return session, true
@@ -36,7 +36,7 @@ func (s *Server) getPlan(c *gin.Context) {
 	}
 	plan, err := s.repo.GetPlan(session.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, plan)
@@ -57,11 +57,11 @@ func (s *Server) updatePlan(c *gin.Context) {
 	}
 	var req UpdatePlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	if req.Version < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "version must be >= 0"})
+		badRequest(c, "version 不能为负数")
 		return
 	}
 	plan, err := s.repo.SavePlan(session.ID, req.Content, req.Version, "")
@@ -71,7 +71,7 @@ func (s *Server) updatePlan(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	db.Emit(session.ID, 0, db.EvPlanUpdated, db.PlanUpdatedData{Version: plan.Version, Status: plan.Status})
@@ -86,11 +86,11 @@ func (s *Server) approvePlan(c *gin.Context) {
 	}
 	plan, err := s.repo.ApprovePlan(session.ID)
 	if errors.Is(err, db.ErrPlanNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		notFound(c, err.Error())
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	db.Emit(session.ID, 0, db.EvPlanUpdated, db.PlanUpdatedData{Version: plan.Version, Status: plan.Status})
@@ -107,7 +107,7 @@ func (s *Server) draftPlan(c *gin.Context) {
 	var req DraftPlanRequest
 	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			badBody(c, err)
 			return
 		}
 	}
@@ -116,7 +116,7 @@ func (s *Server) draftPlan(c *gin.Context) {
 		return
 	}
 	if session.Status == "scanning" {
-		c.JSON(http.StatusConflict, gin.H{"error": "会话还在扫描中，请等扫描完成后再生成方案"})
+		conflict(c, "会话还在扫描中，请等扫描完成后再生成方案")
 		return
 	}
 	run, err := s.launchRun(session.ID, db.RunPhaseSurvey, "生成整理方案", func(ctx context.Context, run *db.AgentRun) runOutcome {

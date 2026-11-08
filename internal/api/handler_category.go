@@ -13,7 +13,7 @@ import (
 func (s *Server) listCategories(c *gin.Context) {
 	fsID, err := strconv.ParseUint(c.Query("filesystem_id"), 10, 32)
 	if err != nil || fsID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem_id required"})
+		badRequest(c, "缺少 filesystem_id")
 		return
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
@@ -35,7 +35,7 @@ type CategoryRequest struct {
 func (s *Server) createCategory(c *gin.Context) {
 	var req CategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 
@@ -43,7 +43,7 @@ func (s *Server) createCategory(c *gin.Context) {
 	// them; enforce the same root-confinement check as the agent tool layer
 	// so the REST API cannot bypass it.
 	if err := pathutil.ValidateFSPath(req.Path); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
+		badRequest(c, "分类路径非法："+err.Error())
 		return
 	}
 
@@ -64,26 +64,26 @@ func (s *Server) createCategory(c *gin.Context) {
 func (s *Server) updateCategory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	cat, err := s.repo.GetCategory(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "category not found"})
+		lookupFailed(c, err, msgNoCategory)
 		return
 	}
 
 	var req CategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 
 	// Same root-confinement check as the tool layer: the new path cascades
 	// into planned files' new_path.
 	if err := pathutil.ValidateFSPath(req.Path); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category path: " + err.Error()})
+		badRequest(c, "分类路径非法："+err.Error())
 		return
 	}
 
@@ -104,12 +104,12 @@ func (s *Server) updateCategory(c *gin.Context) {
 func (s *Server) deleteCategory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	cat, err := s.repo.GetCategory(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "category not found"})
+		lookupFailed(c, err, msgNoCategory)
 		return
 	}
 	// Clear planned files under this category and reset tagged for re-classification
@@ -131,7 +131,7 @@ type CategoryExportItem struct {
 func (s *Server) exportCategories(c *gin.Context) {
 	fsID, err := strconv.ParseUint(c.Query("filesystem_id"), 10, 32)
 	if err != nil || fsID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem_id required"})
+		badRequest(c, "缺少 filesystem_id")
 		return
 	}
 	cats, err := s.repo.ListCategories(uint(fsID))
@@ -149,13 +149,13 @@ func (s *Server) exportCategories(c *gin.Context) {
 func (s *Server) importCategories(c *gin.Context) {
 	fsID, err := strconv.ParseUint(c.Query("filesystem_id"), 10, 32)
 	if err != nil || fsID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "filesystem_id required"})
+		badRequest(c, "缺少 filesystem_id")
 		return
 	}
 
 	var items []CategoryExportItem
 	if err := c.ShouldBindJSON(&items); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 

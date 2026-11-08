@@ -137,7 +137,7 @@ func pinHostKey(fs *db.Filesystem, explicit *string) error {
 func (s *Server) createFilesystem(c *gin.Context) {
 	var req FilesystemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "请求格式错误："+err.Error())
+		badBody(c, err)
 		return
 	}
 	if !validateFilesystemRequest(c, &req) {
@@ -207,7 +207,7 @@ func (s *Server) updateFilesystem(c *gin.Context) {
 	}
 	var req FilesystemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "请求格式错误："+err.Error())
+		badBody(c, err)
 		return
 	}
 	if !validateFilesystemRequest(c, &req) {
@@ -271,7 +271,7 @@ type FilesystemTestRequest struct {
 func (s *Server) testFilesystemConnection(c *gin.Context) {
 	var req FilesystemTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "请求格式错误："+err.Error())
+		badBody(c, err)
 		return
 	}
 	if !validateFilesystemRequest(c, &req.FilesystemRequest) {
@@ -333,13 +333,13 @@ func (s *Server) testFilesystemConnection(c *gin.Context) {
 
 	rfs, err := remotefs.NewFromConfig(fsCfg)
 	if err != nil {
-		resp["error"] = err.Error()
+		resp["error"] = "连接失败：" + err.Error()
 		c.JSON(http.StatusOK, resp)
 		return
 	}
 	defer rfs.Close()
 	if _, err := rfs.List(c.Request.Context(), "."); err != nil {
-		resp["error"] = err.Error()
+		resp["error"] = "读取根目录失败：" + err.Error()
 		c.JSON(http.StatusOK, resp)
 		return
 	}
