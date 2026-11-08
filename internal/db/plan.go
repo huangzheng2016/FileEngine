@@ -102,11 +102,15 @@ func (r *Repository) ApprovePlan(sessionID uint) (*SessionPlan, error) {
 	return r.GetPlan(sessionID)
 }
 
-// DeleteSessionBrainData removes the session's plan and its session-scoped
-// memory (shared working notes). Called when the session is deleted.
+// DeleteSessionBrainData removes the session's plan, chat turns and
+// session-scoped memory (shared working notes). Called when the session is
+// deleted.
 func (r *Repository) DeleteSessionBrainData(sessionID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("session_id = ?", sessionID).Delete(&SessionPlan{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("session_id = ?", sessionID).Delete(&ChatTurn{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("scope = ? AND scope_id = ?", MemoryScopeSession, sessionID).Delete(&MemoryItem{}).Error

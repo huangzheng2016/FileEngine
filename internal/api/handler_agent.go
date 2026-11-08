@@ -66,42 +66,8 @@ func (s *Server) startTagging(c *gin.Context) {
 	run, err := s.launchRun(session.ID, db.RunPhaseTagging, "自动整理", func(ctx context.Context, run *db.AgentRun) runOutcome {
 		logger := agent.NewLogger(session.ID, run.ID, 0)
 		report, partial, err := a.RunTagging(ctx, logger)
-		return runOutcome{Summary: report, Partial: partial, Err: err, Tokens: logger.Tokens()}
-	})
-	respondRunStart(c, run, err)
-}
-
-type InstructRequest struct {
-	FileIDs []uint `json:"file_ids" binding:"required"`
-	Prompt  string `json:"prompt" binding:"required"`
-}
-
-// instructAgent starts a chat run over the selected files:
-// POST /sessions/:id/instruct → {run_id}.
-func (s *Server) instructAgent(c *gin.Context) {
-	var req InstructRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	session, a, ok := s.agentForSession(c)
-	if !ok {
-		return
-	}
-	var files []db.FileEntry
-	for _, fid := range req.FileIDs {
-		if f, err := s.repo.GetFile(fid); err == nil && f.ScanSessionID == session.ID {
-			files = append(files, *f)
-		}
-	}
-	if len(files) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "未选择有效的文件"})
-		return
-	}
-	run, err := s.launchRun(session.ID, db.RunPhaseChat, req.Prompt, func(ctx context.Context, run *db.AgentRun) runOutcome {
-		logger := agent.NewLogger(session.ID, run.ID, 0)
-		resp, err := a.RunInstruct(ctx, logger, files, req.Prompt)
-		return runOutcome{Summary: resp, Err: err, Tokens: logger.Tokens()}
+		return runOutcome{Summary: report, Partial: partial, Err: err, Tokens: logger.Tokens(),
+			Then: func(status string) { s.startReviewAfterTagging(session.ID, run.ID, status) }}
 	})
 	respondRunStart(c, run, err)
 }

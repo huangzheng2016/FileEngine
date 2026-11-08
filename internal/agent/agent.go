@@ -40,13 +40,3 @@ func (a *Agent) RunTagging(ctx context.Context, logger *Logger) (report string, 
 	report, err = orch.Run(ctx, OrchestratorRequest{Type: RequestAutoTag})
 	return report, orch.Partial(), err
 }
-
-// RunInstruct runs a user-directed instruction over the selected files.
-func (a *Agent) RunInstruct(ctx context.Context, logger *Logger, files []db.FileEntry, userPrompt string) (string, error) {
-	orch := NewOrchestratorAgent(a.repo, a.fsCfg, a.modelProvider, a.session, a.sessionID, logger)
-	return orch.Run(ctx, OrchestratorRequest{
-		Type:       RequestInstruct,
-		UserPrompt: userPrompt,
-		Files:      files,
-	})
-}
