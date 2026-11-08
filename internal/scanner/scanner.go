@@ -28,6 +28,7 @@ type Scanner struct {
 	filterDirs []string
 	progress   *Progress
 	pruneJunk  bool // config read once per scan
+	commits    int  // walk transactions committed by the last scan
 }
 
 // Progress tracks one scan's live counters. Workers update it concurrently
@@ -109,6 +110,7 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	w := newWriter(s.repo, cancelWalk)
 	walkErr := s.walk(walkCtx, session.RootPath, session.ID, index, w)
 	saveErr := w.close()
+	s.commits = w.commits
 	cancelWalk()
 	session.ScannedCount = int(s.progress.Entries())
 	if saveErr != nil {
@@ -118,7 +120,7 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 		return fmt.Errorf("scan failed: %w", walkErr)
 	}
 	log.Printf("scan session %d: walked %d entries (%d dirs) in %v, %d commits",
-		session.ID, session.ScannedCount, s.progress.Dirs(), time.Since(start).Round(time.Millisecond), w.commits)
+		session.ID, session.ScannedCount, s.progress.Dirs(), time.Since(start).Round(time.Millisecond), s.commits)
 
 	if index != nil {
 		if err := s.finishRescan(session.ID, index); err != nil {
@@ -224,7 +226,7 @@ func (s *Scanner) readConcurrency() int {
 type dirTask struct {
 	path   string
 	handle []byte
-	depth  int          // depth of the directory's children
+	depth  int           // depth of the directory's children
 	row    *db.FileEntry // nil for the scan root (not an entry)
 }
 
@@ -400,7 +402,7 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, ind
 	return ctx.Err()
 }
 
-// finishRescan deletes entries the walk no longer found and folds new or
+// finishRescan deletes entries the walk did not find and folds new or
 // reset entries under units into those units.
 func (s *Scanner) finishRescan(sessionID uint, index scanIndex) error {
 	var gone []uint

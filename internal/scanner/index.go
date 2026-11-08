@@ -62,7 +62,7 @@ func (idx scanIndex) emit(b *writeBatch, fe db.FileEntry) {
 }
 
 // resetCols rewrites a changed entry's scan columns and drops every decision
-// and derived value: the content differs, so the old plan no longer applies.
+// and derived value: the content differs, so the plan must be redone.
 func resetCols(fe db.FileEntry) map[string]any {
 	return map[string]any{
 		"size": fe.Size, "mod_time": fe.ModTime, "permissions": fe.Permissions, "file_type": fe.FileType,
