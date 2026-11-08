@@ -230,7 +230,7 @@ func TestCollisionName(t *testing.T) {
 
 func seedEntry(t *testing.T, r *Repository, sid uint, p, typ string, size int64) *FileEntry {
 	t.Helper()
-	parent := "."
+	parent := ""
 	if i := strings.LastIndex(p, "/"); i >= 0 {
 		parent = p[:i]
 	}
