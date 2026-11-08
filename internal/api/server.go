@@ -57,7 +57,7 @@ func (s *Server) setupRouter() {
 		api.POST("/sessions/:id/plans/reset", s.resetPlans)
 		api.GET("/sessions/:id/preview/tree", s.previewTree)
 
-		// Session plan (整理方案)
+		// Session plan
 		api.GET("/sessions/:id/plan", s.getPlan)
 		api.PUT("/sessions/:id/plan", s.updatePlan)
 		api.POST("/sessions/:id/plan/approve", s.approvePlan)
