@@ -25,8 +25,6 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
-// ============ ScanSession ============
-
 func (r *Repository) CreateSession(s *ScanSession) error {
 	return r.db.Create(s).Error
 }
@@ -53,23 +51,16 @@ func (r *Repository) UpdateSession(s *ScanSession) error {
 	return r.db.Save(s).Error
 }
 
-// UpdateScanProgress persists the live scan counters without touching any
-// other column. The scanner calls this every few seconds while walking, so a
-// full-row Save of a previously loaded session struct would race the API
-// layer's own session writes — column-scoped is the rule for racing writers.
+// Column-scoped: the scanner calls this every few seconds, and a full-row
+// Save would race the API layer's own session writes.
 func (r *Repository) UpdateScanProgress(sessionID uint, scanned int, currentPath string) error {
 	return r.db.Model(&ScanSession{}).Where("id = ?", sessionID).
 		Updates(map[string]interface{}{"scanned_count": scanned, "current_path": currentPath}).Error
 }
 
-// ScanInterruptedMessage is the error_message stamped on sessions the startup
-// sweep finds stuck in "scanning" from a previous process lifetime.
 const ScanInterruptedMessage = "scan interrupted by server restart"
 
-// MarkInterruptedScans flips sessions stuck in "scanning" (process died or was
-// killed mid-scan — the walk lives in memory, so nothing will ever finish
-// them) to the terminal "interrupted" state. Without this sweep a killed scan
-// shows "scanning" forever with zero diagnostics. Returns the rows flipped.
+// The walk lives in memory, so a scan whose process died can never finish.
 func (r *Repository) MarkInterruptedScans() (int64, error) {
 	res := r.db.Model(&ScanSession{}).Where("status = ?", "scanning").
 		Updates(map[string]interface{}{
@@ -95,10 +86,8 @@ func (r *Repository) DeleteSession(id uint) error {
 	})
 }
 
-// RefreshSessionCounts recomputes the stored session counters and writes
-// them only when they changed. It is never called on a read path: writers
-// call it at the end of a phase, and entry writes schedule it through
-// touchCounts.
+// Never called on a read path: writers call it at the end of a phase, and
+// entry writes schedule it through touchCounts.
 func (r *Repository) RefreshSessionCounts(id uint) error { return r.refreshCounts(r.Reader(), id) }
 
 func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
@@ -133,8 +122,6 @@ func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
 		}).Error
 }
 
-// countsDelay coalesces entry writes before a session's counters are
-// recomputed.
 var countsDelay = time.Second
 
 type countsKey struct {
@@ -144,8 +131,6 @@ type countsKey struct {
 
 var countsPending sync.Map
 
-// touchCounts schedules one coalesced RefreshSessionCounts after entry
-// writes, so per-decision writes never pay for a full aggregate.
 func (r *Repository) touchCounts(sessionID uint) {
 	k := countsKey{r.db, sessionID}
 	if _, loaded := countsPending.LoadOrStore(k, struct{}{}); loaded {
@@ -160,7 +145,6 @@ func (r *Repository) touchCounts(sessionID uint) {
 	})
 }
 
-// SessionProgress holds read-only progress counters for live progress events.
 type SessionProgress struct {
 	Total    int
 	Tagged   int
@@ -168,10 +152,8 @@ type SessionProgress struct {
 	Executed int
 }
 
-// GetSessionProgress returns the session's file counters without writing the
-// session row. Unlike RefreshSessionCounts it is read-only, so concurrent
-// agent workers can call it after every batch without risking a lost update
-// on the session Status field.
+// Read-only, so concurrent workers can call it after every unit without
+// risking a lost update on Status.
 func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 	var counts struct {
 		Total    int64
@@ -192,8 +174,6 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 		Executed: int(counts.Executed),
 	}, err
 }
-
-// ============ FileEntry ============
 
 func (r *Repository) CreateFile(f *FileEntry) error {
 	return r.db.Create(f).Error
@@ -239,11 +219,11 @@ type FileQuery struct {
 	Sensitive    *bool
 }
 
-// fileOrder is the listing order; id makes it total so pages never overlap.
+// id makes the order total so pages never overlap.
 const fileOrder = "file_type ASC, name ASC, id ASC"
 
-// ListFiles returns one offset page plus the total count (the REST listing,
-// whose UI shows page numbers). Iterating callers use ListFilesAfter.
+// The REST listing, whose UI shows page numbers; iterating callers use
+// ListFilesAfter.
 func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
 
@@ -265,13 +245,10 @@ func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 	return files, total, err
 }
 
-// ErrBadCursor reports a keyset cursor whose entry no longer exists.
 var ErrBadCursor = errors.New("bad cursor")
 
-// ListFilesAfter is keyset pagination over q in fileOrder: the page after
-// entry afterID (0 = first page) and whether more rows follow, without a
-// COUNT. For a directory listing idx_session_parent serves both the filter
-// and the order, so every page costs the same.
+// For a directory listing idx_session_parent serves both the filter and the
+// order, so every page costs the same.
 func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]FileEntry, bool, error) {
 	if limit <= 0 {
 		limit = 50
@@ -297,8 +274,6 @@ func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]Fil
 	return files, false, nil
 }
 
-// applyFileFilters builds the shared WHERE clause for FileQuery consumers
-// (ListFiles, ListFilesAfter, SampleFiles). Pagination is left to the caller.
 func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	if q.SessionID > 0 {
 		tx = tx.Where("scan_session_id = ?", q.SessionID)
@@ -338,10 +313,9 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 	return tx
 }
 
-// SampleFiles returns up to n randomly chosen files matching the query
-// filters, path-sorted. It probes random points of the matching id range
-// (each probe is one indexed "id >= x LIMIT 1") instead of loading every id;
-// rows after id gaps are slightly favored, which sampling tolerates.
+// Probes random points of the matching id range (one indexed "id >= x LIMIT
+// 1" each) instead of loading every id; rows after id gaps are slightly
+// favored.
 func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
 	if n <= 0 {
 		return nil, nil
@@ -393,20 +367,14 @@ func (r *Repository) UpdateFile(f *FileEntry) error {
 	return r.db.Save(f).Error
 }
 
-// UpdateDescription writes only the description column. The tool layer runs
-// concurrently with other tools on the same row (eino executes parallel tool
-// calls), so a full-row Save of a previously loaded struct would clobber
-// concurrent field writes (e.g. a racing set_target's new_path).
+// eino executes parallel tool calls, so a full-row Save of a loaded struct
+// would clobber concurrent field writes.
 func (r *Repository) UpdateDescription(sessionID uint, path, description string) error {
 	return r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
 		Update("description", description).Error
 }
 
-// TaggedStatusByIDs returns the tagged flag for each given file ID. It backs
-// the loose-file batch re-check: a batch can finish successfully while leaving
-// files untagged (set_target does not flip tagged), and such misses must be
-// detectable after the fact.
 func (r *Repository) TaggedStatusByIDs(ids []uint) (map[uint]bool, error) {
 	out := make(map[uint]bool, len(ids))
 	if len(ids) == 0 {
@@ -422,22 +390,18 @@ func (r *Repository) TaggedStatusByIDs(ids []uint) (map[uint]bool, error) {
 	return out, nil
 }
 
-// UntaggedBreakdown splits a session's untagged entries by file type. It feeds
-// the end-of-run reconciliation line and the loose-file re-sweep: untagged
-// directories may be containers deliberately left for their children and
-// symlinks are never tagged — only the file count signals tagging misses.
+// Untagged directories may be containers deliberately left for their children
+// and symlinks are never tagged; only files signal misses.
 type UntaggedBreakdown struct {
 	Directories int64
 	Files       int64
 	Symlinks    int64
 }
 
-// Total returns the total number of untagged entries across all types.
 func (b UntaggedBreakdown) Total() int64 {
 	return b.Directories + b.Files + b.Symlinks
 }
 
-// CountUntaggedByType counts a session's untagged entries split by file type.
 func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, error) {
 	var b UntaggedBreakdown
 	err := r.db.Model(&FileEntry{}).
@@ -449,12 +413,6 @@ func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, err
 	return b, err
 }
 
-// MarkJunkEntries auto-ignores well-known system junk before tagging: files
-// whose base name matches fileNames (ASCII-lowered) or the AppleDouble "._*"
-// prefix, and directories matching dirNames with all their descendants.
-// Matched rows are flipped to tagged with the JunkBatchIndex sentinel and an
-// explanatory description, so they never reach an agent batch. Returns the
-// number of rows ignored.
 func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []string) (int64, error) {
 	var total int64
 	err := r.db.Transaction(func(tx *gorm.DB) error {
@@ -491,8 +449,6 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 	return total, err
 }
 
-// CountIgnoredJunk returns how many entries the junk filter has auto-ignored
-// in this session (the JunkBatchIndex sentinel rows).
 func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
 	var n int64
 	err := r.db.Model(&FileEntry{}).
@@ -501,11 +457,8 @@ func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
 	return n, err
 }
 
-// CountPlannedByTargetPath counts planned files under a category path across
-// ALL sessions of a filesystem — the filesystem-level usage view. The
-// empty-category prune must use this (not the per-session summary): a
-// category filled by an earlier run shows zero in the current session yet is
-// genuinely in use (multi-session rescan workflows).
+// Filesystem-wide: a category filled by an earlier session shows zero in the
+// current one yet is still in use.
 func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath string) (int64, error) {
 	var n int64
 	cond, args := targetCond(r.db, categoryPath)
@@ -516,9 +469,6 @@ func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath st
 	return n, err
 }
 
-// ClearPlannedByTargetPath returns every entry targeted at or under the
-// category path, across all sessions of a filesystem, to undecided; members of
-// a cleared unit are released with it.
 func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath string) error {
 	sessions, err := r.filesystemSessionIDs(filesystemID)
 	if err != nil || len(sessions) == 0 {
@@ -555,14 +505,11 @@ func (r *Repository) filesystemSessionIDs(filesystemID uint) ([]uint, error) {
 	return ids, err
 }
 
-// categoryDir is a category path in the stored target spelling without a
-// trailing slash ("/" becomes "", the whole target tree).
 func categoryDir(p string) string {
 	return strings.TrimSuffix(NormalizeTargetPath(p), "/")
 }
 
-// targetCond matches new_path at or under a category path; "/" sibling
-// prefixes ("/photo" vs "/photos2") never match.
+// Sibling prefixes ("/photo" vs "/photos2") never match.
 func targetCond(tx *gorm.DB, categoryPath string) (string, []any) {
 	dir := categoryDir(categoryPath)
 	if dir == "" {
@@ -586,17 +533,13 @@ func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]FileEntr
 	return files, err
 }
 
-// ============ Category ============
-
 func (r *Repository) CreateCategory(c *Category) error {
 	return r.db.Create(c).Error
 }
 
-// CreateCategoryWithConflict creates a category and returns whether it already existed.
 func (r *Repository) CreateCategoryWithConflict(c *Category) (created bool, err error) {
 	err = r.db.Create(c).Error
 	if err != nil {
-		// Check for unique constraint violation (name or path already exists)
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			return false, nil
 		}
@@ -623,7 +566,6 @@ func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*Categor
 	return &cat, err
 }
 
-// CategoryUsage holds a category's name, path, and how many files are planned under it.
 type CategoryUsage struct {
 	Name        string
 	Path        string
@@ -632,12 +574,8 @@ type CategoryUsage struct {
 	FileCount   int64
 }
 
-// GetCategoryUsageSummary returns every category of the filesystem with the
-// count of files planned under its path in the given session. Categories with
-// no planned files are included with a zero count so callers (the agent prompt
-// summary) always see the complete classification system. The count matches
-// new_path == path or new_path under path + "/" exactly, so sibling prefixes
-// ("/photo" vs "/photos2") do not bleed into each other.
+// Categories without planned files are included with a zero count so the
+// prompt always shows the complete category system.
 func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) ([]CategoryUsage, error) {
 	cats, err := r.ListCategories(filesystemID)
 	if err != nil {
@@ -660,13 +598,10 @@ type categoryStat struct {
 	Size  int64
 }
 
-// categoryStatsChunk bounds the UNION ALL arms of one statement (SQLite caps
-// compound selects at 500).
+// SQLite caps compound selects at 500.
 const categoryStatsChunk = 200
 
-// categoryStats counts the session's targets at or under each category path
-// (and sums their sizes) in one UNION ALL statement per chunk; every arm is an
-// index range on idx_session_newpath.
+// Every UNION ALL arm is an index range on idx_session_newpath.
 func (r *Repository) categoryStats(sessionID uint, cats []Category) ([]categoryStat, error) {
 	out := make([]categoryStat, len(cats))
 	for start := 0; start < len(cats); start += categoryStatsChunk {
@@ -693,10 +628,8 @@ func (r *Repository) UpdateCategory(c *Category) error {
 	return r.db.Save(c).Error
 }
 
-// UpdateCategoryPath saves the category and moves the targets at or under
-// its old path to the new one, in the filesystem's sessions only. The prefix
-// is swapped by position, so "/photo" → "/pics" leaves "/photos2" alone and a
-// repeated substring deeper in the path is never touched.
+// The prefix is swapped by position, so "/photo" -> "/pics" leaves
+// "/photos2" alone and a repeated substring deeper in the path is untouched.
 func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
 	if err := r.db.Save(c).Error; err != nil {
 		return err
@@ -723,8 +656,6 @@ func (r *Repository) DeleteCategory(id uint) error {
 	return r.db.Delete(&Category{}, id).Error
 }
 
-// ============ Filesystem ============
-
 func (r *Repository) CreateFilesystem(fs *Filesystem) error {
 	return r.db.Create(fs).Error
 }
@@ -748,8 +679,6 @@ func (r *Repository) UpdateFilesystem(fs *Filesystem) error {
 func (r *Repository) DeleteFilesystem(id uint) error {
 	return r.db.Delete(&Filesystem{}, id).Error
 }
-
-// ============ ModelProvider ============
 
 func (r *Repository) CreateModelProvider(m *ModelProvider) error {
 	return r.db.Create(m).Error
@@ -775,10 +704,6 @@ func (r *Repository) DeleteModelProvider(id uint) error {
 	return r.db.Delete(&ModelProvider{}, id).Error
 }
 
-// ============ Batch cursor ============
-
-// NextManualBatchIndex returns a fresh negative batch index for a
-// user-directed run, below JunkBatchIndex and every manual index in use.
 func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	var minBatch *int
 	r.db.Model(&FileEntry{}).
@@ -790,7 +715,6 @@ func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	return *minBatch - 1
 }
 
-// CategoryDistribution holds a category name/path and the count+size of files planned under it.
 type CategoryDistribution struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
@@ -798,7 +722,6 @@ type CategoryDistribution struct {
 	TotalSize int64  `json:"total_size"`
 }
 
-// GetSessionStats returns category distribution for a session.
 func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]CategoryDistribution, error) {
 	cats, err := r.ListCategories(filesystemID)
 	if err != nil {

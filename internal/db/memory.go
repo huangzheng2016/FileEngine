@@ -10,22 +10,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// MemoryContentMaxRunes caps one memory item's content.
 const MemoryContentMaxRunes = 300
 
-// ErrMemoryNotFound is returned when a memory id does not exist.
 var ErrMemoryNotFound = errors.New("记忆不存在")
 
-// MemoryValidationError is a rejected memory write (bad field, key clash) —
-// the caller's input is wrong, the store is fine.
 type MemoryValidationError struct{ Msg string }
 
 func (e *MemoryValidationError) Error() string { return e.Msg }
 
 func invalidMemory(msg string) error { return &MemoryValidationError{Msg: msg} }
 
-// NormalizeMemoryPath stores memory paths like original paths: cleaned, no
-// leading slash ("" stays "").
 func NormalizeMemoryPath(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -34,13 +28,11 @@ func NormalizeMemoryPath(p string) string {
 	return strings.Trim(path.Clean("/"+p), "/")
 }
 
-// NormalizeMemoryKey canonicalizes a memory key: trimmed, inner whitespace
-// collapsed, lower-cased. One live item exists per (scope, scope_id, key).
+// One live item exists per (scope, scope_id, key).
 func NormalizeMemoryKey(k string) string {
 	return strings.ToLower(strings.Join(strings.Fields(k), " "))
 }
 
-// ValidMemoryScope / ValidMemoryKind report whether the value is a known enum.
 func ValidMemoryScope(s string) bool {
 	return s == MemoryScopeSession || s == MemoryScopeFilesystem || s == MemoryScopeGlobal
 }
@@ -53,7 +45,6 @@ func ValidMemoryKind(k string) bool {
 	return false
 }
 
-// ValidateMemoryItem checks the fields every writer must respect.
 func ValidateMemoryItem(m *MemoryItem) error {
 	if !ValidMemoryScope(m.Scope) {
 		return invalidMemory("scope 必须是 session / filesystem / global 之一")
@@ -79,10 +70,7 @@ func ValidateMemoryItem(m *MemoryItem) error {
 	return nil
 }
 
-// UpsertMemory writes m by (scope, scope_id, key): an existing item is
-// updated in place (kind, content, path, source; pinned only ever turns on;
-// hits are kept), otherwise a new item is created. m is filled with the
-// stored row. Reports whether a new item was created.
+// pinned only ever turns on; hits are kept.
 func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
 	m.Key = NormalizeMemoryKey(m.Key)
 	m.Content = strings.TrimSpace(m.Content)
@@ -126,12 +114,8 @@ func (r *Repository) GetMemory(id uint) (*MemoryItem, error) {
 	return &m, err
 }
 
-// memoryOrder ranks items for display and prompts: pinned first, then most
-// used, then most recently touched.
 const memoryOrder = "pinned DESC, hits DESC, updated_at DESC, id DESC"
 
-// ListMemory lists items of one scope (scope "" = every scope); scopeID nil
-// means every scope id.
 func (r *Repository) ListMemory(scope string, scopeID *uint) ([]MemoryItem, error) {
 	tx := r.db.Model(&MemoryItem{})
 	if scope != "" {
@@ -145,8 +129,6 @@ func (r *Repository) ListMemory(scope string, scopeID *uint) ([]MemoryItem, erro
 	return items, err
 }
 
-// ListLongTermMemory returns the global items plus the filesystem's items —
-// the candidates of the always-on prompt memory block.
 func (r *Repository) ListLongTermMemory(filesystemID uint) ([]MemoryItem, error) {
 	var items []MemoryItem
 	err := r.db.Where("(scope = ? AND scope_id = 0) OR (scope = ? AND scope_id = ?)",
@@ -155,8 +137,6 @@ func (r *Repository) ListLongTermMemory(filesystemID uint) ([]MemoryItem, error)
 	return items, err
 }
 
-// UpdateMemory writes the given fields of one item (column-scoped). key is
-// normalized; the result is re-validated as a whole.
 func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryItem, error) {
 	var out MemoryItem
 	err := WithRetry(func() error {
@@ -207,22 +187,17 @@ func (r *Repository) DeleteMemory(id uint) error {
 	return nil
 }
 
-// MemoryScopeRef names one (scope, scope_id) pair.
 type MemoryScopeRef struct {
 	Scope   string
 	ScopeID uint
 }
 
-// MemorySearch is a recall query: every whitespace-separated term of Query
-// must appear (case-insensitively) in key or content. An empty Query matches
-// everything in Scopes.
 type MemorySearch struct {
 	Query  string
 	Scopes []MemoryScopeRef
 	Limit  int
 }
 
-// SearchMemory runs a recall query, ranked like ListMemory.
 func (r *Repository) SearchMemory(q MemorySearch) ([]MemoryItem, error) {
 	if len(q.Scopes) == 0 {
 		return nil, nil
@@ -246,7 +221,6 @@ func (r *Repository) SearchMemory(q MemorySearch) ([]MemoryItem, error) {
 	return items, err
 }
 
-// BumpMemoryHits records that the items were used (recall hit / injected).
 func (r *Repository) BumpMemoryHits(ids []uint) error {
 	if len(ids) == 0 {
 		return nil
@@ -255,8 +229,6 @@ func (r *Repository) BumpMemoryHits(ids []uint) error {
 		Updates(map[string]any{"hits": gorm.Expr("hits + 1"), "last_used_at": time.Now()}).Error
 }
 
-// NotesSince returns the session's shared notes with id > afterID, oldest
-// first (limit <= 0 means 50). Workers keep afterID as their last-seen cursor.
 func (r *Repository) NotesSince(sessionID, afterID uint, limit int) ([]MemoryItem, error) {
 	if limit <= 0 {
 		limit = 50

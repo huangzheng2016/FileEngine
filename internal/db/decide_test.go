@@ -119,7 +119,6 @@ func TestDecideRolesAndReview(t *testing.T) {
 		t.Fatal("confirmed entries are executable")
 	}
 
-	// A skipped directory governs its subtree like a unit.
 	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleSkip, Reason: "不动"}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +128,6 @@ func TestDecideRolesAndReview(t *testing.T) {
 	if _, err := r.Decide(1, Decision{Path: "proj/main.go", Role: RoleSkip}); !IsRejection(err) || !strings.Contains(err.Error(), "保持原位") {
 		t.Fatalf("under skipped dir: %v", err)
 	}
-	// Undeciding the owner releases its members.
 	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleUndecided}); err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +311,6 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 	if stored[1].Matched != 3 {
 		t.Fatalf("matched stored: %+v", stored[1])
 	}
-	// Re-applying finds nothing new.
 	again, _ := r.ApplyRules(1, 0, false)
 	for _, st := range again {
 		if st.Matched != 0 {

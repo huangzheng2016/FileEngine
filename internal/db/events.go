@@ -38,7 +38,6 @@ type Subscriber struct {
 	lagged    atomic.Bool
 }
 
-// TakeLagged reports (and clears) whether events were dropped for s.
 func (s *Subscriber) TakeLagged() bool { return s.lagged.Swap(false) }
 
 type deltaKey struct {
@@ -69,7 +68,6 @@ var bus = struct {
 	subs:    make(map[uint][]*Subscriber),
 }
 
-// emitEvent is the body of Emit.
 func emitEvent(sessionID, runID uint, typ string, data any) {
 	bus.emitMu.Lock()
 	defer bus.emitMu.Unlock()
@@ -163,16 +161,14 @@ func flushRunLocked(runID uint) {
 	}
 }
 
-// FlushEvents persists every pending delta chunk immediately.
 func FlushEvents() {
 	bus.emitMu.Lock()
 	defer bus.emitMu.Unlock()
 	flushRunLocked(0)
 }
 
-// persistAndBroadcastLocked stores one event row and fans it out. Without a
-// database (unit tests that never call Init) the seq comes from an in-memory
-// counter and nothing is persisted.
+// Without a database (unit tests that never call Init) the seq comes from an
+// in-memory counter.
 func persistAndBroadcastLocked(sessionID, runID uint, typ, data string) {
 	ev := SessionEvent{SessionID: sessionID, RunID: runID, Type: typ, Data: data, CreatedAt: time.Now()}
 	if DB != nil {
@@ -200,8 +196,7 @@ func broadcast(ev SessionEvent) {
 	}
 }
 
-// Subscribe registers a live consumer of sessionID's events; pair it with
-// Unsubscribe. The channel is never closed by the bus.
+// The channel is never closed by the bus.
 func Subscribe(sessionID uint) *Subscriber {
 	s := &Subscriber{C: make(chan SessionEvent, subscriberBuffer), sessionID: sessionID}
 	bus.subMu.Lock()
@@ -227,7 +222,6 @@ func Unsubscribe(s *Subscriber) {
 	}
 }
 
-// EventQuery selects persisted events of one session in ascending seq order.
 type EventQuery struct {
 	SessionID uint
 	RunID     uint // 0 = all runs
@@ -236,9 +230,8 @@ type EventQuery struct {
 	Limit     int
 }
 
-// ListEvents returns up to q.Limit events and whether more exist past them.
-// With only Before set it returns the newest events below Before (still in
-// ascending order), which is the backwards-paging shape.
+// With only Before set it returns the newest events below Before, still in
+// ascending order.
 func (r *Repository) ListEvents(q EventQuery) ([]SessionEvent, bool, error) {
 	if q.Limit <= 0 || q.Limit > 1000 {
 		q.Limit = 500
@@ -274,9 +267,7 @@ func (r *Repository) ListEvents(q EventQuery) ([]SessionEvent, bool, error) {
 	return rows, more, nil
 }
 
-// LatestRunStartSeq returns the seq just before the first event of the
-// session's latest run (0 when the session has no run events) — the default
-// replay origin of the SSE stream.
+// The default replay origin of the SSE stream.
 func (r *Repository) LatestRunStartSeq(sessionID uint) (uint, error) {
 	var run AgentRun
 	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").First(&run).Error

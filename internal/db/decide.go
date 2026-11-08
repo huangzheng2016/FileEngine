@@ -10,10 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// ReviewConfidence is the confidence below which a decision needs user review.
 const ReviewConfidence = 0.6
 
-// Decision is one requested decision for an entry.
 type Decision struct {
 	Path       string // original path (leading "/" tolerated)
 	Role       string // unit / container / file / skip / "" (undecide)
@@ -23,7 +21,6 @@ type Decision struct {
 	Override   bool    // a unit/skip directory may override decided descendants
 }
 
-// DecideResult reports what a decision stored.
 type DecideResult struct {
 	Path            string   `json:"path"`
 	Role            string   `json:"role"`
@@ -35,26 +32,22 @@ type DecideResult struct {
 	OverriddenCount int64    `json:"overridden_count,omitempty"`
 }
 
-// Rejection is a decision refused for a reason the caller can fix; tools
-// report it as a success:false result instead of failing the run.
+// Tools report a Rejection as a success:false result instead of failing the
+// run.
 type Rejection struct{ Msg string }
 
 func (e *Rejection) Error() string { return e.Msg }
 
 func reject(format string, args ...any) error { return &Rejection{Msg: fmt.Sprintf(format, args...)} }
 
-// IsRejection reports whether err is a fixable decision rejection.
 func IsRejection(err error) bool {
 	var r *Rejection
 	return errors.As(err, &r)
 }
 
-// ValidateTargetPath checks that a target or category path is a legal,
-// root-confined slash path: no NUL, no ".." segment, not the bare root.
-// "" is allowed (it clears a target).
+// "" is allowed: it clears a target.
 func ValidateTargetPath(p string) error { return pathutil.ValidateFSPath(p) }
 
-// decidedRoles are roles that carry an effective decision of their own.
 var decidedRoles = []string{RoleUnit, RoleFile, RoleSkip}
 
 // Decide applies one decision under the one-effective-decision invariant:
@@ -76,14 +69,11 @@ func (r *Repository) Decide(sessionID uint, d Decision) (*DecideResult, error) {
 	return res, err
 }
 
-// DecideOutcome is one item of DecideBatch.
 type DecideOutcome struct {
 	Result *DecideResult
 	Err    error // a Rejection, or nil
 }
 
-// DecideBatch applies decisions in chunked transactions; rejections are
-// reported per item, storage failures abort.
 func (r *Repository) DecideBatch(sessionID uint, ds []Decision) ([]DecideOutcome, error) {
 	defer r.touchCounts(sessionID)
 	out := make([]DecideOutcome, len(ds))
@@ -204,18 +194,15 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	return res, nil
 }
 
-// undecidedFields resets an entry to undecided with no decision residue.
 func undecidedFields() map[string]any {
 	return map[string]any{"role": RoleUndecided, "new_path": "", "new_path_key": "", "operation": "", "reason": "",
 		"tagged": false, "needs_review": false, "confidence": 0}
 }
 
-// releaseMembers returns the members of the directory p to undecided.
 func releaseMembers(tx *gorm.DB, sessionID uint, p string) *gorm.DB {
 	return entriesUnder(tx, sessionID, p).Where("role = ?", RoleMember).Updates(undecidedFields())
 }
 
-// MemberReason is the reason stored on members of a unit or skipped directory.
 func MemberReason(owner, ownerRole string) string {
 	if ownerRole == RoleSkip {
 		return "随「" + owner + "」整体保持原位"
@@ -223,8 +210,6 @@ func MemberReason(owner, ownerRole string) string {
 	return "随「" + owner + "」整体移动"
 }
 
-// governingAncestor returns the nearest strict ancestor that owns its
-// subtree (a unit or a skipped directory), or nil.
 func governingAncestor(tx *gorm.DB, sessionID uint, p string) (*FileEntry, error) {
 	anc := pathAncestors(path.Dir(p))
 	if len(anc) == 0 {
@@ -251,8 +236,6 @@ func underUnitRejection(owner *FileEntry) error {
 	return reject("该目录已作为整体「%s」移动到 %s；如需拆分请先调用 split_unit", owner.OriginalPath, owner.NewPath)
 }
 
-// decidedDescendants lists up to limit descendants with a decision of their
-// own and counts them all.
 func decidedDescendants(tx *gorm.DB, sessionID uint, p string, limit int) ([]string, int64, error) {
 	q := entriesUnder(tx, sessionID, p).Where("(role IN ? OR operation != '')", decidedRoles)
 	var n int64
@@ -264,8 +247,6 @@ func decidedDescendants(tx *gorm.DB, sessionID uint, p string, limit int) ([]str
 	return paths, n, err
 }
 
-// uniqueTarget returns target or its first "name (n).ext" variant that no
-// other entry of the session targets.
 func uniqueTarget(tx *gorm.DB, sessionID uint, originalPath, target string) (string, error) {
 	for n := 1; n <= maxCollisionVariants; n++ {
 		candidate := target
@@ -283,9 +264,6 @@ func uniqueTarget(tx *gorm.DB, sessionID uint, originalPath, target string) (str
 	return "", fmt.Errorf("no free target name for %s after %d variants", target, maxCollisionVariants)
 }
 
-// SplitUnit turns a unit (or skipped directory) back into a container: its
-// target is cleared and its members become undecided. Returns how many
-// members were released.
 func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 	defer r.touchCounts(sessionID)
 	p = strings.Trim(p, "/")
@@ -315,9 +293,6 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 	return released, err
 }
 
-// SetTargetUnique decides an entry as file (or unit for a directory) with the
-// given target, overriding decided descendants; "" undecides it. Returns the
-// stored target and how many decided descendants were overridden.
 func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, fileType string) (string, int64, error) {
 	role := RoleFile
 	if fileType == "directory" {

@@ -14,9 +14,6 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// Subtree ranges must match exactly the "dir/" byte prefix, whatever bytes
-// the directory name holds (LIKE metacharacters, the escape char, unicode,
-// the bytes around '/').
 func TestSubtreeCondMatchesExactPrefix(t *testing.T) {
 	r := setupBrainRepo(t)
 	paths := []string{
@@ -52,7 +49,6 @@ func quietRepo(r *Repository) *Repository {
 	return NewRepository(r.db.Session(&gorm.Session{Logger: logger.Discard}))
 }
 
-// explain returns SQLite's plan for the statement a GORM builder produces.
 func explain(t *testing.T, db *gorm.DB, build func(tx *gorm.DB) *gorm.DB) string {
 	t.Helper()
 	sql := db.ToSQL(build)
@@ -73,8 +69,6 @@ func explain(t *testing.T, db *gorm.DB, build func(tx *gorm.DB) *gorm.DB) string
 	return sb.String()
 }
 
-// With ~50k rows every subtree/target/keyset/collision query runs on an
-// index: no full scan of file_entries and no temp sort for listings.
 func TestPathQueriesUseIndexes(t *testing.T) {
 	r := quietRepo(setupBrainRepo(t))
 	rows := make([]FileEntry, 0, 50000)
@@ -127,7 +121,6 @@ func TestPathQueriesUseIndexes(t *testing.T) {
 			t.Errorf("%s: scan or temp sort, plan:\n%s", tc.name, plan)
 		}
 	}
-	// The real subtree write touches exactly the subtree.
 	res := entriesUnder(r.db, 1, "d008").Updates(map[string]any{"tagged": true})
 	if res.Error != nil || res.RowsAffected != 100 {
 		t.Fatalf("subtree update: %d %v", res.RowsAffected, res.Error)
@@ -187,7 +180,6 @@ func TestRefreshSessionCountsWritesOnlyOnChange(t *testing.T) {
 	}
 }
 
-// Decisions refresh the stored counters asynchronously and coalesced.
 func TestDecisionsRefreshCountsCoalesced(t *testing.T) {
 	old := countsDelay
 	countsDelay = 20 * time.Millisecond
@@ -261,7 +253,6 @@ func TestUpdateCategoryPathSwapsPrefixOnly(t *testing.T) {
 	if e, _ := r.GetFileByPath(sB.ID, "other"); e.NewPath != "/Photo/z.jpg" {
 		t.Errorf("other filesystem touched: %q", e.NewPath)
 	}
-	// The rewritten key still detects collisions (case-insensitive).
 	seedEntry(t, r, sA.ID, "6", "file", 1)
 	res, err := r.Decide(sA.ID, Decision{Path: "6", Role: RoleFile, NewPath: "/图片/2024/A.JPG"})
 	if err != nil || res.NewPath != "/图片/2024/A (2).JPG" {
@@ -281,7 +272,6 @@ func TestCollisionKeyColumn(t *testing.T) {
 	if err != nil || res.NewPath != "/t/café (2).TXT" {
 		t.Fatalf("NFD/case variant must collide: %+v %v", res, err)
 	}
-	// Re-deciding the same entry to its own target is not a collision.
 	if res, err := r.Decide(1, Decision{Path: "a", Role: RoleFile, NewPath: "/T/Café.txt"}); err != nil || res.Renamed {
 		t.Fatalf("self target: %+v %v", res, err)
 	}
@@ -412,7 +402,6 @@ func TestMySQLIndexWidths(t *testing.T) {
 			}
 		}
 	}
-	// The unique path index keeps its full session column plus a long prefix.
 	s, _ := schema.Parse(&FileEntry{}, cache, schema.NamingStrategy{})
 	for _, idx := range s.ParseIndexes() {
 		if idx.Name == "idx_uniq_session_path" {

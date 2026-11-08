@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrRuleNotFound is returned when a rule id does not exist.
 var ErrRuleNotFound = errors.New("规则不存在")
 
 var ruleVarRe = regexp.MustCompile(`\{([a-z_]+)\}`)
@@ -22,8 +21,6 @@ var ruleVars = map[string]bool{
 	"parent": true, "rel": true, "taken_year": true, "taken_month": true, "camera": true,
 }
 
-// NormalizeRule canonicalizes a rule in place and validates it; failures are
-// Rejections.
 func NormalizeRule(rule *PlanRule) error {
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.Target = strings.TrimSpace(rule.Target)
@@ -72,7 +69,6 @@ func NormalizeRule(rule *PlanRule) error {
 	return nil
 }
 
-// ListRules returns the session's rules in application order.
 func (r *Repository) ListRules(sessionID uint) ([]PlanRule, error) {
 	var rules []PlanRule
 	err := r.db.Where("session_id = ?", sessionID).Order("position, id").Find(&rules).Error
@@ -90,7 +86,6 @@ func (r *Repository) GetRule(id uint) (*PlanRule, error) {
 	return &rule, nil
 }
 
-// CreateRule validates and stores a rule; Position 0 appends it last.
 func (r *Repository) CreateRule(rule *PlanRule) error {
 	if err := NormalizeRule(rule); err != nil {
 		return err
@@ -113,7 +108,6 @@ func (r *Repository) CreateRule(rule *PlanRule) error {
 	})
 }
 
-// UpdateRule applies edits to a rule and re-validates it.
 func (r *Repository) UpdateRule(id uint, apply func(*PlanRule)) (*PlanRule, error) {
 	rule, err := r.GetRule(id)
 	if err != nil {
@@ -146,7 +140,6 @@ func (r *Repository) DeleteRule(id uint) error {
 	return nil
 }
 
-// ruleMatcher is a compiled rule.
 type ruleMatcher struct {
 	rule  *PlanRule
 	exts  map[string]bool
@@ -200,9 +193,8 @@ func pathSafe(s, fallback string) string {
 	return s
 }
 
-// RenderRuleTarget renders a rule's target template for one entry. A
-// template that never names the entry ({name} {stem} {rel}) is a directory:
-// the entry's name is appended.
+// A template that never names the entry ({name} {stem} {rel}) is a
+// directory: the entry's name is appended.
 func RenderRuleTarget(rule *PlanRule, e *FileEntry) (string, error) {
 	when := e.ModTime
 	if e.TakenAt != nil {
@@ -242,13 +234,11 @@ func RenderRuleTarget(rule *PlanRule, e *FileEntry) (string, error) {
 	return NormalizeTargetPath(out), nil
 }
 
-// RuleSample is one entry a rule would decide.
 type RuleSample struct {
 	Path   string `json:"original_path"`
 	Target string `json:"new_path"`
 }
 
-// RuleApplyStat is the outcome of one rule in an apply or a preview.
 type RuleApplyStat struct {
 	RuleID  uint         `json:"rule_id"`
 	Name    string       `json:"name"`
@@ -256,8 +246,6 @@ type RuleApplyStat struct {
 	Samples []RuleSample `json:"samples,omitempty"`
 }
 
-// ruleCandidates streams the undecided entries a rule's SQL pre-filter
-// admits, in id pages.
 func (r *Repository) ruleCandidates(sessionID uint, rule *PlanRule, fn func([]FileEntry) error) error {
 	var after uint
 	for {
@@ -300,11 +288,9 @@ func (r *Repository) ruleCandidates(sessionID uint, rule *PlanRule, fn func([]Fi
 	}
 }
 
-// ApplyRules applies the session's rules (or only ruleID when non-zero) to
-// undecided entries, first match by position winning. With preview nothing is
-// written: it returns per-rule match counts and up to 10 samples. Writes go
-// through DecideBatch (validation, invariant, collision naming) with reason
-// "规则：<name>", and store each rule's matched count.
+// First match by position wins. With preview nothing is written. Writes go
+// through DecideBatch, so validation, the invariant and collision naming
+// apply.
 func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]RuleApplyStat, error) {
 	rules, err := r.ListRules(sessionID)
 	if err != nil {
@@ -374,9 +360,6 @@ func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]Ru
 	return stats, nil
 }
 
-// PrepareSession runs the deterministic pre-pass over a scanned session:
-// scope skip, sensitive flags and rule application. It runs after every scan
-// and before tagging.
 func (r *Repository) PrepareSession(sessionID uint) error {
 	session, err := r.GetSession(sessionID)
 	if err != nil {

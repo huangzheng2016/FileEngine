@@ -7,8 +7,6 @@ import (
 	"FileEngine/internal/config"
 )
 
-// MarkJunkEntries must auto-ignore junk files (incl. AppleDouble sidecars) and
-// junk directories with their whole subtree, leaving real content untouched.
 func TestMarkJunkEntries(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -65,7 +63,6 @@ func TestMarkJunkEntries(t *testing.T) {
 		t.Errorf("CountIgnoredJunk = %d, want 5", ignored)
 	}
 
-	// Idempotent: a second pass ignores nothing new.
 	if n, err := r.MarkJunkEntries(1, []string{".ds_store"}, []string{"@eadir"}); err != nil || n != 0 {
 		t.Errorf("second pass: n=%d err=%v, want 0/nil", n, err)
 	}

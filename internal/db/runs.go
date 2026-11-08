@@ -9,11 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrSessionBusy is returned when a session already has a running run.
 var ErrSessionBusy = errors.New("会话正在运行中")
 
-// RunInterruptedError is the error recorded on runs the startup sweep finds
-// still running from a previous process lifetime.
 const RunInterruptedError = "服务重启，运行被中断"
 
 var runCancels = struct {
@@ -21,8 +18,6 @@ var runCancels = struct {
 	m  map[uint]context.CancelFunc
 }{m: make(map[uint]context.CancelFunc)}
 
-// CreateRun inserts a running run for the session, refusing when another run
-// of the session is still running.
 func (r *Repository) CreateRun(sessionID uint, phase, title string) (*AgentRun, error) {
 	run := &AgentRun{SessionID: sessionID, Phase: phase, Status: RunRunning, Title: title, StartedAt: time.Now()}
 	err := WithRetry(func() error {
@@ -44,8 +39,7 @@ func (r *Repository) CreateRun(sessionID uint, phase, title string) (*AgentRun, 
 	return run, nil
 }
 
-// FinishRun records the terminal state of a run and emits the terminal
-// run_status plus run_done exactly once.
+// Emits the terminal run_status plus run_done exactly once.
 func (r *Repository) FinishRun(run *AgentRun, status, summary, errMsg string, tokens TokenCounts) error {
 	now := time.Now()
 	run.Status, run.Summary, run.Error, run.EndedAt = status, summary, errMsg, &now
@@ -65,7 +59,6 @@ func (r *Repository) FinishRun(run *AgentRun, status, summary, errMsg string, to
 	return err
 }
 
-// RegisterRunCancel makes a run stoppable through CancelRun.
 func RegisterRunCancel(runID uint, cancel context.CancelFunc) {
 	runCancels.mu.Lock()
 	runCancels.m[runID] = cancel
@@ -78,7 +71,6 @@ func UnregisterRunCancel(runID uint) {
 	runCancels.mu.Unlock()
 }
 
-// CancelRun cancels a running run's context; it reports whether the run was live.
 func CancelRun(runID uint) bool {
 	runCancels.mu.Lock()
 	cancel, ok := runCancels.m[runID]
@@ -89,15 +81,12 @@ func CancelRun(runID uint) bool {
 	return ok
 }
 
-// Emit publishes one stream event of a session run. data is one of the *Data
-// payload types in contract.go. The event is persisted (its row id is the
-// stream seq) and then broadcast; text/reasoning deltas are coalesced first
-// (see events.go).
+// The event is persisted (its row id is the stream seq) and then broadcast;
+// text/reasoning deltas are coalesced first.
 func Emit(sessionID, runID uint, typ string, data any) {
 	emitEvent(sessionID, runID, typ, data)
 }
 
-// AfterFind fills the computed cache hit rate of a loaded run.
 func (r *AgentRun) AfterFind(*gorm.DB) error {
 	r.fillCacheHitRate()
 	return nil
@@ -110,8 +99,7 @@ func (r *AgentRun) fillCacheHitRate() {
 	}
 }
 
-// SweepStaleRuns marks every running run stopped. Called once on startup,
-// when no run of this process can be live.
+// Called once on startup, when no run of this process can be live.
 func (r *Repository) SweepStaleRuns() (int64, error) {
 	res := r.db.Model(&AgentRun{}).Where("status = ?", RunRunning).Updates(map[string]any{
 		"status": RunStopped, "error": RunInterruptedError, "ended_at": time.Now(),
@@ -125,21 +113,18 @@ func (r *Repository) GetRun(id uint) (*AgentRun, error) {
 	return &run, err
 }
 
-// ListRuns returns the session's runs, newest first.
 func (r *Repository) ListRuns(sessionID uint) ([]AgentRun, error) {
 	var runs []AgentRun
 	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").Find(&runs).Error
 	return runs, err
 }
 
-// RunningRuns returns the session's running runs (at most one by design).
 func (r *Repository) RunningRuns(sessionID uint) ([]AgentRun, error) {
 	var runs []AgentRun
 	err := r.db.Where("session_id = ? AND status = ?", sessionID, RunRunning).Find(&runs).Error
 	return runs, err
 }
 
-// SessionTokens sums token usage over the session's runs.
 func (r *Repository) SessionTokens(sessionID uint) (TokenCounts, error) {
 	var t TokenCounts
 	err := r.db.Model(&AgentRun{}).Where("session_id = ?", sessionID).

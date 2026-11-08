@@ -7,8 +7,6 @@ import (
 	"FileEngine/internal/config"
 )
 
-// TestSQLitePragmas pins the per-connection settings the pure-Go driver must
-// apply from the DSN: WAL journal, 30s busy timeout, NORMAL sync, foreign keys.
 func TestSQLitePragmas(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "pragma.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {

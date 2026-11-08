@@ -7,15 +7,6 @@ import (
 
 // previewFixture: a project directory moved whole, loose photos spread over
 // year folders, a kept file, and a name with LIKE wildcards.
-//
-//	proj/            → /代码/proj (whole)
-//	  main.go (10)
-//	  pkg/util.go (5)
-//	photos/2023/a.jpg (100) → /照片/2023/a.jpg
-//	photos/2023/b.jpg (200) → /照片/2023/b.jpg
-//	photos/2024/c.jpg (300) → /照片/c.jpg
-//	photos/keep.txt (1)      (kept)
-//	odd_%/x.txt (7)          → /文档/odd_%/x.txt
 func previewFixture(t *testing.T) *Repository {
 	r := setupBrainRepo(t)
 	seedPreviewFixture(t, r)
@@ -92,7 +83,6 @@ func checkPreviewAfter(t *testing.T, r *Repository) {
 	if it := itemsByName(code)["proj"]; !it.IsDir || it.FileID == 0 || it.OriginalPath != "proj" || it.FileCount != 2 {
 		t.Fatalf("whole-moved directory leaf: %+v", it)
 	}
-	// Inside a directory moved whole, the listing maps back to real children.
 	inside, _ := r.PreviewAfter(1, "/代码/proj", 0, 0)
 	ig := itemsByName(inside)
 	if inside.Total != 2 || ig["pkg"].Path != "/代码/proj/pkg" || !ig["pkg"].IsDir || ig["pkg"].FileCount != 1 || ig["main.go"].OriginalPath != "proj/main.go" {
@@ -103,7 +93,6 @@ func checkPreviewAfter(t *testing.T, r *Repository) {
 		t.Fatalf("deeper inside moved dir: %+v", deeper)
 	}
 
-	// LIKE wildcards in path names match literally.
 	docs, _ := r.PreviewAfter(1, "/文档/odd_%", 0, 0)
 	if docs.Total != 1 || docs.Items[0].Name != "x.txt" {
 		t.Fatalf("wildcard dir: %+v", docs)
@@ -112,7 +101,6 @@ func checkPreviewAfter(t *testing.T, r *Repository) {
 		t.Fatalf("'_' must not match any char: %+v", none)
 	}
 
-	// Pagination.
 	p1, _ := r.PreviewAfter(1, "", 0, 2)
 	p2, _ := r.PreviewAfter(1, "", 2, 2)
 	if len(p1.Items) != 2 || len(p2.Items) != 1 || p1.Total != 3 {
@@ -142,15 +130,12 @@ func checkPreviewBefore(t *testing.T, r *Repository) {
 		t.Fatalf("photos children: %+v", photos.Items)
 	}
 
-	// Under a directory moved whole, every child moves with it.
 	inProj, _ := r.PreviewBefore(1, "", "proj/pkg", 0, 0)
 	if inProj.Total != 1 || inProj.Items[0].Status != PreviewMoved || inProj.Items[0].NewPath != "/代码/proj/pkg/util.go" {
 		t.Fatalf("inside moved dir: %+v", inProj)
 	}
 }
 
-// The aggregation must stay a handful of queries regardless of size: a
-// 5k-entry session lists its root without per-entry work.
 func TestPreviewScales(t *testing.T) {
 	r := setupBrainRepo(t)
 	var rows []FileEntry

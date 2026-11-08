@@ -46,7 +46,6 @@ func TestPlanLifecycle(t *testing.T) {
 	if err != nil || p.Status != PlanApproved || p.ApprovedAt == nil || p.Version != 1 {
 		t.Fatalf("approve: %+v %v", p, err)
 	}
-	// A user edit keeps the approval; an agent write (forced, draft) resets it.
 	p, err = r.SavePlan(1, "# 方案 v2", 1, "")
 	if err != nil || p.Version != 2 || p.Status != PlanApproved {
 		t.Fatalf("user edit: %+v %v", p, err)
@@ -77,7 +76,6 @@ func TestMemoryUpsertValidateAndList(t *testing.T) {
 	}
 	first := m.ID
 
-	// Same normalized key updates in place; pinned never turns off by upsert.
 	m2 := &MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryCorrection, Key: "ext:.psd", Content: "psd 放 /设计/源文件", Path: "/Design/", Source: MemorySourceCorrection}
 	created, err = r.UpsertMemory(m2)
 	if err != nil || created || m2.ID != first || !m2.Pinned || m2.Content != "psd 放 /设计/源文件" || m2.Path != "Design" {
@@ -119,7 +117,6 @@ func TestMemoryUpsertValidateAndList(t *testing.T) {
 		t.Fatalf("list all: %d", len(all))
 	}
 
-	// Update: key clash with another item of the same scope is rejected.
 	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryFact, Key: "other", Content: "c"}); err != nil {
 		t.Fatal(err)
 	}
@@ -263,14 +260,12 @@ func TestSetTargetUniqueResolvesCollisions(t *testing.T) {
 			t.Fatalf("collision naming: got %v want %v", got, want)
 		}
 	}
-	// Re-targeting an entry to its own current path is not a collision.
 	if final, _, _ := r.SetTargetUnique(1, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
 		t.Fatalf("self re-target: %s", final)
 	}
 	if final, _, _ := r.SetTargetUnique(2, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
 		t.Fatalf("other session must not collide: %s", final)
 	}
-	// Clearing.
 	if final, _, _ := r.SetTargetUnique(1, "a/x.jpg", "", "file"); final != "" {
 		t.Fatal("clear")
 	}

@@ -18,8 +18,6 @@ import (
 //
 // PostgreSQL uses FILEENGINE_TEST_PG_DSN (see postgres_integration_test.go).
 
-// resetSchema drops and recreates every table through migrate, so the
-// per-dialect schema steps run as on a fresh database.
 func resetSchema(t *testing.T) {
 	t.Helper()
 	if err := DB.Migrator().DropTable(allModels...); err != nil {
@@ -40,7 +38,6 @@ func TestMySQLDialectSemantics(t *testing.T) {
 		t.Fatalf("init mysql: %v", err)
 	}
 	resetSchema(t)
-	// A second startup migrates the existing schema without changes.
 	if err := Init(cfg); err != nil {
 		t.Fatalf("re-init mysql: %v", err)
 	}
@@ -68,9 +65,6 @@ func TestSQLitePathSemantics(t *testing.T) {
 	checkPathSemantics(t, setupBrainRepo(t))
 }
 
-// checkPathSemantics runs the byte-exact path behavior every dialect must
-// share: subtree ranges, collision keys, category prefix moves, keyset
-// listing, case-insensitive name search and grouped category counts.
 func checkPathSemantics(t *testing.T, r *Repository) {
 	t.Helper()
 	fs := &Filesystem{Name: "fs", Protocol: "local"}
@@ -107,7 +101,6 @@ func checkPathSemantics(t *testing.T, r *Repository) {
 		}
 	}
 
-	// Collision keys are case- and normalization-insensitive.
 	if _, err := r.Decide(s.ID, Decision{Path: "docs/notes.txt", Role: RoleFile, NewPath: "/Photo/Café.txt"}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +112,6 @@ func checkPathSemantics(t *testing.T, r *Repository) {
 		t.Fatal(err)
 	}
 
-	// Category prefix move: siblings untouched, keys follow.
 	cat := &Category{FilesystemID: fs.ID, Name: "照片", Path: "/Photo"}
 	if err := r.CreateCategory(cat); err != nil {
 		t.Fatal(err)
@@ -147,13 +139,11 @@ func checkPathSemantics(t *testing.T, r *Repository) {
 		}
 	}
 
-	// Name search stays case-insensitive.
 	files, total, err := r.ListFiles(FileQuery{SessionID: s.ID, Search: "report"})
 	if err != nil || total != 1 || files[0].Name != "Report.PDF" {
 		t.Fatalf("name search: %d %v", total, err)
 	}
 
-	// Keyset listing walks the root in the same order as the offset listing.
 	root := ""
 	all, _, err := r.ListFiles(FileQuery{SessionID: s.ID, ParentPath: &root, PageSize: 100})
 	if err != nil {

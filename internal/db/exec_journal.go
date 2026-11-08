@@ -21,7 +21,6 @@ const (
 	ExecReverted = "reverted"
 )
 
-// Execution journal op kinds.
 const (
 	ExecKindRename = "rename" // in-place rename of a file or a whole directory
 	ExecKindCopy   = "copy"   // verified copy, source kept
@@ -30,7 +29,6 @@ const (
 	ExecKindRmdir  = "rmdir"  // source directory Src removed after it became empty
 )
 
-// ExecOp is one journaled filesystem step of an executing run.
 type ExecOp struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	RunID      uint      `gorm:"index" json:"run_id"`
@@ -54,7 +52,6 @@ func (r *Repository) CreateExecOp(op *ExecOp) error {
 	return WithRetry(func() error { return r.db.Create(op).Error })
 }
 
-// SetExecOpState advances an op; errMsg is stored as given (empty clears it).
 func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
 	op.State, op.Error = state, errMsg
 	return WithRetry(func() error {
@@ -63,7 +60,6 @@ func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
 	})
 }
 
-// SetExecOpDstStat records the verified destination stat.
 func (r *Repository) SetExecOpDstStat(op *ExecOp, size int64, mtime time.Time) error {
 	op.DstSize, op.DstModTime = size, mtime
 	return WithRetry(func() error {
@@ -72,15 +68,12 @@ func (r *Repository) SetExecOpDstStat(op *ExecOp, size int64, mtime time.Time) e
 	})
 }
 
-// ListExecOps returns a run's ops in execution order.
 func (r *Repository) ListExecOps(runID uint) ([]ExecOp, error) {
 	var ops []ExecOp
 	err := r.db.Where("run_id = ?", runID).Order("id ASC").Find(&ops).Error
 	return ops, err
 }
 
-// ListUnfinishedExecOps returns the session's ops a crash or stop left in an
-// intermediate state, oldest first.
 func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 	var ops []ExecOp
 	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecCopied, ExecVerified}).
@@ -88,9 +81,8 @@ func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 	return ops, err
 }
 
-// FindDoneExecOp returns the newest done op of the session that wrote dst, or
-// nil. The executor uses it to tell its own earlier output from a foreign
-// file when resuming a partially executed directory.
+// The executor uses it to tell its own earlier output from a foreign file
+// when resuming a partially executed directory.
 func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*ExecOp, error) {
 	var ops []ExecOp
 	err := r.db.Where("session_id = ? AND dst = ? AND state = ?", sessionID, dst, ExecDone).
@@ -101,7 +93,6 @@ func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*ExecOp, error)
 	return &ops[0], nil
 }
 
-// LatestExecOpByEntry returns the newest op per entry id.
 func (r *Repository) LatestExecOpByEntry(entryIDs []uint) (map[uint]ExecOp, error) {
 	out := map[uint]ExecOp{}
 	if len(entryIDs) == 0 {
@@ -117,7 +108,6 @@ func (r *Repository) LatestExecOpByEntry(entryIDs []uint) (map[uint]ExecOp, erro
 	return out, nil
 }
 
-// MarkEntryExecuted flags a decided entry as carried out (column-scoped).
 func (r *Repository) MarkEntryExecuted(id uint, mode string) error {
 	now := time.Now()
 	return WithRetry(func() error {
@@ -126,7 +116,6 @@ func (r *Repository) MarkEntryExecuted(id uint, mode string) error {
 	})
 }
 
-// UnmarkEntryExecuted clears the executed flag after a revert.
 func (r *Repository) UnmarkEntryExecuted(id uint) error {
 	return WithRetry(func() error {
 		return r.db.Model(&FileEntry{}).Where("id = ?", id).
@@ -134,8 +123,6 @@ func (r *Repository) UnmarkEntryExecuted(id uint) error {
 	})
 }
 
-// ListPlannedEntries returns the session's decided, not yet executed entries
-// in deterministic order (original path, then id).
 func (r *Repository) ListPlannedEntries(sessionID uint) ([]FileEntry, error) {
 	var files []FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND new_path != '' AND executed = ?", sessionID, false).
@@ -143,8 +130,6 @@ func (r *Repository) ListPlannedEntries(sessionID uint) ([]FileEntry, error) {
 	return files, err
 }
 
-// ListDecidedEntries returns every entry of the session that carries a
-// target, executed or not — the set ancestors are resolved against.
 func (r *Repository) ListDecidedEntries(sessionID uint) ([]FileEntry, error) {
 	var files []FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND new_path != ''", sessionID).
@@ -152,8 +137,6 @@ func (r *Repository) ListDecidedEntries(sessionID uint) ([]FileEntry, error) {
 	return files, err
 }
 
-// SearchEntries finds entries by exact original path, path substring or name
-// substring (case-insensitive name match), at most limit rows.
 func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]FileEntry, error) {
 	var files []FileEntry
 	q = strings.TrimPrefix(strings.TrimSpace(q), "/")
@@ -166,9 +149,7 @@ func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]FileE
 	return files, err
 }
 
-// CollisionKey normalizes a path for collision detection: slash-cleaned,
-// without leading slash, Unicode NFC and lower-cased. Two targets with the
-// same key collide on case-insensitive or normalization-insensitive
+// Two targets with the same key collide on case- or normalization-insensitive
 // filesystems (SMB, macOS) even if their bytes differ.
 func CollisionKey(p string) string {
 	p = strings.TrimPrefix(path.Clean("/"+p), "/")

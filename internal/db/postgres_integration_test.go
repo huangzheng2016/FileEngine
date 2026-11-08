@@ -35,7 +35,6 @@ func TestPostgresDialectSemantics(t *testing.T) {
 		t.Fatalf("dialect selection: got %q, want postgres", DB.Dialector.Name())
 	}
 
-	// Fresh slate: drop + re-migrate so the test is re-runnable on the same DB.
 	resetSchema(t)
 	r := NewRepository(DB)
 
@@ -65,7 +64,6 @@ func TestPostgresDialectSemantics(t *testing.T) {
 		}
 	}
 
-	// Name search must be case-insensitive on PostgreSQL too (ILIKE).
 	files, total, err := r.ListFiles(FileQuery{SessionID: session.ID, Search: "report"})
 	if err != nil {
 		t.Fatalf("search report: %v", err)
@@ -74,9 +72,6 @@ func TestPostgresDialectSemantics(t *testing.T) {
 		t.Fatalf("PG name search must be case-insensitive: got total=%d files=%v", total, files)
 	}
 
-	// Path-prefix matching is case-sensitive (PG LIKE): marking children of
-	// "Docs" must not touch "docs/..." — and escaped '_' must not leak into
-	// the myXdir sibling either.
 	if err := pgUnit(r, session.ID, "Docs"); err != nil {
 		t.Fatalf("unit decide Docs: %v", err)
 	}
@@ -93,7 +88,6 @@ func TestPostgresDialectSemantics(t *testing.T) {
 		t.Fatal("myXdir/b.txt must NOT be tagged — '_' leaked as a LIKE wildcard")
 	}
 
-	// Aggregate counts with boolean bind params (RefreshSessionCounts pattern).
 	if err := r.RefreshSessionCounts(session.ID); err != nil {
 		t.Fatalf("RefreshSessionCounts: %v", err)
 	}
@@ -107,8 +101,6 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	}
 }
 
-// The plan/memory/preview queries use dialect-specific pieces (ILIKE recall,
-// quoted "key" column, strpos segment aggregation) — run them on PostgreSQL.
 func TestPostgresBrainQueries(t *testing.T) {
 	dsn := postgresTestDSN(t)
 	if err := Init(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {

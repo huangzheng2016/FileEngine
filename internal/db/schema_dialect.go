@@ -9,12 +9,11 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// allModels is every migrated table.
 var allModels = []any{&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
 	&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &PlanRule{}, &ExecOp{}}
 
-// migrate creates the schema plus the per-dialect pieces struct tags cannot
-// express: binary path comparison on MySQL and PostgreSQL.
+// Creates the schema plus what struct tags cannot express: binary path
+// comparison on MySQL and PostgreSQL.
 func migrate(db *gorm.DB) error {
 	tx := db
 	if db.Dialector.Name() == "mysql" {
@@ -125,7 +124,6 @@ func mysqlIndexPrefixes(opts []schema.IndexOption) []schema.IndexOption {
 	return out
 }
 
-// mysqlIndexBytes is the key width of an index under mysqlIndexPrefixes.
 func mysqlIndexBytes(opts []schema.IndexOption) int {
 	total := 0
 	for _, o := range mysqlIndexPrefixes(opts) {

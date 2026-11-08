@@ -17,7 +17,7 @@ type FileEntry struct {
 	Reason        string     `gorm:"size:1024" json:"reason"`
 	Confidence    float64    `json:"confidence"`                        // agent confidence 0-1; 0 = not given
 	NeedsReview   bool       `gorm:"default:false" json:"needs_review"` // low-confidence decision: excluded from execution until the user confirms
-	Sensitive     bool       `gorm:"default:false" json:"sensitive"`    // credentials / identity documents: never read by the agent                                        // why this decision was made (agent, rule name or user)
+	Sensitive     bool       `gorm:"default:false" json:"sensitive"`    // credentials / identity documents: never read by the agent
 	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"
@@ -33,16 +33,14 @@ type FileEntry struct {
 	ChildCount    int        `json:"child_count"`  // direct children kept by the scan (directories only)
 	SubdirCount   int        `json:"subdir_count"` // direct child directories (directories only)
 	BatchIndex    int        `json:"batch_index"`
-	// Media metadata (scanner post-walk pass, ScanSession.ExtractMetadata):
-	// TakenAt is the capture time as naive wall-clock (stored as UTC) from
-	// EXIF/video headers, else a date in the file name, else mtime.
+	// TakenAt is naive wall-clock time (stored as UTC) from EXIF/video headers,
+	// else a date in the file name, else mtime.
 	TakenAt    *time.Time `json:"taken_at"`
 	Camera     string     `gorm:"size:128" json:"camera"`
 	HasGPS     bool       `gorm:"default:false" json:"has_gps"`
 	DateSource string     `gorm:"size:16" json:"date_source"` // exif / video / filename / mtime; "" = not extracted
-	// Duplicate detection (ScanSession.DetectDuplicates): Hash is the full
-	// content sha256 (hex), set only for files that share their size with
-	// another file; DuplicateOf points at the group's original.
+	// Hash is set only for files that share their size with another file;
+	// DuplicateOf points at the group's original.
 	Hash        string    `gorm:"size:64;index:idx_session_hash,priority:2" json:"hash"`
 	DuplicateOf *uint     `json:"duplicate_of"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -78,7 +76,6 @@ type Filesystem struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// ToRemoteFSConfig converts a Filesystem to RemoteFSConfig for remotefs factory.
 func (f *Filesystem) ToRemoteFSConfig() config.RemoteFSConfig {
 	return config.RemoteFSConfig{
 		Protocol: f.Protocol,
@@ -100,32 +97,25 @@ type ScanSession struct {
 	Protocol     string `gorm:"size:32" json:"protocol"`
 	Status       string `gorm:"size:32" json:"status"` // scanning / scanned / error / interrupted; agent activity lives on runs
 	TotalFiles   int    `json:"total_files"`
-	// ScannedCount is the live entries counter during "scanning": the scanner
-	// persists it every few seconds so the UI shows progress before the
-	// full-tree TotalFiles lands at the end.
-	ScannedCount int `json:"scanned_count"`
-	// CurrentPath is the directory the scan is listing right now (heartbeat);
-	// empty when the walk is not running (saving results / terminal states).
-	CurrentPath string `gorm:"size:1024" json:"current_path"`
-	// ErrorMessage carries the failure detail when Status is "error" (or the
-	// interruption note for "interrupted") — kept out of Status so the enum
-	// stays short and the full message survives.
+	ScannedCount int    `json:"scanned_count"`
+	CurrentPath  string `gorm:"size:1024" json:"current_path"`
+	// Kept out of Status so the enum stays short and the full message survives.
 	ErrorMessage        string    `gorm:"type:text" json:"error_message"`
 	TaggedFiles         int       `json:"tagged_files"`
 	PlannedOps          int       `json:"planned_ops"`
 	ExecutedOps         int       `json:"executed_ops"`
 	TotalSize           int64     `json:"total_size"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
-	AllowAutoCategory   bool      `gorm:"default:true" json:"allow_auto_category"` // create_category tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
+	AllowAutoCategory   bool      `gorm:"default:true" json:"allow_auto_category"` // create_category switch; DB default on (GORM omits the zero value on insert)
 	AllowVision         bool      `gorm:"default:false" json:"allow_vision"`       // session-level switch; view_image requires ModelProvider.VisionEnabled too
-	AllowScript         bool      `gorm:"default:true" json:"allow_script"`        // run_script tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
-	ExtractMetadata     bool      `gorm:"default:true" json:"extract_metadata"`    // media date/camera/GPS pass after the walk; DB default ON — GORM omits the zero value on insert
+	AllowScript         bool      `gorm:"default:true" json:"allow_script"`        // run_script switch; DB default on (GORM omits the zero value on insert)
+	ExtractMetadata     bool      `gorm:"default:true" json:"extract_metadata"`    // media metadata pass; DB default on (GORM omits the zero value on insert)
 	DetectDuplicates    bool      `gorm:"default:false" json:"detect_duplicates"`  // size → partial hash → full hash duplicate grouping after the walk
 	ExcludeCategoryDirs bool      `gorm:"default:false" json:"exclude_category_dirs"`
 	FilterMode          string    `gorm:"size:16;default:blacklist" json:"filter_mode"`
 	FilterDirs          string    `gorm:"type:text" json:"filter_dirs"`
 	Goal                string    `gorm:"type:text" json:"goal"`
-	ScopeExts           string    `gorm:"type:text" json:"scope_exts"` // comma-separated extensions to organize; empty = all files; others become role=skip // the user's organizing intent, injected into every agent prompt
+	ScopeExts           string    `gorm:"type:text" json:"scope_exts"` // comma-separated extensions to organize; empty = all files; others become role=skip
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
 	BulkModelProviderID uint      `json:"bulk_model_provider_id"` // tagging workers + summarization; 0 = same as ModelProviderID
 	CreatedAt           time.Time `json:"created_at"`
@@ -142,10 +132,8 @@ type ModelProvider struct {
 	Temperature   float64 `json:"temperature"`
 	MaxTokens     int     `json:"max_tokens"`     // output completion cap passed to the LLM API
 	ContextWindow int     `json:"context_window"` // model context window in tokens (drives compaction thresholds)
-	// ReasoningEffort is the thinking strength, used only when ThinkingEnabled:
-	// openai-compatible APIs get it verbatim as reasoning_effort ("" = model
-	// default), claude maps it to an extended-thinking budget. Free-form; the
-	// API validates [a-zA-Z0-9_-]{1,32}.
+	// Used only when ThinkingEnabled: openai-compatible APIs get it verbatim,
+	// claude maps it to an extended-thinking budget.
 	ReasoningEffort string    `gorm:"size:32" json:"reasoning_effort"`
 	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"`   // model can read images (gates the view_image tool)
 	ThinkingEnabled bool      `gorm:"default:false" json:"thinking_enabled"` // request model thinking; reasoning_effort applies only when on
@@ -153,12 +141,8 @@ type ModelProvider struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// DefaultContextWindow is the fallback context window (tokens) used when a
-// ModelProvider does not specify one. It matches the smallest suggested tier
-// (200K); common tiers are 200K/256K/500K/900K/1M, custom values allowed.
 const DefaultContextWindow = 200_000
 
-// EffectiveContextWindow returns the configured context window or the default.
 func (p *ModelProvider) EffectiveContextWindow() int {
 	if p.ContextWindow > 0 {
 		return p.ContextWindow
@@ -166,7 +150,4 @@ func (p *ModelProvider) EffectiveContextWindow() int {
 	return DefaultContextWindow
 }
 
-// JunkBatchIndex is the sentinel batch_index stamped on entries the autotag
-// junk filter auto-ignored (system files like .DS_Store, @eaDir) without an
-// agent batch. It distinguishes them from agent-tagged rows for reporting.
 const JunkBatchIndex = -1

@@ -16,17 +16,15 @@ import (
 
 var DB *gorm.DB
 
-// readDB is the SQLite read-only connection pool (nil on MySQL/PostgreSQL,
-// whose single pool already serves concurrent readers). See ReadDB.
+// nil on MySQL/PostgreSQL, whose single pool already serves concurrent
+// readers.
 var readDB *gorm.DB
 
-// readPoolSize bounds the SQLite reader pool. WAL lets readers run alongside
-// the single writer connection without blocking on it.
+// WAL lets readers run alongside the single writer connection.
 const readPoolSize = 4
 
-// ReadDB returns the pool for read-only queries: on SQLite a separate
-// query_only pool so long reads never queue behind the single writer
-// connection (readers see the last committed state); elsewhere the main DB.
+// On SQLite a separate query_only pool, so long reads never queue behind the
+// single writer connection.
 func ReadDB() *gorm.DB {
 	if readDB != nil {
 		return readDB
@@ -60,15 +58,15 @@ func Init(cfg config.DatabaseConfig) error {
 		if err != nil {
 			return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 		}
-		// Single writer connection to avoid lock contention
+		// SQLite allows one writer at a time; a single connection avoids lock
+		// contention.
 		sqlDB.SetMaxOpenConns(1)
 		sqlDB.SetMaxIdleConns(1)
 		sqlDB.SetConnMaxLifetime(0)
 
-		// Additional pragmas
 		pragmas := []string{
 			"PRAGMA temp_store=MEMORY",
-			"PRAGMA mmap_size=268435456", // 256MB mmap
+			"PRAGMA mmap_size=268435456",
 		}
 		for _, p := range pragmas {
 			if _, err := sqlDB.Exec(p); err != nil {
@@ -105,10 +103,8 @@ func Init(cfg config.DatabaseConfig) error {
 	return nil
 }
 
-// sqliteDSN appends the per-connection pragmas for the pure-Go SQLite driver
-// (glebarez/sqlite on modernc.org/sqlite). Every _pragma runs on each new
-// connection, busy_timeout first so the remaining pragmas already wait on a
-// locked database; _txlock=immediate makes BEGIN take the write lock up front.
+// busy_timeout runs first so the remaining pragmas already wait on a locked
+// database; _txlock=immediate makes BEGIN take the write lock up front.
 func sqliteDSN(path string) string {
 	return path + "?_pragma=busy_timeout(30000)" +
 		"&_pragma=journal_mode(WAL)" +
@@ -118,9 +114,8 @@ func sqliteDSN(path string) string {
 		"&_txlock=immediate"
 }
 
-// openSQLiteReadPool opens the query_only reader pool on the same database
-// file. WAL is a persistent property of the file, so readers need no
-// journal_mode pragma.
+// WAL is a persistent property of the file, so readers need no journal_mode
+// pragma.
 func openSQLiteReadPool(path string) (*gorm.DB, error) {
 	dsn := path + "?_pragma=busy_timeout(30000)" +
 		"&_pragma=cache_size(-65536)" +
@@ -145,7 +140,6 @@ func GetDB() *gorm.DB {
 	return DB
 }
 
-// WithRetry wraps a DB operation with retry logic for SQLite lock errors.
 func WithRetry(fn func() error) error {
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {

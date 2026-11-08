@@ -1,7 +1,5 @@
 package db
 
-// CancelAllRuns cancels every registered run (graceful shutdown) and returns
-// how many were live.
 func CancelAllRuns() int {
 	runCancels.mu.Lock()
 	cancels := make([]func(), 0, len(runCancels.m))
@@ -15,7 +13,6 @@ func CancelAllRuns() int {
 	return len(cancels)
 }
 
-// LiveRunCount is the number of runs still registered (not yet finished).
 func LiveRunCount() int {
 	runCancels.mu.Lock()
 	defer runCancels.mu.Unlock()

@@ -9,8 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// likeLiteral must neutralize every LIKE metacharacter (plus the escape
-// character itself) and leave ordinary text untouched.
 func TestLikeLiteral(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"plain/path", "plain/path"},
@@ -27,8 +25,6 @@ func TestLikeLiteral(t *testing.T) {
 	}
 }
 
-// nameSearchCondition is case-insensitive per dialect: SQLite LIKE already is,
-// PostgreSQL needs ILIKE, MySQL relabels its binary column collation.
 func TestNameSearchConditionPerDialect(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -54,9 +50,6 @@ func TestNameSearchConditionPerDialect(t *testing.T) {
 	}
 }
 
-// The generated PostgreSQL SQL for a search query must use ILIKE with the
-// escape clause and receive the escaped pattern as a bind var — checked in
-// DryRun mode, no server needed.
 func TestApplyFileFiltersPostgresSQL(t *testing.T) {
 	db, err := gorm.Open(postgres.New(postgres.Config{
 		DSN:                 "host=localhost dbname=x sslmode=disable",

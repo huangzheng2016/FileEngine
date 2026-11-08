@@ -24,7 +24,6 @@ const likeEscapeClause = " ESCAPE '!'"
 
 var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
 
-// likeLiteral escapes LIKE wildcards in s so it matches literally.
 func likeLiteral(s string) string { return likeEscaper.Replace(s) }
 
 // subtreeCond matches column values strictly under dir (dir + "/<anything>")
@@ -36,7 +35,6 @@ func subtreeCond(tx *gorm.DB, column, dir string) (string, []any) {
 	return "(" + c + " >= ? AND " + c + " < ?)", []any{dir + "/", dir + "0"}
 }
 
-// atOrUnderCond matches column = dir or values strictly under it.
 func atOrUnderCond(tx *gorm.DB, column, dir string) (string, []any) {
 	sub, args := subtreeCond(tx, column, dir)
 	return "(" + column + " = ? OR " + sub + ")", append([]any{dir}, args...)
@@ -59,7 +57,6 @@ func concatExpr(tx *gorm.DB, parts ...string) string {
 	return strings.Join(parts, " || ")
 }
 
-// nameSearchCondition returns the case-insensitive name-search condition.
 func nameSearchCondition(tx *gorm.DB) string { return ciLikeCondition(tx, "name") }
 
 // ciLikeCondition is the case-insensitive LIKE condition on column for the
@@ -96,8 +93,6 @@ func instrFunc(tx *gorm.DB) string {
 	return "instr"
 }
 
-// entriesUnder scopes a FileEntry query to the session's entries strictly
-// under dir.
 func entriesUnder(tx *gorm.DB, sessionID uint, dir string) *gorm.DB {
 	cond, args := subtreeCond(tx, "original_path", dir)
 	return tx.Model(&FileEntry{}).Where("scan_session_id = ?", sessionID).Where(cond, args...)

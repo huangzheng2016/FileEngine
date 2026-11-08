@@ -48,8 +48,6 @@ func TestEmitPersistsAndBroadcastsInSeqOrder(t *testing.T) {
 	}
 }
 
-// Deltas of one message coalesce into one chunk, and a non-delta event of the
-// same run flushes pending chunks first so persisted order = emission order.
 func TestDeltaCoalescingAndOrdering(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	const sid, run = 11, 5

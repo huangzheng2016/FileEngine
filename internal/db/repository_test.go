@@ -7,9 +7,6 @@ import (
 	"FileEngine/internal/config"
 )
 
-// GetCategoryUsageSummary must return the complete category system — unused
-// categories included with zero counts — and must not let sibling path
-// prefixes bleed into each other's counts.
 func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -72,7 +69,6 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		t.Fatalf("/empty: got count=%d present=%v, want 0 present", c, ok)
 	}
 
-	// GetSessionStats applies the same exact-prefix matching (used-only view).
 	stats, err := r.GetSessionStats(session.ID, fs.ID)
 	if err != nil {
 		t.Fatalf("GetSessionStats: %v", err)
@@ -89,9 +85,8 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	}
 }
 
-// allow_script defaults ON: a session created without touching the field must
-// read back AllowScript=true (the GORM default tag omits the zero value from
-// the INSERT, so the DB default applies).
+// The GORM default tag omits the zero value from the INSERT, so the DB
+// default applies.
 func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -116,7 +111,6 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 		t.Fatal("AllowScript must default to true for a session created without setting it")
 	}
 
-	// An explicit false persists (the session switch can be turned off).
 	reloaded.AllowScript = false
 	if err := r.UpdateSession(reloaded); err != nil {
 		t.Fatalf("update session: %v", err)
@@ -130,8 +124,6 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 	}
 }
 
-// SampleFiles returns a random subset bounded by n, honoring the query
-// filters, and never invents rows.
 func TestSampleFiles(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -154,7 +146,6 @@ func TestSampleFiles(t *testing.T) {
 	}
 
 	parent := "in"
-	// n above the match count returns every match (all session-1 "in" files).
 	all, err := r.SampleFiles(FileQuery{SessionID: 1, ParentPath: &parent, FileType: "file"}, 50)
 	if err != nil {
 		t.Fatalf("SampleFiles: %v", err)
@@ -168,7 +159,6 @@ func TestSampleFiles(t *testing.T) {
 		}
 	}
 
-	// n caps the subset; every winner matches the filters and session.
 	some, err := r.SampleFiles(FileQuery{SessionID: 1, ParentPath: &parent}, 2)
 	if err != nil {
 		t.Fatalf("SampleFiles: %v", err)
@@ -182,7 +172,6 @@ func TestSampleFiles(t *testing.T) {
 		}
 	}
 
-	// No matches → empty, not an error.
 	none, err := r.SampleFiles(FileQuery{SessionID: 99}, 5)
 	if err != nil || len(none) != 0 {
 		t.Fatalf("SampleFiles no matches: got %v, %v", none, err)
@@ -192,9 +181,6 @@ func TestSampleFiles(t *testing.T) {
 	}
 }
 
-// CountUntaggedByType splits the untagged remainder by entry type — the
-// reconciliation line depends on directories/symlinks being reported
-// separately from files (only files signal tagging misses).
 func TestCountUntaggedByType(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -209,7 +195,6 @@ func TestCountUntaggedByType(t *testing.T) {
 		{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/c.txt", Name: "c.txt", FileType: "file", Tagged: true},
 		{ScanSessionID: 1, OriginalPath: "in/link", Name: "link", FileType: "symlink"},
-		// Another session's untagged entries must not leak in.
 		{ScanSessionID: 2, OriginalPath: "in/x.txt", Name: "x.txt", FileType: "file"},
 	}
 	for _, f := range entries {
@@ -236,8 +221,6 @@ func TestCountUntaggedByType(t *testing.T) {
 	}
 }
 
-// TaggedStatusByIDs backs the loose-file batch re-check: it must report the
-// stored tagged flag per ID (unknown IDs simply absent).
 func TestTaggedStatusByIDs(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -269,9 +252,6 @@ func TestTaggedStatusByIDs(t *testing.T) {
 	}
 }
 
-// LIKE wildcards in directory names must match literally: marking children of
-// "in/my_dir" must not cascade into the sibling "in/myXdir" (an unescaped '_'
-// is a single-character wildcard in every dialect).
 func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -312,8 +292,6 @@ func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	}
 }
 
-// Name search stays case-insensitive on SQLite (and must treat a literal '%'
-// in the query as text, not as a wildcard).
 func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {

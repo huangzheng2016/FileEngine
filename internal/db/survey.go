@@ -1,7 +1,5 @@
 package db
 
-// EntryBrief is the slim projection of a FileEntry the survey and review
-// passes stream over.
 type EntryBrief struct {
 	ID           uint
 	OriginalPath string
@@ -14,9 +12,6 @@ type EntryBrief struct {
 	Reason       string
 }
 
-// EachEntry streams every entry of the session in id order (all of them
-// when plannedOnly is false, else only entries with a target that are not
-// unit members). fn returning false stops the walk.
 func (r *Repository) EachEntry(sessionID uint, plannedOnly bool, fn func(EntryBrief) bool) error {
 	q := r.Reader().Model(&FileEntry{}).
 		Select("id, original_path, name, file_type, size, depth, new_path, role, reason").

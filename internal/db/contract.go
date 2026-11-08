@@ -2,7 +2,6 @@ package db
 
 import "time"
 
-// Run phases.
 const (
 	RunPhaseSurvey    = "survey"
 	RunPhaseTagging   = "tagging"
@@ -11,7 +10,6 @@ const (
 	RunPhaseExecuting = "executing"
 )
 
-// Run statuses.
 const (
 	RunRunning = "running"
 	RunDone    = "done"
@@ -20,8 +18,7 @@ const (
 	RunStopped = "stopped"
 )
 
-// AgentRun is one agent or executor activity of a session. Token totals of a
-// session are the sum over its runs.
+// Token totals of a session are the sum over its runs.
 type AgentRun struct {
 	ID               uint       `gorm:"primaryKey" json:"id"`
 	SessionID        uint       `gorm:"index:idx_run_session,priority:1" json:"session_id"`
@@ -40,8 +37,7 @@ type AgentRun struct {
 	EndedAt          *time.Time `json:"ended_at"`
 }
 
-// SessionEvent is one persisted stream event; ID is the stream sequence number
-// used for SSE ids and Last-Event-ID resume.
+// ID is the stream sequence number used for SSE ids and Last-Event-ID resume.
 type SessionEvent struct {
 	ID        uint      `gorm:"primaryKey" json:"seq"`
 	SessionID uint      `gorm:"index:idx_event_session_run,priority:1" json:"session_id"`
@@ -51,13 +47,11 @@ type SessionEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Plan statuses.
 const (
 	PlanDraft    = "draft"
 	PlanApproved = "approved"
 )
 
-// SessionPlan is the session's 整理方案: the Markdown spec every worker follows.
 type SessionPlan struct {
 	SessionID  uint       `gorm:"primaryKey;autoIncrement:false" json:"session_id"`
 	Version    int        `json:"version"`
@@ -67,14 +61,12 @@ type SessionPlan struct {
 	ApprovedAt *time.Time `json:"approved_at"`
 }
 
-// Memory scopes.
 const (
 	MemoryScopeSession    = "session"
 	MemoryScopeFilesystem = "filesystem"
 	MemoryScopeGlobal     = "global"
 )
 
-// Memory kinds.
 const (
 	MemoryPreference = "preference"
 	MemoryConvention = "convention"
@@ -83,7 +75,6 @@ const (
 	MemoryNote       = "note"
 )
 
-// Memory sources.
 const (
 	MemorySourceUser       = "user"
 	MemorySourceAgent      = "agent"
@@ -91,15 +82,14 @@ const (
 	MemorySourceReflection = "reflection"
 )
 
-// MemoryItem is one remembered fact. Session-scoped items are working notes
-// shared live by the session's workers; filesystem and global items persist
-// across sessions.
+// Session-scoped items are working notes shared live by the session's
+// workers; filesystem and global items persist across sessions.
 type MemoryItem struct {
 	ID         uint       `gorm:"primaryKey" json:"id"`
 	Scope      string     `gorm:"size:16;index:idx_memory_scope,priority:1" json:"scope"`
 	ScopeID    uint       `gorm:"index:idx_memory_scope,priority:2" json:"scope_id"`
 	Kind       string     `gorm:"size:16" json:"kind"`
-	Key        string     `gorm:"size:512;index" json:"key"` // normalized subject (e.g. "ext:.psd", "path:照片/2023"); one live item per (scope, scope_id, key)
+	Key        string     `gorm:"size:512;index" json:"key"` // normalized subject (e.g. "ext:.psd"); one live item per (scope, scope_id, key)
 	Content    string     `gorm:"type:text" json:"content"`
 	Path       string     `gorm:"size:1024" json:"path"`
 	Source     string     `gorm:"size:16" json:"source"`
@@ -110,15 +100,14 @@ type MemoryItem struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
-// Chat turn roles. A summary turn condenses every turn with ID <=
-// CoversThrough; it is prompt history only and never listed to the user.
+// A summary turn condenses every turn with ID <= CoversThrough; it is prompt
+// history only and never listed to the user.
 const (
 	ChatRoleUser      = "user"
 	ChatRoleAssistant = "assistant"
 	ChatRoleSummary   = "summary"
 )
 
-// ChatTurn is one persisted turn of the session assistant conversation.
 type ChatTurn struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	SessionID     uint      `gorm:"index" json:"session_id"`
@@ -129,7 +118,6 @@ type ChatTurn struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// Stream event types.
 const (
 	EvRunStatus     = "run_status"
 	EvRunDone       = "run_done"
@@ -195,7 +183,6 @@ type MessageData struct {
 	Tokens   *TokenCounts `json:"tokens,omitempty"`
 }
 
-// DeltaData is the payload of both text and reasoning events.
 type DeltaData struct {
 	RunID    uint   `json:"run_id"`
 	WorkerID int    `json:"worker_id"`
@@ -257,9 +244,7 @@ const (
 	RoleDuplicate = "duplicate" // content duplicate of FileEntry.DuplicateOf (scanner); plan quarantines it, never deletes
 )
 
-// PlanRule is a deterministic classification rule applied in bulk to every
-// undecided entry it matches; rules belong to the session plan and are
-// re-applied after a rescan.
+// Rules belong to the session plan and are re-applied after a rescan.
 type PlanRule struct {
 	ID        uint   `gorm:"primaryKey" json:"id"`
 	SessionID uint   `gorm:"index" json:"session_id"`
@@ -272,9 +257,9 @@ type PlanRule struct {
 	FileType   string `gorm:"size:16" json:"file_type"` // file / directory / ""
 	MinSize    int64  `json:"min_size"`
 	MaxSize    int64  `json:"max_size"`
-	// Target template, e.g. "照片/{year}/{month}/{name}". Variables: {name}
-	// (base name), {stem}, {ext}, {year}, {month}, {day} (modification time),
-	// {parent} (parent dir name), {rel} (path relative to path_prefix).
+	// Target template variables: {name}, {stem}, {ext}, {year}, {month}, {day}
+	// (modification time), {parent} (parent dir name), {rel} (path relative to
+	// path_prefix).
 	Target    string    `gorm:"size:1024" json:"target"`
 	Role      string    `gorm:"size:16" json:"role"`   // file or unit (directories)
 	Source    string    `gorm:"size:16" json:"source"` // user / agent / preset

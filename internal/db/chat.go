@@ -1,11 +1,9 @@
 package db
 
-// AddChatTurn appends one turn to the session conversation.
 func (r *Repository) AddChatTurn(t *ChatTurn) error {
 	return WithRetry(func() error { return r.db.Create(t).Error })
 }
 
-// ListChatTurns returns the session's user and assistant turns, oldest first.
 func (r *Repository) ListChatTurns(sessionID uint) ([]ChatTurn, error) {
 	var turns []ChatTurn
 	err := r.db.Where("session_id = ? AND role IN ?", sessionID, []string{ChatRoleUser, ChatRoleAssistant}).
@@ -13,9 +11,9 @@ func (r *Repository) ListChatTurns(sessionID uint) ([]ChatTurn, error) {
 	return turns, err
 }
 
-// ChatHistory returns what the assistant prompt is built from: the latest
-// summary turn (nil if none) and every user/assistant turn after the range it
-// covers, oldest first. Turns with ID >= beforeID are excluded (0 = no bound).
+// The latest summary turn (nil if none) and every turn after the range it
+// covers, oldest first; turns with ID >= beforeID are excluded (0 = no
+// bound).
 func (r *Repository) ChatHistory(sessionID, beforeID uint) (*ChatTurn, []ChatTurn, error) {
 	var summaries []ChatTurn
 	q := r.db.Where("session_id = ? AND role = ?", sessionID, ChatRoleSummary)

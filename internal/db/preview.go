@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Preview statuses of a source-side entry.
 const (
 	PreviewMoved   = "moved"
 	PreviewKept    = "kept"
@@ -38,18 +37,15 @@ type PreviewItem struct {
 	Sensitive    bool    `json:"sensitive,omitempty"`
 }
 
-// PreviewPage is one page of a preview directory listing.
 type PreviewPage struct {
 	Items []PreviewItem `json:"items"`
 	Total int64         `json:"total"`
 }
 
-// dirStat is the recursive file count and size under a directory.
 type dirStat struct{ files, size int64 }
 
-// dirStatsCache memoizes recursive directory stats per session. The scanned
-// tree is immutable between scans, so the stamp (entry count + max id)
-// changes exactly when a rescan rewrites the rows.
+// The scanned tree is immutable between scans, so the stamp (entry count +
+// max id) changes exactly when a rescan rewrites the rows.
 var dirStatsCache = struct {
 	sync.Mutex
 	m map[uint]dirStatsEntry
@@ -60,9 +56,7 @@ type dirStatsEntry struct {
 	stats        map[string]dirStat
 }
 
-// sessionDirStats returns recursive (files, size) per directory path of the
-// session, computed from one GROUP BY parent_path query and rolled up to the
-// ancestors in Go.
+// One GROUP BY parent_path query, rolled up to the ancestors in Go.
 func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error) {
 	var stamp struct{ Cnt, MaxID int64 }
 	if err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", sessionID).
@@ -109,8 +103,6 @@ func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error)
 	return stats, nil
 }
 
-// pathAncestors returns p and its ancestors, nearest first ("a/b/c" →
-// [a/b/c, a/b, a]; "/x/y" → [/x/y, /x]).
 func pathAncestors(p string) []string {
 	var out []string
 	for p != "" && p != "." && p != "/" {
@@ -124,7 +116,6 @@ func pathAncestors(p string) []string {
 	return out
 }
 
-// segmentGroup is one aggregated next-segment bucket below a prefix.
 type segmentGroup struct {
 	Seg    string
 	Cnt    int64
@@ -134,10 +125,8 @@ type segmentGroup struct {
 	MinID  uint
 }
 
-// segmentQuery groups the session's planned rows whose column value lies
-// under prefix (which must end in "/", or be "" for "everything") by the
-// next path segment below it — the aggregation runs in SQL, so a 100k-entry
-// session costs one grouped scan per listing.
+// prefix must end in "/" or be "". The aggregation runs in SQL, so a
+// 100k-entry session costs one grouped scan per listing.
 func (r *Repository) segmentQuery(sessionID uint, column, prefix string, extra string) *gorm.DB {
 	tx := r.db
 	instr := instrFunc(tx)
@@ -156,9 +145,8 @@ func (r *Repository) segmentQuery(sessionID uint, column, prefix string, extra s
 	return tx.Table("(?) AS t", inner)
 }
 
-// PreviewAfter lists the children of a virtual target directory (dir is
-// "/"-rooted; "" or "/" is the target root). Directories planned as a whole
-// stay browsable: inside one, the listing maps back to its real children.
+// Directories planned as a whole stay browsable: inside one, the listing
+// maps back to its real children.
 func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int) (*PreviewPage, error) {
 	dir = NormalizeTargetPath(dir)
 	if dir == "/" {
@@ -172,7 +160,6 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 		return nil, err
 	}
 
-	// Inside a directory that moves as a whole?
 	if anc := pathAncestors(dir); len(anc) > 0 {
 		var moved []FileEntry
 		if err := r.db.Where("scan_session_id = ? AND file_type = 'directory' AND operation != '' AND new_path IN ?", sessionID, anc).
@@ -263,8 +250,6 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 	return page, nil
 }
 
-// previewRealChildren lists the scanned children of orig as they appear at
-// virtualDir (inside a directory that moves as a whole).
 func (r *Repository) previewRealChildren(sessionID uint, orig, virtualDir string, stats map[string]dirStat, offset, limit int) (*PreviewPage, error) {
 	tx := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND parent_path = ?", sessionID, orig)
 	var total int64
@@ -290,10 +275,6 @@ func (r *Repository) previewRealChildren(sessionID uint, orig, virtualDir string
 	return page, nil
 }
 
-// PreviewBefore lists the scanned children of an original directory (dir ""
-// means the session root) with what happens to each: moved (its own or an
-// ancestor's target), partial (a directory with some planned descendants) or
-// kept.
 func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset, limit int) (*PreviewPage, error) {
 	if dir == "" || dir == "." || dir == "/" {
 		dir = rootPath
@@ -320,7 +301,6 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 		}
 	}
 
-	// Planned descendants per child, aggregated by next segment in SQL.
 	movedBelow := map[string]int64{}
 	if movedAnc == nil {
 		prefix := dir + "/"
@@ -375,7 +355,6 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 	return page, nil
 }
 
-// sortPreviewItems orders directories first, then by name.
 func sortPreviewItems(items []PreviewItem) {
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].IsDir != items[j].IsDir {
@@ -385,8 +364,6 @@ func sortPreviewItems(items []PreviewItem) {
 	})
 }
 
-// GetEntriesByPaths loads the session's entries with the given original
-// paths (used for parent-chain descriptions in prompts).
 func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]FileEntry, error) {
 	if len(paths) == 0 {
 		return nil, nil
@@ -396,7 +373,6 @@ func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]FileEn
 	return rows, err
 }
 
-// DirStats returns the recursive file count and size under dir ("" = root).
 func (r *Repository) DirStats(sessionID uint, dir string) (files, size int64, err error) {
 	stats, err := r.sessionDirStats(sessionID)
 	if err != nil {
@@ -406,8 +382,6 @@ func (r *Repository) DirStats(sessionID uint, dir string) (files, size int64, er
 	return s.files, s.size, nil
 }
 
-// ListChildren returns the direct children of parent ("" = root),
-// directories first, then by name; limit <= 0 means all.
 func (r *Repository) ListChildren(sessionID uint, parent string, limit int) ([]FileEntry, error) {
 	q := r.db.Where("scan_session_id = ? AND parent_path = ?", sessionID, parent).Order("file_type ASC, name ASC")
 	if limit > 0 {

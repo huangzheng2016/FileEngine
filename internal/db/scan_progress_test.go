@@ -16,9 +16,6 @@ func setupScanProgressRepo(t *testing.T) *Repository {
 	return NewRepository(DB)
 }
 
-// UpdateScanProgress must write only the two progress columns — a full-row
-// Save from the scanner's stale session copy would clobber concurrent status
-// writes from the API layer.
 func TestUpdateScanProgress(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	session := &ScanSession{FilesystemID: 1, Status: "scanning", TotalFiles: 7}
@@ -41,7 +38,6 @@ func TestUpdateScanProgress(t *testing.T) {
 		t.Errorf("unrelated columns clobbered: status=%s total_files=%d", got.Status, got.TotalFiles)
 	}
 
-	// The heartbeat also clears the path (walk done, saving results).
 	if err := r.UpdateScanProgress(session.ID, 2000, ""); err != nil {
 		t.Fatalf("UpdateScanProgress clear: %v", err)
 	}
@@ -51,9 +47,6 @@ func TestUpdateScanProgress(t *testing.T) {
 	}
 }
 
-// Sessions stuck in "scanning" at process start are zombies from a previous
-// lifetime: the sweep must flip exactly those to interrupted, leave every
-// other status alone, and stamp an explanatory error message.
 func TestMarkInterruptedScans(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	rows := []*ScanSession{
@@ -106,8 +99,6 @@ func TestMarkInterruptedScans(t *testing.T) {
 	}
 }
 
-// The startup sweep is wired into Init itself: a database reopened with a
-// leftover "scanning" row comes up with that row already interrupted.
 func TestInitMarksZombieScansInterrupted(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
@@ -119,7 +110,6 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 		t.Fatalf("create zombie: %v", err)
 	}
 
-	// Simulate a restart: same database file, fresh Init.
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("re-init: %v", err)
 	}
@@ -133,13 +123,6 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 	}
 }
 
-// RefreshSessionCounts runs on every session GET — exactly while a scan or
-// agent run is writing the same row. It must touch ONLY the aggregate count
-// columns: the old full-row Save was a lost update that could resurrect
-// status="scanning" over a finished run's terminal state (and the startup
-// sweep would then mislabel that completed scan as interrupted). This pins
-// the contract: the row is already in its terminal state when the refresh
-// lands, and every non-count column must survive.
 func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	session := &ScanSession{FilesystemID: 1, Status: "scanning"}
@@ -156,8 +139,6 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 		}
 	}
 
-	// The terminal write of the finished scan lands first (this is the state
-	// the lost update used to clobber).
 	if err := r.db.Model(&ScanSession{}).Where("id = ?", session.ID).
 		Updates(map[string]interface{}{
 			"status":        "scanned",
@@ -176,12 +157,10 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	// Count columns recomputed.
 	if got.TotalFiles != 2 || got.TaggedFiles != 1 || got.PlannedOps != 1 || got.TotalSize != 30 {
 		t.Errorf("counts = total %d tagged %d planned %d size %d, want 2/1/1/30",
 			got.TotalFiles, got.TaggedFiles, got.PlannedOps, got.TotalSize)
 	}
-	// Everything else preserved — status above all.
 	if got.Status != "scanned" {
 		t.Errorf("status = %s, want scanned (lost update would have resurrected scanning)", got.Status)
 	}
