@@ -406,6 +406,53 @@ func TestRevertCopyRun(t *testing.T) {
 	}
 }
 
+func TestRevertRemovesOnlyEmptyCreatedDirs(t *testing.T) {
+	e := newEnv(t)
+	e.write("proj/src/deep/main.go", "x")
+	e.write("in/a.txt", "a")
+	e.write("in/b.txt", "b")
+	e.entry("proj", "x/y/proj")
+	e.entry("in/a.txt", "p/q/a.txt")
+	e.entry("in/b.txt", "k/b.txt")
+	e.fs.noRename = true
+	if res, err := e.run(context.Background(), Options{Mode: ModeMove}); err != nil || res.Success != 3 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// A file the user added after execution keeps its directory.
+	e.write("k/user.txt", "mine")
+
+	var target db.AgentRun
+	e.repo.DB().Order("id DESC").First(&target)
+	rev, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
+	res, err := New(e.repo, e.fs).Revert(context.Background(), rev, target.ID)
+	if err != nil || res.Failed != 0 || res.Skipped != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	for _, p := range []string{"x", "p"} {
+		if e.exists(p) {
+			t.Fatalf("created dir %s left behind", p)
+		}
+	}
+	if !e.exists("proj/src/deep/main.go") || !e.exists("in/a.txt") || !e.exists("in/b.txt") {
+		t.Fatal("sources not restored")
+	}
+	if s, _ := e.read("k/user.txt"); s != "mine" {
+		t.Fatal("non-empty created dir must be kept")
+	}
+	if !strings.Contains(strings.Join(res.Notes, "\n"), "目录「k」非空，已保留") {
+		t.Fatalf("notes: %q", res.Notes)
+	}
+	// Reverting again settles nothing new and never touches the kept dir.
+	e.repo.FinishRun(rev, db.RunDone, "", "", db.TokenCounts{})
+	rev2, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
+	if _, err := New(e.repo, e.fs).Revert(context.Background(), rev2, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !e.exists("k/user.txt") {
+		t.Fatal("kept dir touched")
+	}
+}
+
 func TestSampleAndCategoryExecution(t *testing.T) {
 	e := newEnv(t)
 	for _, n := range []string{"1", "2", "3", "4", "5"} {
@@ -450,7 +497,7 @@ func TestLocate(t *testing.T) {
 		t.Fatalf("%+v %v", items, err)
 	}
 	it := items[0]
-	if it.NewPath != "code/proj/sub/readme.md" || it.DecidedBy != "proj" || !it.Executed || it.OpState != db.ExecDone {
+	if it.NewPath != "/code/proj/sub/readme.md" || it.DecidedBy != "proj" || !it.Executed || it.OpState != db.ExecDone {
 		t.Fatalf("%+v", it)
 	}
 	if !strings.HasSuffix(it.OriginalPath, "readme.md") {

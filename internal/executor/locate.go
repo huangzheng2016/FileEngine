@@ -13,7 +13,7 @@ type LocateItem struct {
 	OriginalPath string     `json:"original_path"`
 	Name         string     `json:"name"`
 	FileType     string     `json:"file_type"`
-	NewPath      string     `json:"new_path"`   // effective target; empty means it stays in place
+	NewPath      string     `json:"new_path"`   // effective target ("/"-rooted); empty means it stays in place
 	DecidedBy    string     `json:"decided_by"` // original path of the deciding entry (itself or an ancestor)
 	Executed     bool       `json:"executed"`
 	ExecutedAt   *time.Time `json:"executed_at"`
@@ -45,7 +45,7 @@ func Locate(repo *db.Repository, sessionID uint, q string, limit int) ([]LocateI
 			continue
 		}
 		rel := cleanPath(f.OriginalPath)[len(cleanPath(dec.OriginalPath)):]
-		items[i].NewPath = path.Join(cleanPath(dec.NewPath), rel)
+		items[i].NewPath = path.Join("/"+cleanPath(dec.NewPath), rel)
 		items[i].DecidedBy = dec.OriginalPath
 		items[i].Executed, items[i].ExecutedAt, items[i].ExecuteMode = dec.Executed, dec.ExecutedAt, dec.ExecuteMode
 		deciderOf[i] = dec.ID

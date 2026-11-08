@@ -62,12 +62,12 @@ type Issue struct {
 
 // Result holds per-entry counters of one run.
 type Result struct {
-	Total   int     `json:"total"`
-	Success int     `json:"success"`
-	Failed  int     `json:"failed"`
-	Skipped int     `json:"skipped"`
-	Issues  []Issue `json:"issues"`
-	Notes   []string
+	Total   int      `json:"total"`
+	Success int      `json:"success"`
+	Failed  int      `json:"failed"`
+	Skipped int      `json:"skipped"`
+	Issues  []Issue  `json:"issues"`
+	Notes   []string `json:"notes,omitempty"`
 }
 
 func (r *Result) issue(f *db.FileEntry, code, detail string) {

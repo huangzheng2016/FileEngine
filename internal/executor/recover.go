@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -107,8 +109,9 @@ func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
 
 // Revert reverses the done ops of target in reverse order within run. Each
 // destination must be unchanged since the run wrote it; anything else is
-// skipped and reported. Reverting is idempotent: ops already undone are
-// recognized and settled.
+// skipped and reported. Directories the run created are removed afterwards,
+// deepest first and only when empty. Reverting is idempotent: ops already
+// undone are recognized and settled.
 func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*Result, error) {
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
 	res := &Result{}
@@ -119,13 +122,17 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 	if err != nil {
 		return res, err
 	}
-	var todo []db.ExecOp
+	var todo, mkdirs []db.ExecOp
 	for i := len(ops) - 1; i >= 0; i-- {
-		if ops[i].State == db.ExecDone {
+		switch {
+		case ops[i].State != db.ExecDone:
+		case ops[i].Kind == db.ExecKindMkdir:
+			mkdirs = append(mkdirs, ops[i])
+		default:
 			todo = append(todo, ops[i])
 		}
 	}
-	if len(todo) == 0 {
+	if len(todo) == 0 && len(mkdirs) == 0 {
 		return res, errors.New("该运行没有可撤销的操作")
 	}
 	res.Total = len(todo)
@@ -158,18 +165,58 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 			return res, err
 		}
 	}
-	return res, nil
+	return res, e.removeCreatedDirs(ctx, mkdirs, res)
+}
+
+// removeCreatedDirs undoes the run's mkdir ops after everything else was
+// moved back: deepest first, and a directory is removed only when a listing
+// shows it empty. Kept directories are reported as notes.
+func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, res *Result) error {
+	sort.SliceStable(mkdirs, func(i, j int) bool {
+		di, dj := strings.Count(mkdirs[i].Dst, "/"), strings.Count(mkdirs[j].Dst, "/")
+		if di != dj {
+			return di > dj
+		}
+		return mkdirs[i].ID > mkdirs[j].ID
+	})
+	removed := 0
+	for i := range mkdirs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		op := &mkdirs[i]
+		if st, ok := e.exists(ctx, op.Dst); ok {
+			if !st.IsDir {
+				res.Notes = append(res.Notes, "「"+op.Dst+"」已不是目录，已保留")
+				continue
+			}
+			children, err := e.fs.List(ctx, op.Dst)
+			switch {
+			case err != nil:
+				res.Notes = append(res.Notes, "无法读取目录「"+op.Dst+"」，已保留")
+				continue
+			case len(children) > 0:
+				res.Notes = append(res.Notes, "目录「"+op.Dst+"」非空，已保留")
+				continue
+			}
+			if err := e.fs.Delete(ctx, op.Dst); err != nil {
+				res.Notes = append(res.Notes, "删除空目录「"+op.Dst+"」失败，已保留")
+				continue
+			}
+			removed++
+		}
+		if err := e.setState(op, db.ExecReverted, ""); err != nil {
+			return err
+		}
+	}
+	if removed > 0 {
+		res.Notes = append(res.Notes, fmt.Sprintf("已删除执行时创建的 %d 个空目录", removed))
+	}
+	return nil
 }
 
 func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 	switch op.Kind {
-	case db.ExecKindMkdir:
-		if _, ok := e.exists(ctx, op.Dst); ok {
-			if err := e.fs.Delete(ctx, op.Dst); err != nil {
-				return skip(IssueTargetExists, "目录「"+op.Dst+"」非空，已保留")
-			}
-		}
-		return e.setState(op, db.ExecReverted, "")
 	case db.ExecKindRmdir:
 		if err := e.fs.MkdirAll(ctx, op.Src); err != nil {
 			return err
