@@ -1,10 +1,10 @@
 module FileEngine
 
-go 1.25.0
+go 1.27
 
 require (
-	github.com/cloudwego/eino v0.9.15
-	github.com/cloudwego/eino-ext/components/model/claude v0.1.25
+	github.com/cloudwego/eino v0.9.22
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.26
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/d5/tengo/v2 v2.17.0
 	github.com/gin-gonic/gin v1.12.0

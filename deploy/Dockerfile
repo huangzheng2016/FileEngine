@@ -13,7 +13,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 2: build the Go backend (CGO required by gorm.io/driver/sqlite)
 # ---------------------------------------------------------------------------
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 RUN apk add --no-cache build-base
 WORKDIR /build
 COPY go.mod go.sum ./
