@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"FileEngine/internal/db"
+	"FileEngine/internal/pathutil"
 )
 
 // maxBatchItems caps one set_targets / decide_dirs call.
@@ -87,7 +88,7 @@ func (tb *ToolBuilder) newTargetChecker() (*targetChecker, error) {
 }
 
 func (c *targetChecker) check(newPath string) string {
-	if err := ValidateFSPath(newPath); err != nil {
+	if err := pathutil.ValidateFSPath(newPath); err != nil {
 		return fmt.Sprintf("invalid new_path: %v", err)
 	}
 	np := db.NormalizeTargetPath(newPath)

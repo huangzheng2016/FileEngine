@@ -1,6 +1,7 @@
 package db
 
 import (
+	"FileEngine/internal/pathutil"
 	"errors"
 	"fmt"
 	"path"
@@ -51,23 +52,7 @@ func IsRejection(err error) bool {
 // ValidateTargetPath checks that a target or category path is a legal,
 // root-confined slash path: no NUL, no ".." segment, not the bare root.
 // "" is allowed (it clears a target).
-func ValidateTargetPath(p string) error {
-	if p == "" {
-		return nil
-	}
-	if strings.ContainsRune(p, 0) {
-		return fmt.Errorf("path %q contains a NUL byte", p)
-	}
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return fmt.Errorf("path %q contains '..' and could escape the filesystem root", p)
-		}
-	}
-	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
-		return fmt.Errorf("path %q does not name a file or directory", p)
-	}
-	return nil
-}
+func ValidateTargetPath(p string) error { return pathutil.ValidateFSPath(p) }
 
 // decidedRoles are roles that carry an effective decision of their own.
 var decidedRoles = []string{RoleUnit, RoleFile, RoleSkip}

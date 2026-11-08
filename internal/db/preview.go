@@ -95,14 +95,12 @@ func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error)
 			s.files += row.Cnt
 			s.size += row.Size
 			stats[p] = s
-			if p == "" || p == "." || p == "/" {
+			if p == "" || p == "/" {
 				break
 			}
-			next := path.Dir(p)
-			if next == p {
-				break
+			if p = path.Dir(p); p == "." {
+				p = ""
 			}
-			p = next
 		}
 	}
 	dirStatsCache.Lock()
@@ -393,6 +391,28 @@ func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]FileEn
 	}
 	var rows []FileEntry
 	err := r.db.Where("scan_session_id = ? AND original_path IN ?", sessionID, paths).Find(&rows).Error
+	return rows, err
+}
+
+// DirStats returns the recursive file count and size under dir ("" = root).
+func (r *Repository) DirStats(sessionID uint, dir string) (files, size int64, err error) {
+	stats, err := r.sessionDirStats(sessionID)
+	if err != nil {
+		return 0, 0, err
+	}
+	s := stats[dir]
+	return s.files, s.size, nil
+}
+
+// ListChildren returns the direct children of parent ("" = root),
+// directories first, then by name; limit <= 0 means all.
+func (r *Repository) ListChildren(sessionID uint, parent string, limit int) ([]FileEntry, error) {
+	q := r.db.Where("scan_session_id = ? AND parent_path = ?", sessionID, parent).Order("file_type ASC, name ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var rows []FileEntry
+	err := q.Find(&rows).Error
 	return rows, err
 }
 

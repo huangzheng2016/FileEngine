@@ -82,7 +82,7 @@ func (tb *ToolBuilder) scriptLimits() (maxSize int, timeout time.Duration, maxRe
 	}
 	maxResult = tb.cfg.ScriptMaxResultSize
 	if maxResult <= 0 {
-		maxResult = 32 * 1024
+		maxResult = 8 * 1024
 	}
 	return maxSize, time.Duration(secs) * time.Second, maxResult
 }
@@ -97,33 +97,22 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 	// The create_category builtin line carries the session gate note plus the
 	// configured category policy verbatim (empty when no policy is set).
 	createCatNote := map[bool]string{true: "", false: "（本会话未开启 allow_auto_category，不可用）"}[tb.session.AllowAutoCategory] + categoryPolicySuffix(tb.cfg.CategoryPolicy)
-	desc := fmt.Sprintf(`运行一段 Tengo 脚本（类 Go 语法）做批量查询和批量分类操作，代替逐文件的工具调用。返回 print 输出和 result 全局变量的 JSON 值。
+	desc := fmt.Sprintf(`运行 Tengo 脚本（类 Go 语法）做批量查询和批量决定，代替逐条工具调用。返回 print 输出和全局变量 result 的 JSON。
 
-内置函数（全部围绕当前会话的文件与分类）：
-- query_files({parent_path?, file_type?, tagged?, category_path?, offset?, limit?}) → {files: [...], total: N}，limit 默认 %d 上限 %d
-- count_files({同上过滤条件}) → 整数
-- get_file_info(path) → 文件详情 map；找不到返回 error 值
-- get_categories() → 分类数组（name/path/structure/description/agent_editable）
-- mark_tagged(path) → true；标记文件/目录为已处理（目录级联子项）。批量流程收尾必须对每个处理过的文件调用
-- set_target(path, new_path) → 实际写入的目标路径字符串（与他人目标重名时自动改为 "name (2).ext"）；new_path 传 "" 清除目标并返回 true。与工具同样校验：路径合法且位于某个分类路径下
-- set_category(path, category_name, relative_to?) → 实际写入的目标路径字符串。目标 = 分类路径 + 相对路径，保留子结构：给了 relative_to 时取文件在该目录下的相对路径（"." 表示整个原路径）；否则取当前处理单元根目录下的相对路径；都不适用时只取文件名
-- create_category(name, path, description) → 分类 map；受与 create_category 工具完全相同的护栏约束（需先 get_categories；同名/同路径拒绝）%s
-- rename_category(name, new_name) → true；仅 agent_editable 的分类可改
-- sample_files(n) 或 sample_files({过滤条件}, n) → 随机抽取至多 n 个文件（默认 %d，上限 %d），用于抽样了解大批文件
+内置函数：
+- query_files({parent_path?, file_type?, undecided?, category_path?, offset?, limit?}) → {files, total}（limit 默认 %d，上限 %d）；count_files({同上}) → 整数；sample_files([过滤,] n) → 随机 n 个（上限 %d）
+- list_dirs(parent?) → 子目录数组；signals(path) → 目录信号（标记、扩展名、版本组、规模）
+- get_file_info(path)；get_categories()
+- set_targets([{path, new_path, reason, confidence?}]) → {ok, failed, renamed}；set_target(path, new_path) → 实际目标路径
+- set_category(path, 分类名, relative_to?) → 实际目标路径（分类路径 + 相对路径，保留子结构；无 relative_to 时取当前单元根目录下的相对路径，否则只取文件名）
+- decide_dir(path, role, new_path?, reason?) → {role, new_path}；role 为 unit / container / skip
+- apply_rule(规则 id 或名称) → 本次匹配数
+- create_category(name, path, description)%s；rename_category(name, new_name)
 
-文件记录的字段（query_files/sample_files/get_file_info 返回的 map）：original_path, name, size, file_type, tagged, description?, new_path?, child_count?（带 ? 的字段为空时不出现；访问不存在的字段得到 undefined）
-标准库模块需 import 后使用，如 json := import("json")
-
-约定：
-- 失败的内置函数返回 error 值，用 is_error(x) 判断，不会中断脚本（参数形状错误会直接报运行时错误）
-- 脚本本身的编译/运行/超时错误会作为工具结果的 error 字段返回（不中断 agent 运行），读到后修正脚本重新调用即可
-- 注释用 //（不支持 #），语句结束不用分号
-- result 已预声明，赋值用 = 不要用 :=（result := ... 会报 'result' redeclared）
-- print(...) 输出、脚本返回值分别限 %d 字节；脚本源码限 %d 字节；单次运行限 %d 秒，超时中止
-- 可用标准库模块：%s（无 os/exec/env/文件/网络能力，一切数据访问必须经内置函数）`,
-		scriptQueryDefault, scriptQueryMax,
+文件记录字段：original_path, name, size, file_type, role, reason?, new_path?, description?, child_count?
+约定：失败的内置函数返回 error 值（is_error(x) 判断）；result 已预声明，用 = 赋值；注释用 //；输出和返回值各限 %d 字节，源码限 %d 字节，单次 %d 秒；可 import 的模块：%s`,
+		scriptQueryDefault, scriptQueryMax, scriptSampleMax,
 		createCatNote,
-		scriptSampleDefault, scriptSampleMax,
 		maxResult, maxSize, int(timeout.Seconds()), scriptStdlibModules)
 	runScript, err := utils.InferTool("run_script", desc, tb.runScript)
 	if err != nil {
@@ -282,7 +271,11 @@ func (tb *ToolBuilder) scriptBuiltins(ctx context.Context) map[string]*tengo.Use
 		"sample_files":    {Name: "sample_files", Value: tb.scriptSampleFiles(ctx)},
 		"get_file_info":   {Name: "get_file_info", Value: tb.scriptGetFileInfo(ctx)},
 		"get_categories":  {Name: "get_categories", Value: tb.scriptGetCategories(ctx)},
-		"mark_tagged":     {Name: "mark_tagged", Value: tb.scriptMarkTagged(ctx)},
+		"set_targets":     {Name: "set_targets", Value: tb.scriptSetTargets(ctx)},
+		"decide_dir":      {Name: "decide_dir", Value: tb.scriptDecideDir(ctx)},
+		"apply_rule":      {Name: "apply_rule", Value: tb.scriptApplyRule(ctx)},
+		"signals":         {Name: "signals", Value: tb.scriptSignals(ctx)},
+		"list_dirs":       {Name: "list_dirs", Value: tb.scriptListDirs(ctx)},
 		"set_target":      {Name: "set_target", Value: tb.scriptSetTarget(ctx)},
 		"set_category":    {Name: "set_category", Value: tb.scriptSetCategory(ctx)},
 		"rename_category": {Name: "rename_category", Value: tb.scriptRenameCategory(ctx)},
@@ -327,7 +320,7 @@ func scriptIntArg(fn, name string, o tengo.Object) (int, error) {
 type scriptFilter struct {
 	parentPath   *string
 	fileType     string
-	tagged       *bool
+	undecided    bool
 	categoryPath *string
 	offset       int
 	limit        int
@@ -360,13 +353,12 @@ func parseScriptFilter(fn string, o tengo.Object) (*scriptFilter, error) {
 				return nil, fmt.Errorf("%s: filter.file_type must be a string", fn)
 			}
 			f.fileType = s.Value
-		case "tagged":
+		case "undecided":
 			b, ok := val.(*tengo.Bool)
 			if !ok {
-				return nil, fmt.Errorf("%s: filter.tagged must be a bool", fn)
+				return nil, fmt.Errorf("%s: filter.undecided must be a bool", fn)
 			}
-			v := b == tengo.TrueValue
-			f.tagged = &v
+			f.undecided = b == tengo.TrueValue
 		case "category_path":
 			s, ok := val.(*tengo.String)
 			if !ok {
@@ -386,7 +378,7 @@ func parseScriptFilter(fn string, o tengo.Object) (*scriptFilter, error) {
 			}
 			f.limit = int(i.Value)
 		default:
-			return nil, fmt.Errorf("%s: unknown filter key %q (want one of parent_path/file_type/tagged/category_path/offset/limit)", fn, key)
+			return nil, fmt.Errorf("%s: unknown filter key %q (want one of parent_path/file_type/undecided/category_path/offset/limit)", fn, key)
 		}
 	}
 	if f.offset < 0 {
@@ -406,8 +398,11 @@ func (f *scriptFilter) toFileQuery(sessionID uint) db.FileQuery {
 		SessionID:    sessionID,
 		ParentPath:   f.parentPath,
 		FileType:     f.fileType,
-		Tagged:       f.tagged,
 		CategoryPath: f.categoryPath,
+	}
+	if f.undecided {
+		role := db.RoleUndecided
+		q.Role = &role
 	}
 	// Convert offset+limit to page+pageSize, same as the list_files tool.
 	if f.limit > 0 {
@@ -421,13 +416,17 @@ func (f *scriptFilter) toFileQuery(sessionID uint) db.FileQuery {
 func fileToScriptMap(f db.FileEntry) map[string]interface{} {
 	m := map[string]interface{}{
 		"original_path": f.OriginalPath,
-		"name":          f.Name,
+		"name":          SanitizeUntrustedName(f.Name),
+		"role":          f.Role,
 		"size":          f.Size,
 		"file_type":     f.FileType,
 		"tagged":        f.Tagged,
 	}
 	if f.Description != "" {
 		m["description"] = f.Description
+	}
+	if f.Reason != "" {
+		m["reason"] = f.Reason
 	}
 	if f.NewPath != "" {
 		m["new_path"] = f.NewPath
@@ -462,7 +461,6 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 			return nil, err
 		}
 		q := filter.toFileQuery(tb.sessionID)
-		isPull := tb.harnessShard(&q)
 		files, total, err := tb.repo.ListFiles(q)
 		if err != nil {
 			return scriptError(err), nil
@@ -470,17 +468,6 @@ func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc 
 		items := make([]interface{}, len(files))
 		for i, f := range files {
 			items[i] = fileToScriptMap(f)
-		}
-		if isPull && total > 0 {
-			tb.harnessNotePull(fmt.Sprintf("%d files", len(files)), files)
-			summaries := tb.archiveSummaries(ctx, files)
-			for i, f := range files {
-				if s := summaries[f.ID]; s != "" {
-					if m, ok := items[i].(map[string]interface{}); ok {
-						m["archive_summary"] = s
-					}
-				}
-			}
 		}
 		return scriptObject(map[string]interface{}{"files": items, "total": total})
 	}
@@ -596,32 +583,9 @@ func (tb *ToolBuilder) scriptGetCategories(ctx context.Context) tengo.CallableFu
 
 // --- mutating builtins (reuse the tool core logic) ---
 
-func (tb *ToolBuilder) scriptMarkTagged(ctx context.Context) tengo.CallableFunc {
-	return func(args ...tengo.Object) (tengo.Object, error) {
-		if err := scriptArgCount("mark_tagged", args, 1, 1); err != nil {
-			return nil, err
-		}
-		p, err := scriptStringArg("mark_tagged", "path", args[0])
-		if err != nil {
-			return nil, err
-		}
-		f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(p))
-		if err != nil {
-			return scriptError(fmt.Errorf("file not found: %s", p)), nil
-		}
-		if f.Tagged {
-			return tengo.TrueValue, nil
-		}
-		if err := tb.repo.MarkTaggedAtomic(tb.sessionID, normalizePath(p), tb.logger.GetBatch()); err != nil {
-			return scriptError(err), nil
-		}
-		return tengo.TrueValue, nil
-	}
-}
-
 func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {
-		if err := scriptArgCount("set_target", args, 2, 2); err != nil {
+		if err := scriptArgCount("set_target", args, 2, 3); err != nil {
 			return nil, err
 		}
 		p, err := scriptStringArg("set_target", "path", args[0])
@@ -632,14 +596,24 @@ func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 		if err != nil {
 			return nil, err
 		}
-		final, _, err := tb.setTargetCore(ctx, p, np)
+		reason := "脚本"
+		if len(args) == 3 {
+			if reason, err = scriptStringArg("set_target", "reason", args[2]); err != nil {
+				return nil, err
+			}
+		}
+		role := db.RoleFile
+		if np == "" {
+			role = db.RoleUndecided
+		}
+		res, err := tb.decideOne(db.Decision{Path: p, Role: role, NewPath: np, Reason: reason})
 		if err != nil {
 			return scriptError(err), nil
 		}
-		if final == "" {
+		if res.NewPath == "" {
 			return tengo.TrueValue, nil
 		}
-		return &tengo.String{Value: final}, nil
+		return &tengo.String{Value: res.NewPath}, nil
 	}
 }
 
@@ -675,11 +649,11 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 			return scriptError(err), nil
 		}
 		target := strings.TrimSuffix(cat.Path, "/") + "/" + rel
-		final, _, err := tb.setTargetCore(ctx, p, target)
+		res, err := tb.decideOne(db.Decision{Path: p, Role: db.RoleFile, NewPath: target, Reason: "归入「" + cat.Name + "」"})
 		if err != nil {
 			return scriptError(err), nil
 		}
-		return &tengo.String{Value: final}, nil
+		return &tengo.String{Value: res.NewPath}, nil
 	}
 }
 
@@ -702,7 +676,7 @@ func categoryRelativePath(f db.FileEntry, relativeTo, unitRoot string) (string, 
 		}
 		return rel, nil
 	}
-	if unitRoot != "" && unitRoot != "." {
+	if unitRoot != "" {
 		if rel, ok := strings.CutPrefix(f.OriginalPath, unitRoot+"/"); ok {
 			return rel, nil
 		}
@@ -786,5 +760,182 @@ func (tb *ToolBuilder) scriptRenameCategory(ctx context.Context) tengo.CallableF
 			tb.guard.note(names)
 		}
 		return tengo.TrueValue, nil
+	}
+}
+
+// --- decision-model builtins ---
+
+func (tb *ToolBuilder) scriptSetTargets(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("set_targets", args, 1, 1); err != nil {
+			return nil, err
+		}
+		arr, ok := args[0].(*tengo.Array)
+		if !ok {
+			return nil, fmt.Errorf("set_targets: argument must be an array of maps")
+		}
+		ds := make([]db.Decision, 0, len(arr.Value))
+		for i, o := range arr.Value {
+			m, ok := o.(*tengo.Map)
+			if !ok {
+				return nil, fmt.Errorf("set_targets: item %d must be a map", i)
+			}
+			d := db.Decision{Role: db.RoleFile, Reason: "脚本"}
+			for k, v := range m.Value {
+				switch k {
+				case "path", "new_path", "reason":
+					sv, ok := v.(*tengo.String)
+					if !ok {
+						return nil, fmt.Errorf("set_targets: item %d %s must be a string", i, k)
+					}
+					switch k {
+					case "path":
+						d.Path = sv.Value
+					case "new_path":
+						d.NewPath = sv.Value
+					default:
+						d.Reason = sv.Value
+					}
+				case "confidence":
+					switch n := v.(type) {
+					case *tengo.Float:
+						d.Confidence = n.Value
+					case *tengo.Int:
+						d.Confidence = float64(n.Value)
+					default:
+						return nil, fmt.Errorf("set_targets: item %d confidence must be a number", i)
+					}
+				default:
+					return nil, fmt.Errorf("set_targets: item %d unknown key %q", i, k)
+				}
+			}
+			if d.NewPath == "" {
+				d.Role = db.RoleUndecided
+			}
+			ds = append(ds, d)
+		}
+		out, _, err := tb.decide(ds)
+		if err != nil {
+			return scriptError(err), nil
+		}
+		if out.Error != "" {
+			return scriptError(fmt.Errorf("%s", out.Error)), nil
+		}
+		raw, _ := json.Marshal(out)
+		var m map[string]interface{}
+		_ = json.Unmarshal(raw, &m)
+		return scriptObject(m)
+	}
+}
+
+func (tb *ToolBuilder) scriptDecideDir(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("decide_dir", args, 2, 4); err != nil {
+			return nil, err
+		}
+		strs := make([]string, len(args))
+		for i, a := range args {
+			v, err := scriptStringArg("decide_dir", "argument", a)
+			if err != nil {
+				return nil, err
+			}
+			strs[i] = v
+		}
+		d := db.Decision{Path: strs[0], Role: strs[1], Reason: "脚本"}
+		if len(strs) > 2 {
+			d.NewPath = strs[2]
+		}
+		if len(strs) > 3 && strs[3] != "" {
+			d.Reason = strs[3]
+		}
+		res, err := tb.decideOne(d)
+		if err != nil {
+			return scriptError(err), nil
+		}
+		return scriptObject(map[string]interface{}{"role": res.Role, "new_path": res.NewPath})
+	}
+}
+
+func (tb *ToolBuilder) scriptApplyRule(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("apply_rule", args, 1, 1); err != nil {
+			return nil, err
+		}
+		rules, err := tb.repo.ListRules(tb.sessionID)
+		if err != nil {
+			return scriptError(err), nil
+		}
+		var id uint
+		for _, r := range rules {
+			switch a := args[0].(type) {
+			case *tengo.Int:
+				if uint(a.Value) == r.ID {
+					id = r.ID
+				}
+			case *tengo.String:
+				if a.Value == r.Name {
+					id = r.ID
+				}
+			default:
+				return nil, fmt.Errorf("apply_rule: argument must be a rule id or name")
+			}
+		}
+		if id == 0 {
+			return scriptError(fmt.Errorf("规则不存在：%s", args[0].String())), nil
+		}
+		stats, err := tb.repo.ApplyRules(tb.sessionID, id, false)
+		if err != nil {
+			return scriptError(err), nil
+		}
+		n := 0
+		for _, st := range stats {
+			n += st.Matched
+		}
+		return &tengo.Int{Value: int64(n)}, nil
+	}
+}
+
+func (tb *ToolBuilder) scriptSignals(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("signals", args, 1, 1); err != nil {
+			return nil, err
+		}
+		p, err := scriptStringArg("signals", "path", args[0])
+		if err != nil {
+			return nil, err
+		}
+		sig, err := tb.dirSignals(strings.Trim(normalizePath(p), "/"))
+		if err != nil {
+			return scriptError(err), nil
+		}
+		raw, _ := json.Marshal(sig)
+		var m map[string]interface{}
+		_ = json.Unmarshal(raw, &m)
+		return scriptObject(m)
+	}
+}
+
+func (tb *ToolBuilder) scriptListDirs(ctx context.Context) tengo.CallableFunc {
+	return func(args ...tengo.Object) (tengo.Object, error) {
+		if err := scriptArgCount("list_dirs", args, 0, 1); err != nil {
+			return nil, err
+		}
+		parent := ""
+		if len(args) == 1 {
+			p, err := scriptStringArg("list_dirs", "parent", args[0])
+			if err != nil {
+				return nil, err
+			}
+			parent = strings.Trim(normalizePath(p), "/")
+		}
+		dirs, _, err := tb.repo.ListFiles(db.FileQuery{SessionID: tb.sessionID, ParentPath: &parent, FileType: "directory", Page: 1, PageSize: scriptQueryMax})
+		if err != nil {
+			return scriptError(err), nil
+		}
+		items := make([]interface{}, len(dirs))
+		for i, d := range dirs {
+			items[i] = fileToScriptMap(d)
+		}
+		return scriptObject(items)
 	}
 }

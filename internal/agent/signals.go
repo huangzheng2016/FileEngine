@@ -148,6 +148,33 @@ func ComputeSignals(dir *db.FileEntry, children []db.FileEntry, totalFiles, tota
 	return s
 }
 
+// LoadDirSignals loads a directory (nil for the root ""), its direct children
+// and its signals.
+func LoadDirSignals(repo *db.Repository, sessionID uint, dir string) (DirSignals, *db.FileEntry, []db.FileEntry, error) {
+	var entry *db.FileEntry
+	if dir != "" {
+		e, err := repo.GetFileByPath(sessionID, dir)
+		if err != nil {
+			return DirSignals{}, nil, nil, fmt.Errorf("目录不存在：%s", dir)
+		}
+		entry = e
+	}
+	children, err := repo.ListChildren(sessionID, dir, 0)
+	if err != nil {
+		return DirSignals{}, nil, nil, err
+	}
+	files, size, err := repo.DirStats(sessionID, dir)
+	if err != nil {
+		return DirSignals{}, nil, nil, err
+	}
+	return ComputeSignals(entry, children, files, size), entry, children, nil
+}
+
+func (tb *ToolBuilder) dirSignals(dir string) (DirSignals, error) {
+	s, _, _, err := LoadDirSignals(tb.repo, tb.sessionID, dir)
+	return s, err
+}
+
 // strongMarker returns the first marker that by itself identifies a whole
 // unit (project root or OS bundle), or nil.
 func (s DirSignals) strongMarker() *Marker {
