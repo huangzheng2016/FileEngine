@@ -11,10 +11,10 @@ COPY web/ ./
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 2: build the Go backend (CGO required by gorm.io/driver/sqlite)
+# Stage 2: build the static Go server (pure-Go SQLite, no cgo toolchain)
 # ---------------------------------------------------------------------------
-FROM golang:1.25-alpine AS go-builder
-RUN apk add --no-cache build-base
+FROM golang:1.27.2-alpine AS go-builder
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly
 WORKDIR /build
 COPY go.mod go.sum ./
 # Local replace targets must exist before go mod download reads go.mod.
@@ -25,7 +25,7 @@ COPY . .
 COPY --from=web-builder /build/web/dist ./web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/fileengine .
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fileengine .
 
 # ---------------------------------------------------------------------------
 # Stage 3: runtime — single binary + entrypoint, state lives in /data

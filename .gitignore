@@ -29,8 +29,9 @@ Thumbs.db
 *.test
 *.out
 
-# Build output (Taskfile)
+# Build output + go-task checksum cache (Taskfile)
 bin/
+.task/
 
 # Claude Code
 .claude/
