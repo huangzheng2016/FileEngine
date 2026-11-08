@@ -1,5 +1,5 @@
 # Binary
-fileengine
+/fileengine
 
 # Database
 *.db
@@ -29,9 +29,8 @@ Thumbs.db
 *.test
 *.out
 
-# Wails build output
-wails/build/
-wails/bin/backend.bin
+# Build output (Taskfile)
+bin/
 
 # Claude Code
 .claude/
