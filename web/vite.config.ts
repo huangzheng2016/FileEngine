@@ -12,7 +12,8 @@ export default defineConfig({
       // is a chunked HTTP response, not a WebSocket, so no `ws: true` is needed.
       '/api': {
         target: 'http://localhost:8080',
-        changeOrigin: true,
+        // Keep the browser Host so the backend Origin check sees same-origin.
+        changeOrigin: false,
       },
     },
   },

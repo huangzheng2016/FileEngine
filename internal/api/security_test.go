@@ -303,4 +303,3 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatal("keys not independent")
 	}
 }
-

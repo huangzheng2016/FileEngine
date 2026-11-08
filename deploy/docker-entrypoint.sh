@@ -2,8 +2,7 @@
 # FileEngine container entrypoint.
 # Generates /data/config.yaml from FE_* env vars on first start, fixes
 # ownership of the data dir, then runs the server as the fileengine user.
-# The process CWD is /data because the API persists config changes to the
-# relative path "config.yaml" (see internal/api/handler_config.go).
+# The server binds FE_SERVER_HOST (default 127.0.0.1; the image sets 0.0.0.0).
 set -eu
 
 DATA_DIR="${FE_DATA_DIR:-/data}"
@@ -14,7 +13,7 @@ if [ ! -f "$DATA_DIR/config.yaml" ]; then
     cat > "$DATA_DIR/config.yaml" <<EOF
 server:
   port: ${FE_SERVER_PORT:-8080}
-  host: ${FE_SERVER_HOST:-0.0.0.0}
+  host: ${FE_SERVER_HOST:-127.0.0.1}
 database:
   driver: ${FE_DB_DRIVER:-sqlite}
   dsn: ${FE_DB_DSN:-$DATA_DIR/fileengine.db}
@@ -31,5 +30,4 @@ fi
 # privileges. Never fails the container on exotic mount setups.
 chown -R fileengine:fileengine "$DATA_DIR" 2>/dev/null || true
 
-cd "$DATA_DIR"
-exec su-exec fileengine /app/fileengine config.yaml
+exec su-exec fileengine /app/fileengine "$DATA_DIR/config.yaml"
