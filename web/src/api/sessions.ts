@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { LocateResult, ScanSession, ValidationIssue } from './types'
+import type { LocateResult, ScanSession, ExecuteCheck } from './types'
 
 export interface SessionOptions {
   model_provider_id: number
@@ -82,12 +82,12 @@ export async function confirmReview(id: number, fileIds: number[]) {
   await http.post(`/sessions/${id}/review/confirm`, { file_ids: fileIds })
 }
 
-export async function validatePlans(id: number, signal?: AbortSignal) {
-  const { data } = await http.get<{ ok: boolean; issues: ValidationIssue[] | null }>(
-    `/sessions/${id}/execute/validate`,
-    { signal },
-  )
-  return { ok: data.ok, issues: data.issues ?? [] }
+export async function checkExecute(id: number, mode: ExecMode, sample: number, signal?: AbortSignal) {
+  const { data } = await http.get<ExecuteCheck>(`/sessions/${id}/execute/check`, {
+    params: { mode, sample: sample || undefined },
+    signal,
+  })
+  return { ...data, issues: (data.issues ?? []).filter((i) => i.code !== 'nested') }
 }
 
 export const plansExportUrl = (id: number) => `/sessions/${id}/plans/export`

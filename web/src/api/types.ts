@@ -216,10 +216,19 @@ export interface PreviewItem {
 }
 
 export interface ValidationIssue {
+  entry_id: number
   original_path: string
   new_path: string
-  issue: string
+  code: string
   detail: string
+}
+
+export interface ExecuteCheck {
+  total: number
+  success: number
+  failed: number
+  skipped: number
+  issues: ValidationIssue[]
 }
 
 export type EntryRole = '' | 'unit' | 'container' | 'member' | 'file' | 'skip' | 'duplicate'
@@ -250,8 +259,12 @@ export interface RulePreview {
 }
 
 export interface LocateResult {
-  file_id: number
+  entry_id: number
   original_path: string
+  name: string
+  file_type: string
   new_path: string
   executed: boolean
+  executed_at: string | null
+  execute_mode: string
 }

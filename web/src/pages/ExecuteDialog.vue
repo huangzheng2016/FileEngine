@@ -10,14 +10,15 @@ import { VALIDATION_ISSUE } from '@/base/labels'
 import { toast } from '@/base/toast'
 import { useFetch } from '@/base/useFetch'
 import { useFormValidation } from '@/base/useFormValidation'
-import { startExecute, validatePlans, type ExecMode } from '@/api/sessions'
+import { checkExecute, startExecute, type ExecMode } from '@/api/sessions'
 
 const props = defineProps<{ open: boolean; sessionId: number; pending: number }>()
 const emit = defineEmits<{ close: []; started: [runId: number] }>()
 
 const form = reactive({ scope: 'sample' as 'sample' | 'all', sample: 20, mode: 'copy' as ExecMode })
 const starting = ref(false)
-const check = useFetch((signal) => validatePlans(props.sessionId, signal))
+const checkSample = () => (form.scope === 'sample' ? form.sample : 0)
+const check = useFetch((signal) => checkExecute(props.sessionId, form.mode, checkSample(), signal))
 
 watch(
   () => props.open,
@@ -26,6 +27,13 @@ watch(
     Object.assign(form, { scope: props.pending > 20 ? 'sample' : 'all', sample: 20, mode: 'copy' })
     v.reset()
     void check.refresh()
+  },
+)
+
+watch(
+  () => [form.mode, form.scope, form.sample],
+  () => {
+    if (props.open) void check.refresh()
   },
 )
 
@@ -71,7 +79,7 @@ async function submit() {
           <table>
             <tbody>
               <tr v-for="(i, n) in check.data.value.issues.slice(0, 50)" :key="n">
-                <td><StatusPill :value="i.issue" :map="VALIDATION_ISSUE" /></td>
+                <td><StatusPill :value="i.code" :map="VALIDATION_ISSUE" /></td>
                 <td>
                   <span class="truncate">{{ i.new_path }}</span>
                   <span v-if="i.original_path" class="cell-sub">来自 {{ i.original_path }}</span>

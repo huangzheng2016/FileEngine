@@ -355,7 +355,7 @@ function openLocate() {
       <div v-else-if="locate.done" class="table-wrap">
         <table>
           <tbody>
-            <tr v-for="r in locate.items" :key="r.file_id">
+            <tr v-for="r in locate.items" :key="r.entry_id">
               <td>
                 <span class="truncate">{{ r.original_path }}</span>
                 <span class="cell-sub">

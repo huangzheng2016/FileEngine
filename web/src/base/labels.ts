@@ -125,13 +125,19 @@ export const RULE_ROLE = {
 } satisfies LabelMap
 
 export const VALIDATION_ISSUE = {
-  duplicate: { text: '目标重名', tone: 'danger' },
-  conflict: { text: '目标已存在', tone: 'danger' },
-  stale: { text: '源文件已变化', tone: 'warning' },
+  invalid_target: { text: '目标路径无效', tone: 'danger' },
+  into_self: { text: '目标在自身内部', tone: 'danger' },
+  nested: { text: '随上级目录移动', tone: 'neutral' },
+  collision: { text: '目标重名', tone: 'danger' },
+  target_exists: { text: '目标已存在', tone: 'danger' },
+  source_changed: { text: '源文件已变化', tone: 'warning' },
+  source_missing: { text: '源文件不存在', tone: 'warning' },
+  failed: { text: '执行失败', tone: 'danger' },
 } satisfies LabelMap
 
 export const DATE_SOURCE = {
   exif: { text: '拍摄时间', tone: 'neutral' },
+  video: { text: '视频创建时间', tone: 'neutral' },
   filename: { text: '文件名中的日期', tone: 'neutral' },
   mtime: { text: '修改时间', tone: 'neutral' },
 } satisfies LabelMap
