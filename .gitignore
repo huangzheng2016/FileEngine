@@ -1,5 +1,5 @@
 # Binary
-fileengine
+/fileengine
 
 # Database
 *.db
@@ -29,9 +29,9 @@ Thumbs.db
 *.test
 *.out
 
-# Wails build output
-wails/build/
-wails/bin/backend.bin
+# Build output + go-task checksum cache (Taskfile)
+bin/
+.task/
 
 # Claude Code
 .claude/

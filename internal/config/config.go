@@ -70,8 +70,8 @@ type AgentConfig struct {
 	MaxFileReadSize int `yaml:"max_file_read_size" json:"max_file_read_size"`
 	// ArchiveEntryMaxSize caps which archive entries read_file will extract
 	// inline via the path::entry syntax (larger entries are listing-only).
-	ArchiveEntryMaxSize  int    `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
-	MaxRetries           int    `yaml:"max_retries" json:"max_retries"`
+	ArchiveEntryMaxSize int `yaml:"archive_entry_max_size" json:"archive_entry_max_size"`
+	MaxRetries          int `yaml:"max_retries" json:"max_retries"`
 	// RateLimitMaxRetries is the retry budget for HTTP 429 rate-limit failures
 	// only (default 8) — separate from MaxRetries (default 3, used for 5xx and
 	// network errors) so brief throttling does not fail a long tagging run.
@@ -81,8 +81,8 @@ type AgentConfig struct {
 	// jitter in seconds (defaults 2/60): attempt N sleeps
 	// rand[0, min(RetryMaxDelay, RetryBaseDelay*2^(N-1))]. A server-provided
 	// Retry-After hint replaces the computed wait (clamped to 4*RetryMaxDelay).
-	RetryBaseDelay int `yaml:"retry_base_delay" json:"retry_base_delay"`
-	RetryMaxDelay  int `yaml:"retry_max_delay" json:"retry_max_delay"`
+	RetryBaseDelay       int    `yaml:"retry_base_delay" json:"retry_base_delay"`
+	RetryMaxDelay        int    `yaml:"retry_max_delay" json:"retry_max_delay"`
 	MaxStep              int    `yaml:"max_step" json:"max_step"` // tool-call rounds per agent run; script bulk mode decouples it from BatchSize
 	InstructMaxStep      int    `yaml:"instruct_max_step" json:"instruct_max_step"`
 	SystemPrompt         string `yaml:"system_prompt" json:"system_prompt"`

@@ -1,0 +1,43 @@
+name: Go toolchain with shared caches
+description: >-
+  Installs the pinned Go toolchain and restores the module cache (keyed by
+  go.sum and runner OS) plus an optional build cache profile (keyed by OS,
+  architecture and profile name, so jobs compiling different targets do not
+  overwrite each other's entry).
+inputs:
+  go-version:
+    description: Go toolchain version (keep in sync with go.mod toolchain and GOTOOLCHAIN)
+    required: false
+    default: 1.27.2
+  build-cache:
+    description: Build cache profile name; empty restores no build cache
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+    - name: Point Go at the cached module and build directories
+      shell: bash
+      env:
+        MOD_DIR: ${{ runner.temp }}/go-mod
+        BUILD_DIR: ${{ runner.temp }}/go-build
+      run: |
+        echo "GOMODCACHE=$MOD_DIR" >> "$GITHUB_ENV"
+        echo "GOCACHE=$BUILD_DIR" >> "$GITHUB_ENV"
+    - name: Restore the Go module cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/go-mod
+        key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+        restore-keys: go-mod-${{ runner.os }}-
+    - name: Restore the Go build cache profile
+      if: inputs.build-cache != ''
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/go-build
+        key: go-build-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-cache }}-go${{ inputs.go-version }}-${{ hashFiles('go.sum') }}
+        restore-keys: go-build-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-cache }}-go${{ inputs.go-version }}-

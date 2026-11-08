@@ -8,20 +8,23 @@ FileEngine is a Go + Vue 3 monorepo. The Go backend uses Gin (HTTP), GORM (ORM),
 
 ## Build Commands
 
+All builds and gates go through `Taskfile.yml` — run with `task <name>` or, without go-task installed, the pinned Wails CLI `wails3 task <name>` (CI does the latter; install it with `task wails:install` / `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.27`). Toolchain is pinned: `go.mod` `go 1.27.0` + `toolchain go1.27.2`, `GOTOOLCHAIN=go1.27.2` in Taskfile/CI, `golang:1.27.2-alpine` in `deploy/Dockerfile`. The Wails CLI/library version `v3.0.0-beta.27` is pinned in go.mod, Taskfile `WAILS_VERSION` and `.github/actions/wails-cli` — bump them together.
+
 ```bash
-# Frontend build (must run first, output goes to web/dist/ which is embedded)
-cd web && npm run build
+task check            # full gate = CI: fmt:check, mod:verify (verify + tidy -diff), vet, vet:cross (windows, CGO off), test, web:check, web:build
+task build            # bin/fileengine — static CGO_ENABLED=0 server with embedded frontend (GOOS/GOARCH cross OK)
+task desktop:build    # bin/fileengine-desktop — Wails v3, -tags production (embeds web/dist); GOOS=windows cross-builds from any host
+task desktop:dev      # go run ./cmd/fileengine-desktop — dev tag, serves web/dist from disk (--web-root, --data-dir)
+task web:build        # cd web && npm ci && npm run build → web/dist (embedded by package FileEngine/web)
+task web:stub         # placeholder web/dist/index.html for Go-only vet/test (vet/test depend on it)
+task fmt / fmt:check / vet / test
 
-# Backend build (includes embedded frontend)
-go build -o fileengine .
-
-# Full build
-cd web && npm run build && cd .. && go build -o fileengine .
-
-# Run
-./fileengine              # uses config.yaml in CWD
-./fileengine path/to/config.yaml
+# Run the server
+./bin/fileengine              # uses config.yaml in CWD
+./bin/fileengine path/to/config.yaml
 ```
+
+Linux desktop builds (and `go vet/test ./...`, which compile `cmd/fileengine-desktop`) need `libgtk-4-dev libwebkitgtk-6.0-dev` (Wails v3 default GTK4/WebKitGTK 6.0). SQLite is pure Go (`github.com/glebarez/sqlite` on modernc.org/sqlite), so the server and the Windows desktop build with `CGO_ENABLED=0`; only Linux/macOS desktop builds need cgo.
 
 ## Code Style & Conventions
 
@@ -154,7 +157,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - **Endpoint**: `GET /api/v1/sessions/:id/events/stream` — SSE stream of live agent run events for one session. History stays in `GET /logs` (agent_logs persistence is unchanged); the stream only carries new events. `GET /logs` query filters: `session_id`, `role`, `tool_name`, `worker_id` (worker lane; 0 is a legal filter value — single-worker and pre-lane rows), `before_id` (strict id upper bound — the backwards-paging/gap-fill cursor), `order` (asc/desc), `page`/`page_size`; the `total` count carries the same filters as the row query.
 - **Bus**: `internal/db/events.go` — session-scoped in-memory event bus living in the `db` package so every producer (agent Logger, ADK event loop, orchestrator, API handlers) can publish without import cycles. `db.PublishEvent` broadcasts with non-blocking sends (slow consumers drop events; refetch `/logs` to fill gaps); subscriber channels are never closed by the bus.
 - **Frame format**: `event: <type>\ndata: <json payload>\n\n`, plus `: ping` comment heartbeats every 25s. Consume with `EventSource`; there is no last-event-id replay — on reconnect, refetch history from `/logs`.
-- **Wails desktop**: `wails/app.go` `proxySSE` already forwards any request with `Accept: text/event-stream` to the backend with chunked flushing — it works with this endpoint as-is.
+- **Desktop**: the desktop window talks to the same in-process Gin server over loopback HTTP, so the SSE stream works unchanged there (see Desktop below).
 - **Event types and payloads** (`phase`: `tagging` / `instruct` / `executing`). The batch system is gone from the stream: every step event carries `worker_id` and the frontend renders one lane per worker (batch_index survives only as an internal DB cursor — `agent_logs.batch_index` / `file_entries.batch_index` — and is never exposed on the stream; `GET /logs/batches` and the `?batch=` log filter were removed with the batch UI):
   - `run_status` — `{session_id, phase, status, message?}`; status: `started` / `done` / `error` / `stopped` (user stop). Mirrors `ScanSession.Status` transitions; emitted by the orchestrator (tagging/instruct) and API handlers (executing).
   - `pull_begin` — `{session_id, worker_id, label, count?, cursor?}`; a worker starts one work unit (label: directory path, "N files", or "instruct"; count: files pulled this round; cursor: smallest file id of a loose-file pull).
@@ -169,7 +172,7 @@ cd web && npm run build && cd .. && go build -o fileengine .
 
 ### Database
 - Three dialects, selected by `database.driver` in `config.yaml`: `sqlite` (default), `mysql`, `postgres`. The DSN format follows the driver: file path for SQLite, go-sql-driver DSN for MySQL (`user:pass@tcp(host:3306)/dbname`), libpq keyword/value string or `postgres://` URL for PostgreSQL (e.g. `host=localhost port=5432 user=postgres password=... dbname=fileengine sslmode=disable`)
-- SQLite optimized: WAL mode, busy_timeout=30s, _txlock=immediate, MaxOpenConns=1 (single writer), mmap_size=256MB
+- SQLite driver is pure Go: `github.com/glebarez/sqlite` (GORM dialector over modernc.org/sqlite, no cgo). Settings are per-connection `_pragma=` DSN params built by `sqliteDSN()` (`internal/db/db.go`) — busy_timeout=30s (first), WAL, synchronous=NORMAL, cache_size, foreign_keys — plus `_txlock=immediate`; MaxOpenConns=1 (single writer), mmap_size=256MB. `TestSQLitePragmas` pins the applied values. Test code opening raw GORM SQLite imports `github.com/glebarez/sqlite` too
 - `db.WithRetry()` wraps write operations with retry on "database is locked"
 - Composite indexes defined via GORM struct tags (not separate migration files)
 - Key indexes: `idx_uniq_session_path`, `idx_session_type_tagged_depth`, `idx_session_parent`, `idx_session_op_exec`
@@ -189,15 +192,33 @@ cd web && npm run build && cd .. && go build -o fileengine .
 - Tool builder `NewToolBuilder(repo, fs, sessionID, filesystemID, logger, cfg, session, modelVisionEnabled)`
 
 ### Frontend Embedding
-- `embed.go` uses `//go:embed all:web/dist` to embed the built frontend
-- `main.go` serves it via Gin's NoRoute fallback (SPA support)
-- Must run `cd web && npm run build` before `go build`
+- `web/embed.go` (package `FileEngine/web`) uses `//go:embed all:dist`; `web.Dist()` returns the SPA root. The server (`main.go`) and the production desktop import it
+- `api.Server` serves it via Gin's NoRoute fallback (SPA support)
+- Must build the frontend (`task web:build`) before building binaries; `task web:stub` writes a placeholder for Go-only checks. Never commit `web/dist`
+
+### App Runtime (`internal/app`)
+- `app.New(Options{ConfigPath, Frontend})` loads config, runs `db.Init`, builds `api.Server`; `Handler()` is the unguarded API+SPA handler; `Start(ctx, ln, handler)` serves on a caller-owned listener; `Wait()`; `Shutdown(ctx)` stops HTTP, then closes the DB
+- Request contexts derive from a base context cancelled when shutdown begins (`RegisterOnShutdown`), so open SSE streams end immediately instead of pinning graceful shutdown; the http.Server has `ReadHeaderTimeout` only — no write timeout (SSE is long-lived)
+- `main.go` is the thin server entry: listen on `server.host:server.port`, SIGINT/SIGTERM → graceful `Shutdown` (10s)
+
+### Desktop (`cmd/fileengine-desktop`, Wails v3 `v3.0.0-beta.27`)
+- Single process, root module, no subprocess/proxy: the full server from `internal/app` runs in-process
+- **Transport decision — loopback, not the Wails asset handler.** Evidence from the beta.27 asset server (`internal/assetserver/webview/responsewriter_*.go`): WKWebView (`didReceiveData` per Write) and WebKitGTK (pipe) stream, but the WebView2 writer buffers the whole body in a `bytes.Buffer` and hands it over only in `Finish()` after the handler returns, and deliberately does not implement `http.Flusher` — a never-ending SSE response would never reach the page on Windows. So the Gin handler is served on `127.0.0.1:<random port>` and the window opens that origin
+- **Loopback guard** (`loopback.go`): a per-launch 256-bit secret; the window's start URL is `/__desktop/session?token=…`, which sets an `HttpOnly; SameSite=Strict` cookie and 303-redirects to `/`. Every other request needs the cookie (constant-time compare), an exact `Host` (`127.0.0.1:<port>`, blocks DNS rebinding), an exact `Origin` when present, no cross-site `Sec-Fetch-Site`, no frame destination; all responses send `X-Frame-Options: DENY` + `frame-ancestors 'none'`. Other local processes cannot use the API without the token
+- The Wails asset origin serves only a 404 fallback, wrapped by `runtimeRequestGuard` (ported from NexTerm) so no foreign page can drive `/wails/runtime` (WebView2 intercepts `http://wails.localhost` from any page)
+- Lifecycle: `Service` (`service.go`) starts serving the pre-bound listener in `ServiceStartup` and calls `app.Shutdown` with a 5s timeout in `ServiceShutdown`
+- `SingleInstance` (`com.fileengine.desktop`) — `application.New` exits a second instance before it touches the DB; the first is shown/focused. Startup failures (paths, config, DB, assets) open a bilingual startup-error window in the same app (`startup_error.go`) instead of exiting silently
+- Data dir (`paths.go`): `--data-dir` flag > `FE_DATA_DIR` > `%LOCALAPPDATA%\FileEngine` / `~/Library/Application Support/FileEngine` / `$XDG_DATA_HOME/fileengine` (`~/.local/share/fileengine`). First launch writes a minimal 0600 `config.yaml` (sqlite DSN `<data>/fileengine.db`); logs go to `<data>/logs/fileengine-desktop.log` (+stderr), window geometry to `<data>/window-state.json` (debounced, restored only if it overlaps a connected screen). The process `chdir`s into the data dir because the config API persists to the relative path `config.yaml` (same convention as the Docker image)
+- Assets: build tag split — `assets_dev.go` (`!production`) serves `web/dist` (or `--web-root`) from disk via `os.DirFS`, so a frontend rebuild needs only a reload; `assets_production.go` embeds via `FileEngine/web`
+- Native file drop: `EnableFileDrop` + `WindowFilesDropped` re-emitted as the Wails event `files://dropped` (`{paths:[{path,dir}],x,y}`, `native_drop.go`). The frontend must load `@wailsio/runtime` to receive Wails events (Go→JS events are `ExecJS` into `window._wails`, which works on the loopback origin); on Windows the drop itself is also reported by that runtime script. JS→Go Wails calls are not available on the loopback origin (none are needed — the UI uses HTTP)
 
 ## Key File Locations
 
 | What | Where |
 |------|-------|
-| Entry point | `main.go` |
+| Server entry point | `main.go` |
+| App runtime (config + DB + API, Start/Shutdown) | `internal/app/app.go` |
+| Embedded frontend (`web.Dist()`) | `web/embed.go` |
 | All API routes | `internal/api/server.go` (setupRouter) |
 | DB models + indexes | `internal/db/models.go` |
 | DB init + dialect selection | `internal/db/db.go` |
@@ -224,10 +245,12 @@ cd web && npm run build && cd .. && go build -o fileengine .
 | Frontend API | `web/src/api/index.ts` |
 | Frontend routes | `web/src/router/index.ts` |
 | Model manager page | `web/src/views/ModelManager.vue` |
-| Wails desktop app | `wails/main.go`, `wails/app.go` |
-| Wails build script | `build-wails.sh` |
+| Desktop entry (Wails v3) | `cmd/fileengine-desktop/main.go` |
+| Desktop loopback guard (token cookie, Host/Origin pinning) | `cmd/fileengine-desktop/loopback.go` |
+| Desktop data dir / first-run config | `cmd/fileengine-desktop/paths.go` |
+| Build tasks + gates | `Taskfile.yml` |
 | Docker test env (compose, bootstrap, SSE watch) | `deploy/` (see `deploy/README.md`) |
-| CI/CD | `.github/workflows/build.yml` |
+| CI/CD | `.github/workflows/ci.yml` (check, server ×6, desktop ×6, `ci-ok` aggregate), `.github/workflows/release.yml` (tag `v*` → ci with version → GitHub release), composite actions in `.github/actions/` (go-toolchain, linux-gui-deps, wails-cli) |
 
 ## Common Tasks
 

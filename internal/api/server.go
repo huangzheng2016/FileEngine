@@ -117,8 +117,10 @@ func (s *Server) setupRouter() {
 	s.router = r
 }
 
-func (s *Server) Run(addr string) error {
-	return s.router.Run(addr)
+// Handler returns the complete HTTP surface (REST API, SSE stream and the
+// SPA fallback) for an http.Server owned by the caller (internal/app).
+func (s *Server) Handler() http.Handler {
+	return s.router
 }
 
 func (s *Server) Router() *gin.Engine {
