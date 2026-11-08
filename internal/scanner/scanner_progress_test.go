@@ -2,13 +2,14 @@ package scanner
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"FileEngine/internal/db"
+	"FileEngine/internal/remotefs"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -72,47 +73,71 @@ func TestScanProgress_FinalState(t *testing.T) {
 	}
 }
 
-// While the walk runs, the session row must reflect live progress — the whole
-// point: total_files only exists after the full tree, scanned_count is now.
+// gatedFS blocks the listing of one directory until released, so a test can
+// observe the session row while the walk is provably still running.
+type gatedFS struct {
+	*fakeFS
+	gate    string
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedFS) List(ctx context.Context, p string) ([]remotefs.FileInfo, error) {
+	if p == g.gate {
+		g.once.Do(func() { close(g.reached) })
+		<-g.release
+	}
+	return g.fakeFS.List(ctx, p)
+}
+
 func TestScanProgress_LiveRowUpdates(t *testing.T) {
 	prev := progressReportInterval
-	progressReportInterval = 5 * time.Millisecond
+	progressReportInterval = time.Millisecond
 	defer func() { progressReportInterval = prev }()
 
-	// A tree wide enough that the walk outlives several reporter ticks.
-	children := make([]*memNode, 0, 101)
-	for i := 0; i < 100; i++ {
-		children = append(children, dir(fmt.Sprintf("d%03d", i), file("a"), file("b")))
+	gfs := &gatedFS{
+		fakeFS:  &fakeFS{root: testTree()},
+		gate:    "root/photos",
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
 	}
-	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: &memNode{name: "root", isDir: true, children: children}}}
-
 	repo := setupFileTestDB(t)
 	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	sc := New(hfs, repo, "", nil)
+	sc := New(gfs, repo, "", nil)
 
 	done := make(chan error, 1)
 	go func() { done <- sc.Scan(context.Background(), session) }()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gfs.release) }) }
+	defer release()
 
-	deadline := time.Now().Add(10 * time.Second)
-	sawLive := false
-	for time.Now().Before(deadline) {
-		row, err := repo.GetSession(1)
-		if err == nil && row.Status == "scanning" && row.ScannedCount > 0 && row.CurrentPath != "" {
-			sawLive = true
+	select {
+	case <-gfs.reached:
+	case err := <-done:
+		t.Fatalf("scan finished without listing the gated directory: %v", err)
+	}
+
+	var row *db.ScanSession
+	for {
+		var err error
+		row, err = repo.GetSession(1)
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		if row.ScannedCount > 0 && row.CurrentPath != "" {
 			break
 		}
-		select {
-		case err := <-done:
-			t.Fatalf("scan finished before live progress was observed: %v", err)
-		case <-time.After(2 * time.Millisecond):
-		}
+		time.Sleep(time.Millisecond)
 	}
-	if !sawLive {
-		t.Fatal("never observed scanned_count > 0 + current_path on the session row mid-scan")
+	if row.Status != "scanning" {
+		t.Errorf("status = %q mid-scan, want scanning", row.Status)
 	}
+
+	release()
 	if err := <-done; err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
