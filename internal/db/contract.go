@@ -232,3 +232,40 @@ type MemoryUpdatedData struct {
 	Scope string `json:"scope"`
 	ID    uint   `json:"id"`
 }
+
+// Entry roles: every path has at most one effective decision — the nearest
+// ancestor-or-self that is a unit or a file.
+const (
+	RoleUndecided = ""
+	RoleUnit      = "unit"      // moved whole; descendants become members
+	RoleContainer = "container" // not moved itself; children decided individually
+	RoleMember    = "member"    // inside a unit, follows it
+	RoleFile      = "file"      // loose file with its own decision
+	RoleSkip      = "skip"      // out of scope, junk or explicitly left in place
+)
+
+// PlanRule is a deterministic classification rule applied in bulk to every
+// undecided entry it matches; rules belong to the session plan and are
+// re-applied after a rescan.
+type PlanRule struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	SessionID uint   `gorm:"index" json:"session_id"`
+	Position  int    `json:"position"` // lower runs first; first matching rule wins
+	Name      string `gorm:"size:256" json:"name"`
+	// Match conditions (all non-empty conditions must hold).
+	Exts       string `gorm:"size:1024" json:"exts"` // comma-separated, lower-case, without dot
+	NameRegex  string `gorm:"size:512" json:"name_regex"`
+	PathPrefix string `gorm:"size:1024" json:"path_prefix"`
+	FileType   string `gorm:"size:16" json:"file_type"` // file / directory / ""
+	MinSize    int64  `json:"min_size"`
+	MaxSize    int64  `json:"max_size"`
+	// Target template, e.g. "照片/{year}/{month}/{name}". Variables: {name}
+	// (base name), {stem}, {ext}, {year}, {month}, {day} (modification time),
+	// {parent} (parent dir name), {rel} (path relative to path_prefix).
+	Target    string    `gorm:"size:1024" json:"target"`
+	Role      string    `gorm:"size:16" json:"role"`   // file or unit (directories)
+	Source    string    `gorm:"size:16" json:"source"` // user / agent / preset
+	Matched   int       `json:"matched"`               // entries decided by this rule in the last apply
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
