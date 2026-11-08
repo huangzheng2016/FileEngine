@@ -147,9 +147,11 @@ type CreateSessionRequest struct {
 	ExcludeCategoryDirs bool   `json:"exclude_category_dirs"`
 	FilterMode          string `json:"filter_mode"`
 	FilterDirs          string `json:"filter_dirs"`
-	AllowVision         *bool  `json:"allow_vision"`
-	ExtractMetadata     *bool  `json:"extract_metadata"`
-	DetectDuplicates    *bool  `json:"detect_duplicates"`
+	AllowVision         bool   `json:"allow_vision"`
+	ExtractMetadata     *bool  `json:"extract_metadata"` // nil = on
+	DetectDuplicates    bool   `json:"detect_duplicates"`
+	// Goal is the user's organizing intent in their own words.
+	Goal string `json:"goal"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -171,7 +173,8 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	session := &db.ScanSession{
-		AllowVision:         req.AllowVision != nil && *req.AllowVision,
+		AllowVision:         req.AllowVision,
+		Goal:                strings.TrimSpace(req.Goal),
 		FilesystemID:        filesystem.ID,
 		ScanPath:            req.ScanPath,
 		RootPath:            scanRootPath(req.ScanPath),
@@ -182,7 +185,7 @@ func (s *Server) createSession(c *gin.Context) {
 		FilterMode:          filterMode,
 		FilterDirs:          req.FilterDirs,
 		ModelProviderID:     req.ModelProviderID,
-		DetectDuplicates:    req.DetectDuplicates != nil && *req.DetectDuplicates,
+		DetectDuplicates:    req.DetectDuplicates,
 	}
 	if err := s.repo.CreateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -254,6 +257,10 @@ func (s *Server) deleteSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if err := s.repo.DeleteSessionBrainData(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
@@ -268,6 +275,7 @@ type UpdateSessionRequest struct {
 	ModelProviderID     *uint   `json:"model_provider_id"`
 	ExtractMetadata     *bool   `json:"extract_metadata"`
 	DetectDuplicates    *bool   `json:"detect_duplicates"`
+	Goal                *string `json:"goal"`
 }
 
 func (s *Server) updateSessionConfig(c *gin.Context) {
@@ -316,6 +324,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 	if req.DetectDuplicates != nil {
 		session.DetectDuplicates = *req.DetectDuplicates
 	}
+	if req.Goal != nil {
+		session.Goal = strings.TrimSpace(*req.Goal)
+	}
 	if err := s.repo.UpdateSession(session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -342,6 +353,7 @@ func (s *Server) rescanSession(c *gin.Context) {
 
 	// Incremental: the scanner diffs against the existing entries and keeps
 	// decisions of unchanged ones.
+	session.RootPath = scanRootPath(session.ScanPath)
 	session.Status = "scanning"
 	session.ScannedCount = 0
 	session.CurrentPath = ""

@@ -39,9 +39,33 @@ func childPathPattern(dir string) string { return likeLiteral(dir) + "/%" }
 // nameSearchCondition returns the case-insensitive name-search condition for
 // the dialect of tx: PostgreSQL needs ILIKE (its LIKE is case-sensitive),
 // SQLite and MySQL LIKE are already case-insensitive.
-func nameSearchCondition(tx *gorm.DB) string {
+func nameSearchCondition(tx *gorm.DB) string { return ciLikeCondition(tx, "name") }
+
+// ciLikeCondition is the case-insensitive LIKE condition on column for the
+// dialect of tx (ILIKE on PostgreSQL); the pattern must come from likeLiteral.
+func ciLikeCondition(tx *gorm.DB, column string) string {
 	if tx.Dialector.Name() == "postgres" {
-		return "name ILIKE ?" + likeEscapeClause
+		return column + " ILIKE ?" + likeEscapeClause
 	}
-	return "name LIKE ?" + likeEscapeClause
+	return column + " LIKE ?" + likeEscapeClause
+}
+
+// quoteCol quotes a column name for the dialect of tx — needed for raw
+// conditions on columns named after reserved words (memory_items.key is
+// reserved in MySQL).
+func quoteCol(tx *gorm.DB, column string) string {
+	var sb strings.Builder
+	tx.Dialector.QuoteTo(&sb, column)
+	return sb.String()
+}
+
+// instrFunc names the dialect's "1-based position of substring" function
+// (instr(str, sub) on SQLite/MySQL, strpos(str, sub) on PostgreSQL). Paired
+// with the portable substr() it lets path aggregations split off the next
+// path segment in SQL.
+func instrFunc(tx *gorm.DB) string {
+	if tx.Dialector.Name() == "postgres" {
+		return "strpos"
+	}
+	return "instr"
 }
