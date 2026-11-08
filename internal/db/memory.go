@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,6 +23,16 @@ type MemoryValidationError struct{ Msg string }
 func (e *MemoryValidationError) Error() string { return e.Msg }
 
 func invalidMemory(msg string) error { return &MemoryValidationError{Msg: msg} }
+
+// NormalizeMemoryPath stores memory paths like original paths: cleaned, no
+// leading slash ("" stays "").
+func NormalizeMemoryPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	return strings.Trim(path.Clean("/"+p), "/")
+}
 
 // NormalizeMemoryKey canonicalizes a memory key: trimmed, inner whitespace
 // collapsed, lower-cased. One live item exists per (scope, scope_id, key).
@@ -75,6 +86,7 @@ func ValidateMemoryItem(m *MemoryItem) error {
 func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
 	m.Key = NormalizeMemoryKey(m.Key)
 	m.Content = strings.TrimSpace(m.Content)
+	m.Path = NormalizeMemoryPath(m.Path)
 	if err := ValidateMemoryItem(m); err != nil {
 		return false, err
 	}
@@ -158,6 +170,7 @@ func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryIt
 			apply(&out)
 			out.Key = NormalizeMemoryKey(out.Key)
 			out.Content = strings.TrimSpace(out.Content)
+			out.Path = NormalizeMemoryPath(out.Path)
 			if err := ValidateMemoryItem(&out); err != nil {
 				return err
 			}

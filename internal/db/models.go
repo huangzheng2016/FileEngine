@@ -12,7 +12,7 @@ type FileEntry struct {
 	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1" json:"scan_session_id"`
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024;index:idx_session_newpath,priority:2" json:"new_path"` // always "/"-rooted when set
-	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"` // "move" / "copy" / ""
+	Operation     string     `gorm:"size:16;index:idx_session_op_exec,priority:2" json:"operation"`  // "move" / "copy" / ""
 	Executed      bool       `gorm:"default:false;index:idx_session_op_exec,priority:3" json:"executed"`
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"

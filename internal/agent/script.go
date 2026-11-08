@@ -105,8 +105,8 @@ func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 - get_file_info(path) → 文件详情 map；找不到返回 error 值
 - get_categories() → 分类数组（name/path/structure/description/agent_editable）
 - mark_tagged(path) → true；标记文件/目录为已处理（目录级联子项）。批量流程收尾必须对每个处理过的文件调用
-- set_target(path, new_path) → true；new_path 传 "" 清除目标。与工具同样校验路径合法性
-- set_category(path, category_name) → true；把文件归入指定分类（目标=分类路径+文件名）
+- set_target(path, new_path) → 实际写入的目标路径字符串（与他人目标重名时自动改为 "name (2).ext"）；new_path 传 "" 清除目标并返回 true。与工具同样校验：路径合法且位于某个分类路径下
+- set_category(path, category_name, relative_to?) → 实际写入的目标路径字符串。目标 = 分类路径 + 相对路径，保留子结构：给了 relative_to 时取文件在该目录下的相对路径（"." 表示整个原路径）；否则取当前处理单元根目录下的相对路径；都不适用时只取文件名
 - create_category(name, path, description) → 分类 map；受与 create_category 工具完全相同的护栏约束（需先 get_categories；同名/同路径拒绝）%s
 - rename_category(name, new_name) → true；仅 agent_editable 的分类可改
 - sample_files(n) 或 sample_files({过滤条件}, n) → 随机抽取至多 n 个文件（默认 %d，上限 %d），用于抽样了解大批文件
@@ -634,16 +634,20 @@ func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tb.setTargetCore(ctx, p, np); err != nil {
+		final, _, err := tb.setTargetCore(ctx, p, np)
+		if err != nil {
 			return scriptError(err), nil
 		}
-		return tengo.TrueValue, nil
+		if final == "" {
+			return tengo.TrueValue, nil
+		}
+		return &tengo.String{Value: final}, nil
 	}
 }
 
 func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {
-		if err := scriptArgCount("set_category", args, 2, 2); err != nil {
+		if err := scriptArgCount("set_category", args, 2, 3); err != nil {
 			return nil, err
 		}
 		p, err := scriptStringArg("set_category", "path", args[0])
@@ -654,6 +658,12 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 		if err != nil {
 			return nil, err
 		}
+		relativeTo := ""
+		if len(args) == 3 {
+			if relativeTo, err = scriptStringArg("set_category", "relative_to", args[2]); err != nil {
+				return nil, err
+			}
+		}
 		cat, err := tb.repo.GetCategoryByName(tb.filesystemID, catName)
 		if err != nil {
 			return scriptError(fmt.Errorf("category not found: %s", catName)), nil
@@ -662,12 +672,44 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 		if err != nil {
 			return scriptError(fmt.Errorf("file not found: %s", p)), nil
 		}
-		target := strings.TrimSuffix(cat.Path, "/") + "/" + f.Name
-		if _, err := tb.setTargetCore(ctx, p, target); err != nil {
+		rel, err := categoryRelativePath(*f, relativeTo, tb.unitRoot)
+		if err != nil {
 			return scriptError(err), nil
 		}
-		return tengo.TrueValue, nil
+		target := strings.TrimSuffix(cat.Path, "/") + "/" + rel
+		final, _, err := tb.setTargetCore(ctx, p, target)
+		if err != nil {
+			return scriptError(err), nil
+		}
+		return &tengo.String{Value: final}, nil
 	}
+}
+
+// categoryRelativePath is the part of a file's path that set_category keeps
+// below the category path, so sub-structure survives instead of flattening:
+//   - relative_to given: the path below that directory (the file must lie
+//     under it; "" / "." means the scan root, i.e. the full original path)
+//   - otherwise the path below the current work unit's root (SetUnitRoot) when
+//     the file lies under it
+//   - otherwise just the file name (direct placement in the category)
+func categoryRelativePath(f db.FileEntry, relativeTo, unitRoot string) (string, error) {
+	if relativeTo != "" {
+		base := strings.Trim(normalizePath(relativeTo), "/")
+		if base == "" || base == "." {
+			return f.OriginalPath, nil
+		}
+		rel, ok := strings.CutPrefix(f.OriginalPath, base+"/")
+		if !ok {
+			return "", fmt.Errorf("set_category: %s is not under relative_to %s", f.OriginalPath, relativeTo)
+		}
+		return rel, nil
+	}
+	if unitRoot != "" && unitRoot != "." {
+		if rel, ok := strings.CutPrefix(f.OriginalPath, unitRoot+"/"); ok {
+			return rel, nil
+		}
+	}
+	return f.Name, nil
 }
 
 func (tb *ToolBuilder) scriptCreateCategory(ctx context.Context) tengo.CallableFunc {
