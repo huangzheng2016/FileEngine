@@ -1,20 +1,19 @@
 import { createApp } from 'vue'
-import ElementPlus from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import router from './router'
-import i18n from './i18n'
-// styles/index.css bundles, in order: element-plus base -> tokens -> override -> components.
-import './styles/index.css'
-import App from './App.vue'
+import MainLayout from '@/base/MainLayout.vue'
+import { setUnauthorizedHandler } from '@/api/http'
+import { resetSignIn, router } from '@/router'
+import { installTooltips } from '@/base/tooltip'
+import '@/styles/tokens.css'
+import '@/styles/base.css'
 
-const app = createApp(App)
+const app = createApp(MainLayout).use(router)
+installTooltips()
 
-app.use(ElementPlus)
-app.use(router)
-app.use(i18n)
+setUnauthorizedHandler(() => {
+  resetSignIn()
+  const current = router.currentRoute.value
+  if (!current.meta.public) void router.replace({ path: '/login', query: { next: current.fullPath } })
+})
 
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
-
-app.mount('#app')
+// Wait for the first navigation so the shell never flashes before a bare route.
+void router.isReady().then(() => app.mount('#app'))

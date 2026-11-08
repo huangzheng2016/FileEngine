@@ -1,253 +1,151 @@
-/*
- * danceinbox-style — design tokens
- * Catppuccin Latte (light) + Catppuccin Mocha (dark)
- *
- * COPY THIS FILE VERBATIM. Do not "adapt" or "simplify".
- * Import in your app entry: import '@/styles/tokens.css'
- */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-latin.woff2') format('woff2');
+}
 
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin.woff2') format('woff2');
+}
+
+/* Rebranding a project means editing the "brand" block below and nothing else. */
 :root {
-  /* ===== Catppuccin Latte palette ===== */
-  --ctp-rosewater: #dc8a78;
-  --ctp-flamingo: #dd7878;
-  --ctp-pink: #ea76cb;
-  --ctp-mauve: #8839ef;
-  --ctp-red: #d20f39;
-  --ctp-maroon: #e64553;
-  --ctp-peach: #fe640b;
-  --ctp-yellow: #df8e1d;
-  --ctp-green: #40a02b;
-  --ctp-teal: #179299;
-  --ctp-sky: #04a5e5;
-  --ctp-sapphire: #209fb5;
-  --ctp-blue: #1e66f5;
-  --ctp-lavender: #7287fd;
-  --ctp-text: #4c4f69;
-  --ctp-subtext1: #5c5f77;
-  --ctp-subtext0: #6c6f85;
-  --ctp-overlay2: #7c7f93;
-  --ctp-overlay1: #8c8fa1;
-  --ctp-overlay0: #9ca0b0;
-  --ctp-surface2: #acb0be;
-  --ctp-surface1: #bcc0cc;
-  --ctp-surface0: #ccd0da;
-  --ctp-base: #eff1f5;
-  --ctp-mantle: #e6e9ef;
-  --ctp-crust: #dce0e8;
+  /* brand */
+  --accent: #00a8cc;
+  --accent-hover: #008fb3;
+  --accent-text: #00799a;
+  --on-accent: #0f1214;
+  --radius-sm: 4px;
+  --radius-md: 6px;
 
-  /* ===== Brand accents ===== */
-  --accent: #1e66f5;
-  --accent-strong: #fe640b;
-  --accent-soft: rgba(30, 102, 245, 0.12);
-  --accent-hover: rgba(30, 102, 245, 0.16);
-  --accent-gradient: linear-gradient(135deg, #1e66f5 0%, #fe640b 100%);
+  --accent-soft: rgba(0, 168, 204, 0.1);
+  --accent-ring: rgba(0, 168, 204, 0.25);
 
-  /* ===== Status ===== */
-  --success: #40a02b;
-  --success-soft: rgba(64, 160, 43, 0.12);
-  --warning: #df8e1d;
-  --warning-soft: rgba(223, 142, 29, 0.14);
+  --success: #2f8a1f;
+  --success-soft: rgba(47, 138, 31, 0.12);
+  --warning: #b86e00;
+  --warning-soft: rgba(223, 142, 29, 0.16);
   --danger: #d20f39;
-  --danger-soft: rgba(210, 15, 57, 0.12);
-  --info: #04a5e5;
+  --danger-hover: #b00c30;
+  --danger-soft: rgba(210, 15, 57, 0.1);
+  --on-danger: #ffffff;
+  --info: #0b7fb3;
   --info-soft: rgba(4, 165, 229, 0.12);
 
-  /* ===== Text ===== */
-  --text-primary: #4c4f69;
-  --text-secondary: rgba(92, 95, 119, 0.84);
-  --text-muted: rgba(108, 111, 133, 0.72);
-  --text-inverse: #ffffff;
-  --text-on-accent: #ffffff;
+  --text: #1e1e1c;
+  --text-secondary: #52524e;
+  --text-muted: #6b6b66;
 
-  /* ===== Surfaces ===== */
-  --app-bg: #eff1f5;
-  --surface-strong: rgba(239, 241, 245, 0.92);
-  --surface-soft: rgba(230, 233, 239, 0.84);
-  --surface-elevated: rgba(255, 255, 255, 0.70);
-  --surface-elevated-hover: rgba(255, 255, 255, 0.82);
-  --aside-bg: rgba(255, 255, 255, 0.78);
-  --header-bg: rgba(255, 255, 255, 0.70);
-  --input-bg: rgba(255, 255, 255, 0.82);
-  --input-bg-hover: rgba(255, 255, 255, 0.92);
-  --surface-muted: rgba(140, 143, 161, 0.14);
+  --bg: #f4f4f2;
+  --surface: #fbfbfa;
+  --surface-muted: #efefec;
+  --surface-hover: #e9e9e6;
+  --surface-raised: #ffffff;
+  --border: rgba(30, 30, 28, 0.1);
+  --border-strong: rgba(30, 30, 28, 0.2);
+  --mask: rgba(30, 30, 28, 0.36);
 
-  /* ===== Borders ===== */
-  --border-soft: rgba(92, 95, 119, 0.16);
-  --border-strong: rgba(92, 95, 119, 0.26);
-  --floating-border: rgba(30, 102, 245, 0.24);
-  --button-highlight: rgba(255, 255, 255, 0.28);
+  /* categorical chart series, in order; the first is the brand accent */
+  --chart-1: #00a8cc;
+  --chart-2: #5b6cf0;
+  --chart-3: #e8963a;
+  --chart-4: #3f9f5c;
+  --chart-5: #d4537e;
+  --chart-6: #8b5cd6;
+  --chart-7: #2a9d8f;
+  --chart-8: #a3a3a0;
 
-  /* ===== Ambient backdrop ===== */
-  --ambient-blue: rgba(30, 102, 245, 0.16);
-  --ambient-orange: rgba(254, 100, 11, 0.14);
-  --ambient-base-start: #eff1f5;
-  --ambient-base-end: #e6e9ef;
+  --shadow-float: 0 8px 24px rgba(30, 30, 28, 0.12);
+  --shadow-dialog: 0 20px 48px rgba(30, 30, 28, 0.18);
 
-  /* ===== Shadows (use colored, not pure black) ===== */
-  --shadow-soft: 0 12px 38px rgba(92, 95, 119, 0.12);
-  --shadow-floating: 0 18px 34px rgba(92, 95, 119, 0.16);
-  --shadow-dialog: 0 24px 48px rgba(92, 95, 119, 0.20);
-  --shadow-tooltip: 0 10px 24px rgba(92, 95, 119, 0.18);
-  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-
-  /* ===== Brand-tinted shadows (use these instead of hard-coded rgba on accent color) ===== */
-  --accent-shadow-flat: 0 4px 12px rgba(30, 102, 245, 0.22);
-  --accent-shadow: 0 10px 26px rgba(30, 102, 245, 0.28);
-  --accent-shadow-strong: 0 14px 32px rgba(30, 102, 245, 0.36);
-  --danger-shadow: 0 10px 26px rgba(210, 15, 57, 0.28);
-
-  /* ===== Mask ===== */
-  --overlay-mask: rgba(76, 79, 105, 0.32);
-
-  /* ===== Typography ===== */
-  --font-display: 'Plus Jakarta Sans', 'PingFang SC', 'Noto Sans SC',
-    'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Plus Jakarta Sans', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'JetBrains Mono', Consolas, monospace;
 
-  /* ===== Radii ===== */
-  --radius-xs: 8px;
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 20px;
-  --radius-xl: 24px;
-  --radius-2xl: 28px;
-  --radius-pill: 999px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
 
-  /* ===== Spacing scale ===== */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
-  --space-7: 28px;
-  --space-8: 32px;
 
-  /* ===== Motion ===== */
-  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 0.18s;
-  --duration-base: 0.24s;
-  --duration-slow: 0.36s;
+  --control-h: 32px;
+  --control-h-sm: 26px;
+  --sidebar-w: 224px;
+  --sidebar-w-collapsed: 64px;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 0.15s;
+  --dur: 0.22s;
+
+  --z-sticky: 2;
+  --z-header: 10;
+  --z-popover: 100;
+  --z-dialog: 200;
+  --z-menu: 300;
+  --z-toast: 400;
+  --z-tooltip: 500;
+
+  color-scheme: light;
 }
 
-/* ===== Dark mode: Catppuccin Mocha ===== */
 :root.dark {
-  --ctp-rosewater: #f4dbd6;
-  --ctp-flamingo: #f0c6c6;
-  --ctp-pink: #f5bde6;
-  --ctp-mauve: #c6a0f6;
-  --ctp-red: #ed8796;
-  --ctp-maroon: #ee99a0;
-  --ctp-peach: #f5a97f;
-  --ctp-yellow: #eed49f;
-  --ctp-green: #a6da95;
-  --ctp-teal: #8bd5ca;
-  --ctp-sky: #91d7e3;
-  --ctp-sapphire: #7dc4e4;
-  --ctp-blue: #8aadf4;
-  --ctp-lavender: #b7bdf8;
-  --ctp-text: #cad3f5;
-  --ctp-subtext1: #b8c0e0;
-  --ctp-subtext0: #a5adcb;
-  --ctp-overlay2: #939ab7;
-  --ctp-overlay1: #8087a2;
-  --ctp-overlay0: #6e738d;
-  --ctp-surface2: #5b6078;
-  --ctp-surface1: #494d64;
-  --ctp-surface0: #363a4f;
-  --ctp-base: #24273a;
-  --ctp-mantle: #1e2030;
-  --ctp-crust: #181926;
+  --accent: #00d9ff;
+  --accent-hover: #4de4ff;
+  --accent-text: #00d9ff;
+  --on-accent: #0f1214;
 
-  --accent: #8aadf4;
-  --accent-strong: #f5a97f;
-  --accent-soft: rgba(138, 173, 244, 0.16);
-  --accent-hover: rgba(138, 173, 244, 0.22);
-  --accent-gradient: linear-gradient(135deg, #8aadf4 0%, #f5a97f 100%);
+  --accent-soft: rgba(0, 217, 255, 0.1);
+  --accent-ring: rgba(0, 217, 255, 0.3);
 
   --success: #a6da95;
-  --success-soft: rgba(166, 218, 149, 0.16);
+  --success-soft: rgba(166, 218, 149, 0.14);
   --warning: #eed49f;
-  --warning-soft: rgba(238, 212, 159, 0.16);
+  --warning-soft: rgba(238, 212, 159, 0.14);
   --danger: #ed8796;
-  --danger-soft: rgba(237, 135, 150, 0.16);
+  --danger-hover: #f3a5b1;
+  --danger-soft: rgba(237, 135, 150, 0.14);
+  --on-danger: #15171a;
   --info: #91d7e3;
-  --info-soft: rgba(145, 215, 227, 0.16);
+  --info-soft: rgba(145, 215, 227, 0.14);
 
-  --text-primary: #cad3f5;
-  --text-secondary: rgba(184, 192, 224, 0.90);
-  --text-muted: rgba(165, 173, 203, 0.80);
-  --text-inverse: #24273a;
-  --text-on-accent: #24273a; /* dark accent is LIGHT blue (#8aadf4) - on-accent text must flip dark or primary buttons/tabs become unreadable white-on-light */
+  --text: #e8e8e6;
+  --text-secondary: #b0b0ad;
+  --text-muted: #8f8f8a;
 
-  --app-bg: #24273a;
-  --surface-strong: rgba(36, 39, 58, 0.92);
-  --surface-soft: rgba(48, 52, 70, 0.84);
-  --surface-elevated: rgba(54, 58, 79, 0.70);
-  --surface-elevated-hover: rgba(60, 64, 86, 0.82);
-  --aside-bg: rgba(30, 32, 48, 0.88);
-  --header-bg: rgba(24, 25, 38, 0.86);
-  --input-bg: rgba(48, 52, 70, 0.70);
-  --input-bg-hover: rgba(60, 64, 86, 0.82);
-  --surface-muted: rgba(128, 135, 162, 0.18);
+  --bg: #131518;
+  --surface: #1a1d21;
+  --surface-muted: #20242a;
+  --surface-hover: #272c33;
+  --surface-raised: #22262c;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --mask: rgba(0, 0, 0, 0.56);
 
-  --border-soft: rgba(184, 192, 224, 0.18);
-  --border-strong: rgba(184, 192, 224, 0.28);
-  --floating-border: rgba(138, 173, 244, 0.30);
-  --button-highlight: rgba(255, 255, 255, 0.10);
+  --chart-1: #00d9ff;
+  --chart-2: #8c98ff;
+  --chart-3: #f2b066;
+  --chart-4: #6cc787;
+  --chart-5: #ee86ab;
+  --chart-6: #b496f0;
+  --chart-7: #5cc4b8;
+  --chart-8: #8f8f8a;
 
-  --ambient-blue: rgba(138, 173, 244, 0.18);
-  --ambient-orange: rgba(245, 169, 127, 0.16);
-  --ambient-base-start: #24273a;
-  --ambient-base-end: #1e2030;
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-dialog: 0 20px 48px rgba(0, 0, 0, 0.55);
 
-  --shadow-soft: 0 12px 38px rgba(0, 0, 0, 0.32);
-  --shadow-floating: 0 18px 34px rgba(0, 0, 0, 0.40);
-  --shadow-dialog: 0 24px 48px rgba(0, 0, 0, 0.50);
-  --shadow-tooltip: 0 10px 24px rgba(0, 0, 0, 0.36);
-  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-
-  --accent-shadow-flat: 0 4px 12px rgba(138, 173, 244, 0.28);
-  --accent-shadow: 0 10px 26px rgba(138, 173, 244, 0.32);
-  --accent-shadow-strong: 0 14px 32px rgba(138, 173, 244, 0.40);
-  --danger-shadow: 0 10px 26px rgba(237, 135, 150, 0.32);
-
-  --overlay-mask: rgba(0, 0, 0, 0.56);
-}
-
-/* ===== Global resets that the design depends on ===== */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-  font-family: var(--font-display);
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--text-primary);
-  background: var(--app-bg);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
-
-#app {
-  min-height: 100vh;
-}
-
-::selection {
-  background: var(--accent-soft);
-  color: var(--text-primary);
-}
-
-/* Tabular numbers for data tables / metrics — looks more professional */
-.tabular {
-  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
 }
