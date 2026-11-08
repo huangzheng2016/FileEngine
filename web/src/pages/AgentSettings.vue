@@ -100,8 +100,6 @@ function resetPrompt() {
   form.prompt = defaultPrompt.value
 }
 
-// ---------- category templates ----------
-
 const PRESETS = categoryPresets.map((p) => ({ value: p.id, label: p.label }))
 const fillFrom = ref('')
 async function fillPolicy(id: string) {

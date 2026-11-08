@@ -1,5 +1,3 @@
-// Category templates: a policy text for the agent and the categories it starts from.
-
 export interface PresetCategory {
   name: string
   path: string

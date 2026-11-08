@@ -6,8 +6,6 @@ import { errorMessage } from '@/base/errors'
 import { getFileTree } from '@/api/files'
 import type { TreeNode } from '@/api/types'
 
-// Lazily loaded folder tree of a scanned session. The model is the selected
-// folder path ('' for the scan root).
 const props = defineProps<{ sessionId: number }>()
 const model = defineModel<string>({ required: true })
 

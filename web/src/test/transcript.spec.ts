@@ -37,7 +37,6 @@ describe('transcript reducer', () => {
     let t = applyEvents(emptyTimeline(), [a, b])
     const same = applyEvents(t, [a, b])
     expect(same).toBe(t)
-    // an older event arriving late changes nothing
     t = applyEvents(t, [ev('text', { run_id: 2, msg_id: 'x', delta: 'z' }, 9)])
     expect((t.runs[2].lanes[0].items[0] as MessageItem).text).toBe('ab')
     expect(t.seq).toBe(11)

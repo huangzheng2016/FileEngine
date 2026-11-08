@@ -1,5 +1,3 @@
-// Model form presets and rules, kept out of the dialog so they can be tested.
-
 export const EFFORT_PRESETS = ['low', 'medium', 'high', 'max'] as const
 
 export const EFFORT_LABEL: Record<string, string> = { low: '低', medium: '中', high: '高', max: '最高' }

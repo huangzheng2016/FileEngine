@@ -54,7 +54,6 @@ export function useSessionStream(sessionId: Ref<number>, hooks: StreamHooks = {}
   return { timeline, error, reconnect: () => connect(sessionId.value) }
 }
 
-// A finished run read from history, for runs the live stream did not replay.
 export async function loadRunTimeline(sessionId: number, runId: number, signal?: AbortSignal) {
   return applyEvents(emptyTimeline(), await loadRunEvents(sessionId, runId, signal))
 }

@@ -1,5 +1,3 @@
-// Readable views of agent tool calls: a one-line subject for the folded head and a
-// semantic body per common tool. Raw arguments and output stay in a folded CodeBlock.
 import { TOOL_LABEL } from '@/base/labels'
 import type { ToolItem } from './transcript'
 
@@ -42,8 +40,8 @@ export interface FileRow {
   target: string
 }
 
-// list_files / query_files: the first rows of what the agent saw. list_files
-// returns compact TSV rows (名称/类型/大小/角色/目标/描述) relative to `parent`.
+// list_files / query_files: the first rows of what the agent saw; list_files
+// returns compact TSV rows relative to `parent`.
 export function fileRows(output: unknown): { rows: FileRow[]; total: number } {
   const o = obj(output)
   if (typeof o.rows === 'string') {

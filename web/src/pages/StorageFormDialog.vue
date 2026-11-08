@@ -102,8 +102,6 @@ function body(): FilesystemInput {
   }
 }
 
-// ---------- test ----------
-
 interface TestResult {
   target: string
   ok: boolean

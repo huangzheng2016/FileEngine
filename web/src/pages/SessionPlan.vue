@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Plan tab: the Markdown plan every worker follows, and the deterministic rules that
-// decide the obvious cases in bulk.
 import { computed, ref, watch } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
@@ -31,8 +29,6 @@ import RuleDialog from './RuleDialog.vue'
 const props = defineProps<{ sessionId: number; rev: number; busyReason: string }>()
 const emit = defineEmits<{ started: [] }>()
 const confirm = useConfirm()
-
-// ---------- plan ----------
 
 const plan = useFetch((signal) => getPlan(props.sessionId, signal), { immediate: true })
 const editing = ref(false)
@@ -124,8 +120,6 @@ const planMenu = computed(() => [
     onSelect: () => void generate(),
   },
 ])
-
-// ---------- rules ----------
 
 const rules = useFetch((signal) => listRules(props.sessionId, signal), { immediate: true })
 const items = computed(() => rules.data.value ?? [])

@@ -6,7 +6,6 @@ import { fmtMs } from '@/base/format'
 import { fileRows, readExcerpt, toolLabel, toolSubject } from '@/lib/toolView'
 import type { ToolItem } from '@/lib/transcript'
 
-// One agent tool call: a single folded line; a failure opens itself.
 const props = defineProps<{ tool: ToolItem }>()
 
 const toggled = ref<boolean | null>(null)

@@ -1,5 +1,3 @@
-// Task templates for the new-task dialog: a goal in the user's words, the files in scope,
-// starter rules for the obvious cases and the categories they land in.
 import type { RuleInput } from '@/api/rules'
 import type { PresetCategory } from './categoryPresets'
 

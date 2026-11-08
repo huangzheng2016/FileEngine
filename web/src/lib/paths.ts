@@ -39,7 +39,6 @@ export function crumbs(p: string, rootLabel = '全部', rooted = false): Crumb[]
   ]
 }
 
-// Directories first, then by name, the way file managers list them.
 export function sortItems<T extends { is_dir: boolean; name: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name, 'zh-CN'))
 }

@@ -4,8 +4,6 @@ import EmptyState from '@/base/EmptyState.vue'
 import type { RunView, UnitItem } from '@/lib/transcript'
 import LaneView from './LaneView.vue'
 
-// A run's transcript: one column for a single worker, compact lanes side by side
-// when several workers ran in parallel.
 const props = defineProps<{ run: RunView }>()
 
 const lanes = computed(() => props.run.lanes)

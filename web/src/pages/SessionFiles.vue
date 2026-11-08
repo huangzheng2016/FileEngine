@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Files tab: the scanned tree with each entry's decision. Correcting a target here is
-// remembered for next time.
 import { computed, reactive, ref, watch } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
@@ -95,8 +93,6 @@ function open(f: FileEntry) {
   else previewing.value = f
 }
 
-// ---------- actions ----------
-
 const previewing = ref<FileEntry | null>(null)
 const categoriesOpen = ref(false)
 
@@ -136,8 +132,6 @@ const menuFor = (f: FileEntry) => [
   },
 ]
 
-// ---------- target ----------
-
 const target = reactive({ file: null as FileEntry | null, path: '', saving: false })
 const targetGuard = useDirtyGuard(() => target.path)
 const tv = useFormValidation(() => ({
@@ -169,8 +163,6 @@ async function saveTarget() {
     target.saving = false
   }
 }
-
-// ---------- locate ----------
 
 const locate = reactive({ open: false, q: '', loading: false, done: false, items: [] as LocateResult[] })
 async function runLocate() {

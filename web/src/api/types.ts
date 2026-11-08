@@ -1,4 +1,3 @@
-// Wire shapes of the backend (internal/db/models.go, internal/db/contract.go).
 // Times are ISO strings on the wire; pages format them through toSec + time.ts.
 
 export type SessionStatus = 'scanning' | 'scanned' | 'error' | 'interrupted'

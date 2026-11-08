@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Memory page: long-term memory across tasks — preferences that apply everywhere, and what
-// was learned about each storage.
 import { computed, ref, watch } from 'vue'
 import Icon from '@/base/Icon.vue'
 import Segmented from '@/base/Segmented.vue'

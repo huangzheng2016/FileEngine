@@ -5,7 +5,6 @@ export interface ChatFile {
   name: string
 }
 
-// Files picked on the files tab to ask the assistant about, per session.
 const picked = reactive(new Map<number, ChatFile[]>())
 
 export function chatFiles(sessionId: number): ChatFile[] {

@@ -12,8 +12,6 @@ import { laneBlocks, type Block, type Timeline } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import TranscriptBlock from './TranscriptBlock.vue'
 
-// The session assistant: past turns, the live answer with its steps folded, and
-// a composer that can carry files picked on the files tab.
 const props = defineProps<{ sessionId: number; timeline: Timeline; busyReason: string }>()
 const emit = defineEmits<{ sent: [runId: number] }>()
 
@@ -68,8 +66,6 @@ const runErrors = computed(() =>
 )
 const errorOf = (key: string) => runErrors.value.find(([id]) => `r-${id}` === key)?.[1] ?? ''
 
-// ---------- follow ----------
-
 const box = ref<HTMLElement | null>(null)
 const following = ref(true)
 function onScroll() {
@@ -96,8 +92,6 @@ watch(
   () => liveRuns.value.filter((r) => r.done).length,
   () => void turns.refresh(),
 )
-
-// ---------- send ----------
 
 const blocked = computed(() => props.busyReason || '')
 

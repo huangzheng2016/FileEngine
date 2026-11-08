@@ -11,7 +11,6 @@ export const frameScheduler: Scheduler = (cb) => {
 // (a long replay) never piles up unbounded work for one frame.
 export const MAX_PENDING_CHARS = 64 * 1024
 
-// Collects stream events and hands them over once per animation frame, in order.
 export function createEventBuffer(
   onFlush: (events: SessionEvent[]) => void,
   scheduler: Scheduler = frameScheduler,

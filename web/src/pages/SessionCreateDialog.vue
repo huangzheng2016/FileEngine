@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// New task: storage + folder + one-sentence goal; everything else is folded.
-// The scan starts as soon as the task is created.
 import { computed, reactive, ref, watch } from 'vue'
 import BaseDialog from '@/base/BaseDialog.vue'
 import Icon from '@/base/Icon.vue'

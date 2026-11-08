@@ -3,9 +3,8 @@ import MarkdownRender from 'markstream-vue'
 import 'markstream-vue/index.css'
 import { useDarkClass } from '@/lib/theme'
 
-// markstream-vue behind StreamMarkdown: streams model output; finished
-// text renders too. Raw HTML in the source is shown as text.
-// `streaming=false` marks the source final, so unclosed constructs settle once.
+// Raw HTML in the source is shown as text. `streaming=false` marks the source
+// final, so unclosed constructs settle once.
 withDefaults(defineProps<{ source: string; streaming?: boolean }>(), { streaming: false })
 
 const dark = useDarkClass()

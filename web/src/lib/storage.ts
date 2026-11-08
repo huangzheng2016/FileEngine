@@ -1,6 +1,5 @@
 import type { Protocol } from '@/api/types'
 
-// What each connection can do with archives, in the operator's words.
 export const PROTOCOL_HINT: Record<Protocol, string> = {
   smb: 'NAS 首选，压缩包可以直接查看内容',
   sftp: '压缩包可以直接查看内容',

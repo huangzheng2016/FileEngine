@@ -47,7 +47,6 @@ export async function fileContent(id: number, signal?: AbortSignal) {
   return data
 }
 
-// Rejected targets go back to the agent: targets cleared, files untagged.
 export async function resetPlans(sessionId: number, fileIds: number[]) {
   const { data } = await http.post<{ reset: number }>(`/sessions/${sessionId}/plans/reset`, { file_ids: fileIds })
   return data.reset
@@ -68,8 +67,6 @@ export async function previewTree(
   const items = data.items ?? []
   return { items, total: data.total ?? items.length }
 }
-
-// ---------- categories ----------
 
 export async function listCategories(filesystemId: number, signal?: AbortSignal) {
   const { data } = await http.get<Category[] | null>('/categories', { params: { filesystem_id: filesystemId }, signal })

@@ -1,6 +1,6 @@
-// The session event stream folded into per-run, per-worker transcripts. Pure:
-// the same reducer serves the live stream, history replays and tests. A batch of
-// events copies each touched object once, so a frame of deltas stays cheap.
+// Pure, so the same reducer serves the live stream, history replays and tests.
+// A batch of events copies each touched object once, so a frame of deltas stays
+// cheap.
 import type { RunPhase, RunStatus, SessionEvent, TokenCounts } from '@/api/types'
 
 export interface MessageItem {
@@ -89,8 +89,6 @@ type Data = Record<string, unknown>
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v))
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0)
 
-// Applies a batch of events in order and returns a new timeline (or the same one
-// when nothing applied).
 export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timeline {
   const owned = new WeakSet<object>()
   const own = <T extends object>(o: T, copy: (o: T) => T): T => {
@@ -300,8 +298,6 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
   }
   return next
 }
-
-// ---------- display grouping ----------
 
 export interface StepGroup {
   kind: 'steps'

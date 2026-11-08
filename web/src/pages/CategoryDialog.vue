@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// The categories of one storage: where organized files land. Opened from the files tab.
 import { reactive, ref, watch } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import BaseDialog from '@/base/BaseDialog.vue'

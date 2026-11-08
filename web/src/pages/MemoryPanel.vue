@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Memory tab of a session: what the agent keeps for this storage, and the notes the
-// workers shared during this task.
 import { ref } from 'vue'
 import Icon from '@/base/Icon.vue'
 import MemoryTable from './MemoryTable.vue'

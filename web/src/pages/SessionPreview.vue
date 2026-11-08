@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// Preview tab: the tree as it is and as it will be, side by side. Anything that looks wrong
-// is sent back; low-confidence decisions wait for confirmation.
 import { computed, ref, watch } from 'vue'
 import Pagination from '@/base/Pagination.vue'
 import Segmented from '@/base/Segmented.vue'
@@ -39,8 +37,6 @@ async function reset(it: PreviewItem) {
     toast.error('退回失败', e)
   }
 }
-
-// ---------- review queue ----------
 
 const SIZE = 50
 const review = useFetch((signal) =>

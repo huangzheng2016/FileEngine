@@ -19,7 +19,6 @@ export function splitExts(text: string): string[] {
 
 export const joinExts = (exts: readonly string[]) => exts.join(',')
 
-// What a rule matches, in words.
 export function describeMatch(
   r: Pick<PlanRule, 'exts' | 'name_regex' | 'path_prefix' | 'file_type' | 'min_size' | 'max_size'>,
 ): string {

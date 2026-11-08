@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// Progress tab: the run history and the selected run's live transcript.
 import { computed, ref, watch } from 'vue'
 import Alert from '@/base/Alert.vue'
 import EmptyState from '@/base/EmptyState.vue'

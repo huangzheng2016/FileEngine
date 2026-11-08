@@ -5,8 +5,6 @@ import { stepSummary, type Block } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import ToolCard from './ToolCard.vue'
 
-// One display block of a lane: an open conclusion, a folded group of steps, a
-// prompt bubble or a work-unit marker.
 const props = defineProps<{ block: Block }>()
 
 const toggled = ref<boolean | null>(null)

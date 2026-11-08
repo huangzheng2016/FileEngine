@@ -23,7 +23,6 @@ export async function listEvents(
   return { items: data.items ?? [], hasMore: data.has_more }
 }
 
-// Every page of one run's persisted events, oldest first.
 export async function loadRunEvents(sessionId: number, runId: number, signal?: AbortSignal) {
   const all: SessionEvent[] = []
   let after = 0
@@ -50,8 +49,6 @@ export function followSession(sessionId: number, onEvent: (e: SessionEvent) => v
   return followStream(`/sessions/${sessionId}/events/stream`, (e) => onEvent(parseEvent(e)), signal)
 }
 
-// ---------- plan ----------
-
 export async function getPlan(sessionId: number, signal?: AbortSignal) {
   const { data } = await http.get<SessionPlan>(`/sessions/${sessionId}/plan`, { signal })
   return data
@@ -71,8 +68,6 @@ export async function approvePlan(sessionId: number) {
   const { data } = await http.post<SessionPlan>(`/sessions/${sessionId}/plan/approve`)
   return data
 }
-
-// ---------- assistant ----------
 
 export async function listChat(sessionId: number, signal?: AbortSignal) {
   const { data } = await http.get<{ items: ChatTurn[] }>(`/sessions/${sessionId}/chat`, { signal })

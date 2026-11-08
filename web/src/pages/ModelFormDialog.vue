@@ -117,8 +117,6 @@ function body(): ModelInput {
   }
 }
 
-// ---------- test ----------
-
 interface TestResult {
   model: string
   host: string

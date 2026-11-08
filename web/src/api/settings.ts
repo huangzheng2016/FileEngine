@@ -1,8 +1,6 @@
 import { http } from './http'
 import type { Filesystem, ModelProvider, Protocol } from './types'
 
-// ---------- storage (filesystems) ----------
-
 export interface FilesystemInput {
   name: string
   description: string
@@ -42,8 +40,6 @@ export async function testFilesystem(body: FilesystemInput & { id?: number }) {
   return data
 }
 
-// ---------- models ----------
-
 export interface ModelInput {
   name: string
   provider: ModelProvider['provider']
@@ -82,8 +78,6 @@ export async function testModel(body: ModelInput & { id?: number }) {
   const { data } = await http.post<{ success: boolean; reply?: string; error?: string }>('/models/test', body)
   return data
 }
-
-// ---------- agent config ----------
 
 export interface AgentConfig {
   concurrency: number

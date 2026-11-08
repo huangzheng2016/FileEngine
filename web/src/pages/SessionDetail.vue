@@ -1,7 +1,4 @@
 <script setup lang="ts">
-// One organizing task. The toolbar shows where it stands and exactly one next
-// step; the tabs hold the live run, the plan, the before/after preview, the files
-// and what the agent remembers. The assistant sits beside the run.
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ActionMenu, { type MenuItem } from '@/base/ActionMenu.vue'
@@ -75,8 +72,6 @@ usePolling(
   { interval: 2000, enabled: () => s.value?.status === 'scanning' },
 )
 
-// ---------- tabs ----------
-
 const wide = useMedia('(min-width: 1280px)')
 const TABS_ALL = [
   { key: 'progress', label: '进展' },
@@ -94,8 +89,6 @@ const tab = computed<TabKey>({
   set: (t) => set({ tab: t }),
 })
 const withChat = computed(() => wide.value && (tab.value === 'progress' || tab.value === 'preview'))
-
-// ---------- state and next step ----------
 
 const running = computed(() => runningRun(runs.data.value ?? []))
 const stage = computed(() => (s.value ? stageOf(s.value, running.value) : 'ready'))
@@ -219,8 +212,6 @@ const menu = computed<MenuItem[]>(() => [
   { label: '导出计划', icon: 'download' as const, onSelect: () => void exportPlan() },
   { label: '删除任务', icon: 'trash-2' as const, danger: true, onSelect: () => void remove() },
 ])
-
-// ---------- goal ----------
 
 const goalForm = reactive({ open: false, text: '', saving: false })
 const goalGuard = useDirtyGuard(() => goalForm.text)

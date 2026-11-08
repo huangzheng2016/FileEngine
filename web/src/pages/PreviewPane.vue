@@ -11,7 +11,6 @@ import { PREVIEW_LIMIT, previewTree } from '@/api/files'
 import type { PreviewItem } from '@/api/types'
 import { crumbs, resetReason, sortItems } from '@/lib/paths'
 
-// One side of the before/after preview: a folder listing with breadcrumbs.
 const props = defineProps<{ sessionId: number; side: 'before' | 'after'; path: string; rev: number }>()
 const emit = defineEmits<{ open: [path: string]; reset: [item: PreviewItem] }>()
 

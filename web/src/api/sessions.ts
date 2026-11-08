@@ -50,7 +50,6 @@ export async function rescanSession(id: number) {
   await http.post(`/sessions/${id}/rescan`)
 }
 
-// Starting returns the new run; the page follows it through the event stream.
 export async function startTagging(id: number) {
   const { data } = await http.post<{ run_id?: number }>(`/sessions/${id}/tag`)
   return data.run_id ?? 0
@@ -77,7 +76,6 @@ export async function locateFile(id: number, q: string, signal?: AbortSignal) {
   return data.items ?? []
 }
 
-// Low-confidence decisions wait for the user: confirm keeps them, reset sends them back.
 export async function confirmReview(id: number, fileIds: number[]) {
   await http.post(`/sessions/${id}/review/confirm`, { file_ids: fileIds })
 }

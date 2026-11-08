@@ -16,7 +16,6 @@ import { deleteMemory, listMemory, updateMemory } from '@/api/memory'
 import type { MemoryItem, MemoryScope } from '@/api/types'
 import MemoryFormDialog from './MemoryFormDialog.vue'
 
-// Memories of one scope; the user is the final curator: edit, pin, delete.
 const props = withDefaults(
   defineProps<{
     scope: MemoryScope

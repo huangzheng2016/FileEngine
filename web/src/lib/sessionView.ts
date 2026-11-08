@@ -12,7 +12,6 @@ export interface NextAction {
   label: string
 }
 
-// The one thing the session page offers as its primary action right now.
 export function nextAction(s: ScanSession, latest: AgentRun | undefined, onPreview: boolean): NextAction {
   if (s.status === 'scanning') return { kind: 'none', label: '' }
   if (s.status === 'error' || s.status === 'interrupted') return { kind: 'rescan', label: '重新扫描' }

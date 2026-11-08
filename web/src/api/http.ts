@@ -65,7 +65,6 @@ export async function download(url: string, filename: string) {
   URL.revokeObjectURL(href)
 }
 
-// Follows an SSE stream until aborted; reconnects resume with Last-Event-ID.
 export function followStream(path: string, onEvent: (e: SseEvent) => void, signal: AbortSignal) {
   return readEventStream(`${API}${path}`, {
     onEvent,
