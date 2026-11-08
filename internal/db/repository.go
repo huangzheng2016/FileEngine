@@ -86,10 +86,6 @@ func (r *Repository) DeleteSession(id uint) error {
 	})
 }
 
-func (r *Repository) DeleteFilesBySession(sessionID uint) error {
-	return r.db.Where("scan_session_id = ?", sessionID).Delete(&FileEntry{}).Error
-}
-
 func (r *Repository) RefreshSessionCounts(id uint) error {
 	// Single query for all FileEntry aggregations (was 5 separate queries)
 	var fileCounts struct {

@@ -28,7 +28,7 @@ func TestSQLitePragmas(t *testing.T) {
 		{"busy_timeout", "30000"},
 		{"synchronous", "1"},
 		{"foreign_keys", "1"},
-		{"cache_size", "-20000"},
+		{"cache_size", "-65536"},
 	}
 	for _, c := range cases {
 		var got string

@@ -15,6 +15,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/pkg/sftp v1.13.10
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/vmware/go-nfs-client v0.0.0-20190605212624-d43b92724c1b
 	github.com/wailsapp/wails/v3 v3.0.0-beta.27
 	golang.org/x/crypto v0.53.0
