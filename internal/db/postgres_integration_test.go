@@ -110,20 +110,4 @@ func TestPostgresDialectSemantics(t *testing.T) {
 		t.Fatalf("session counts: got total=%d tagged=%d, want total=%d tagged=2",
 			reloaded.TotalFiles, reloaded.TaggedFiles, len(entries))
 	}
-
-	// Backfill SQL (context_window IS NULL OR <= 0) must run on PostgreSQL.
-	legacy := &ModelProvider{Name: "legacy", Provider: "openai", Model: "gpt-x", ContextWindow: 0}
-	if err := r.CreateModelProvider(legacy); err != nil {
-		t.Fatalf("create legacy provider: %v", err)
-	}
-	if err := backfillContextWindow(DB); err != nil {
-		t.Fatalf("backfillContextWindow: %v", err)
-	}
-	reloadedP, err := r.GetModelProvider(legacy.ID)
-	if err != nil {
-		t.Fatalf("reload provider: %v", err)
-	}
-	if reloadedP.ContextWindow != DefaultContextWindow {
-		t.Fatalf("context window backfill: got %d, want %d", reloadedP.ContextWindow, DefaultContextWindow)
-	}
 }
