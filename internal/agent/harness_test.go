@@ -22,7 +22,7 @@ func TestListFilesHarnessShardAndBatchRoll(t *testing.T) {
 		seedFile(t, repo, 1, p, "file")
 	}
 	var counter int32
-	logger := NewLogger(repo, 1, 0)
+	logger := NewLogger(1, 0, 0)
 	tb := NewToolBuilder(repo, nil, 1, 1, logger, config.AgentConfig{}, &db.ScanSession{}, false).
 		withHarness(1, 2, &counter)
 
@@ -60,7 +60,7 @@ func TestListFilesHarnessShardAndBatchRoll(t *testing.T) {
 	}
 
 	// No-harness builder: no shard (sees all 4), no roll.
-	plain := NewToolBuilder(repo, nil, 1, 1, NewLogger(repo, 1, 0), config.AgentConfig{}, &db.ScanSession{}, false)
+	plain := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 	pout, err := plain.listFiles(context.Background(), &ListFilesInput{FileType: "file", Tagged: &falseVal, Limit: 10})
 	if err != nil {
 		t.Fatalf("plain listFiles: %v", err)
@@ -102,7 +102,7 @@ func TestListFilesHarnessArchiveSummary(t *testing.T) {
 	repo.DB().Model(&db.FileEntry{}).Where("scan_session_id = 1 AND original_path = 'proj.zip'").Update("size", int64(len(zipData)))
 
 	var counter int32
-	tb := NewToolBuilder(repo, lfs, 1, 1, NewLogger(repo, 1, 0), config.AgentConfig{}, &db.ScanSession{}, false).
+	tb := NewToolBuilder(repo, lfs, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false).
 		withHarness(0, 1, &counter)
 	falseVal := false
 	out, err := tb.listFiles(context.Background(), &ListFilesInput{FileType: "file", Tagged: &falseVal, Limit: 10})
@@ -129,7 +129,7 @@ func TestListFilesHarnessArchiveSummary(t *testing.T) {
 	}
 
 	// Disabled via guardrail → no summaries.
-	tb2 := NewToolBuilder(repo, lfs, 1, 1, NewLogger(repo, 1, 0), config.AgentConfig{ArchivePromptDisabled: true}, &db.ScanSession{}, false).
+	tb2 := NewToolBuilder(repo, lfs, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{ArchivePromptDisabled: true}, &db.ScanSession{}, false).
 		withHarness(0, 1, &counter)
 	out2, err := tb2.listFiles(context.Background(), &ListFilesInput{FileType: "file", Tagged: &falseVal, Limit: 10})
 	if err != nil {

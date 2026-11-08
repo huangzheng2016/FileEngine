@@ -78,11 +78,9 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 	}
 
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
+		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
-	}
-	if err := DB.AutoMigrate(&SessionPlan{}, &MemoryItem{}); err != nil {
-		return fmt.Errorf("failed to migrate plan/memory tables: %w", err)
 	}
 
 	readDB = nil
@@ -92,13 +90,18 @@ func Init(cfg config.DatabaseConfig) error {
 			return err
 		}
 	}
-
-	// Zombie sweep: sessions still "scanning" belong to a previous process
-	// lifetime — mark them interrupted so they cannot masquerade as live.
-	if n, err := NewRepository(DB).MarkInterruptedScans(); err != nil {
+	// Zombie sweeps: scans and runs still marked live belong to a previous
+	// process lifetime.
+	repo := NewRepository(DB)
+	if n, err := repo.MarkInterruptedScans(); err != nil {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	} else if n > 0 {
 		log.Printf("db init: marked %d zombie scanning session(s) as interrupted", n)
+	}
+	if n, err := repo.SweepStaleRuns(); err != nil {
+		return fmt.Errorf("failed to sweep stale runs: %w", err)
+	} else if n > 0 {
+		log.Printf("db init: marked %d stale running run(s) as stopped", n)
 	}
 
 	return nil

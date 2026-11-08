@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -34,7 +33,11 @@ type OrchestratorAgent struct {
 	session       *db.ScanSession
 	sessionID     uint
 	logger        *Logger
+	partial       bool // the last auto-tag run had failed batches
 }
+
+// Partial reports whether the last auto-tag run had failed batches.
+func (o *OrchestratorAgent) Partial() bool { return o.partial }
 
 func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *OrchestratorAgent {
 	return &OrchestratorAgent{
@@ -82,48 +85,15 @@ func (o *OrchestratorAgent) Run(ctx context.Context, req OrchestratorRequest) (s
 func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	log.Printf("orchestrator: routing to AutoTagAgent for session %d", o.sessionID)
 
-	// Update session status
-	session, err := o.repo.GetSession(o.sessionID)
-	if err != nil {
-		return "", err
-	}
-	session.Status = "tagging"
-	if err := o.repo.UpdateSession(session); err != nil {
-		return "", err
-	}
-	o.emitRunStatus(db.PhaseTagging, db.StatusStarted, "")
-
-	autoTag := NewAutoTagAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID)
+	autoTag := NewAutoTagAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger)
 	if err := autoTag.Run(ctx); err != nil {
-		if errors.Is(err, context.Canceled) {
-			o.emitRunStatus(db.PhaseTagging, db.StatusStopped, "")
-		} else {
-			o.emitRunStatus(db.PhaseTagging, db.StatusError, err.Error())
-		}
 		return "", fmt.Errorf("auto-tag failed: %w", err)
 	}
 
-	// Surface partial failure: failed batches (retries exhausted) are reflected
-	// in the session status, the run_status message, and the final report.
+	// Surface partial failure: failed batches (retries exhausted) make the
+	// run partial and get their own report section.
 	failures := autoTag.Failures()
-
-	// Update session status
-	session, err = o.repo.GetSession(o.sessionID)
-	if err != nil {
-		return "", err
-	}
-	session.Status = "tagged"
-	if len(failures) > 0 {
-		session.Status = "tagged_partial"
-	}
-	if err := o.repo.UpdateSession(session); err != nil {
-		return "", err
-	}
-	doneMsg := ""
-	if len(failures) > 0 {
-		doneMsg = fmt.Sprintf("%d batch(es) failed after retries", len(failures))
-	}
-	o.emitRunStatus(db.PhaseTagging, db.StatusDone, doneMsg)
+	o.partial = len(failures) > 0
 
 	// "建了不用" discipline, enforced at run end (never mid-run — a category
 	// created by an earlier batch may still be filled by a later one):
@@ -196,18 +166,11 @@ func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
 func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntry, userPrompt string) (string, error) {
 	log.Printf("orchestrator: routing to InstructAgent for session %d", o.sessionID)
 
-	o.emitRunStatus(db.PhaseInstruct, db.StatusStarted, "")
 	instruct := NewInstructAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger)
 	response, err := instruct.Run(ctx, files, userPrompt)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			o.emitRunStatus(db.PhaseInstruct, db.StatusStopped, "")
-		} else {
-			o.emitRunStatus(db.PhaseInstruct, db.StatusError, err.Error())
-		}
 		return "", fmt.Errorf("instruct failed: %w", err)
 	}
-	o.emitRunStatus(db.PhaseInstruct, db.StatusDone, "")
 
 	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
@@ -218,14 +181,4 @@ func (o *OrchestratorAgent) runInstruct(ctx context.Context, files []db.FileEntr
 	}
 
 	return response + "\n\n---\n\n" + report, nil
-}
-
-// emitRunStatus publishes a run_status event mirroring a phase transition.
-func (o *OrchestratorAgent) emitRunStatus(phase, status, message string) {
-	db.PublishEvent(db.Event{Type: db.EventRunStatus, SessionID: o.sessionID, Payload: db.RunStatusPayload{
-		SessionID: o.sessionID,
-		Phase:     phase,
-		Status:    status,
-		Message:   message,
-	}})
 }

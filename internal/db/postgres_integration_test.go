@@ -36,10 +36,10 @@ func TestPostgresDialectSemantics(t *testing.T) {
 	}
 
 	// Fresh slate: drop + re-migrate so the test is re-runnable on the same DB.
-	if err := DB.Migrator().DropTable(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.Migrator().DropTable(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
 		t.Fatalf("drop tables: %v", err)
 	}
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{}, &AgentRun{}, &SessionEvent{}); err != nil {
 		t.Fatalf("re-migrate: %v", err)
 	}
 	r := NewRepository(DB)

@@ -18,7 +18,6 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/internal/config"
@@ -104,7 +103,7 @@ func TestBuildToolsVisionGating(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := &db.ScanSession{AllowVision: tc.allowVision}
-			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, tc.modelVision)
+			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, tc.modelVision)
 
 			tools, err := tb.BuildTools()
 			if err != nil {
@@ -130,7 +129,7 @@ func TestBuildToolsVisionGating(t *testing.T) {
 // read_file / create_category.
 func TestBuildToolsDefaultOffRegression(t *testing.T) {
 	session := &db.ScanSession{AllowReadFile: true, AllowAutoCategory: true}
-	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, session, false)
+	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
 	tools, err := tb.BuildTools()
 	if err != nil {
 		t.Fatalf("BuildTools: %v", err)
@@ -180,7 +179,7 @@ func newVisionToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *Too
 	if err != nil {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
-	return NewToolBuilder(nil, fs, 1, 1, NewLogger(nil, 1, 0), cfg, &db.ScanSession{AllowVision: true}, true)
+	return NewToolBuilder(nil, fs, 1, 1, NewLogger(1, 0, 0), cfg, &db.ScanSession{AllowVision: true}, true)
 }
 
 func TestViewImageThumbnails(t *testing.T) {
@@ -348,39 +347,28 @@ func TestRunADKOnceEnhancedToolResultPlaceholder(t *testing.T) {
 		t.Fatalf("build enhanced echo tool: %v", err)
 	}
 
-	adkAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:  "test-agent",
-		Model: &scriptedModel{},
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{echoTool}},
-		},
-		MaxIterations: 3,
-	})
-	if err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
+	setupToolTestRepo(t)
+	adkAgent := newEchoAgent(t, &scriptedModel{}, echoTool)
+	logger := NewLogger(201, 1, 7)
 
-	logger := NewLogger(nil, 201, 7)
-
-	ch := db.SubscribeEvents(201)
-	defer db.UnsubscribeEvents(201, ch)
+	sub := db.Subscribe(201)
+	defer db.Unsubscribe(sub)
 
 	if _, err := runADKOnce(ctx, adkAgent, []*schema.Message{{Role: schema.User, Content: "go"}}, logger); err != nil {
 		t.Fatalf("runADKOnce: %v", err)
 	}
 
-	// 1st event: tool_call; 2nd: tool_result with the placeholder text.
-	recvBusEvent(t, ch)
-	ev := recvBusEvent(t, ch)
-	p, ok := ev.Payload.(db.ToolResultPayload)
-	if ev.Type != db.EventToolResult || !ok {
-		t.Fatalf("event: type=%q payload=%+v", ev.Type, ev.Payload)
+	var output string
+	for _, e := range collectEvents(t, sub) {
+		if e.Type == db.EvToolResult {
+			output, _ = e.Data["output"].(string)
+		}
 	}
-	if !strings.Contains(p.Output, "echo: hi") || !strings.Contains(p.Output, "[1 image(s) attached]") {
-		t.Fatalf("placeholder output: %q", p.Output)
+	if !strings.Contains(output, "echo: hi") || !strings.Contains(output, "[1 image(s) attached]") {
+		t.Fatalf("placeholder output: %q", output)
 	}
-	if strings.Contains(p.Output, "aW1n") {
-		t.Fatalf("base64 payload leaked into event stream: %q", p.Output)
+	if strings.Contains(output, "aW1n") {
+		t.Fatalf("base64 payload leaked into event stream: %q", output)
 	}
 }
 

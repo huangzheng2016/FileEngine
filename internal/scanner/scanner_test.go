@@ -38,7 +38,7 @@ func setupTestDB(t *testing.T) *db.Repository {
 	if sqlDB, err := gdb.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}, &db.AgentLog{}); err != nil {
+	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db.NewRepository(gdb)

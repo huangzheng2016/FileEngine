@@ -79,7 +79,10 @@ func (r *Repository) DeleteSession(id uint) error {
 		if err := tx.Where("scan_session_id = ?", id).Delete(&FileEntry{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("scan_session_id = ?", id).Delete(&AgentLog{}).Error; err != nil {
+		if err := tx.Where("session_id = ?", id).Delete(&SessionEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("session_id = ?", id).Delete(&AgentRun{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&ScanSession{}, id).Error
@@ -87,7 +90,7 @@ func (r *Repository) DeleteSession(id uint) error {
 }
 
 func (r *Repository) RefreshSessionCounts(id uint) error {
-	// Single query for all FileEntry aggregations (was 5 separate queries)
+	// One query for all FileEntry aggregations.
 	var fileCounts struct {
 		Total    int64
 		Tagged   int64
@@ -105,38 +108,18 @@ func (r *Repository) RefreshSessionCounts(id uint) error {
 		return err
 	}
 
-	// Single query for all AgentLog token sums (was 3 separate queries)
-	var tokenSums struct {
-		PromptTokens     int64
-		CachedTokens     int64
-		CompletionTokens int64
-		TotalTokens      int64
-	}
-	if err := r.db.Model(&AgentLog{}).Where("scan_session_id = ?", id).
-		Select(`COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-			COALESCE(SUM(total_tokens), 0) AS total_tokens`).
-		Scan(&tokenSums).Error; err != nil {
-		return err
-	}
-
 	// Column-scoped update: NEVER a full-row Save. This runs on every session
 	// GET, i.e. exactly while a scan/tag/execute goroutine is writing the row
 	// — a Save of a previously loaded struct is a lost update that can
-	// resurrect status="scanning" over a finished run (and the startup sweep
+	// resurrect status="scanning" over a finished scan (and the startup sweep
 	// would then mislabel that completed scan as interrupted).
 	return r.db.Model(&ScanSession{}).Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"total_files":       int(fileCounts.Total),
-			"tagged_files":      int(fileCounts.Tagged),
-			"planned_ops":       int(fileCounts.Planned),
-			"executed_ops":      int(fileCounts.Executed),
-			"total_size":        fileCounts.Size,
-			"prompt_tokens":     int(tokenSums.PromptTokens),
-			"cached_tokens":     int(tokenSums.CachedTokens),
-			"completion_tokens": int(tokenSums.CompletionTokens),
-			"total_tokens":      int(tokenSums.TotalTokens),
+			"total_files":  int(fileCounts.Total),
+			"tagged_files": int(fileCounts.Tagged),
+			"planned_ops":  int(fileCounts.Planned),
+			"executed_ops": int(fileCounts.Executed),
+			"total_size":   fileCounts.Size,
 		}).Error
 }
 
@@ -673,96 +656,32 @@ func (r *Repository) DeleteModelProvider(id uint) error {
 	return r.db.Delete(&ModelProvider{}, id).Error
 }
 
-// ============ AgentLog ============
+// ============ Batch cursor ============
 
-func (r *Repository) CreateAgentLog(log *AgentLog) error {
-	return r.db.Create(log).Error
-}
-
-func (r *Repository) CreateAgentLogs(logs []*AgentLog) error {
-	if len(logs) == 0 {
-		return nil
-	}
-	return r.db.CreateInBatches(logs, 100).Error
-}
-
-type LogQuery struct {
-	SessionID uint
-	Role      string
-	ToolName  string
-	// WorkerID filters by agent worker lane; nil means no filter. A pointer is
-	// required because worker_id=0 is a legal filter value (single-worker
-	// instruct runs and pre-lane rows live on lane 0).
-	WorkerID *int
-	// BeforeID returns only rows with id < BeforeID (0 = no bound) — the
-	// cursor for paging backwards through a lane without page math.
-	BeforeID uint
-	Order    string // "asc" or "desc"
-	Page     int
-	PageSize int
-}
-
-func (r *Repository) ListAgentLogs(q LogQuery) ([]AgentLog, int64, error) {
-	tx := r.db.Model(&AgentLog{})
-	if q.SessionID > 0 {
-		tx = tx.Where("scan_session_id = ?", q.SessionID)
-	}
-	if q.Role != "" {
-		tx = tx.Where("role = ?", q.Role)
-	}
-	if q.ToolName != "" {
-		tx = tx.Where("tool_name = ?", q.ToolName)
-	}
-	if q.WorkerID != nil {
-		tx = tx.Where("worker_id = ?", *q.WorkerID)
-	}
-	if q.BeforeID > 0 {
-		tx = tx.Where("id < ?", q.BeforeID)
-	}
-
-	var total int64
-	if err := tx.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	if q.Page <= 0 {
-		q.Page = 1
-	}
-	if q.PageSize <= 0 {
-		q.PageSize = 50
-	}
-	offset := (q.Page - 1) * q.PageSize
-
-	order := "id ASC"
-	if q.Order == "desc" {
-		order = "id DESC"
-	}
-
-	var logs []AgentLog
-	err := tx.Order(order).Offset(offset).Limit(q.PageSize).Find(&logs).Error
-	return logs, total, err
-}
-
-func (r *Repository) NextManualBatchIndex(sessionID uint) int {
-	var minBatch *int
-	r.db.Model(&AgentLog{}).
-		Where("scan_session_id = ? AND batch_index < 0", sessionID).
-		Select("MIN(batch_index)").Scan(&minBatch)
-	if minBatch == nil {
-		return -1
-	}
-	return *minBatch - 1
-}
-
+// MaxBatchIndex returns the largest agent batch index stamped on the
+// session's entries (0 when none) — the base for a new tagging run's cursor.
 func (r *Repository) MaxBatchIndex(sessionID uint) int {
 	var maxBatch *int
-	r.db.Model(&AgentLog{}).
+	r.db.Model(&FileEntry{}).
 		Where("scan_session_id = ? AND batch_index > 0", sessionID).
 		Select("MAX(batch_index)").Scan(&maxBatch)
 	if maxBatch == nil {
 		return 0
 	}
 	return *maxBatch
+}
+
+// NextManualBatchIndex returns a fresh negative batch index for a
+// user-directed run, below JunkBatchIndex and every manual index in use.
+func (r *Repository) NextManualBatchIndex(sessionID uint) int {
+	var minBatch *int
+	r.db.Model(&FileEntry{}).
+		Where("scan_session_id = ? AND batch_index < ?", sessionID, JunkBatchIndex).
+		Select("MIN(batch_index)").Scan(&minBatch)
+	if minBatch == nil {
+		return JunkBatchIndex - 1
+	}
+	return *minBatch - 1
 }
 
 // CategoryDistribution holds a category name/path and the count+size of files planned under it.

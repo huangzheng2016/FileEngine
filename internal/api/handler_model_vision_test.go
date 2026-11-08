@@ -5,52 +5,54 @@ import (
 	"testing"
 )
 
-// vision_enabled is additive: old clients omit it (create -> false, update ->
-// keeps stored value); new clients can toggle it explicitly.
-func TestModelProviderVisionEnabledCompat(t *testing.T) {
+// vision_enabled and thinking_enabled are optional switches: absent on create
+// means false, absent on update keeps the stored value.
+func TestModelProviderSwitches(t *testing.T) {
 	s := setupModelTestServer(t)
 
-	// Create without vision_enabled (legacy client) -> defaults to false.
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
 		"name": "plain", "provider": "openai", "model": "gpt-4o",
 	})
 	if code != http.StatusCreated {
-		t.Fatalf("create legacy: code %d, resp %v", code, created)
+		t.Fatalf("create plain: code %d, resp %v", code, created)
 	}
-	if got, ok := created["vision_enabled"].(bool); !ok || got {
-		t.Fatalf("legacy create vision_enabled: got %v, want false", created["vision_enabled"])
+	for _, k := range []string{"vision_enabled", "thinking_enabled"} {
+		if got, ok := created[k].(bool); !ok || got {
+			t.Fatalf("create without %s: got %v, want false", k, created[k])
+		}
 	}
 
-	// Create with vision_enabled: true.
 	code, created = doModelRequest(t, s, http.MethodPost, "/api/v1/models", map[string]any{
-		"name": "vision", "provider": "claude", "model": "claude-sonnet-4", "vision_enabled": true,
+		"name": "smart", "provider": "claude", "model": "claude-sonnet-4",
+		"vision_enabled": true, "thinking_enabled": true, "reasoning_effort": "high",
 	})
 	if code != http.StatusCreated {
-		t.Fatalf("create vision: code %d, resp %v", code, created)
+		t.Fatalf("create smart: code %d, resp %v", code, created)
 	}
-	if got, ok := created["vision_enabled"].(bool); !ok || !got {
-		t.Fatalf("create vision_enabled: got %v, want true", created["vision_enabled"])
+	if created["vision_enabled"] != true || created["thinking_enabled"] != true || created["reasoning_effort"] != "high" {
+		t.Fatalf("create smart: %v", created)
 	}
 
-	// Full-form update WITHOUT vision_enabled (legacy client) must not clobber it.
+	// Update without the switches keeps them.
 	code, updated := doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
-		"name": "vision", "provider": "claude", "model": "claude-sonnet-4", "max_tokens": 8192,
+		"name": "smart", "provider": "claude", "model": "claude-sonnet-4", "max_tokens": 8192,
 	})
 	if code != http.StatusOK {
-		t.Fatalf("update legacy-form: code %d, resp %v", code, updated)
+		t.Fatalf("update: code %d, resp %v", code, updated)
 	}
-	if got, ok := updated["vision_enabled"].(bool); !ok || !got {
-		t.Fatalf("vision_enabled clobbered by legacy update: got %v, want true", updated["vision_enabled"])
+	if updated["vision_enabled"] != true || updated["thinking_enabled"] != true || updated["reasoning_effort"] != "high" {
+		t.Fatalf("switches clobbered by update without them: %v", updated)
 	}
 
-	// Explicit toggle off via update.
+	// Explicit toggles off.
 	code, updated = doModelRequest(t, s, http.MethodPut, "/api/v1/models/2", map[string]any{
-		"name": "vision", "provider": "claude", "model": "claude-sonnet-4", "vision_enabled": false,
+		"name": "smart", "provider": "claude", "model": "claude-sonnet-4",
+		"vision_enabled": false, "thinking_enabled": false,
 	})
 	if code != http.StatusOK {
-		t.Fatalf("update vision_enabled: code %d, resp %v", code, updated)
+		t.Fatalf("toggle off: code %d, resp %v", code, updated)
 	}
-	if got, ok := updated["vision_enabled"].(bool); !ok || got {
-		t.Fatalf("update vision_enabled: got %v, want false", updated["vision_enabled"])
+	if updated["vision_enabled"] != false || updated["thinking_enabled"] != false {
+		t.Fatalf("toggle off: %v", updated)
 	}
 }

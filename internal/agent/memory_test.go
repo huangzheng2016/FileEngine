@@ -115,7 +115,7 @@ func TestCorrectionMemory(t *testing.T) {
 func brainTestBuilder(t *testing.T) (*ToolBuilder, *db.Repository) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7, AllowScript: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7, AllowScript: true}, false)
 	tb.RunID = 42
 	return tb, repo
 }
@@ -171,7 +171,7 @@ func TestMemoryTools(t *testing.T) {
 
 func TestNotesAreSharedAcrossWorkers(t *testing.T) {
 	a, repo := brainTestBuilder(t)
-	b := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 1), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7}, false)
+	b := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 1), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7}, false)
 	ctx := context.Background()
 
 	if out, err := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类", Path: "Projects/foo"}); err != nil || !out.Success {

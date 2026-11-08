@@ -56,7 +56,11 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 
 	instruction := instructPromptForSession(config.Get().Agent, a.session)
 
-	agentInst, err := buildADKAgent(ctx, tracker, tools, instruction, config.Get().Agent.InstructMaxStep, a.modelProvider.EffectiveContextWindow())
+	summaryOpt, err := bulkSummaryOption(ctx, a.repo, a.session, a.modelProvider, tracker)
+	if err != nil {
+		return "", err
+	}
+	agentInst, err := buildADKAgent(ctx, tracker, tools, instruction, config.Get().Agent.InstructMaxStep, a.modelProvider.EffectiveContextWindow(), summaryOpt)
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
@@ -78,28 +82,25 @@ func (a *InstructAgent) Run(ctx context.Context, files []db.FileEntry, userPromp
 	sb.WriteString("\n请使用工具执行用户的指令。")
 
 	a.logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
-	a.logger.EmitPullBegin("instruct", 0, 0)
+	a.logger.EmitPullBegin("用户指令", 0)
 	userMsg := sb.String()
-	a.logger.LogMessage("user", userMsg, 0, 0, 0, 0)
+	a.logger.LogMessage("user", userMsg)
 
 	messages := []*schema.Message{
 		{Role: schema.User, Content: userMsg},
 	}
 
-	label := "instruct"
-	result, err := runADKWithRetry(ctx, agentInst, messages, a.logger, label, tracker)
+	result, err := runADKWithRetry(ctx, agentInst, messages, a.logger, "instruct", tracker)
 	if err != nil {
-		a.logger.EmitPullDone("instruct", 0, 1)
+		a.logger.EmitPullDone(0, 1)
 		return "", err
 	}
 
 	response := ""
 	if result != nil {
-		pt, cached, ct, tt := tracker.Usage()
-		a.logger.LogMessage("assistant", result.Content, pt, cached, ct, tt)
 		response = result.Content
 	}
-	a.logger.EmitPullDone("instruct", 0, 0)
+	a.logger.EmitPullDone(0, 0)
 
 	_ = a.repo.RefreshSessionCounts(a.sessionID)
 	return response, nil

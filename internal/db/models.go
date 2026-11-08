@@ -2,7 +2,6 @@ package db
 
 import (
 	"time"
-	"unicode/utf8"
 
 	"FileEngine/internal/config"
 )
@@ -93,7 +92,7 @@ type ScanSession struct {
 	ScanPath     string `gorm:"size:1024" json:"scan_path"`
 	RootPath     string `gorm:"size:1024" json:"root_path"`
 	Protocol     string `gorm:"size:32" json:"protocol"`
-	Status       string `gorm:"size:255" json:"status"` // scanning/scanned/tagging/tagged/tagged_partial/executing/done/error/interrupted
+	Status       string `gorm:"size:32" json:"status"` // scanning / scanned / error / interrupted; agent activity lives on runs
 	TotalFiles   int    `json:"total_files"`
 	// ScannedCount is the live entries counter during "scanning": the scanner
 	// persists it every few seconds so the UI shows progress before the
@@ -110,10 +109,6 @@ type ScanSession struct {
 	PlannedOps          int       `json:"planned_ops"`
 	ExecutedOps         int       `json:"executed_ops"`
 	TotalSize           int64     `json:"total_size"`
-	PromptTokens        int       `json:"prompt_tokens"`
-	CachedTokens        int       `json:"cached_tokens"` // cache-hit subset of prompt_tokens, as reported by the provider
-	CompletionTokens    int       `json:"completion_tokens"`
-	TotalTokens         int       `json:"total_tokens"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`
 	AllowAutoCategory   bool      `gorm:"default:true" json:"allow_auto_category"` // create_category tool switch; DB default ON (owner decision) — GORM omits the zero value on insert, so unset means on
 	AllowVision         bool      `gorm:"default:false" json:"allow_vision"`       // session-level switch; view_image requires ModelProvider.VisionEnabled too
@@ -126,6 +121,7 @@ type ScanSession struct {
 	Goal                string    `gorm:"type:text" json:"goal"`
 	ScopeExts           string    `gorm:"type:text" json:"scope_exts"` // comma-separated extensions to organize; empty = all files; others become role=skip // the user's organizing intent, injected into every agent prompt
 	ModelProviderID     uint      `gorm:"index" json:"model_provider_id"`
+	BulkModelProviderID uint      `json:"bulk_model_provider_id"` // tagging workers + summarization; 0 = same as ModelProviderID
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -140,12 +136,10 @@ type ModelProvider struct {
 	Temperature   float64 `json:"temperature"`
 	MaxTokens     int     `json:"max_tokens"`     // output completion cap passed to the LLM API
 	ContextWindow int     `json:"context_window"` // model context window in tokens (drives compaction thresholds)
-	// ReasoningEffort is passed through to OpenAI-compatible APIs as
-	// reasoning_effort: "" keeps the model default, otherwise any free-form
-	// level the backend accepts (suggested none/low/medium/high/max; e.g. low
-	// cuts kimi-k3 thinking tokens ~85% on tool-heavy runs). The API validates
-	// charset/length ([a-zA-Z0-9_-]{1,32}) but never hard-rejects unknown
-	// levels — providers keep inventing new ones.
+	// ReasoningEffort is the thinking strength, used only when ThinkingEnabled:
+	// openai-compatible APIs get it verbatim as reasoning_effort ("" = model
+	// default), claude maps it to an extended-thinking budget. Free-form; the
+	// API validates [a-zA-Z0-9_-]{1,32}.
 	ReasoningEffort string    `gorm:"size:32" json:"reasoning_effort"`
 	VisionEnabled   bool      `gorm:"default:false" json:"vision_enabled"`   // model can read images (gates the view_image tool)
 	ThinkingEnabled bool      `gorm:"default:false" json:"thinking_enabled"` // request model thinking; reasoning_effort applies only when on
@@ -166,42 +160,7 @@ func (p *ModelProvider) EffectiveContextWindow() int {
 	return DefaultContextWindow
 }
 
-type AgentLog struct {
-	ID            uint `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint `gorm:"index:idx_log_session_batch,priority:1" json:"scan_session_id"`
-	BatchIndex    int  `gorm:"index:idx_log_session_batch,priority:2" json:"batch_index"`
-	// WorkerID identifies the agent worker lane that produced the row (0 for
-	// single-worker instruct runs and for rows written before lanes existed).
-	// default:0 makes AutoMigrate backfill existing rows with 0 on all
-	// dialects — a bare ADD COLUMN would leave NULLs that fail int scans.
-	WorkerID         int       `gorm:"default:0" json:"worker_id"`
-	Role             string    `gorm:"size:32" json:"role"` // "system" / "user" / "assistant" / "tool"
-	ToolName         string    `gorm:"size:128" json:"tool_name"`
-	ToolInput        string    `gorm:"type:text" json:"tool_input"`
-	ToolOutput       string    `gorm:"type:text" json:"tool_output"`
-	Content          string    `gorm:"type:text" json:"content"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CachedTokens     int       `json:"cached_tokens"` // cache-hit subset of PromptTokens; 0 on rows written before it existed
-	CompletionTokens int       `json:"completion_tokens"`
-	TotalTokens      int       `json:"total_tokens"`
-	CreatedAt        time.Time `json:"created_at"`
-}
-
-// StatusMaxLen is the storage limit for ScanSession.Status. Error-derived
-// statuses ("error: ...") must be truncated with TruncateStatus before saving
-// so MySQL strict mode does not reject over-long values.
-const StatusMaxLen = 255
-
 // JunkBatchIndex is the sentinel batch_index stamped on entries the autotag
 // junk filter auto-ignored (system files like .DS_Store, @eaDir) without an
 // agent batch. It distinguishes them from agent-tagged rows for reporting.
 const JunkBatchIndex = -1
-
-// TruncateStatus truncates s to StatusMaxLen runes for safe storage in
-// ScanSession.Status.
-func TruncateStatus(s string) string {
-	if utf8.RuneCountInString(s) <= StatusMaxLen {
-		return s
-	}
-	return string([]rune(s)[:StatusMaxLen])
-}
