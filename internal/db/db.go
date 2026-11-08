@@ -62,7 +62,7 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 	}
 
-	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
+	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}, &ExecOp{}); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
