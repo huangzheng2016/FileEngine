@@ -2,9 +2,11 @@ package api
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
+	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 
@@ -71,6 +73,10 @@ type UpdateFileRequest struct {
 	NewPath     *string `json:"new_path"`
 }
 
+// updateFile is the user's manual edit of one entry. A changed target goes
+// through the same validation and plan-time collision resolution as the
+// agent's set_target, and is learned as a filesystem-scope correction memory
+// so later runs classify that kind of file the user's way.
 func (s *Server) updateFile(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -91,22 +97,51 @@ func (s *Server) updateFile(c *gin.Context) {
 	}
 
 	if req.Description != nil {
-		file.Description = *req.Description
+		if err := s.repo.UpdateFileFields(file.ID, map[string]any{"description": *req.Description}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.NewPath != nil {
-		file.NewPath = *req.NewPath
-		if *req.NewPath != "" {
-			file.Operation = "planned"
-		} else {
-			file.Operation = ""
+		if err := agent.ValidateFSPath(*req.NewPath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid new_path: " + err.Error()})
+			return
+		}
+		oldTarget := file.NewPath
+		final, _, err := s.repo.SetTargetUnique(file.ScanSessionID, file.OriginalPath, *req.NewPath, file.FileType)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := s.learnCorrection(*file, oldTarget, final); err != nil {
+			log.Printf("file %d: record correction memory: %v", file.ID, err)
 		}
 	}
 
-	if err := s.repo.UpdateFile(file); err != nil {
+	updated, err := s.repo.GetFile(file.ID)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, file)
+	c.JSON(http.StatusOK, updated)
+}
+
+// learnCorrection records a user re-targeting as a correction memory of the
+// session's filesystem (no-op when there is nothing to learn).
+func (s *Server) learnCorrection(f db.FileEntry, oldTarget, newTarget string) error {
+	session, err := s.repo.GetSession(f.ScanSessionID)
+	if err != nil {
+		return err
+	}
+	m := agent.CorrectionMemory(f, oldTarget, newTarget, session.FilesystemID)
+	if m == nil {
+		return nil
+	}
+	if _, err := s.repo.UpsertMemory(m); err != nil {
+		return err
+	}
+	db.Emit(session.ID, 0, db.EvMemoryUpdated, db.MemoryUpdatedData{Scope: m.Scope, ID: m.ID})
+	return nil
 }
 
 func (s *Server) getFileContent(c *gin.Context) {

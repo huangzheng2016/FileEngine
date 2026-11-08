@@ -63,6 +63,9 @@ func Init(cfg config.DatabaseConfig) error {
 	if err := DB.AutoMigrate(&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &AgentLog{}, &ModelProvider{}); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
+	if err := DB.AutoMigrate(&SessionPlan{}, &MemoryItem{}); err != nil {
+		return fmt.Errorf("failed to migrate plan/memory tables: %w", err)
+	}
 
 	// Backfill context_window for providers created before the field existed
 	// (max_tokens was previously misused as the window; it now only caps output).

@@ -238,7 +238,7 @@ ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg")
 bad := set_target("incoming/photo2.jpg", "/../escape")
 result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 	v := resultValue(t, out)
-	if v["ok"] != true || v["bad_is_error"] != true {
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["bad_is_error"] != true {
 		t.Fatalf("set_target outcomes: %+v", v)
 	}
 	if !strings.Contains(v["bad_msg"].(string), "invalid new_path") {
@@ -287,7 +287,7 @@ missing_cat := set_category("incoming/photo2.jpg", "不存在")
 missing_file := set_category("nope/x.jpg", "照片")
 result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_file)}`)
 	v := resultValue(t, out)
-	if v["ok"] != true || v["cat_err"] != true || v["file_err"] != true {
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["cat_err"] != true || v["file_err"] != true {
 		t.Fatalf("set_category outcomes: %+v", v)
 	}
 	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
