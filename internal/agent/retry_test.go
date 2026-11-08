@@ -97,7 +97,7 @@ func TestParseRetryAfterMessage(t *testing.T) {
 
 type fakeRetryAfterCarrier struct{ d time.Duration }
 
-func (e *fakeRetryAfterCarrier) Error() string        { return "carrier" }
+func (e *fakeRetryAfterCarrier) Error() string             { return "carrier" }
 func (e *fakeRetryAfterCarrier) RetryAfter() time.Duration { return e.d }
 
 func TestRetryAfterFromError(t *testing.T) {

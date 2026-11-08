@@ -1,50 +1,61 @@
+// Command fileengine is the headless server: REST API + SSE + embedded SPA on
+// server.host:server.port. The desktop shell lives in cmd/fileengine-desktop.
 package main
 
 import (
-	"fmt"
-	"io/fs"
+	"context"
 	"log"
+	"net"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"FileEngine/internal/api"
-	"FileEngine/internal/config"
-	"FileEngine/internal/db"
+	"FileEngine/internal/app"
+	"FileEngine/web"
 )
 
+const shutdownTimeout = 10 * time.Second
+
 func main() {
-	// Load config
 	cfgPath := "config.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]
 	}
 
-	cfg, err := config.Load(cfgPath)
+	frontend, err := web.Dist()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Frontend not embedded: %v", err)
 	}
-
-	// Initialize database
-	if err := db.Init(cfg.Database); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
-	}
-
-	repo := db.NewRepository(db.GetDB())
-
-	// Setup frontend static files
-	var frontend fs.FS
-	subFS, err := fs.Sub(frontendFS, "web/dist")
+	a, err := app.New(app.Options{ConfigPath: cfgPath, Frontend: frontend})
 	if err != nil {
-		log.Printf("Warning: frontend not embedded: %v", err)
-	} else {
-		frontend = subFS
+		log.Fatalf("Startup failed: %v", err)
 	}
 
-	// Create and start server
-	server := api.NewServer(repo, frontend)
+	ln, err := net.Listen("tcp", a.Addr())
+	if err != nil {
+		log.Fatalf("Listen on %s: %v", a.Addr(), err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := a.Start(context.Background(), ln, a.Handler()); err != nil {
+		log.Fatalf("Start server: %v", err)
+	}
+	log.Printf("Starting FileEngine on %s", ln.Addr())
 
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Starting FileEngine on %s", addr)
-	if err := server.Run(addr); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	served := make(chan error, 1)
+	go func() { served <- a.Wait() }()
+	select {
+	case err := <-served:
+		if err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("Shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := a.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Shutdown: %v", err)
+		}
 	}
 }
