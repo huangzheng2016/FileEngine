@@ -21,9 +21,8 @@ config.yaml
 deploy/.env
 deploy/data
 
-# Wails
-wails/build
-wails/bin
+# Taskfile build output
+bin
 
 # OS / IDE
 .DS_Store
