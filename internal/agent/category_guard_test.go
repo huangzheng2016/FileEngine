@@ -12,7 +12,7 @@ import (
 func setupGuardTest(t *testing.T) (*db.Repository, *ToolBuilder) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
 	return repo, tb
 }
 

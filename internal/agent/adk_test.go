@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,32 +13,49 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
-// scriptedModel answers the first Generate call with a tool call and the
-// second with the final assistant message.
+// scriptedModel streams a reasoning + text + tool-call answer on its first
+// call and a plain text answer on its second. emptyCallID simulates models
+// that omit tool call ids.
 type scriptedModel struct {
-	calls int
+	calls       int
+	emptyCallID bool
+}
+
+func (m *scriptedModel) chunks() []*schema.Message {
+	m.calls++
+	usage := &schema.ResponseMeta{Usage: &schema.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}}
+	if m.calls == 1 {
+		id := "call_1"
+		if m.emptyCallID {
+			id = ""
+		}
+		idx := 0
+		return []*schema.Message{
+			{Role: schema.Assistant, ReasoningContent: "think"},
+			{Role: schema.Assistant, Content: "Let me "},
+			{Role: schema.Assistant, Content: "echo."},
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Index: &idx, ID: id, Type: "function",
+				Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":`}}}},
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Index: &idx,
+				Function: schema.FunctionCall{Arguments: `"hi"}`}}}, ResponseMeta: usage},
+		}
+	}
+	return []*schema.Message{
+		{Role: schema.Assistant, Content: "do"},
+		{Role: schema.Assistant, Content: "ne", ResponseMeta: usage},
+	}
 }
 
 func (m *scriptedModel) Generate(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {
-	m.calls++
-	if m.calls == 1 {
-		return &schema.Message{
-			Role: schema.Assistant,
-			ToolCalls: []schema.ToolCall{{
-				ID:       "call_1",
-				Type:     "function",
-				Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":"hi"}`},
-			}},
-		}, nil
-	}
-	return &schema.Message{Role: schema.Assistant, Content: "done"}, nil
+	return schema.ConcatMessages(m.chunks())
 }
 
 func (m *scriptedModel) Stream(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
-	return nil, errors.New("streaming not supported by scriptedModel")
+	return schema.StreamReaderFromArray(m.chunks()), nil
 }
 
 func (m *scriptedModel) BindTools(_ []*schema.ToolInfo) error { return nil }
@@ -51,34 +68,65 @@ type echoOutput struct {
 	Text string `json:"text"`
 }
 
-func TestRunADKOnceForwardsStepEvents(t *testing.T) {
-	ctx := context.Background()
-
-	echoTool, err := utils.InferTool("echo", "echo back the text", func(_ context.Context, in *echoInput) (*echoOutput, error) {
-		return &echoOutput{Text: in.Text}, nil
-	})
-	if err != nil {
-		t.Fatalf("build echo tool: %v", err)
+func newEchoAgent(t *testing.T, model einomodel.ChatModel, echo tool.BaseTool) *adk.ChatModelAgent {
+	t.Helper()
+	if config.Get() == nil {
+		config.Update(&config.Config{})
 	}
-
-	adkAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:  "test-agent",
-		Model: &scriptedModel{},
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{echoTool}},
-		},
-		MaxIterations: 3,
+	if echo == nil {
+		var err error
+		echo, err = utils.InferTool("echo", "echo back the text", func(_ context.Context, in *echoInput) (*echoOutput, error) {
+			return &echoOutput{Text: in.Text}, nil
+		})
+		if err != nil {
+			t.Fatalf("build echo tool: %v", err)
+		}
+	}
+	a, err := adk.NewChatModelAgent(context.Background(), &adk.ChatModelAgentConfig{
+		Name:             "test-agent",
+		Model:            model,
+		ToolsConfig:      adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{echo}}},
+		MaxIterations:    3,
+		ModelRetryConfig: modelRetryConfig(),
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
+	return a
+}
 
-	logger := NewLogger(nil, 200, 5)
+type streamEvent struct {
+	Type string
+	Data map[string]any
+}
 
-	ch := db.SubscribeEvents(200)
-	defer db.UnsubscribeEvents(200, ch)
+// collectEvents flushes pending deltas and drains everything sub received.
+func collectEvents(t *testing.T, sub *db.Subscriber) []streamEvent {
+	t.Helper()
+	db.FlushEvents()
+	var out []streamEvent
+	for {
+		select {
+		case ev := <-sub.C:
+			var d map[string]any
+			if err := json.Unmarshal([]byte(ev.Data), &d); err != nil {
+				t.Fatalf("event %s data: %v", ev.Type, err)
+			}
+			out = append(out, streamEvent{Type: ev.Type, Data: d})
+		case <-time.After(100 * time.Millisecond):
+			return out
+		}
+	}
+}
 
-	msg, err := runADKOnce(ctx, adkAgent, []*schema.Message{{Role: schema.User, Content: "go"}}, logger)
+func TestRunADKOnceStreamsEvents(t *testing.T) {
+	setupToolTestRepo(t)
+	const sid = 200
+	sub := db.Subscribe(sid)
+	defer db.Unsubscribe(sub)
+
+	logger := NewLogger(sid, 9, 5)
+	msg, err := runADKOnce(context.Background(), newEchoAgent(t, &scriptedModel{}, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger)
 	if err != nil {
 		t.Fatalf("runADKOnce: %v", err)
 	}
@@ -86,31 +134,114 @@ func TestRunADKOnceForwardsStepEvents(t *testing.T) {
 		t.Fatalf("final message: %+v", msg)
 	}
 
-	// 1st event: tool_call for echo
-	ev := recvBusEvent(t, ch)
-	p1, ok := ev.Payload.(db.ToolCallPayload)
-	if ev.Type != db.EventToolCall || !ok {
-		t.Fatalf("event 1: type=%q payload=%+v", ev.Type, ev.Payload)
+	evs := collectEvents(t, sub)
+	var types []string
+	for _, e := range evs {
+		types = append(types, e.Type)
+		if e.Data["run_id"] != float64(9) || e.Data["worker_id"] != float64(5) {
+			t.Fatalf("%s lacks run/worker ids: %v", e.Type, e.Data)
+		}
 	}
-	if p1.WorkerID != 5 || p1.ToolName != "echo" || p1.Input != `{"text":"hi"}` {
-		t.Fatalf("tool_call payload: %+v", p1)
+	want := []string{db.EvReasoning, db.EvText, db.EvMessage, db.EvToolCall, db.EvToolResult, db.EvText, db.EvMessage}
+	if len(types) != len(want) {
+		t.Fatalf("event types = %v, want %v", types, want)
 	}
-
-	// 2nd event: tool_result for echo
-	ev = recvBusEvent(t, ch)
-	p2, ok := ev.Payload.(db.ToolResultPayload)
-	if ev.Type != db.EventToolResult || !ok {
-		t.Fatalf("event 2: type=%q payload=%+v", ev.Type, ev.Payload)
-	}
-	if p2.WorkerID != 5 || p2.ToolName != "echo" || !p2.OK || p2.Output == "" {
-		t.Fatalf("tool_result payload: %+v", p2)
+	for i := range want {
+		if types[i] != want[i] {
+			t.Fatalf("event types = %v, want %v", types, want)
+		}
 	}
 
-	// The final assistant message is NOT emitted by runADKOnce — the caller
-	// logs it via LogMessage with token usage.
-	select {
-	case ev := <-ch:
-		t.Fatalf("unexpected extra event: %s %+v", ev.Type, ev.Payload)
-	case <-time.After(100 * time.Millisecond):
+	m1 := evs[0].Data["msg_id"]
+	if evs[1].Data["msg_id"] != m1 || evs[2].Data["msg_id"] != m1 {
+		t.Fatalf("first message deltas and finalization must share msg_id: %v", evs[:3])
+	}
+	if evs[0].Data["delta"] != "think" || evs[1].Data["delta"] != "Let me echo." {
+		t.Fatalf("coalesced deltas: %v / %v", evs[0].Data, evs[1].Data)
+	}
+	if evs[2].Data["role"] != "assistant" || evs[2].Data["content"] != "Let me echo." {
+		t.Fatalf("finalizing message: %v", evs[2].Data)
+	}
+
+	call, res := evs[3].Data, evs[4].Data
+	args, _ := call["args"].(map[string]any)
+	if call["call_id"] != "call_1" || call["name"] != "echo" || args["text"] != "hi" {
+		t.Fatalf("tool_call: %v", call)
+	}
+	out, _ := res["output"].(map[string]any)
+	if res["call_id"] != "call_1" || res["name"] != "echo" || res["ok"] != true || out["text"] != "hi" {
+		t.Fatalf("tool_result: %v", res)
+	}
+	if _, has := res["duration_ms"]; !has {
+		t.Fatalf("tool_result lacks duration_ms: %v", res)
+	}
+
+	m2 := evs[5].Data["msg_id"]
+	if m2 == m1 || evs[6].Data["msg_id"] != m2 || evs[6].Data["content"] != "done" {
+		t.Fatalf("second message: %v / %v", evs[5].Data, evs[6].Data)
+	}
+}
+
+// Models that omit tool call ids still get a generated call_id that pairs
+// the tool_call with its tool_result.
+func TestRunADKOnceGeneratesCallIDs(t *testing.T) {
+	setupToolTestRepo(t)
+	const sid = 202
+	sub := db.Subscribe(sid)
+	defer db.Unsubscribe(sub)
+
+	logger := NewLogger(sid, 1, 0)
+	if _, err := runADKOnce(context.Background(), newEchoAgent(t, &scriptedModel{emptyCallID: true}, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger); err != nil {
+		t.Fatalf("runADKOnce: %v", err)
+	}
+	var callID, resultID any
+	for _, e := range collectEvents(t, sub) {
+		switch e.Type {
+		case db.EvToolCall:
+			callID = e.Data["call_id"]
+		case db.EvToolResult:
+			resultID = e.Data["call_id"]
+		}
+	}
+	if callID == nil || callID == "" || callID != resultID {
+		t.Fatalf("call_id %v / result call_id %v", callID, resultID)
+	}
+}
+
+// Under streaming the token tracker still counts usage (Stream path), and
+// runADKWithRetry adds it to the run totals.
+func TestRunADKWithRetryCountsStreamingTokens(t *testing.T) {
+	setupToolTestRepo(t)
+	tracker := newTokenTrackingModel(&scriptedModel{})
+	logger := NewLogger(203, 1, 0)
+	if _, err := runADKWithRetry(context.Background(), newEchoAgent(t, tracker, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "test", tracker); err != nil {
+		t.Fatalf("runADKWithRetry: %v", err)
+	}
+	tok := logger.Tokens()
+	if tok.Prompt != 20 || tok.Completion != 10 || tok.Total != 30 {
+		t.Fatalf("run tokens = %+v, want 20/10/30 over two streamed model calls", tok)
+	}
+	if other := logger.ForWorker(3).Tokens(); other != tok {
+		t.Fatalf("worker loggers must share the run totals: %+v vs %+v", other, tok)
+	}
+}
+
+func TestToolOutcome(t *testing.T) {
+	cases := []struct {
+		out any
+		ok  bool
+		err string
+	}{
+		{map[string]any{"files": []any{}}, true, ""},
+		{map[string]any{"success": true}, true, ""},
+		{map[string]any{"success": false, "error": "名称重复"}, false, "名称重复"},
+		{map[string]any{"error": "file not found"}, false, "file not found"},
+		{"plain text", true, ""},
+	}
+	for _, c := range cases {
+		ok, err := toolOutcome(c.out)
+		if ok != c.ok || err != c.err {
+			t.Errorf("toolOutcome(%v) = %v %q, want %v %q", c.out, ok, err, c.ok, c.err)
+		}
 	}
 }

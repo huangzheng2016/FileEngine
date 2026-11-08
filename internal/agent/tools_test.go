@@ -75,7 +75,7 @@ func TestSetTargetRejectsIllegalPaths(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	seedFile(t, repo, 1, "incoming/photo.jpg", "file")
 
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{}, false)
+	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 
 	bad := []string{"/", "..", "../escape", "/../etc/passwd", "/organized/../../escape"}
 	for _, p := range bad {
@@ -102,7 +102,7 @@ func TestSetTargetValidAndClear(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	seedFile(t, repo, 1, "incoming/photo.jpg", "file")
 
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{}, false)
+	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 
 	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "incoming/photo.jpg", NewPath: "/organized/photos/photo.jpg"}); err != nil {
 		t.Fatalf("setTarget valid: %v", err)
@@ -125,7 +125,7 @@ func TestSetTargetValidAndClear(t *testing.T) {
 // Category paths become new_path prefixes, so they follow the same rules.
 func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
 
 	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err != nil || out.Success {
 		t.Fatalf("createCategory with escaping path: got %+v, %v — want non-fatal rejection", out, err)
@@ -164,7 +164,7 @@ func TestSetTargetCascadeClearWarning(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	seedFile(t, repo, 1, "db", "directory")
 	seedFile(t, repo, 1, "db/azure", "directory")
-	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(nil, 1, 0), config.AgentConfig{}, &db.ScanSession{}, false)
+	tb := NewToolBuilder(repo, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{}, false)
 
 	if _, err := tb.setTarget(context.Background(), &SetTargetInput{Path: "db/azure", NewPath: "/backups/database/azure"}); err != nil {
 		t.Fatalf("child set: %v", err)

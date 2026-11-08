@@ -1,44 +1,51 @@
 package agent
 
 import (
-	"encoding/json"
-	"log"
+	"fmt"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"FileEngine/internal/db"
 )
 
-const logBufferSize = 20
+// runUsage is the state shared by all loggers of one run: token usage and
+// the id counter that keeps msg / call / unit ids unique within the run.
+type runUsage struct {
+	mu     sync.Mutex
+	tokens db.TokenCounts
+	seq    atomic.Uint64
+}
 
+// Logger emits the stream events of one worker lane of one run. Loggers of
+// the same run (ForWorker) share the run's token accumulator, which feeds
+// AgentRun's token columns when the run finishes.
 type Logger struct {
-	repo      *db.Repository
 	sessionID uint
+	runID     uint
 	workerID  int
-	batch     int
-	buffer    []*db.AgentLog
-	mu        sync.Mutex
+	usage     *runUsage
+
+	mu     sync.Mutex
+	batch  int
+	unitID string
 }
 
-// NewLogger creates a session-scoped logger for one agent worker lane.
-// workerID lands in every SSE payload and persisted row so the frontend can
-// render per-worker lanes; single-worker runs (instruct) pass 0.
-func NewLogger(repo *db.Repository, sessionID uint, workerID int) *Logger {
-	return &Logger{
-		repo:      repo,
-		sessionID: sessionID,
-		workerID:  workerID,
-		buffer:    make([]*db.AgentLog, 0, logBufferSize),
-	}
+// NewLogger creates the logger of worker lane workerID of a run.
+func NewLogger(sessionID, runID uint, workerID int) *Logger {
+	return &Logger{sessionID: sessionID, runID: runID, workerID: workerID, usage: &runUsage{}}
 }
 
-func (l *Logger) WorkerID() int {
-	return l.workerID
+// ForWorker returns a logger for another worker lane of the same run.
+func (l *Logger) ForWorker(workerID int) *Logger {
+	return &Logger{sessionID: l.sessionID, runID: l.runID, workerID: workerID, usage: l.usage}
 }
 
-// SetBatch moves the internal batch cursor (persisted as agent_logs.batch_index
-// and stamped onto file_entries by mark_tagged). It is no longer exposed on
-// the event stream — lanes replaced batch grouping there.
+func (l *Logger) SessionID() uint { return l.sessionID }
+func (l *Logger) RunID() uint     { return l.runID }
+func (l *Logger) WorkerID() int   { return l.workerID }
+
+// SetBatch moves the internal batch cursor stamped onto file_entries by
+// mark_tagged. It never appears on the event stream.
 func (l *Logger) SetBatch(batch int) {
 	l.mu.Lock()
 	l.batch = batch
@@ -51,141 +58,91 @@ func (l *Logger) GetBatch() int {
 	return l.batch
 }
 
-func (l *Logger) LogMessage(role, content string, promptTokens, cachedTokens, completionTokens, totalTokens int) {
-	l.mu.Lock()
-	batch := l.batch
-	l.mu.Unlock()
-
-	log := &db.AgentLog{
-		ScanSessionID:    l.sessionID,
-		BatchIndex:       batch,
-		WorkerID:         l.workerID,
-		Role:             role,
-		Content:          content,
-		PromptTokens:     promptTokens,
-		CachedTokens:     cachedTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      totalTokens,
-		CreatedAt:        time.Now(),
-	}
-	l.save(log)
-	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
-		SessionID:        l.sessionID,
-		WorkerID:         l.workerID,
-		Role:             role,
-		Content:          content,
-		PromptTokens:     promptTokens,
-		CachedTokens:     cachedTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:      totalTokens,
-	}})
+// nextID returns a run-unique id with the given prefix ("m", "call", "u").
+func (l *Logger) nextID(prefix string) string {
+	return fmt.Sprintf("%s%d-%d", prefix, l.workerID, l.usage.seq.Add(1))
 }
 
-// EmitMessage publishes a transient message event without persisting it.
-// Used for intermediate assistant steps; the final assistant message of a run
-// goes through LogMessage (persisted + published, with token counts).
-func (l *Logger) EmitMessage(role, content string) {
-	db.PublishEvent(db.Event{Type: db.EventMessage, SessionID: l.sessionID, Payload: db.MessagePayload{
-		SessionID: l.sessionID,
-		WorkerID:  l.workerID,
-		Role:      role,
-		Content:   content,
-	}})
+// NewMsgID allocates the msg_id of a new message on this lane.
+func (l *Logger) NewMsgID() string { return l.nextID("m") }
+
+// AddUsage adds one attempt's token usage to the run.
+func (l *Logger) AddUsage(t db.TokenCounts) {
+	l.usage.mu.Lock()
+	defer l.usage.mu.Unlock()
+	u := &l.usage.tokens
+	u.Prompt += t.Prompt
+	u.Cached += t.Cached
+	u.CacheWrite += t.CacheWrite
+	u.Completion += t.Completion
+	u.Total += t.Total
 }
 
-// EmitPullBegin announces this worker starting one work unit (directory,
-// loose-file pull, instruct run) on the session bus. count is the number of
-// files pulled (0 for directory/instruct units); cursor is the starting
-// cursor (smallest file id of a loose-file pull).
-func (l *Logger) EmitPullBegin(label string, count int, cursor uint) {
-	db.PublishEvent(db.Event{Type: db.EventPullBegin, SessionID: l.sessionID, Payload: db.PullBeginPayload{
-		SessionID: l.sessionID,
-		WorkerID:  l.workerID,
-		Label:     label,
-		Count:     count,
-		Cursor:    cursor,
-	}})
+// Tokens returns the run's accumulated token usage.
+func (l *Logger) Tokens() db.TokenCounts {
+	l.usage.mu.Lock()
+	defer l.usage.mu.Unlock()
+	return l.usage.tokens
 }
 
-// EmitPullDone settles this worker's current work unit: tagged files
-// classified, failed files missed or failed outright.
-func (l *Logger) EmitPullDone(label string, tagged, failed int) {
-	db.PublishEvent(db.Event{Type: db.EventPullDone, SessionID: l.sessionID, Payload: db.PullDonePayload{
-		SessionID: l.sessionID,
-		WorkerID:  l.workerID,
-		Label:     label,
-		Tagged:    tagged,
-		Failed:    failed,
-	}})
+func (l *Logger) emit(typ string, data any) {
+	db.Emit(l.sessionID, l.runID, typ, data)
 }
 
-// EmitToolCall publishes one model-requested tool invocation.
-func (l *Logger) EmitToolCall(toolName, input string) {
-	db.PublishEvent(db.Event{Type: db.EventToolCall, SessionID: l.sessionID, Payload: db.ToolCallPayload{
-		SessionID: l.sessionID,
-		WorkerID:  l.workerID,
-		ToolName:  toolName,
-		Input:     input,
-	}})
+// LogMessage emits one complete message (role user / assistant / system).
+func (l *Logger) LogMessage(role, content string) {
+	l.EmitMessage(l.NewMsgID(), role, content)
 }
 
-// EmitToolResult publishes one tool execution result.
-func (l *Logger) EmitToolResult(toolName, output string, ok bool) {
-	db.PublishEvent(db.Event{Type: db.EventToolResult, SessionID: l.sessionID, Payload: db.ToolResultPayload{
-		SessionID: l.sessionID,
-		WorkerID:  l.workerID,
-		ToolName:  toolName,
-		Output:    output,
-		OK:        ok,
-	}})
+// EmitMessage emits a complete message with a known msg_id; for assistant
+// messages it finalizes the text deltas streamed under the same msg_id.
+func (l *Logger) EmitMessage(msgID, role, content string) {
+	l.emit(db.EvMessage, db.MessageData{RunID: l.runID, WorkerID: l.workerID, MsgID: msgID, Role: role, Content: content})
 }
 
-func (l *Logger) LogToolCall(toolName string, input, output interface{}) {
-	l.mu.Lock()
-	batch := l.batch
-	l.mu.Unlock()
-
-	inputJSON, _ := json.Marshal(input)
-	outputJSON, _ := json.Marshal(output)
-
-	log := &db.AgentLog{
-		ScanSessionID: l.sessionID,
-		BatchIndex:    batch,
-		WorkerID:      l.workerID,
-		Role:          "tool",
-		ToolName:      toolName,
-		ToolInput:     string(inputJSON),
-		ToolOutput:    string(outputJSON),
-		CreatedAt:     time.Now(),
-	}
-	l.save(log)
-}
-
-func (l *Logger) save(entry *db.AgentLog) {
-	l.mu.Lock()
-	l.buffer = append(l.buffer, entry)
-	shouldFlush := len(l.buffer) >= logBufferSize
-	l.mu.Unlock()
-
-	if shouldFlush {
-		l.Flush()
-	}
-}
-
-// Flush writes all buffered logs to DB in a single batch.
-func (l *Logger) Flush() {
-	l.mu.Lock()
-	if len(l.buffer) == 0 {
-		l.mu.Unlock()
+// EmitDelta emits a text or reasoning delta of an assistant message.
+func (l *Logger) EmitDelta(typ, msgID, delta string) {
+	if delta == "" {
 		return
 	}
-	batch := l.buffer
-	l.buffer = make([]*db.AgentLog, 0, logBufferSize)
-	l.mu.Unlock()
+	l.emit(typ, db.DeltaData{RunID: l.runID, WorkerID: l.workerID, MsgID: msgID, Delta: delta})
+}
 
-	if err := db.WithRetry(func() error {
-		return l.repo.CreateAgentLogs(batch)
-	}); err != nil {
-		log.Printf("logger: failed to flush %d logs: %v", len(batch), err)
+// EmitToolCall emits one model-requested tool invocation.
+func (l *Logger) EmitToolCall(callID, name string, args any) {
+	l.emit(db.EvToolCall, db.ToolCallData{RunID: l.runID, WorkerID: l.workerID, CallID: callID, Name: name, Args: args})
+}
+
+// EmitToolResult emits the result of the tool call callID.
+func (l *Logger) EmitToolResult(r db.ToolResultData) {
+	r.RunID, r.WorkerID = l.runID, l.workerID
+	l.emit(db.EvToolResult, r)
+}
+
+// EmitPullBegin starts a work unit on this lane (directory path, "N 个文件",
+// instruction); count is the number of files pulled (0 if not applicable).
+func (l *Logger) EmitPullBegin(label string, count int) {
+	id := l.nextID("u")
+	l.mu.Lock()
+	l.unitID = id
+	l.mu.Unlock()
+	l.emit(db.EvPullBegin, db.PullBeginData{RunID: l.runID, WorkerID: l.workerID, UnitID: id, Label: label, Count: count})
+}
+
+// EmitPullDone settles the lane's current work unit.
+func (l *Logger) EmitPullDone(tagged, failed int) {
+	l.mu.Lock()
+	id := l.unitID
+	l.unitID = ""
+	l.mu.Unlock()
+	if id == "" {
+		return
 	}
+	l.emit(db.EvPullDone, db.PullDoneData{RunID: l.runID, WorkerID: l.workerID, UnitID: id, Tagged: tagged, Failed: failed})
+}
+
+// EmitProgress emits the run's absolute progress counters.
+func (l *Logger) EmitProgress(p db.ProgressData) {
+	p.RunID = l.runID
+	l.emit(db.EvProgress, p)
 }

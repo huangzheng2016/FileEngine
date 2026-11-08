@@ -2,101 +2,59 @@ package agent
 
 import (
 	"testing"
-	"time"
 
 	"FileEngine/internal/db"
 )
 
-func recvBusEvent(t *testing.T, ch chan db.Event) db.Event {
-	t.Helper()
-	select {
-	case ev := <-ch:
-		return ev
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for event")
-		return db.Event{}
+func TestLoggerEmitsRunScopedEvents(t *testing.T) {
+	setupToolTestRepo(t)
+	const sid = 100
+	sub := db.Subscribe(sid)
+	defer db.Unsubscribe(sub)
+
+	l := NewLogger(sid, 4, 2)
+	l.EmitPullBegin("照片", 3)
+	l.LogMessage("user", "hello")
+	l.EmitPullDone(2, 1)
+	l.EmitPullDone(0, 0) // no open unit: ignored
+	l.EmitProgress(db.ProgressData{Phase: db.RunPhaseTagging, Total: 10, Tagged: 2})
+
+	evs := collectEvents(t, sub)
+	if len(evs) != 4 {
+		t.Fatalf("got %d events: %+v", len(evs), evs)
+	}
+	begin, msg, done, prog := evs[0], evs[1], evs[2], evs[3]
+	if begin.Type != db.EvPullBegin || begin.Data["label"] != "照片" || begin.Data["count"] != float64(3) || begin.Data["unit_id"] == "" {
+		t.Fatalf("pull_begin: %+v", begin)
+	}
+	if done.Type != db.EvPullDone || done.Data["unit_id"] != begin.Data["unit_id"] || done.Data["tagged"] != float64(2) || done.Data["failed"] != float64(1) {
+		t.Fatalf("pull_done: %+v", done)
+	}
+	if msg.Type != db.EvMessage || msg.Data["role"] != "user" || msg.Data["content"] != "hello" || msg.Data["msg_id"] == "" {
+		t.Fatalf("message: %+v", msg)
+	}
+	if prog.Type != db.EvProgress || prog.Data["run_id"] != float64(4) || prog.Data["total"] != float64(10) {
+		t.Fatalf("progress: %+v", prog)
+	}
+	for _, e := range evs[:3] {
+		if e.Data["run_id"] != float64(4) || e.Data["worker_id"] != float64(2) {
+			t.Fatalf("%s lacks run/worker ids: %v", e.Type, e.Data)
+		}
 	}
 }
 
-// A logger with a nil repo is safe as long as the buffer never reaches the
-// flush threshold; these tests stay well below it.
-func TestLoggerLogMessagePublishesToBus(t *testing.T) {
-	ch := db.SubscribeEvents(100)
-	defer db.UnsubscribeEvents(100, ch)
-
-	l := NewLogger(nil, 100, 7)
-	l.SetBatch(3)
-	l.LogMessage("assistant", "final answer", 10, 5, 20, 30)
-
-	ev := recvBusEvent(t, ch)
-	if ev.Type != db.EventMessage {
-		t.Fatalf("event type: got %q, want %q", ev.Type, db.EventMessage)
-	}
-	p, ok := ev.Payload.(db.MessagePayload)
-	if !ok {
-		t.Fatalf("payload type: got %T", ev.Payload)
-	}
-	if p.WorkerID != 7 || p.Role != "assistant" || p.Content != "final answer" ||
-		p.PromptTokens != 10 || p.CachedTokens != 5 || p.CompletionTokens != 20 || p.TotalTokens != 30 {
-		t.Fatalf("payload: %+v", p)
-	}
-}
-
-func TestLoggerLogToolCallDoesNotPublish(t *testing.T) {
-	ch := db.SubscribeEvents(101)
-	defer db.UnsubscribeEvents(101, ch)
-
-	// Tool-call records are DB-only; live tool events come from the ADK event
-	// loop (EmitToolCall/EmitToolResult) to avoid duplicates.
-	l := NewLogger(nil, 101, 0)
-	l.LogToolCall("list_files", map[string]int{"limit": 1}, map[string]int{"total": 1})
-
-	select {
-	case ev := <-ch:
-		t.Fatalf("unexpected event from LogToolCall: %+v", ev)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestLoggerEmitHelpers(t *testing.T) {
-	ch := db.SubscribeEvents(102)
-	defer db.UnsubscribeEvents(102, ch)
-
-	l := NewLogger(nil, 102, 2)
-	l.SetBatch(-1)
-
-	l.EmitPullBegin("instruct", 0, 0)
-	ev := recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.PullBeginPayload); ev.Type != db.EventPullBegin || !ok ||
-		p.WorkerID != 2 || p.Label != "instruct" {
-		t.Fatalf("pull_begin: type=%q payload=%+v", ev.Type, ev.Payload)
-	}
-
-	l.EmitPullDone("instruct", 3, 1)
-	ev = recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.PullDonePayload); ev.Type != db.EventPullDone || !ok ||
-		p.WorkerID != 2 || p.Label != "instruct" || p.Tagged != 3 || p.Failed != 1 {
-		t.Fatalf("pull_done: type=%q payload=%+v", ev.Type, ev.Payload)
-	}
-
-	l.EmitToolCall("read_file", `{"path":"a.txt"}`)
-	ev = recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.ToolCallPayload); ev.Type != db.EventToolCall || !ok ||
-		p.ToolName != "read_file" || p.Input != `{"path":"a.txt"}` {
-		t.Fatalf("tool_call: type=%q payload=%+v", ev.Type, ev.Payload)
-	}
-
-	l.EmitToolResult("read_file", `{"content":"x"}`, true)
-	ev = recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.ToolResultPayload); ev.Type != db.EventToolResult || !ok ||
-		p.ToolName != "read_file" || !p.OK {
-		t.Fatalf("tool_result: type=%q payload=%+v", ev.Type, ev.Payload)
-	}
-
-	l.EmitMessage("assistant", "thinking...")
-	ev = recvBusEvent(t, ch)
-	if p, ok := ev.Payload.(db.MessagePayload); ev.Type != db.EventMessage || !ok ||
-		p.Role != "assistant" || p.Content != "thinking..." || p.TotalTokens != 0 {
-		t.Fatalf("message: type=%q payload=%+v", ev.Type, ev.Payload)
+// Ids stay unique across all lanes of a run, including loggers recreated for
+// the same worker (e.g. one per depth level).
+func TestLoggerIDsUniqueWithinRun(t *testing.T) {
+	root := NewLogger(1, 1, 0)
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		for _, l := range []*Logger{root.ForWorker(1), root.ForWorker(1), root.ForWorker(2)} {
+			id := l.NewMsgID()
+			if seen[id] {
+				t.Fatalf("duplicate msg id %q", id)
+			}
+			seen[id] = true
+		}
 	}
 }

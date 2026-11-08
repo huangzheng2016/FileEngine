@@ -16,7 +16,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 	if err := repo.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
-	session := &db.ScanSession{FilesystemID: fs.ID, Status: "tagged"}
+	session := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 		t.Fatalf("set target: %v", err)
 	}
 
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(nil, session.ID, 0))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(session.ID, 0, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if len(pruned) != 1 || !strings.Contains(pruned[0], "监控录像") {
@@ -71,11 +71,11 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	if err := repo.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
-	sessA := &db.ScanSession{FilesystemID: fs.ID, Status: "tagged"}
+	sessA := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(sessA); err != nil {
 		t.Fatalf("create session A: %v", err)
 	}
-	sessB := &db.ScanSession{FilesystemID: fs.ID, Status: "tagged"}
+	sessB := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(sessB); err != nil {
 		t.Fatalf("create session B: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	}
 
 	// The run-ending prune for session B must keep 历史分类 (zero in B, used in A).
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(nil, sessB.ID, 0))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(sessB.ID, 0, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if _, err := repo.GetCategoryByName(fs.ID, "历史分类"); err != nil {

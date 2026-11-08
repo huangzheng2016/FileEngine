@@ -143,7 +143,6 @@ func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*R
 	// context cancellation (user stop / run kill) stays a hard error.
 	fail := func(format string, args ...any) (*RunScriptOutput, error) {
 		err := fmt.Errorf(format, args...)
-		tb.logger.LogToolCall("run_script", input, map[string]string{"error": err.Error()})
 		return &RunScriptOutput{Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}, nil
 	}
 
@@ -164,7 +163,6 @@ func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*R
 		return fail("%s", err.Error())
 	}
 	out.DurationMs = time.Since(start).Milliseconds()
-	tb.logger.LogToolCall("run_script", input, out)
 	return out, nil
 }
 
