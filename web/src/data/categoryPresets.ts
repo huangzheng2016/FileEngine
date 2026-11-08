@@ -1,167 +1,120 @@
-// Built-in category templates with a matching category-creation policy text
-// per template. Names/descriptions/policy are bilingual; the UI picks the
-// current locale. Importing a template seeds only missing categories via the
-// existing category import endpoint (duplicates are skipped server-side).
+// Category templates: a policy text for the agent and the categories it starts from.
 
 export interface PresetCategory {
-  name: { 'zh-CN': string; en: string }
+  name: string
   path: string
-  description: { 'zh-CN': string; en: string }
+  description: string
 }
 
 export interface CategoryPreset {
   id: string
-  label: { 'zh-CN': string; en: string }
-  policy: { 'zh-CN': string; en: string }
+  label: string
+  policy: string
   categories: PresetCategory[]
 }
 
 export const categoryPresets: CategoryPreset[] = [
   {
     id: 'backup-archive',
-    label: { 'zh-CN': '备份归档型', en: 'Backup Archive' },
-    policy: {
-      'zh-CN': `分类创建规范（备份归档）：
-- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
-- 备份按内容类型入类（网站/数据库/配置/虚拟机镜像），绝不按时间、设备名或人名建类
-- 名称用语义化中文（网站备份/数据库备份/配置备份/虚拟机与镜像），路径用小写英文短横线（/website-backups）
-- 同义近义必须合并，禁止一词多类
-- 预期少于 5 个文件就不新建，归入更宽的上级分类
-- 拿不准一律进 /uncategorized`,
-      en: `Category creation policy (backup archive):
-- Exhaust existing categories first; create a new one only when nothing fits — merge whenever possible
-- File backups by content type (website/database/config/VM images), never by date, device name, or person
-- Use semantic Chinese names (网站备份/数据库备份/配置备份/虚拟机与镜像) with lowercase hyphenated English paths (/website-backups)
-- Merge synonyms and near-duplicates; never allow multiple categories for one concept
-- Do not create a category expecting fewer than 5 files; file them under a broader parent instead
-- When in doubt, file under /uncategorized`,
-    },
+    label: '备份归档型',
+    policy:
+      '分类创建规范（备份归档）：\n- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建\n- 备份按内容类型入类（网站/数据库/配置/虚拟机镜像）\n- 名称用语义化中文（网站备份/数据库备份/配置备份/虚拟机与镜像），路径用小写英文短横线（/website-backups）\n- 同义近义必须合并，禁止一词多类\n- 预期少于 5 个文件就不新建，归入更宽的上级分类\n- 拿不准一律进 /uncategorized',
     categories: [
       {
-        name: { 'zh-CN': '网站备份', en: 'Website Backups' },
+        name: '网站备份',
         path: '/website-backups',
-        description: { 'zh-CN': '网站源码与数据的备份归档', en: 'Website source and data backup archives' },
+        description: '网站源码与数据的备份归档',
       },
       {
-        name: { 'zh-CN': '数据库备份', en: 'Database Backups' },
+        name: '数据库备份',
         path: '/database-backups',
-        description: { 'zh-CN': '数据库导出与转储文件', en: 'Database exports and dump files' },
+        description: '数据库导出与转储文件',
       },
       {
-        name: { 'zh-CN': '配置备份', en: 'Config Backups' },
+        name: '配置备份',
         path: '/config-backups',
-        description: { 'zh-CN': '服务与系统的配置文件备份', en: 'Configuration backups for services and systems' },
+        description: '服务与系统的配置文件备份',
       },
       {
-        name: { 'zh-CN': '虚拟机与镜像', en: 'VMs & Images' },
+        name: '虚拟机与镜像',
         path: '/vm-images',
-        description: { 'zh-CN': '虚拟机磁盘与系统镜像文件', en: 'Virtual machine disks and system images' },
+        description: '虚拟机磁盘与系统镜像文件',
       },
       {
-        name: { 'zh-CN': '安装包', en: 'Packages' },
+        name: '安装包',
         path: '/packages',
-        description: { 'zh-CN': '软件安装包与发行文件', en: 'Software installers and distribution packages' },
+        description: '软件安装包与发行文件',
       },
       {
-        name: { 'zh-CN': '文档资料', en: 'Documents' },
+        name: '文档资料',
         path: '/documents',
-        description: { 'zh-CN': '文档与参考资料', en: 'Documents and reference materials' },
+        description: '文档与参考资料',
       },
     ],
   },
   {
     id: 'media-library',
-    label: { 'zh-CN': '媒体库型', en: 'Media Library' },
-    policy: {
-      'zh-CN': `分类创建规范（媒体库）：
-- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
-- 媒体按内容类型建类（照片/视频/音乐/监控录像），绝不按日期、事件或设备名建类
-- 名称用语义化中文（照片/视频/音乐/监控录像），路径用小写英文短横线（/photos）
-- 同义近义必须合并，禁止一词多类
-- 预期少于 5 个文件就不新建，归入更宽的上级分类
-- 拿不准一律进 /uncategorized`,
-      en: `Category creation policy (media library):
-- Exhaust existing categories first; create a new one only when nothing fits — merge whenever possible
-- File media by content type (photos/videos/music/surveillance), never by date, event, or device name
-- Use semantic Chinese names (照片/视频/音乐/监控录像) with lowercase hyphenated English paths (/photos)
-- Merge synonyms and near-duplicates; never allow multiple categories for one concept
-- Do not create a category expecting fewer than 5 files; file them under a broader parent instead
-- When in doubt, file under /uncategorized`,
-    },
+    label: '媒体库型',
+    policy:
+      '分类创建规范（媒体库）：\n- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建\n- 媒体按内容类型建类（照片/视频/音乐/监控录像）\n- 名称用语义化中文（照片/视频/音乐/监控录像），路径用小写英文短横线（/photos）\n- 同义近义必须合并，禁止一词多类\n- 预期少于 5 个文件就不新建，归入更宽的上级分类\n- 拿不准一律进 /uncategorized',
     categories: [
       {
-        name: { 'zh-CN': '照片', en: 'Photos' },
+        name: '照片',
         path: '/photos',
-        description: { 'zh-CN': '照片与图片文件', en: 'Photos and image files' },
+        description: '照片与图片文件',
       },
       {
-        name: { 'zh-CN': '视频', en: 'Videos' },
+        name: '视频',
         path: '/videos',
-        description: { 'zh-CN': '视频文件', en: 'Video files' },
+        description: '视频文件',
       },
       {
-        name: { 'zh-CN': '音乐', en: 'Music' },
+        name: '音乐',
         path: '/music',
-        description: { 'zh-CN': '音乐与音频文件', en: 'Music and audio files' },
+        description: '音乐与音频文件',
       },
       {
-        name: { 'zh-CN': '监控录像', en: 'Surveillance' },
+        name: '监控录像',
         path: '/surveillance',
-        description: { 'zh-CN': '安防监控录像文件', en: 'Surveillance camera recordings' },
+        description: '安防监控录像文件',
       },
       {
-        name: { 'zh-CN': '文档', en: 'Docs' },
+        name: '文档',
         path: '/docs',
-        description: { 'zh-CN': '相关文档资料', en: 'Related documents' },
+        description: '相关文档资料',
       },
     ],
   },
   {
     id: 'project-code',
-    label: { 'zh-CN': '项目代码型', en: 'Project Code' },
-    policy: {
-      'zh-CN': `分类创建规范（项目代码）：
-- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建
-- 源码与产物分离：项目源码归 /source-code，构建产物与依赖产物（dist/build/node_modules 等）归 /build-artifacts
-- 按"内容类型"建分类，不按人名/时间/设备名建
-- 名称用语义化中文（项目源码/构建产物/工具脚本），路径用小写英文短横线（/source-code）
-- 同义近义必须合并，禁止一词多类
-- 预期少于 5 个文件就不新建，归入更宽的上级分类
-- 拿不准一律进 /uncategorized`,
-      en: `Category creation policy (project code):
-- Exhaust existing categories first; create a new one only when nothing fits — merge whenever possible
-- Separate source from artifacts: project source goes to /source-code; build and dependency artifacts (dist/build/node_modules etc.) go to /build-artifacts
-- Create categories by content type, never by person, date, or device name
-- Use semantic Chinese names (项目源码/构建产物/工具脚本) with lowercase hyphenated English paths (/source-code)
-- Merge synonyms and near-duplicates; never allow multiple categories for one concept
-- Do not create a category expecting fewer than 5 files; file them under a broader parent instead
-- When in doubt, file under /uncategorized`,
-    },
+    label: '项目代码型',
+    policy:
+      '分类创建规范（项目代码）：\n- 先穷尽现有分类，确无合适归属才新建；能并入绝不新建\n- 源码与产物分离：项目源码归 /source-code，构建产物与依赖产物（dist/build/node_modules 等）归 /build-artifacts\n- 名称用语义化中文（项目源码/构建产物/工具脚本），路径用小写英文短横线（/source-code）\n- 同义近义必须合并，禁止一词多类\n- 预期少于 5 个文件就不新建，归入更宽的上级分类\n- 拿不准一律进 /uncategorized',
     categories: [
       {
-        name: { 'zh-CN': '项目源码', en: 'Source Code' },
+        name: '项目源码',
         path: '/source-code',
-        description: { 'zh-CN': '代码项目源码仓库', en: 'Source code repositories' },
+        description: '代码项目源码仓库',
       },
       {
-        name: { 'zh-CN': '构建产物', en: 'Build Artifacts' },
+        name: '构建产物',
         path: '/build-artifacts',
-        description: { 'zh-CN': '编译构建与依赖产物', en: 'Build outputs and dependency artifacts' },
+        description: '编译构建与依赖产物',
       },
       {
-        name: { 'zh-CN': '项目文档', en: 'Project Docs' },
+        name: '项目文档',
         path: '/project-docs',
-        description: { 'zh-CN': '项目文档', en: 'Project documentation' },
+        description: '项目文档',
       },
       {
-        name: { 'zh-CN': '工具脚本', en: 'Scripts' },
+        name: '工具脚本',
         path: '/scripts',
-        description: { 'zh-CN': '实用工具与脚本', en: 'Utility tools and scripts' },
+        description: '实用工具与脚本',
       },
       {
-        name: { 'zh-CN': '数据文件', en: 'Data Files' },
+        name: '数据文件',
         path: '/data',
-        description: { 'zh-CN': '项目数据文件', en: 'Project data files' },
+        description: '项目数据文件',
       },
     ],
   },

@@ -346,6 +346,56 @@ func (v *Target) Mkdir(path string, perm os.FileMode) ([]byte, error) {
 
 // Create a file with name the given mode
 func (v *Target) Create(path string, perm os.FileMode) ([]byte, error) {
+	return v.create(path, perm, 0)
+}
+
+// CreateGuarded creates a new file and opens it for writing; it fails with
+// os.ErrExist when the name already exists (GUARDED create), so an existing
+// file is never truncated or overwritten.
+func (v *Target) CreateGuarded(path string, perm os.FileMode) (*File, error) {
+	fh, err := v.create(path, perm, 1)
+	if err != nil {
+		return nil, err
+	}
+	return &File{Target: v, fsinfo: v.fsinfo, fh: fh}, nil
+}
+
+// Rename renames from to to (NFSPROC3_RENAME). NFS rename replaces an
+// existing target; callers that must not overwrite check for it first.
+func (v *Target) Rename(from, to string) error {
+	fromDir, fromName := filepath.Split(from)
+	_, fromFH, err := v.Lookup(fromDir)
+	if err != nil {
+		return err
+	}
+	toDir, toName := filepath.Split(to)
+	_, toFH, err := v.Lookup(toDir)
+	if err != nil {
+		return err
+	}
+
+	type RenameArgs struct {
+		rpc.Header
+		From Diropargs3
+		To   Diropargs3
+	}
+
+	_, err = v.call(&RenameArgs{
+		Header: rpc.Header{
+			Rpcvers: 2,
+			Prog:    Nfs3Prog,
+			Vers:    Nfs3Vers,
+			Proc:    NFSProc3Rename,
+			Cred:    v.auth,
+			Verf:    rpc.AuthNull,
+		},
+		From: Diropargs3{FH: fromFH, Filename: fromName},
+		To:   Diropargs3{FH: toFH, Filename: toName},
+	})
+	return err
+}
+
+func (v *Target) create(path string, perm os.FileMode, mode uint32) ([]byte, error) {
 	dir, newFile := filepath.Split(path)
 	_, fh, err := v.Lookup(dir)
 	if err != nil {
@@ -385,6 +435,7 @@ func (v *Target) Create(path string, perm os.FileMode) ([]byte, error) {
 			Filename: newFile,
 		},
 		HW: How{
+			Mode: mode,
 			Attr: Sattr3{
 				Mode: SetMode{
 					SetIt: true,

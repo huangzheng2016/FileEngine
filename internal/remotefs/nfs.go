@@ -2,6 +2,7 @@ package remotefs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -445,18 +446,25 @@ func (l *nfsLockedFile) Close() error {
 	return l.f.Close()
 }
 
-func (n *NFSFS) MoveFile(ctx context.Context, src, dst string) error {
-	// NFS client doesn't have Rename; use copy + delete
-	if err := n.CopyFile(ctx, src, dst); err != nil {
+func (n *NFSFS) MoveFile(_ context.Context, src, dst string) error {
+	srcFull, err := n.resolve(src)
+	if err != nil {
 		return err
 	}
-	srcFull, err := n.resolve(src)
+	dstFull, err := n.resolve(dst)
 	if err != nil {
 		return err
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.target.Remove(srcFull)
+	// NFS RENAME replaces an existing target; refuse instead.
+	if _, _, err := n.target.Lookup(dstFull); err == nil {
+		return existErr("nfs", "move", dst)
+	}
+	if err := n.target.Rename(srcFull, dstFull); err != nil {
+		return &OpError{Protocol: "nfs", Op: "move", Path: src, Err: err}
+	}
+	return nil
 }
 
 func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
@@ -464,7 +472,7 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	dstPath, err := n.resolve(dst)
+	dstFull, err := n.resolve(dst)
 	if err != nil {
 		return err
 	}
@@ -472,25 +480,42 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	// the same single-stream client without their own locking.
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	info, _, err := n.target.Lookup(srcFull)
+	if err != nil {
+		return &OpError{Protocol: "nfs", Op: "stat", Path: src, Err: err}
+	}
+	if info.IsDir() {
+		return &OpError{Protocol: "nfs", Op: "copy", Path: src, Err: ErrIsDir}
+	}
 	srcFile, err := n.target.Open(srcFull)
 	if err != nil {
-		return err
+		return &OpError{Protocol: "nfs", Op: "open", Path: src, Err: err}
 	}
-	defer srcFile.Close()
-
-	dstDir := path.Dir(dstPath)
-	n.target.Mkdir(dstDir, 0755)
-
-	dstFile, err := n.target.OpenFile(dstPath, 0644)
+	// GUARDED create: an existing dst fails with os.ErrExist instead of
+	// being written over without truncation.
+	dstFile, err := n.target.CreateGuarded(dstFull, 0644)
 	if err != nil {
+		return &OpError{Protocol: "nfs", Op: "create", Path: dst, Err: err}
+	}
+	written, err := io.Copy(dstFile, srcFile)
+	// Close issues COMMIT; its failure means the data may not be stable.
+	if cerr := dstFile.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && written != info.Size() {
+		err = shortCopyErr("nfs", dst, written, info.Size())
+	}
+	if err != nil {
+		n.target.Remove(dstFull)
+		if _, ok := err.(*OpError); !ok {
+			err = &OpError{Protocol: "nfs", Op: "copy", Path: dst, Err: err}
+		}
 		return err
 	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	return nil
 }
 
+// Delete removes one file or one empty directory.
 func (n *NFSFS) Delete(_ context.Context, p string) error {
 	fullPath, err := n.resolve(p)
 	if err != nil {
@@ -498,9 +523,21 @@ func (n *NFSFS) Delete(_ context.Context, p string) error {
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.target.RemoveAll(fullPath)
+	info, _, err := n.target.Lookup(fullPath)
+	if err == nil {
+		if info.IsDir() {
+			err = n.target.RmDir(fullPath)
+		} else {
+			err = n.target.Remove(fullPath)
+		}
+	}
+	if err != nil {
+		return &OpError{Protocol: "nfs", Op: "delete", Path: p, Err: err}
+	}
+	return nil
 }
 
+// MkdirAll creates each missing level; existing directories are fine.
 func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 	fullPath, err := n.resolve(p)
 	if err != nil {
@@ -508,8 +545,26 @@ func (n *NFSFS) MkdirAll(_ context.Context, p string) error {
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	_, err = n.target.Mkdir(fullPath, 0755)
-	return err
+	cur := ""
+	if path.IsAbs(fullPath) {
+		cur = "/"
+	}
+	for _, seg := range strings.Split(strings.Trim(fullPath, "/"), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		cur = path.Join(cur, seg)
+		if info, _, err := n.target.Lookup(cur); err == nil {
+			if !info.IsDir() {
+				return &OpError{Protocol: "nfs", Op: "mkdir", Path: p, Err: fmt.Errorf("%s exists and is not a directory", cur)}
+			}
+			continue
+		}
+		if _, err := n.target.Mkdir(cur, 0755); err != nil && !errors.Is(err, os.ErrExist) {
+			return &OpError{Protocol: "nfs", Op: "mkdir", Path: p, Err: err}
+		}
+	}
+	return nil
 }
 
 func (n *NFSFS) Close() error {

@@ -269,13 +269,11 @@ func uniqueTarget(tx *gorm.DB, sessionID uint, originalPath, target string) (str
 		if n > 1 {
 			candidate = CollisionName(target, n)
 		}
-		var taken int64
-		if err := tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND new_path = ? AND original_path <> ?", sessionID, candidate, originalPath).
-			Count(&taken).Error; err != nil {
+		taken, err := targetTaken(tx, sessionID, candidate, originalPath)
+		if err != nil {
 			return "", err
 		}
-		if taken == 0 {
+		if !taken {
 			return candidate, nil
 		}
 	}

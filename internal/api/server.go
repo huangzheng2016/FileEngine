@@ -54,13 +54,15 @@ func (s *Server) setupRouter() {
 		api.GET("/sessions/:id/events", s.listSessionEvents)
 		api.GET("/sessions/:id/events/stream", s.streamSessionEvents)
 
-		api.GET("/sessions/:id/execute/validate", s.validatePlans)
+		api.GET("/sessions/:id/execute/check", s.checkExecute)
+		api.POST("/runs/:run_id/revert", s.revertRun)
+		api.GET("/sessions/:id/locate", s.locateEntries)
 		api.GET("/sessions/:id/plans", s.getPlans)
 		api.GET("/sessions/:id/plans/export", s.exportPlans)
 		api.POST("/sessions/:id/plans/reset", s.resetPlans)
 		api.GET("/sessions/:id/preview/tree", s.previewTree)
 
-		// Session plan (整理方案)
+		// Session plan
 		api.GET("/sessions/:id/plan", s.getPlan)
 		api.PUT("/sessions/:id/plan", s.updatePlan)
 		api.POST("/sessions/:id/plan/approve", s.approvePlan)

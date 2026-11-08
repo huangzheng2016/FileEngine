@@ -211,7 +211,7 @@ func TestRunBusyAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	code, body := doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%d/execute", sess.ID), nil)
+	code, body := doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%d/execute", sess.ID), map[string]any{"mode": "copy"})
 	if code != http.StatusConflict || body["error"] != db.ErrSessionBusy.Error() {
 		t.Fatalf("busy session: code %d body %v, want 409", code, body)
 	}
