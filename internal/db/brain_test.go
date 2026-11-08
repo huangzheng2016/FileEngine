@@ -311,3 +311,28 @@ func TestResetPlansUntagsDirectorySubtree(t *testing.T) {
 		t.Fatal("ids of another session must be ignored")
 	}
 }
+
+func TestSetTargetUniqueCaseAndNFCInsensitive(t *testing.T) {
+	r := setupBrainRepo(t)
+	seedEntry(t, r, 1, "a/1", "file", 1)
+	seedEntry(t, r, 1, "a/2", "file", 1)
+	seedEntry(t, r, 1, "a/3", "file", 1)
+	first, _, _ := r.SetTargetUnique(1, "a/1", "Docs/Café.txt", "file")
+	second, _, _ := r.SetTargetUnique(1, "a/2", "docs/café.TXT", "file")
+	third, _, _ := r.SetTargetUnique(1, "a/3", "DOCS/CAFÉ.txt", "file")
+	if first != "/Docs/Café.txt" || second == "/docs/café.TXT" {
+		t.Fatalf("NFD/case variant must be renamed: %q %q", first, second)
+	}
+	if CollisionKey(first) == CollisionKey(second) || CollisionKey(third) == CollisionKey(first) || CollisionKey(third) == CollisionKey(second) {
+		t.Fatalf("keys still collide: %q %q %q", first, second, third)
+	}
+}
+
+func TestCollisionKey(t *testing.T) {
+	if CollisionKey("/A/Café.TXT") != CollisionKey("a/café.txt") {
+		t.Fatal("case/NFC variants must share a key")
+	}
+	if CollisionKey("a/b") == CollisionKey("a/c") {
+		t.Fatal("distinct paths must differ")
+	}
+}
