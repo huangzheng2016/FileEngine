@@ -72,4 +72,3 @@ func TestCategoryPathValidation(t *testing.T) {
 		t.Fatalf("updateCategory valid: %v", err)
 	}
 }
-

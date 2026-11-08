@@ -103,4 +103,3 @@ func makeBatchEntries(t *testing.T) []db.FileEntry {
 		{ID: 2, ScanSessionID: 1, OriginalPath: "p/readme.txt", Name: "readme.txt", FileType: "file", Size: 128},
 	}
 }
-

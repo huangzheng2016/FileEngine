@@ -290,4 +290,3 @@ func TestApplyMemoryOps(t *testing.T) {
 		t.Fatalf("global add: %+v", g)
 	}
 }
-

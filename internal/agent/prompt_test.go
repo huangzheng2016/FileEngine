@@ -54,4 +54,3 @@ func TestSystemPromptMatchesScriptAvailability(t *testing.T) {
 		t.Fatal("prompt without AllowScript must not mention run_script")
 	}
 }
-

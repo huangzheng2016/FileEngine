@@ -70,4 +70,3 @@ func TestMarkJunkEntries(t *testing.T) {
 		t.Errorf("second pass: n=%d err=%v, want 0/nil", n, err)
 	}
 }
-
