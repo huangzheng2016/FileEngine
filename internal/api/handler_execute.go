@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -15,17 +16,18 @@ import (
 func (s *Server) sessionFS(c *gin.Context, sessionID uint) (remotefs.RemoteFS, bool) {
 	session, err := s.repo.GetSession(sessionID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		lookupFailed(c, err, msgNoSession)
 		return nil, false
 	}
 	fsCfg, err := s.resolveFSConfig(session)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fsConfigFailed(c, err)
 		return nil, false
 	}
 	fs, err := remotefs.NewFromConfig(fsCfg)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "connect fs: " + err.Error()})
+		slog.Warn("connect filesystem", "session", sessionID, "err", err)
+		abortError(c, http.StatusServiceUnavailable, msgFSConnect)
 		return nil, false
 	}
 	return fs, true
@@ -33,26 +35,26 @@ func (s *Server) sessionFS(c *gin.Context, sessionID uint) (remotefs.RemoteFS, b
 
 func runStartError(c *gin.Context, err error) {
 	if errors.Is(err, db.ErrSessionBusy) {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		conflict(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	internalError(c, err)
 }
 
 // startExecute: POST /sessions/:id/execute {mode, sample?, category_path?} → {run_id}.
 func (s *Server) startExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	var opts executor.Options
 	if err := c.ShouldBindJSON(&opts); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	if opts.Mode != executor.ModeCopy && opts.Mode != executor.ModeMove {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'copy' or 'move'"})
+		badRequest(c, "执行模式只能是 copy 或 move")
 		return
 	}
 	fs, ok := s.sessionFS(c, uint(id))
@@ -73,7 +75,7 @@ func (s *Server) startExecute(c *gin.Context) {
 func (s *Server) checkExecute(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	sample, _ := strconv.Atoi(c.Query("sample"))
@@ -85,7 +87,7 @@ func (s *Server) checkExecute(c *gin.Context) {
 	defer fs.Close()
 	res, err := executor.New(s.repo, fs).Validate(c.Request.Context(), uint(id), opts)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -95,12 +97,16 @@ func (s *Server) checkExecute(c *gin.Context) {
 func (s *Server) revertRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid run id"})
+		badRequest(c, "无效的运行 ID")
 		return
 	}
 	var target db.AgentRun
 	if err := s.repo.DB().First(&target, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		lookupFailed(c, err, msgNoRun)
+		return
+	}
+	if target.Phase != db.RunPhaseExecuting {
+		badRequest(c, "只能撤销执行运行")
 		return
 	}
 	fs, ok := s.sessionFS(c, target.SessionID)
@@ -120,17 +126,17 @@ func (s *Server) revertRun(c *gin.Context) {
 func (s *Server) locateEntries(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	q := c.Query("q")
 	if q == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		badRequest(c, "请输入要查找的文件名或路径")
 		return
 	}
 	items, err := executor.Locate(s.repo, uint(id), q, 50)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})

@@ -124,9 +124,13 @@ var (
 )
 
 // Load reads the config file and remembers its path: Save always writes back
-// to the file that was loaded, never to a CWD-relative guess.
+// to the file that was loaded, never to a CWD-relative guess. A missing file
+// is created with the defaults (mode 0600, like Save).
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		data, err = createDefault(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +148,24 @@ func Load(path string) (*Config, error) {
 	loadedPath = abs
 	mu.Unlock()
 	return &cfg, nil
+}
+
+func createDefault(path string) ([]byte, error) {
+	var cfg Config
+	setDefaults(&cfg)
+	data, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return data, f.Close()
 }
 
 // Path is the absolute path of the loaded config file ("" before Load).

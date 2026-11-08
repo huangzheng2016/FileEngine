@@ -19,7 +19,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// SFTPFS serializes its read operations (List/Stat/ReadFile/Close) with mu.
+// SFTPFS serializes every operation (reads, writes, Close) with mu.
 // pkg/sftp itself is safe for concurrent use, but bounding an operation
 // requires arming an IO deadline on the shared ssh transport, and concurrent
 // arm/disarm on one connection is incoherent without serialization (the ssh
@@ -130,11 +130,15 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 		return nil, &OpError{Protocol: "sftp", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
+	// The ssh transport must do its IO through activityConn, or an armed
+	// deadline never slides and a long transfer is cut off after timeout.
+	ac := &activityConn{Conn: conn, timeout: timeout}
+
 	// The ssh handshake and the sftp INIT exchange block on server replies;
 	// keep an absolute deadline armed until the client is fully up. Steady
 	// state runs with no deadline — arming happens per operation instead.
 	conn.SetDeadline(time.Now().Add(timeout))
-	sshTransport, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
+	sshTransport, chans, reqs, err := ssh.NewClientConn(ac, addr, &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
 		HostKeyCallback: pinnedHostKey(cfg.HostKey),
@@ -155,7 +159,7 @@ func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	return &SFTPFS{
 		client:   client,
 		sshConn:  sshClient,
-		conn:     &activityConn{Conn: conn, timeout: timeout},
+		conn:     ac,
 		basePath: cfg.BasePath,
 	}, nil
 }

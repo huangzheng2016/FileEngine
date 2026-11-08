@@ -110,17 +110,17 @@ func resolveBool(v *bool, fallback bool) bool {
 func (s *Server) createModelProvider(c *gin.Context) {
 	var req ModelProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	contextWindow, err := resolveContextWindow(req.ContextWindow, db.DefaultContextWindow)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	m := &db.ModelProvider{
@@ -141,12 +141,12 @@ func (s *Server) createModelProvider(c *gin.Context) {
 func (s *Server) getModelProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	m, err := s.repo.GetModelProvider(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		lookupFailed(c, err, msgNoModel)
 		return
 	}
 	c.JSON(http.StatusOK, toModelProviderResponse(m))
@@ -155,17 +155,17 @@ func (s *Server) getModelProvider(c *gin.Context) {
 func (s *Server) updateModelProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	m, err := s.repo.GetModelProvider(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		lookupFailed(c, err, msgNoModel)
 		return
 	}
 	var req ModelProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	if req.APIKey == nil && m.APIKey != "" && !sameModelEndpoint(m, &req) {
@@ -180,12 +180,12 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 	m.MaxTokens = req.MaxTokens
 	contextWindow, err := resolveContextWindow(req.ContextWindow, m.ContextWindow)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, m.ReasoningEffort)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	m.ContextWindow = contextWindow
@@ -205,7 +205,7 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 func (s *Server) deleteModelProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 	if err := s.repo.DeleteModelProvider(uint(id)); err != nil {
@@ -238,7 +238,7 @@ func deref(p *string) string {
 func (s *Server) testModelProvider(c *gin.Context) {
 	var treq ModelTestRequest
 	if err := c.ShouldBindJSON(&treq); err != nil {
-		badRequest(c, "请求格式错误："+err.Error())
+		badBody(c, err)
 		return
 	}
 	req := treq.ModelProviderRequest
@@ -256,12 +256,12 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		apiKey = stored.APIKey
 	}
 	if _, err := resolveContextWindow(req.ContextWindow, db.DefaultContextWindow); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	reasoningEffort, err := resolveReasoningEffort(req.ReasoningEffort, "")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badRequest(c, err.Error())
 		return
 	}
 	testProvider := &db.ModelProvider{
@@ -271,7 +271,7 @@ func (s *Server) testModelProvider(c *gin.Context) {
 	}
 	chatModel, err := modelfactory.NewChatModelFromProvider(c.Request.Context(), testProvider)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "模型配置无效：" + err.Error()})
 		return
 	}
 	// Send a test message to verify the model actually works
@@ -279,7 +279,7 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		{Role: schema.User, Content: "Hi"},
 	})
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "模型调用失败：" + err.Error()})
 		return
 	}
 	reply := ""

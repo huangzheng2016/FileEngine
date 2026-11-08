@@ -29,19 +29,19 @@ func (s *Server) previewTree(c *gin.Context) {
 	case "after":
 		page, err := s.repo.PreviewAfter(session.ID, dir, offset, limit)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, page)
 	case "before":
 		page, err := s.repo.PreviewBefore(session.ID, session.RootPath, dir, offset, limit)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, page)
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "side must be after or before"})
+		badRequest(c, "side 只能是 after 或 before")
 	}
 }
 
@@ -59,16 +59,16 @@ func (s *Server) resetPlans(c *gin.Context) {
 	}
 	var req ResetPlansRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		badBody(c, err)
 		return
 	}
 	if len(req.FileIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file_ids required"})
+		badRequest(c, "缺少 file_ids")
 		return
 	}
 	n, err := s.repo.ResetPlans(session.ID, req.FileIDs)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reset": n})

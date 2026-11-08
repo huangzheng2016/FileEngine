@@ -230,6 +230,7 @@ export interface ExecuteCheck {
   failed: number
   skipped: number
   issues: ValidationIssue[]
+  notes?: string[]
 }
 
 export type EntryRole = '' | 'unit' | 'container' | 'member' | 'file' | 'skip' | 'duplicate'

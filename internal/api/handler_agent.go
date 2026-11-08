@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,19 +13,33 @@ import (
 	"FileEngine/internal/executor"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+var errSessionNoFilesystem = errors.New("会话关联的文件系统不存在")
 
 // resolveFSConfig resolves the RemoteFSConfig for a session via its Filesystem entity.
 func (s *Server) resolveFSConfig(session *db.ScanSession) (config.RemoteFSConfig, error) {
 	if session.FilesystemID == 0 {
-		return config.RemoteFSConfig{}, fmt.Errorf("session has no filesystem_id")
+		return config.RemoteFSConfig{}, errSessionNoFilesystem
 	}
 	filesystem, err := s.repo.GetFilesystem(session.FilesystemID)
-	if err != nil {
-		return config.RemoteFSConfig{}, fmt.Errorf("filesystem not found: %w", err)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return config.RemoteFSConfig{}, errSessionNoFilesystem
 	}
-	fsCfg := filesystem.ToRemoteFSConfig()
-	return fsCfg, nil
+	if err != nil {
+		return config.RemoteFSConfig{}, err
+	}
+	return filesystem.ToRemoteFSConfig(), nil
+}
+
+// fsConfigFailed answers a failed resolveFSConfig.
+func fsConfigFailed(c *gin.Context, err error) {
+	if errors.Is(err, errSessionNoFilesystem) {
+		badRequest(c, err.Error())
+		return
+	}
+	internalError(c, err)
 }
 
 // agentForSession resolves everything an agent run of the session needs. On
@@ -32,26 +47,30 @@ func (s *Server) resolveFSConfig(session *db.ScanSession) (config.RemoteFSConfig
 func (s *Server) agentForSession(c *gin.Context) (*db.ScanSession, *agent.Agent, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的会话 ID"})
+		badRequest(c, "无效的会话 ID")
 		return nil, nil, false
 	}
 	session, err := s.repo.GetSession(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
+		lookupFailed(c, err, msgNoSession)
 		return nil, nil, false
 	}
 	if session.ModelProviderID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "会话未配置模型"})
+		badRequest(c, "会话未配置模型")
 		return nil, nil, false
 	}
 	modelProvider, err := s.repo.GetModelProvider(session.ModelProviderID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "模型不存在"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			badRequest(c, "会话配置的模型不存在")
+		} else {
+			internalError(c, err)
+		}
 		return nil, nil, false
 	}
 	fsCfg, err := s.resolveFSConfig(session)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fsConfigFailed(c, err)
 		return nil, nil, false
 	}
 	return session, agent.New(s.repo, fsCfg, session.ID, modelProvider, session), true
@@ -75,7 +94,7 @@ func (s *Server) startTagging(c *gin.Context) {
 func (s *Server) getPlans(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
@@ -83,7 +102,7 @@ func (s *Server) getPlans(c *gin.Context) {
 	e := executor.New(s.repo, nil)
 	plans, err := e.DryRun(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, plans)
@@ -92,14 +111,14 @@ func (s *Server) getPlans(c *gin.Context) {
 func (s *Server) exportPlans(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		badRequest(c, msgBadID)
 		return
 	}
 
 	e := executor.New(s.repo, nil)
 	plans, err := e.DryRun(uint(id))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 
