@@ -23,24 +23,28 @@ AI 驱动的文件整理引擎。通过 LLM Agent 扫描远程文件系统，生
 - **自定义列** — 文件表列可拖拽排序、显示/隐藏，偏好持久化
 - **Token 统计** — 全量统计所有 LLM 调用（含工具调用轮次）的 token 用量
 - **单二进制** — Vue 3 前端通过 `go:embed` 嵌入，零运行时依赖
-- **Wails 桌面版** — 可选的原生桌面应用，内嵌后端进程
+- **桌面版** — Wails v3 原生桌面应用，服务端在同一进程内运行（无子进程）
 - **中英双语** — 前端界面支持中文 / 英文切换
 
 ## 快速开始
 
-**环境要求：** Go 1.25+, Node.js 18+
+**环境要求：** Go 1.27（`go.mod` 固定 toolchain go1.27.2）、Node.js 24、[Task](https://taskfile.dev)（或用固定版本的 Wails CLI：`wails3 task <name>`）
 
 ```bash
-# 构建
-cd web && npm ci && npm run build && cd ..
-go build -o fileengine .
+# 服务端（静态单二进制，CGO_ENABLED=0，内嵌前端）
+task build                        # → bin/fileengine
+./bin/fileengine                  # 使用当前目录 config.yaml
+./bin/fileengine /path/to/config.yaml
 
-# 运行
-./fileengine                      # 使用当前目录 config.yaml
-./fileengine /path/to/config.yaml
+# 桌面版（Wails v3，服务端在进程内运行）
+task desktop:build                # → bin/fileengine-desktop（-tags production）
+task desktop:dev                  # 开发模式，直接读取 web/dist
+
+# 质量门禁（与 CI 一致）
+task check
 ```
 
-启动后访问 `http://localhost:8080`。
+服务端启动后访问 `http://localhost:8080`。桌面版的配置和 SQLite 数据库位于用户数据目录（`--data-dir` 或 `FE_DATA_DIR` 可覆盖）。Linux 构建桌面版需要 `libgtk-4-dev libwebkitgtk-6.0-dev`。
 
 ## 配置
 
@@ -70,9 +74,9 @@ agent:
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Go, Gin, GORM, Cloudwego Eino |
+| 后端 | Go, Gin, GORM (纯 Go SQLite), Cloudwego Eino |
 | 前端 | Vue 3, Element Plus, TypeScript, Vite |
-| 桌面 | Wails v2 |
+| 桌面 | Wails v3 |
 | 协议 | SFTP, FTP, SMB, NFS, Local |
 | LLM | OpenAI, Claude（原生）, Ollama |
 
