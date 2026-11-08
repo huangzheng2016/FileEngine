@@ -10,11 +10,8 @@ import (
 	"FileEngine/internal/db"
 )
 
-// categoryGuard tracks the category-set snapshot the agent last saw, so
-// create_category can refuse to run against a stale (or never-seen) list.
-// One guard lives in each ToolBuilder, i.e. per agent worker / per instruct
-// run — the lifetime of one session-scoped conversation. It is in-memory
-// only; nothing is persisted and no DB schema changes.
+// categoryGuard holds the category snapshot the agent last saw, so
+// create_category can refuse to run against a stale or never-seen list.
 type categoryGuard struct {
 	mu sync.Mutex
 	fp string
@@ -23,15 +20,12 @@ type categoryGuard struct {
 	set bool
 }
 
-// categoryFingerprint renders the version of a category set as the count
-// plus the exact set of names. Renames, creations and deletions all change
-// it; a path-only edit does not (per the agreed design: 数量+名称集合).
+// Path-only edits deliberately keep the fingerprint unchanged.
 func categoryFingerprint(names []string) string {
 	sort.Strings(names)
 	return strconv.Itoa(len(names)) + "\x1f" + strings.Join(names, "\x1f")
 }
 
-// note records the snapshot the agent is about to see.
 func (g *categoryGuard) note(names []string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -39,7 +33,6 @@ func (g *categoryGuard) note(names []string) {
 	g.set = true
 }
 
-// last returns the recorded snapshot and whether any was ever recorded.
 func (g *categoryGuard) last() (fp string, set bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -50,14 +43,11 @@ func normalizeCategoryName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// normalizeCategoryPath folds case and strips separators so that prefix
-// comparison is segment-based and case-insensitive.
 func normalizeCategoryPath(p string) string {
 	return strings.Trim(path.Clean(strings.ToLower(strings.TrimSpace(p))), "/")
 }
 
-// categoryPathsOverlap reports whether two normalized paths are equal or one
-// sits under the other (segment-aware: "photos" vs "photos2" does not bleed).
+// Segment-aware: "photos" and "photos2" do not overlap.
 func categoryPathsOverlap(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -65,19 +55,13 @@ func categoryPathsOverlap(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
-// similarCategory pairs an existing category with why it matched.
 type similarCategory struct {
 	usage  db.CategoryUsage
 	reason string
 }
 
-// findSimilarCategories splits existing categories related to (name, path)
-// into two hit classes:
-//   - hard: objective duplicates — a normalized identical name (trim +
-//     case-fold) or a normalized identical path. Creation must be refused.
-//   - soft: fuzzy lookalikes — a segment-aware path-prefix overlap in either
-//     direction (containment) that is not already a hard hit. Creation
-//     proceeds; these ride along as reference info for the model to judge.
+// Hard hits (normalized identical name or path) block creation; soft hits
+// (path containment either way) are only reported for the model to judge.
 func findSimilarCategories(usages []db.CategoryUsage, name, path string) (hard, soft []similarCategory) {
 	nName := normalizeCategoryName(name)
 	nPath := normalizeCategoryPath(path)

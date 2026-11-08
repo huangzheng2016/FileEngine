@@ -1,11 +1,7 @@
 package agent
 
-// Archive content hints for loose-file batch prompts: a one-line summary
-// (kind + total entries + first few names) attached to archive files so the
-// agent gets a content signal without spending read_file tool calls. zip
-// reads only the central directory (a few seeks at the file tail); tar/tar.gz
-// streams headers bounded by the 32MB read cap. __MACOSX sidecar noise is
-// filtered out. Every failure degrades silently — the caller skips the hint.
+// zip reads only the central directory (a few tail seeks); tar streams
+// headers bounded by the 32MB read cap. Any failure just drops the hint.
 
 import (
 	"archive/tar"
@@ -81,9 +77,6 @@ func formatArchiveHint(kind string, total int, names []string, capped bool) stri
 	return fmt.Sprintf("%s 压缩包，共 %d%s 个条目，含: %s", kind, total, more, strings.Join(names, ", "))
 }
 
-// computeArchiveHint builds the one-line listing summary for one archive
-// file via the given FS connection (a few tail seeks for zip, a bounded
-// header stream for tar). Failures propagate — callers degrade silently.
 func computeArchiveHint(ctx context.Context, fsys remotefs.RemoteFS, protocol, path string, size int64, kind string, maxNames int) (string, error) {
 	rc, err := fsys.ReadFile(ctx, path)
 	if err != nil {
@@ -107,8 +100,6 @@ func computeArchiveHint(ctx context.Context, fsys remotefs.RemoteFS, protocol, p
 // realistic batches.
 const harnessArchiveHintsPerPull = 20
 
-// fsProtocolLabel maps an FS instance to its backend label (only used for
-// the FTP archive-degradation notice text).
 func fsProtocolLabel(fsys remotefs.RemoteFS) string {
 	switch fsys.(type) {
 	case *remotefs.NFSFS:
@@ -125,10 +116,6 @@ func fsProtocolLabel(fsys remotefs.RemoteFS) string {
 	return ""
 }
 
-// archiveHints computes prompt hints for the archive files in one loose-file
-// batch. Remote read cost: a few tail seeks per zip; a bounded header stream
-// per tar. Disabled via archive_prompt_disabled, width via
-// archive_prompt_max_entries.
 func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS, files []db.FileEntry, cfg config.AgentConfig) map[uint]string {
 	if cfg.ArchivePromptDisabled {
 		return nil

@@ -13,15 +13,12 @@ import (
 	modelfactory "FileEngine/internal/model"
 )
 
-// Retries happen per model request: the ADK ChatModelAgent re-issues only
-// the failed request (ModelRetryConfig), so a 429 at turn 6 never replays
-// turns 1-5. shouldRetryModelCall applies the class-aware policy (retry.go)
-// to every failed request. The outer run-level loop (runWithRetry) only
-// covers network failures that hit before the model answered at all.
+// Retries happen per model request (ModelRetryConfig), so a 429 at turn 6
+// never replays turns 1-5; the run-level loop only covers network failures
+// before the model answered at all.
 
-// modelRetryConfig builds the per-request retry policy of an agent. The
-// class budgets are enforced by shouldRetryModelCall; MaxRetries is the
-// largest of them so ADK never cuts a class short.
+// MaxRetries is the largest class budget so ADK never cuts a class short;
+// shouldRetryModelCall enforces each class's own budget.
 func modelRetryConfig() *adk.ModelRetryConfig {
 	cfg := retryCfg()
 	return &adk.ModelRetryConfig{
@@ -30,11 +27,8 @@ func modelRetryConfig() *adk.ModelRetryConfig {
 	}
 }
 
-// shouldRetryModelCall decides one failed model request: hard errors and
-// caller cancellation fail the run, rate_limit/server/network errors retry
-// within their class budget after a jittered backoff (Retry-After honored).
-// The transport hints of the request are consumed here so they never leak
-// into the classification of a later request.
+// The request's transport hints are consumed here so they never leak into
+// the classification of a later request.
 func shouldRetryModelCall(ctx context.Context, rc *adk.RetryContext) *adk.RetryDecision {
 	var statusHint int
 	var retryAfter time.Duration
@@ -74,15 +68,10 @@ type respondedError struct{ err error }
 func (e *respondedError) Error() string { return e.err.Error() }
 func (e *respondedError) Unwrap() error { return e.err }
 
-// runAttemptFunc executes one full agent run under ctx.
 type runAttemptFunc func(ctx context.Context) (*schema.Message, error)
 
-// runWithRetry runs attempt and replays the whole run only for network
-// failures that happened before any model response (connection refused,
-// DNS, a dead proxy …), within the network budget; every other failure has
-// already been retried per request inside the run. Each attempt carries a
-// fresh ResponseHints store so request-level classification sees transport
-// status codes. A final failure is reported on the lane as a system message.
+// Only network failures before any model response replay the whole run;
+// everything else was already retried per request inside it.
 func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, label string) (*schema.Message, error) {
 	retries := 0
 	for {

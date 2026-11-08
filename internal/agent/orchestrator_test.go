@@ -8,8 +8,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// Run-end prune: AI-created categories with zero planned files are deleted
-// and recorded; user-created and non-empty categories are never touched.
 func TestPruneEmptyAgentCategories(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	fs := &db.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
@@ -62,9 +60,6 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 
 }
 
-// Cross-session safety (review P2-1): a category created and filled by an
-// EARLIER session has zero plans in the current session — the prune must
-// judge emptiness filesystem-wide and never delete it (rescan workflows).
 func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	fs := &db.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
@@ -89,13 +84,11 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	mk("历史分类", "/history-used", true) // filled by session A only
 	mk("真空分类", "/truly-empty", true)  // empty across all sessions
 
-	// Planned file under 历史分类, but ONLY in session A.
 	seedFile(t, repo, sessA.ID, "in/site.tar.gz", "file")
 	if _, _, err := repo.SetTargetUnique(sessA.ID, "in/site.tar.gz", "/history-used/site.tar.gz", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 
-	// The run-ending prune for session B must keep 历史分类 (zero in B, used in A).
 	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(sessB.ID, 0, 0))
 	pruned := o.pruneEmptyAgentCategories()
 

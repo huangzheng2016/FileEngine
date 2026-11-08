@@ -1,12 +1,5 @@
 package agent
 
-// Format-aware text extraction for the read_file tool: PDF via
-// github.com/ledongthuc/pdf (a maintained pure-Go fork of rsc.io/pdf), and
-// docx/xlsx/pptx via archive/zip + encoding/xml from the standard library —
-// OOXML files are zip containers of XML members, so text extraction needs no
-// third-party dependency. The legacy binary .doc format is explicitly
-// unsupported (reported as such, never parsed).
-
 import (
 	"archive/tar"
 	"archive/zip"
@@ -26,17 +19,12 @@ import (
 )
 
 const (
-	// maxDocumentReadBytes caps how many bytes of a document file are read
-	// for text extraction. Zip/central-directory and PDF xref tables live at
-	// the end of the file, so a truncated read cannot be parsed at all —
-	// beyond the cap the tool reports "too large" instead of a parse error.
-	maxDocumentReadBytes = 32 << 20 // 32 MB
-	// maxPDFPages caps how many pages of one PDF are extracted.
-	maxPDFPages = 50
+	// Zip central directories and PDF xref tables live at the end of the file,
+	// so a truncated read cannot be parsed at all.
+	maxDocumentReadBytes = 32 << 20
+	maxPDFPages          = 50
 )
 
-// documentExt returns the lower-cased extension when p names a document
-// format read_file can extract text from ("" otherwise).
 func documentExt(p string) string {
 	switch ext := strings.ToLower(path.Ext(p)); ext {
 	case ".pdf", ".docx", ".xlsx", ".pptx", ".doc":
@@ -45,9 +33,8 @@ func documentExt(p string) string {
 	return ""
 }
 
-// extractDocument turns a document file's raw bytes into plain text. maxChars
-// caps the extracted text (Truncated reports the cut). data must be capped at
-// maxDocumentReadBytes+1 by the caller so the over-limit case is detectable.
+// data must be capped at maxDocumentReadBytes+1 by the caller so the
+// over-limit case is detectable.
 func extractDocument(name string, data []byte, maxChars int) (*ReadFileOutput, error) {
 	ext := documentExt(name)
 	if ext == ".doc" {
@@ -84,8 +71,6 @@ func extractDocument(name string, data []byte, maxChars int) (*ReadFileOutput, e
 	return &ReadFileOutput{Content: text, Truncated: truncated}, nil
 }
 
-// runeBudget caps how many runes get written to sb across a whole document;
-// exhausted reports that the cap was hit (i.e. the output is truncated).
 type runeBudget struct {
 	sb        *strings.Builder
 	max       int
@@ -107,11 +92,8 @@ func (b *runeBudget) writeString(s string) {
 	}
 }
 
-// ============ PDF ============
-
-// extractPDFText extracts per-page plain text, capped at maxPDFPages pages
-// and maxChars runes. One unreadable page is noted inline and skipped rather
-// than sinking the whole read.
+// One unreadable page is noted inline and skipped rather than sinking the
+// whole read.
 func extractPDFText(data []byte, maxChars int) (string, bool, error) {
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -146,9 +128,6 @@ func extractPDFText(data []byte, maxChars int) (string, bool, error) {
 	return b.sb.String(), truncated, nil
 }
 
-// ============ OOXML (docx / xlsx / pptx) ============
-
-// openMember opens one named member of a zip document.
 func openMember(zr *zip.Reader, name string) (io.ReadCloser, error) {
 	for _, f := range zr.File {
 		if f.Name == name {
@@ -158,8 +137,7 @@ func openMember(zr *zip.Reader, name string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("%s not found in document", name)
 }
 
-// memberNames lists zip members directly under dir with the given suffix,
-// ordered sheet1..sheet2..sheet10 style (length-then-lexical sort).
+// Ordered sheet1, sheet2, ..., sheet10 (length, then lexical).
 func memberNames(zr *zip.Reader, dir, suffix string) []string {
 	var names []string
 	for _, f := range zr.File {
@@ -178,10 +156,8 @@ func memberNames(zr *zip.Reader, dir, suffix string) []string {
 	return names
 }
 
-// xmlTextRuns streams xr as XML, collecting character data of elements whose
-// local name is in textTags into the budget; closing a breakTags element
-// appends a newline. OOXML text lives in <w:t>/<a:t>-style leaf elements, so
-// matching local names (ignoring namespaces) is sufficient.
+// OOXML text lives in <w:t>/<a:t>-style leaf elements, so matching local
+// names regardless of namespace is sufficient.
 func xmlTextRuns(xr io.Reader, textTags, breakTags map[string]bool, b *runeBudget) error {
 	dec := xml.NewDecoder(xr)
 	depth := 0
@@ -216,8 +192,6 @@ func xmlTextRuns(xr io.Reader, textTags, breakTags map[string]bool, b *runeBudge
 	}
 }
 
-// extractDocxText pulls paragraph text out of word/document.xml: <w:t> runs
-// as text, <w:p> ends as newlines.
 func extractDocxText(data []byte, maxChars int) (string, bool, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -235,8 +209,6 @@ func extractDocxText(data []byte, maxChars int) (string, bool, error) {
 	return b.sb.String(), b.exhausted, nil
 }
 
-// extractPptxText pulls text runs (<a:t>, paragraphs <a:p>) out of every
-// slide in order.
 func extractPptxText(data []byte, maxChars int) (string, bool, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -265,10 +237,6 @@ func extractPptxText(data []byte, maxChars int) (string, bool, error) {
 	return b.sb.String(), b.exhausted, nil
 }
 
-// ============ XLSX ============
-
-// xlsxSharedStrings parses xl/sharedStrings.xml: each <si> entry is the
-// concatenation of its <t> runs. Returns nil when the workbook has none.
 func xlsxSharedStrings(zr *zip.Reader) ([]string, error) {
 	rc, err := openMember(zr, "xl/sharedStrings.xml")
 	if err != nil {
@@ -315,9 +283,6 @@ func xlsxSharedStrings(zr *zip.Reader) ([]string, error) {
 	}
 }
 
-// extractXlsxText renders every worksheet as TSV lines (cells joined by tab,
-// rows by newline). Shared-string cells (t="s") are resolved through
-// xl/sharedStrings.xml; inline strings and raw values are used as-is.
 func extractXlsxText(data []byte, maxChars int) (string, bool, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -349,8 +314,6 @@ func extractXlsxText(data []byte, maxChars int) (string, bool, error) {
 	return b.sb.String(), b.exhausted, nil
 }
 
-// renderXlsxSheet streams one worksheet, resolving cell values and writing
-// TSV rows into the budget.
 func renderXlsxSheet(xr io.Reader, shared []string, b *runeBudget) error {
 	var (
 		cells    []string
@@ -427,27 +390,15 @@ func renderXlsxSheet(xr io.Reader, shared []string, b *runeBudget) error {
 	}
 }
 
-// ============ Archives (zip / tar / tar.gz) ============
-//
-// zip parsing needs random access (the central directory lives at the end of
-// the file). How that is served depends on the backend's opened-file type —
-// checked by type assertion, per the locked go.mod libraries:
-//   - Local (*os.File), SFTP (*sftp.File), SMB (*smb2.File): native io.ReaderAt
-//   - NFS (*nfs.File): io.Seeker only (no ReadAt, no SeekEnd) → seek adapter
-//   - FTP (*ftp.Response): stream only → bounded download to a temp file,
-//     beyond which the call degrades with an explicit notice (never a silent
-//     retry). tar/tar.gz are streamed, so they need no random access at all.
+// zip needs random access (the central directory is at the end). Local, SFTP
+// and SMB files are io.ReaderAt; NFS files only seek, so they get an adapter;
+// FTP is stream-only and falls back to a bounded temp-file download.
 
 const (
-	// maxArchiveListEntries caps how many entries an archive listing shows.
-	maxArchiveListEntries = 200
-	// defaultArchiveEntryMaxSize mirrors config.AgentConfig.ArchiveEntryMaxSize
-	// when unset (e.g. zero-valued config in tests).
+	maxArchiveListEntries      = 200
 	defaultArchiveEntryMaxSize = 64 * 1024
 )
 
-// archiveKind classifies p by extension: "zip", "tar", "tar.gz", or the
-// explicitly unsupported "rar"/"7z" ("" = not an archive).
 func archiveKind(p string) string {
 	lp := strings.ToLower(p)
 	switch {
@@ -465,9 +416,8 @@ func archiveKind(p string) string {
 	return ""
 }
 
-// seekReaderAt adapts an io.Seeker+io.Reader (e.g. NFS *nfs.File) into an
-// io.ReaderAt for archive parsing. Calls are serialized; archive readers are
-// single-goroutine, so the shared seek position is safe.
+// Calls are serialized; archive readers are single-goroutine, so the shared
+// seek position is safe.
 type seekReaderAt struct {
 	mu sync.Mutex
 	r  io.Reader
@@ -483,13 +433,9 @@ func (a *seekReaderAt) ReadAt(b []byte, off int64) (int, error) {
 	return io.ReadFull(a.r, b)
 }
 
-// resolveArchiveReaderAt picks the cheapest way to parse a zip on this
-// backend: a native io.ReaderAt, a seek adapter, or a bounded download to a
-// temp file (removed by cleanup). size may be -1 when Stat failed; it is
-// recovered via SeekEnd or the download length. When the temp download would
-// exceed maxDownload, notice is a non-empty explicit degradation message
-// (the caller serves it verbatim — the agent must see it, not retry).
-// cleanup must always be called.
+// size may be -1 when Stat failed. A non-empty notice is an explicit
+// degradation message the agent must see instead of retrying. cleanup must
+// always be called.
 func resolveArchiveReaderAt(rc io.ReadCloser, size int64, maxDownload int64, protocol string) (ra io.ReaderAt, actualSize int64, notice string, cleanup func(), err error) {
 	cleanup = func() { rc.Close() }
 
@@ -510,8 +456,8 @@ func resolveArchiveReaderAt(rc io.ReadCloser, size int64, maxDownload int64, pro
 		return &seekReaderAt{r: rc, s: sk}, size, "", cleanup, nil
 	}
 
-	// Stream-only backend (FTP-style): bounded download to a temp file. Gate
-	// on the known size first so oversized archives never start downloading.
+	// Gate on the known size first so oversized archives never start
+	// downloading.
 	if size > maxDownload {
 		return nil, size, archiveDegradeNotice(protocol, size, maxDownload), cleanup, nil
 	}
@@ -535,15 +481,12 @@ func resolveArchiveReaderAt(rc io.ReadCloser, size int64, maxDownload int64, pro
 	return tmp, n, "", func() { tmp.Close(); os.Remove(tmp.Name()) }, nil
 }
 
-// archiveDegradeNotice is the explicit refusal for archives that cannot be
-// served on a stream-only backend: no random access and too large for the
-// temp-file fallback. It tells the agent not to retry.
+// The notice tells the agent not to retry.
 func archiveDegradeNotice(protocol string, size, maxDownload int64) string {
 	return fmt.Sprintf("[cannot read archive: filesystem backend %q does not support random access and the archive (%s) exceeds the %d MB temporary-download limit — listing and entry reads are both unavailable. Do not retry on this backend; copy the archive to an SMB/SFTP/local filesystem or extract it first]",
 		protocol, humanBytes(size), maxDownload/(1<<20))
 }
 
-// humanBytes renders a byte count for notices.
 func humanBytes(n int64) string {
 	switch {
 	case n >= 1<<30:
@@ -556,9 +499,6 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%d B", n)
 }
 
-// listZipArchive renders the zip's central directory: one "size  name" line
-// per entry, capped at maxArchiveListEntries with a truncation trailer and an
-// entry-read hint.
 func listZipArchive(ra io.ReaderAt, size int64) (string, error) {
 	zr, err := zip.NewReader(ra, size)
 	if err != nil {
@@ -585,8 +525,8 @@ func listZipArchive(ra io.ReaderAt, size int64) (string, error) {
 	return sb.String(), nil
 }
 
-// readZipEntry extracts one named entry's text content. Entries over maxEntry
-// bytes or binary-looking are refused with a note, never an error.
+// Oversized or binary-looking entries are refused with a note, never an
+// error.
 func readZipEntry(ra io.ReaderAt, size int64, entryName string, maxEntry int64) (*ReadFileOutput, error) {
 	zr, err := zip.NewReader(ra, size)
 	if err != nil {
@@ -613,8 +553,6 @@ func readZipEntry(ra io.ReaderAt, size int64, entryName string, maxEntry int64) 
 	return nil, fmt.Errorf("entry %q not found in archive", entryName)
 }
 
-// entryTextOutput applies the binary sniff and size cap to an extracted
-// archive entry.
 func entryTextOutput(data []byte, maxEntry int64) *ReadFileOutput {
 	peek := data
 	if len(peek) > 1024 {
@@ -630,9 +568,6 @@ func entryTextOutput(data []byte, maxEntry int64) *ReadFileOutput {
 	return &ReadFileOutput{Content: string(data), Truncated: truncated}
 }
 
-// listTarArchive streams a tar (optionally gzipped) listing: one
-// "size  name" line per entry. The stream is capped at maxDocumentReadBytes;
-// hitting the cap marks the listing truncated.
 func listTarArchive(r io.Reader, gz bool) (string, error) {
 	tr, done, err := tarStream(r, gz)
 	if err != nil {
@@ -681,9 +616,8 @@ func listTarArchive(r io.Reader, gz bool) (string, error) {
 	return out, nil
 }
 
-// readTarEntry streams a tar (optionally gzipped) looking for one entry and
-// extracts its text. The entry size is known from its header before any
-// content is read, so oversized entries are refused without downloading.
+// The entry size is known from its header before any content is read, so
+// oversized entries are refused without downloading.
 func readTarEntry(r io.Reader, gz bool, entryName string, maxEntry int64) (*ReadFileOutput, error) {
 	tr, _, err := tarStream(r, gz)
 	if err != nil {
@@ -711,9 +645,6 @@ func readTarEntry(r io.Reader, gz bool, entryName string, maxEntry int64) (*Read
 	}
 }
 
-// tarStream wraps r as a tar reader (gunzipping first when gz). The returned
-// done func reports whether the stream was fully consumed within the
-// maxDocumentReadBytes cap.
 func tarStream(r io.Reader, gz bool) (*tar.Reader, func() bool, error) {
 	cr := &countingReader{r: io.LimitReader(r, maxDocumentReadBytes+1)}
 	var tr *tar.Reader

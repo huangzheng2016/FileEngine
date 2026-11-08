@@ -9,7 +9,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// fakeStreamModel replays a fixed sequence of stream frames.
 type fakeStreamModel struct {
 	frames []*schema.Message
 }
@@ -85,8 +84,6 @@ func TestTokenTrackingStreamCumulativeFrames(t *testing.T) {
 }
 
 func TestTokenTrackingStreamAccumulatesAcrossCalls(t *testing.T) {
-	// Two separate calls on the same tracker must both count in full:
-	// the delta state is per-call, not shared.
 	tracker := newTokenTrackingModel(&fakeStreamModel{frames: claudeTwoFrameUsage()})
 
 	for i := 0; i < 2; i++ {
@@ -125,7 +122,6 @@ func TestTokenTrackingStreamFramesWithoutUsage(t *testing.T) {
 	}
 }
 
-// Generate counts usage including the cached-token breakdown in one shot.
 func TestTokenTrackingGenerateWithCachedTokens(t *testing.T) {
 	inner := &fakeStreamModel{}
 	tracker := newTokenTrackingModel(inner)
@@ -136,7 +132,6 @@ func TestTokenTrackingGenerateWithCachedTokens(t *testing.T) {
 			Usage: &schema.TokenUsage{PromptTokens: 100, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 40}, CompletionTokens: 50, TotalTokens: 150},
 		},
 	}
-	// Route Generate through a fake that returns this message.
 	g := &fakeGenerateModel{msg: msg}
 	tracker = newTokenTrackingModel(g)
 	if _, err := tracker.Generate(context.Background(), nil); err != nil {
@@ -149,7 +144,6 @@ func TestTokenTrackingGenerateWithCachedTokens(t *testing.T) {
 	}
 }
 
-// fakeGenerateModel returns a fixed message from Generate.
 type fakeGenerateModel struct{ msg *schema.Message }
 
 func (f *fakeGenerateModel) Generate(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {

@@ -17,17 +17,12 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// BatchFailure records one work unit whose agent run failed or left entries
-// undecided.
 type BatchFailure struct {
 	BatchIndex int
-	Target     string // unit label
+	Target     string
 	Err        string
 }
 
-// AutoTagAgent runs the tagging pipeline: deterministic pre-pass (junk,
-// scope, sensitive flags, rules), then a top-down breadth-first walk of work
-// units pulled by parallel workers from one shared queue.
 type AutoTagAgent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
@@ -50,14 +45,12 @@ func (a *AutoTagAgent) noteFailure(f BatchFailure) {
 	a.mu.Unlock()
 }
 
-// Failures returns the unit failures collected during the run.
 func (a *AutoTagAgent) Failures() []BatchFailure {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]BatchFailure(nil), a.failures...)
 }
 
-// Work unit kinds.
 const (
 	unitDir      = "dir"      // decide one directory: unit / container / skip
 	unitGroup    = "group"    // the loose undecided files of one container
@@ -81,9 +74,8 @@ func (u workUnit) label() string {
 	return displayPath(u.path)
 }
 
-// unitQueue is the shared queue workers pull from. Units are pushed while
-// others run (a decided container enqueues its children); pending counts
-// pushed-but-unfinished units so workers stop only when all work is done.
+// pending counts pushed-but-unfinished units, so workers stop only when all
+// work is done.
 type unitQueue struct {
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -106,7 +98,6 @@ func (q *unitQueue) push(units ...workUnit) {
 	q.cond.Broadcast()
 }
 
-// pop blocks until a unit is available; false when all work is done.
 func (q *unitQueue) pop() (workUnit, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -135,7 +126,6 @@ func (q *unitQueue) stop() {
 	q.cond.Broadcast()
 }
 
-// unitRunner executes one unit; tests replace the LLM step.
 type unitRunner func(ctx context.Context, w *tagWorker, u workUnit) error
 
 func (a *AutoTagAgent) Run(ctx context.Context) error {
@@ -156,8 +146,6 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 	})
 }
 
-// prepass decides everything that needs no LLM: system junk, out-of-scope
-// files, sensitive flags and the session's rules.
 func (a *AutoTagAgent) prepass() error {
 	if !config.Get().Agent.JunkFilterDisabled {
 		if n, err := a.repo.MarkJunkEntries(a.sessionID, junkFileNames, junkDirNames); err != nil {
@@ -173,8 +161,6 @@ func (a *AutoTagAgent) prepass() error {
 	return nil
 }
 
-// walk runs the BFS from the scan root ("") with the configured number of
-// workers.
 func (a *AutoTagAgent) walk(ctx context.Context, newWorker func(workerID int) (*tagWorker, func(), error)) error {
 	q := newUnitQueue()
 	root, err := a.expandContainer("")
@@ -221,9 +207,6 @@ func (a *AutoTagAgent) walk(ctx context.Context, newWorker func(workerID int) (*
 	return ctx.Err()
 }
 
-// expandContainer turns a container directory ("" = scan root) into work
-// units: each undecided (or container) subdirectory, each version group, and
-// one folder group of its remaining undecided loose files.
 func (a *AutoTagAgent) expandContainer(dir string) ([]workUnit, error) {
 	children, err := a.repo.ListChildren(a.sessionID, dir, 0)
 	if err != nil {
@@ -255,7 +238,6 @@ func (a *AutoTagAgent) expandContainer(dir string) ([]workUnit, error) {
 	return units, nil
 }
 
-// processUnit runs one unit and returns the units it uncovers.
 func (a *AutoTagAgent) processUnit(ctx context.Context, w *tagWorker, u workUnit) ([]workUnit, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -309,8 +291,6 @@ func (a *AutoTagAgent) countUndecided(ids []uint) int {
 	return n
 }
 
-// processDir decides one directory — deterministically when possible, else
-// by the LLM — and expands it when it ends up a container.
 func (a *AutoTagAgent) processDir(ctx context.Context, w *tagWorker, u workUnit) ([]workUnit, error) {
 	sig, entry, _, err := LoadDirSignals(a.repo, a.sessionID, u.path)
 	if err != nil {
@@ -361,8 +341,6 @@ func (a *AutoTagAgent) afterDecision(dir string) ([]workUnit, error) {
 	return a.expandContainer(dir)
 }
 
-// codeCategoryWords / bundleCategoryWords pick the category a strong marker
-// auto-decides into.
 var (
 	codeCategoryWords   = []string{"代码", "项目", "源码", "开发", "code", "project", "dev", "src"}
 	bundleCategoryWords = []string{"软件", "应用", "程序", "app", "software"}
@@ -380,9 +358,6 @@ func matchCategory(cats []db.Category, words []string) *db.Category {
 	return nil
 }
 
-// autoDecide settles a directory without an LLM call: no undecided content
-// left → container; a strong marker (project root, OS bundle) with a matching
-// category under a goal or plan → unit.
 func (a *AutoTagAgent) autoDecide(dir *db.FileEntry, sig DirSignals) (bool, error) {
 	var undecided int64
 	if err := a.repo.DB().Model(&db.FileEntry{}).
@@ -432,7 +407,6 @@ func ignoreRejection(err error) error {
 	return err
 }
 
-// tagWorker is one worker lane: its own FS connection, tools and agent.
 type tagWorker struct {
 	id      int
 	logger  *Logger
@@ -468,9 +442,8 @@ func (a *AutoTagAgent) newWorker(ctx context.Context, id int, chatModel einomode
 	return w, func() { fs.Close() }, nil
 }
 
-// unitMessages assembles one unit request after the static system prompt:
-// the shared-context message (byte-identical across the run's units, a cache
-// breakpoint) followed by the per-unit message.
+// The shared-context message is byte-identical across the run's units, so it
+// is a cache breakpoint.
 func (a *AutoTagAgent) unitMessages(ctx context.Context, w *tagWorker, u workUnit) ([]*schema.Message, error) {
 	shared, err := a.sharedContextFor(w.tb)
 	if err != nil {
@@ -507,8 +480,6 @@ func (a *AutoTagAgent) unitMessages(ctx context.Context, w *tagWorker, u workUni
 	return []*schema.Message{SharedContextMessage(shared), schema.UserMessage(msg)}, nil
 }
 
-// sharedContextFor renders the run's shared context and records the category
-// snapshot the agent is about to see (create_category guard).
 func (a *AutoTagAgent) sharedContextFor(tb *ToolBuilder) (string, error) {
 	c, err := LoadSharedContext(a.repo, a.session)
 	if err != nil {
@@ -522,7 +493,6 @@ func (a *AutoTagAgent) sharedContextFor(tb *ToolBuilder) (string, error) {
 	return RenderSharedContext(c), nil
 }
 
-// softwareTarget suggests the target prefix of a version group.
 func (a *AutoTagAgent) softwareTarget(name string) string {
 	base := "/软件"
 	if cats, err := a.repo.ListCategories(a.session.FilesystemID); err == nil {
@@ -543,7 +513,6 @@ func (a *AutoTagAgent) runUnitLLM(ctx context.Context, w *tagWorker, u workUnit)
 	return err
 }
 
-// emitTagProgress publishes absolute tagging counters.
 func (a *AutoTagAgent) emitTagProgress() {
 	p, err := a.repo.GetSessionProgress(a.sessionID)
 	if err != nil {

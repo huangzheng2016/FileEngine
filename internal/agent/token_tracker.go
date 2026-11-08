@@ -10,8 +10,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// tokenTrackingModel wraps a ChatModel to accumulate token usage across all
-// Generate and Stream calls (including intermediate ReAct tool-use rounds).
 type tokenTrackingModel struct {
 	inner einomodel.ChatModel
 	c     *tokenCounters
@@ -29,8 +27,6 @@ func newTokenTrackingModel(inner einomodel.ChatModel) *tokenTrackingModel {
 	return &tokenTrackingModel{inner: inner, c: &tokenCounters{}}
 }
 
-// sibling wraps another model (e.g. the bulk summarization model) into the
-// same counters, so its usage lands in the same run totals.
 func (m *tokenTrackingModel) sibling(inner einomodel.ChatModel) *tokenTrackingModel {
 	return &tokenTrackingModel{inner: inner, c: m.c}
 }
@@ -53,10 +49,9 @@ func (m *tokenTrackingModel) Stream(ctx context.Context, input []*schema.Message
 	if err != nil {
 		return nil, err
 	}
-	// Providers may emit usage on multiple frames per call with cumulative
-	// counters (e.g. claude ext: message_start + message_delta). Track per-call
-	// state in this closure and add only the delta so cumulative frames are
-	// never double counted.
+	// Providers may emit cumulative usage on several frames per call (claude:
+	// message_start + message_delta); add only the delta so nothing is counted
+	// twice.
 	var last [5]int64
 	counters := [5]*atomic.Int64{&m.c.promptTokens, &m.c.cachedTokens, &m.c.cacheWriteTokens, &m.c.completionTokens, &m.c.totalTokens}
 	return schema.StreamReaderWithConvert(sr, func(msg *schema.Message) (*schema.Message, error) {
@@ -79,9 +74,8 @@ func (m *tokenTrackingModel) BindTools(tools []*schema.ToolInfo) error {
 	return m.inner.BindTools(tools)
 }
 
-// Usage returns the accumulated counters: prompt tokens (cache hits and
-// writes included), cache-hit and cache-write subsets of prompt, completion
-// and total tokens.
+// Prompt tokens include cache hits and writes; the cache counters are subsets
+// of prompt.
 func (m *tokenTrackingModel) Usage() db.TokenCounts {
 	return db.TokenCounts{
 		Prompt:     int(m.c.promptTokens.Load()),

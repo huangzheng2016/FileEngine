@@ -16,7 +16,7 @@ func TestLoggerEmitsRunScopedEvents(t *testing.T) {
 	l.EmitPullBegin("照片", 3)
 	l.LogMessage("user", "hello")
 	l.EmitPullDone(2, 1)
-	l.EmitPullDone(0, 0) // no open unit: ignored
+	l.EmitPullDone(0, 0)
 	l.EmitProgress(db.ProgressData{Phase: db.RunPhaseTagging, Total: 10, Tagged: 2})
 
 	evs := collectEvents(t, sub)
@@ -43,8 +43,6 @@ func TestLoggerEmitsRunScopedEvents(t *testing.T) {
 	}
 }
 
-// Ids stay unique across all lanes of a run, including loggers recreated for
-// the same worker (e.g. one per depth level).
 func TestLoggerIDsUniqueWithinRun(t *testing.T) {
 	root := NewLogger(1, 1, 0)
 	seen := map[string]bool{}

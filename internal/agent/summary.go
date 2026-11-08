@@ -8,7 +8,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// SummaryAgent generates a human-readable summary of operation results.
 type SummaryAgent struct {
 	repo      *db.Repository
 	sessionID uint
@@ -18,7 +17,6 @@ func NewSummaryAgent(repo *db.Repository, sessionID uint) *SummaryAgent {
 	return &SummaryAgent{repo: repo, sessionID: sessionID}
 }
 
-// Run generates a summary of the current session state.
 func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	session, err := a.repo.GetSession(a.sessionID)
 	if err != nil {
@@ -55,9 +53,6 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	return sb.String(), nil
 }
 
-// untaggedReconciliationSection renders the end-of-run reconciliation of
-// entries still undecided, split by type (symlinks never take part), plus
-// the junk entries skipped without an LLM call.
 func untaggedReconciliationSection(b db.UntaggedBreakdown, ignored int64) string {
 	miss := ""
 	if b.Files+b.Directories > 0 {
@@ -71,8 +66,6 @@ func untaggedReconciliationSection(b db.UntaggedBreakdown, ignored int64) string
 		b.Files, b.Directories, b.Symlinks, miss, junk)
 }
 
-// emptyCategoryPruneSection records the AI-created empty categories pruned at
-// run end (created but never used). Empty input renders nothing.
 func emptyCategoryPruneSection(pruned []string) string {
 	if len(pruned) == 0 {
 		return ""
@@ -85,8 +78,6 @@ func emptyCategoryPruneSection(pruned []string) string {
 	return sb.String()
 }
 
-// failureReportSection lists the work units that failed or left entries
-// undecided (capped).
 func failureReportSection(failures []BatchFailure) string {
 	if len(failures) == 0 {
 		return ""

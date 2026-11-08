@@ -16,51 +16,28 @@ import (
 	"github.com/d5/tengo/v2/stdlib"
 )
 
-// run_script lets the agent run a Tengo script mid-run (REPL-like): bulk
-// queries and bulk category operations without one tool round-trip per file.
-//
-// Security model:
-//   - stdlib is trimmed to pure-function modules (text/math/json/base64/hex/
-//     rand/enum); os (exec/env/file/process) and fmt (writes to the process
-//     stdout) are NOT registered, and tengo file import stays disabled.
-//     times is excluded too: its sleep() blocks inside a VM builtin, and the
-//     abort flag behind RunContext is only checked between VM instructions —
-//     a sleeping script cannot be interrupted, bypassing script_timeout
-//   - scripts have no I/O at all: every data access goes through the builtin
-//     functions below, which reuse the tool layer's repository calls and
-//     guard rails (ValidateFSPath, categoryGuard, M14 similarity semantics)
-//   - each run is bounded by script_max_size (source), script_timeout
-//     (wall clock, independent of the unlimited-by-default agent run timeout),
-//     scriptMaxAllocs (object allocations — NOT bytes, see its comment) and
-//     script_max_result_size (print output and return value, each)
-//   - tengo's RunContext recovers VM panics into errors, so a panicking
-//     script cannot take the worker down
+// Security: the stdlib is trimmed to pure-function modules; os, fmt (writes
+// to process stdout) and file import are unavailable. times is excluded
+// because its sleep() blocks inside a VM builtin, where the RunContext abort
+// flag is never checked, so it would bypass script_timeout. All data access
+// goes through the builtins, which reuse the tool layer's guard rails.
 
 type RunScriptInput struct {
 	Script string `json:"script" jsonschema_description:"Tengo 脚本源码。用 print(...) 打印输出；给全局变量 result 赋值作为返回值。可用内置函数见工具描述"`
 }
 
 type RunScriptOutput struct {
-	Output     string `json:"output"`              // captured print()/println() text
+	Output     string `json:"output"`
 	Value      string `json:"value,omitempty"`     // JSON of the script's `result` global, when set
 	Truncated  bool   `json:"truncated,omitempty"` // output or value hit script_max_result_size
 	Error      string `json:"error,omitempty"`     // script compile/runtime/timeout failure, fed back for the model to fix
 	DurationMs int64  `json:"duration_ms"`
 }
 
-// Fixed script limits (the configurable ones live in AgentConfig).
 const (
-	// scriptMaxAllocs caps tengo object allocations per run. It counts
-	// allocations, NOT bytes: it stops many-small-object runaways (each
-	// allocation-producing op decrements the counter), which comfortably
-	// covers legitimate bulk queries (capped by scriptQueryMax per call).
-	// It does NOT stop exponential-growth bombs: `x += x` doubles memory
-	// each round with a single allocation per round, and one giant copy
-	// cannot be interrupted mid-instruction — Go's out-of-memory is a fatal
-	// error, not a recoverable panic, so the process would die inside the
-	// timeout window. That residual availability risk is accepted (tengo has
-	// no byte-level memory cap; real containment would need a subprocess
-	// with rlimits) and documented in CLAUDE.md.
+	// scriptMaxAllocs counts allocations, not bytes: an exponential-growth loop
+	// (x += x) can still OOM the process inside the timeout window, and Go's
+	// out-of-memory is fatal. Accepted: tengo has no byte-level memory cap.
 	scriptMaxAllocs     = 4_000_000
 	scriptQueryDefault  = 200  // default query_files limit
 	scriptQueryMax      = 1000 // hard cap on query_files limit
@@ -69,9 +46,8 @@ const (
 	scriptStdlibModules = "text, math, json, base64, hex, rand, enum"
 )
 
-// scriptLimits resolves the configurable guardrails with the same fallbacks
-// as config.setDefaults (tests build AgentConfig literals that never pass
-// through it).
+// Same fallbacks as config.setDefaults: tests build AgentConfig literals that
+// never pass through it.
 func (tb *ToolBuilder) scriptLimits() (maxSize int, timeout time.Duration, maxResult int) {
 	maxSize = tb.cfg.ScriptMaxSize
 	if maxSize <= 0 {
@@ -88,15 +64,11 @@ func (tb *ToolBuilder) scriptLimits() (maxSize int, timeout time.Duration, maxRe
 	return maxSize, time.Duration(secs) * time.Second, maxResult
 }
 
-// buildScriptTool returns the run_script tool when the session allows it, or
-// (nil, nil) when gated off. allow_script defaults to ON at the DB level.
 func (tb *ToolBuilder) buildScriptTool() (tool.BaseTool, error) {
 	if !tb.session.AllowScript {
 		return nil, nil
 	}
 	maxSize, timeout, maxResult := tb.scriptLimits()
-	// The create_category builtin line carries the session gate note plus the
-	// configured category policy verbatim (empty when no policy is set).
 	createCatNote := map[bool]string{true: "", false: "（本会话未开启 allow_auto_category，不可用）"}[tb.session.AllowAutoCategory] + categoryPolicySuffix(tb.cfg.CategoryPolicy)
 	desc := fmt.Sprintf(`运行 Tengo 脚本（类 Go 语法）做批量查询和批量决定，代替逐条工具调用。返回 print 输出和全局变量 result 的 JSON。
 
@@ -126,11 +98,9 @@ func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*R
 	maxSize, timeout, maxResult := tb.scriptLimits()
 	start := time.Now()
 
-	// Model-fixable failures (bad input shape, compile/runtime errors,
-	// script-side timeout) come back as the tool result's error field: the
-	// agent reads the message and fixes the script on its next call, instead
-	// of the whole run dying on a NodeRunError and burning a full retry. Only
-	// context cancellation (user stop / run kill) stays a hard error.
+	// Model-fixable failures come back in the result's error field so the agent
+	// fixes the script on its next call instead of the run dying; only context
+	// cancellation stays a hard error.
 	fail := func(format string, args ...any) (*RunScriptOutput, error) {
 		err := fmt.Errorf(format, args...)
 		return &RunScriptOutput{Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}, nil
@@ -148,23 +118,18 @@ func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*R
 		if ctx.Err() != nil {
 			return nil, err
 		}
-		// Failures are logged too: the entry records what the agent tried and
-		// why it failed (bounded — the script source is capped by maxSize).
 		return fail("%s", err.Error())
 	}
 	out.DurationMs = time.Since(start).Milliseconds()
 	return out, nil
 }
 
-// executeScript compiles and runs one script under all guardrails.
 func (tb *ToolBuilder) executeScript(ctx context.Context, src string, timeout time.Duration, maxResult int) (*RunScriptOutput, error) {
 	s := tengo.NewScript([]byte(src))
-	// Whitelisted pure-function stdlib only; file import stays disabled.
 	s.SetImports(stdlib.GetModuleMap(strings.Split(scriptStdlibModules, ", ")...))
 	s.SetMaxAllocs(scriptMaxAllocs)
 
-	// print/println write into a per-run capped buffer, never to the process
-	// stdout (the stdlib fmt module is deliberately absent).
+	// Never the process stdout: the stdlib fmt module is deliberately absent.
 	buf := &scriptPrintBuffer{cap: maxResult}
 	if err := s.Add("print", &tengo.UserFunction{Name: "print", Value: buf.print}); err != nil {
 		return nil, err
@@ -173,11 +138,8 @@ func (tb *ToolBuilder) executeScript(ctx context.Context, src string, timeout ti
 		return nil, err
 	}
 
-	// The return-value contract: the script assigns a global named `result`.
-	// Pre-declare it as undefined — scripts must therefore assign with `=`
-	// (`result := ...` redeclares the predeclared global and fails
-	// compilation); an untouched (still undefined) result is skipped after
-	// the run.
+	// Predeclared, so scripts must assign with `=`: `result := ...` redeclares
+	// the global and fails compilation.
 	if err := s.Add("result", tengo.UndefinedValue); err != nil {
 		return nil, err
 	}
@@ -200,7 +162,6 @@ func (tb *ToolBuilder) executeScript(ctx context.Context, src string, timeout ti
 
 	out := &RunScriptOutput{Output: buf.sb.String(), Truncated: buf.truncated}
 
-	// Return-value contract: the script assigns a global named `result`.
 	if compiled.IsDefined("result") {
 		if v := compiled.Get("result").Value(); v != nil {
 			raw, jerr := json.Marshal(v)
@@ -217,9 +178,8 @@ func (tb *ToolBuilder) executeScript(ctx context.Context, src string, timeout ti
 	return out, nil
 }
 
-// scriptPrintBuffer captures print output with a hard byte cap so a print
-// loop cannot exhaust memory inside the timeout window. Scripts run on a
-// single VM goroutine, so no locking is needed.
+// Capped so a print loop cannot exhaust memory inside the timeout window.
+// Scripts run on a single VM goroutine, so no locking is needed.
 type scriptPrintBuffer struct {
 	sb        strings.Builder
 	cap       int
@@ -252,18 +212,13 @@ func (b *scriptPrintBuffer) write(s string) {
 	b.sb.WriteString(s)
 }
 
-// ============ Script Builtins ============
-
-// scriptError wraps a domain failure as a tengo error value so scripts can
-// branch on is_error(x) instead of dying. Argument-shape mistakes still
-// return Go errors, which surface as script runtime errors.
+// Domain failures are tengo error values so scripts can branch on
+// is_error(x); argument-shape mistakes stay Go errors.
 func scriptError(err error) tengo.Object {
 	return &tengo.Error{Value: &tengo.String{Value: err.Error()}}
 }
 
-// scriptBuiltins assembles the category-domain builtin functions. Every one
-// of them goes through the repository layer; the mutating ones reuse the tool
-// core logic (setTargetCore/createCategoryCore) so validation and guard rails
+// The mutating builtins reuse the tool cores, so validation and guard rails
 // are identical to the standalone tools.
 func (tb *ToolBuilder) scriptBuiltins(ctx context.Context) map[string]*tengo.UserFunction {
 	builtins := map[string]*tengo.UserFunction{
@@ -288,8 +243,6 @@ func (tb *ToolBuilder) scriptBuiltins(ctx context.Context) map[string]*tengo.Use
 	}
 	return builtins
 }
-
-// --- argument helpers ---
 
 func scriptArgCount(fn string, args []tengo.Object, min, max int) error {
 	if len(args) < min || len(args) > max {
@@ -317,7 +270,6 @@ func scriptIntArg(fn, name string, o tengo.Object) (int, error) {
 	return int(i.Value), nil
 }
 
-// scriptFilter mirrors the list_files filters available to scripts.
 type scriptFilter struct {
 	parentPath   *string
 	fileType     string
@@ -327,9 +279,8 @@ type scriptFilter struct {
 	limit        int
 }
 
-// parseScriptFilter converts an optional trailing map argument into a
-// scriptFilter. Unknown keys are rejected loudly so a typo never silently
-// degrades a filter to "everything".
+// Unknown keys are rejected so a typo never silently widens a filter to
+// everything.
 func parseScriptFilter(fn string, o tengo.Object) (*scriptFilter, error) {
 	f := &scriptFilter{limit: scriptQueryDefault}
 	if o == nil {
@@ -405,7 +356,6 @@ func (f *scriptFilter) toFileQuery(sessionID uint) db.FileQuery {
 	return q
 }
 
-// fileToScriptMap mirrors the list_files FileItem fields.
 func fileToScriptMap(f db.FileEntry) map[string]interface{} {
 	m := map[string]interface{}{
 		"original_path": f.OriginalPath,
@@ -437,8 +387,6 @@ func scriptObject(v interface{}) (tengo.Object, error) {
 	}
 	return obj, nil
 }
-
-// --- read builtins ---
 
 func (tb *ToolBuilder) scriptQueryFiles(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {
@@ -485,7 +433,7 @@ func (tb *ToolBuilder) scriptCountFiles(ctx context.Context) tengo.CallableFunc 
 			return nil, err
 		}
 		q := filter.toFileQuery(tb.sessionID)
-		q.PageSize = 1 // only the count matters
+		q.PageSize = 1
 		_, total, err := tb.repo.ListFiles(q)
 		if err != nil {
 			return scriptError(err), nil
@@ -501,8 +449,6 @@ func (tb *ToolBuilder) scriptSampleFiles(ctx context.Context) tengo.CallableFunc
 		}
 		n := scriptSampleDefault
 		var filterArg tengo.Object
-		// Forms: sample_files() / sample_files(n) / sample_files(filter) /
-		// sample_files(filter, n).
 		for _, a := range args {
 			if iv, ok := a.(*tengo.Int); ok {
 				n = int(iv.Value)
@@ -572,14 +518,12 @@ func (tb *ToolBuilder) scriptGetCategories(ctx context.Context) tengo.CallableFu
 				"agent_editable": c.AgentEditable,
 			}
 		}
-		// The script is receiving the category list — record the snapshot for
-		// the create_category version guard, exactly like list_categories does.
+		// Record the snapshot for the create_category version guard, like
+		// list_categories.
 		tb.guard.note(names)
 		return scriptObject(items)
 	}
 }
-
-// --- mutating builtins (reuse the tool core logic) ---
 
 func (tb *ToolBuilder) scriptSetTarget(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {
@@ -701,12 +645,9 @@ func (tb *ToolBuilder) scriptCreateCategory(ctx context.Context) tengo.CallableF
 		}
 		out, err := tb.createCategoryCore(ctx, &CreateCategoryInput{Name: name, Path: p, Description: desc})
 		if err != nil {
-			// Guard rejections and duplicate conflicts are domain failures —
-			// hand them to the script as an inspectable error value.
 			return scriptError(err), nil
 		}
-		// Round-trip through JSON to reuse the tool output shape verbatim
-		// (including similar_categories/guidance).
+		// Round-trip through JSON to reuse the tool output shape verbatim.
 		raw, _ := json.Marshal(out)
 		var m map[string]interface{}
 		if err := json.Unmarshal(raw, &m); err != nil {
@@ -747,9 +688,8 @@ func (tb *ToolBuilder) scriptRenameCategory(ctx context.Context) tengo.CallableF
 		if err := tb.repo.UpdateCategoryPath(cat, cat.Path); err != nil {
 			return scriptError(fmt.Errorf("rename category: %w", err)), nil
 		}
-		// The rename changed the name set the agent knows about; refresh the
-		// create_category guard snapshot so a later create in the same script
-		// is judged against the post-rename world.
+		// The rename changed the name set; refresh the guard snapshot so a later
+		// create in the same script sees the post-rename set.
 		if cats, err := tb.repo.ListCategories(tb.filesystemID); err == nil {
 			names := make([]string, len(cats))
 			for i, c := range cats {
@@ -760,8 +700,6 @@ func (tb *ToolBuilder) scriptRenameCategory(ctx context.Context) tengo.CallableF
 		return tengo.TrueValue, nil
 	}
 }
-
-// --- decision-model builtins ---
 
 func (tb *ToolBuilder) scriptSetTargets(ctx context.Context) tengo.CallableFunc {
 	return func(args ...tengo.Object) (tengo.Object, error) {

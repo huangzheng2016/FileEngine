@@ -46,7 +46,6 @@ func TestBuildMemoryBlockOrderAndBudget(t *testing.T) {
 		t.Fatalf("labels:\n%s", out)
 	}
 
-	// Budget: many items get cut with a recall hint; path-related ones survive.
 	var many []db.MemoryItem
 	for i := 1; i <= 200; i++ {
 		many = append(many, mem(uint(i), fs, db.MemoryConvention, strings.Repeat("约定内容", 10)+fmt.Sprint(i), "", 0, false))
@@ -72,7 +71,6 @@ func TestBuildMemoryBlockOrderAndBudget(t *testing.T) {
 	if BuildMemoryBlock(nil, nil, 0) != "" {
 		t.Fatal("empty")
 	}
-	// Default budget is ~1.5K tokens.
 	out = BuildMemoryBlock(many, nil, 0)
 	if got := estimateTokens(out); got > memoryBlockTokenBudget || got < memoryBlockTokenBudget-200 {
 		t.Fatalf("default budget use: %d tokens", got)
@@ -177,7 +175,6 @@ func TestNotesAreSharedAcrossWorkers(t *testing.T) {
 	if out, err := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类", Path: "Projects/foo"}); err != nil || !out.Success {
 		t.Fatalf("note: %+v %v", out, err)
 	}
-	// The same content is one note (idempotent key).
 	if out, _ := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类"}); out.Created {
 		t.Fatal("identical note must update, not duplicate")
 	}
@@ -218,7 +215,6 @@ result = {a: a, b: b, c_err: is_error(c)}`)
 		t.Fatalf("relative_to: %+v", v)
 	}
 
-	// Default: relative to the unit root when set, else the file name.
 	tb.SetUnitRoot("/incoming/trip/")
 	out = mustRunScript(t, tb, `
 a := set_category("incoming/trip/day1/p.jpg", "照片")
@@ -228,7 +224,6 @@ result = {a: a, b: b}`)
 	if v["a"] != "/organized/photos/day1/p.jpg" || v["b"] != "/organized/photos/photo2.jpg" {
 		t.Fatalf("unit-root default: %+v", v)
 	}
-	// Two files landing on the same name get distinct targets.
 	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day2/p.jpg", "照片", "incoming/trip/day2")}`)
 	if v := resultValue(t, out); v["x"] != "/organized/photos/p.jpg" {
 		t.Fatalf("free name: %+v", v)

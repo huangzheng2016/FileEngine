@@ -98,8 +98,6 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 	return a, repo
 }
 
-// fakeWorkers builds workers whose LLM step is replaced by decide, recording
-// every unit they receive.
 func fakeWorkers(a *AutoTagAgent, decide func(tb *ToolBuilder, u workUnit), seen *[]workUnit, mu *sync.Mutex) func(int) (*tagWorker, func(), error) {
 	return func(id int) (*tagWorker, func(), error) {
 		logger := a.logger.ForWorker(id)
@@ -156,7 +154,6 @@ func TestPipelineTopDownUnits(t *testing.T) {
 	for _, u := range seen {
 		kinds[u.kind] = append(kinds[u.kind], u.path)
 	}
-	// proj is auto-decided (go.mod + goal + 代码 category): no LLM unit.
 	for _, p := range kinds[unitDir] {
 		if p == "proj" {
 			t.Fatal("strong marker must auto-decide without an LLM unit")
@@ -189,7 +186,6 @@ func TestPipelineFailuresAndAutoContainer(t *testing.T) {
 	if err := a.prepass(); err != nil {
 		t.Fatal(err)
 	}
-	// misc/inner's only child is already decided → settled without the LLM.
 	if _, err := repo.Decide(a.sessionID, db.Decision{Path: "misc/inner/deep.txt", Role: db.RoleSkip}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +232,6 @@ func TestPipelineScopeSkipsOutOfScope(t *testing.T) {
 	}
 }
 
-// Cache affinity: two different units of one run share a byte-identical
-// shared-context message; only the per-unit message differs.
 func TestUnitMessagesShareByteIdenticalContext(t *testing.T) {
 	a, repo := pipelineFixture(t, "照片按年份")
 	if err := repo.CreateRule(&db.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档"}); err != nil {
@@ -250,7 +244,6 @@ func TestUnitMessagesShareByteIdenticalContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Planning between units must not disturb the block.
 	if _, err := repo.Decide(a.sessionID, db.Decision{Path: "readme.txt", Role: db.RoleFile, NewPath: "/文档/readme.txt"}); err != nil {
 		t.Fatal(err)
 	}

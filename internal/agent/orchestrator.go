@@ -9,19 +9,14 @@ import (
 	"FileEngine/internal/db"
 )
 
-// RequestType identifies the kind of operation requested.
 type RequestType string
 
 const RequestAutoTag RequestType = "autotag"
 
-// OrchestratorRequest is the unified request for the orchestrator. Chat,
-// survey and review runs do not route through it (see Agent.RunChat,
-// RunSurvey, RunReview).
 type OrchestratorRequest struct {
 	Type RequestType
 }
 
-// OrchestratorAgent routes requests to specialized sub-agents and coordinates execution.
 type OrchestratorAgent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
@@ -29,10 +24,9 @@ type OrchestratorAgent struct {
 	session       *db.ScanSession
 	sessionID     uint
 	logger        *Logger
-	partial       bool // the last auto-tag run had failed batches
+	partial       bool
 }
 
-// Partial reports whether the last auto-tag run had failed batches.
 func (o *OrchestratorAgent) Partial() bool { return o.partial }
 
 func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *OrchestratorAgent {
@@ -46,7 +40,6 @@ func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, mode
 	}
 }
 
-// Run executes the request by routing to the appropriate sub-agent.
 func (o *OrchestratorAgent) Run(ctx context.Context, req OrchestratorRequest) (string, error) {
 	switch req.Type {
 	case RequestAutoTag:
@@ -64,17 +57,13 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("auto-tag failed: %w", err)
 	}
 
-	// Surface partial failure: failed batches (retries exhausted) make the
-	// run partial and get their own report section.
 	failures := autoTag.Failures()
 	o.partial = len(failures) > 0
 
-	// "建了不用" discipline, enforced at run end (never mid-run — a category
-	// created by an earlier batch may still be filled by a later one):
-	// AI-created categories with zero planned files are pruned and recorded.
+	// Pruned at run end only: a category created by an earlier unit may still be
+	// filled by a later one.
 	pruned := o.pruneEmptyAgentCategories()
 
-	// Generate summary
 	summary := NewSummaryAgent(o.repo, o.sessionID)
 	report, err := summary.Run(ctx)
 	if err != nil {
@@ -83,9 +72,8 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	}
 	report += failureReportSection(failures)
 	report += emptyCategoryPruneSection(pruned)
-	// Reconciliation: split the untagged remainder by entry type so the
-	// expected deltas (container dirs, symlinks) are distinguishable from
-	// real tagging misses (files); junk-filter ignores are reported too.
+	// Container dirs and symlinks are expected remainders; only files are real
+	// misses.
 	var ignored int64
 	if n, err := o.repo.CountIgnoredJunk(o.sessionID); err == nil {
 		ignored = n
@@ -98,17 +86,8 @@ func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	return report, nil
 }
 
-// pruneEmptyAgentCategories deletes AI-created categories that ended the run
-// with zero planned files and returns their "name (path)" labels for the
-// report. User-created categories (agent_created=false) and non-empty ones
-// are never touched. Runs at run end only: categories created mid-run may
-// still be filled by later batches.
-//
-// Emptiness is judged FILESYSTEM-WIDE (all sessions), not per-session:
-// categories are filesystem-level shared resources — in a rescan workflow
-// (new session + exclude_category_dirs) a category created and filled by an
-// earlier run has zero plans in the current session, and pruning it would
-// destroy still-referenced organization metadata.
+// Emptiness is judged across all sessions of the filesystem: in a rescan, a
+// category filled by an earlier session has no plans in the current one.
 func (o *OrchestratorAgent) pruneEmptyAgentCategories() []string {
 	cats, err := o.repo.ListCategories(o.session.FilesystemID)
 	if err != nil {

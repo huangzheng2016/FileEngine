@@ -15,11 +15,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// runADKWithRetry executes one agent run and retries failures according to
-// their error class (see retry.go): 429/5xx/network errors back off with
-// jitter, hard 4xx errors fail immediately. Each attempt gets a fresh
-// per-run timeout (agent_timeout) and token-usage window; every attempt's
-// usage, failed ones included, is added to the run's token totals.
 func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
 	attempt := func(ctx context.Context) (*schema.Message, error) {
 		callCtx, callCancel := withRunTimeout(ctx)
@@ -104,9 +99,8 @@ func runADKOnce(ctx context.Context, agent *adk.ChatModelAgent, messages []*sche
 	return lastAssistantMsg, nil
 }
 
-// streamAssistant consumes one assistant MessageOutput, emitting its deltas
-// and the finalizing message event. A stream that breaks midway is still
-// finalized with the content received so far before the error is returned.
+// A stream that breaks midway is still finalized with the content received
+// so far.
 func streamAssistant(mo *adk.MessageVariant, logger *Logger) (*schema.Message, error) {
 	msgID := logger.NewMsgID()
 	if !mo.IsStreaming {
@@ -171,7 +165,6 @@ type pendingCall struct {
 	start time.Time
 }
 
-// callTracker pairs tool results with the tool calls that produced them.
 type callTracker struct {
 	logger  *Logger
 	pending []pendingCall
@@ -221,7 +214,6 @@ func (t *callTracker) result(toolName string, msg *schema.Message) {
 	})
 }
 
-// parseJSONOrRaw decodes s as JSON, falling back to the raw string.
 func parseJSONOrRaw(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return s

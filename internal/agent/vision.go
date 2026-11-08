@@ -16,8 +16,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// Cost-guardrail fallbacks, mirroring readFile's pattern: applied when the
-// AgentConfig fields are unset (e.g. zero-valued config in tests).
 const (
 	defaultVisionMaxImagesPerBatch = 4
 	defaultVisionImageMaxPx        = 512
@@ -40,7 +38,6 @@ type ViewImageInput struct {
 	Paths []string `json:"paths" jsonschema_description:"Image file paths to view (original_path from list_files). Supported: jpg/jpeg/png/gif. HEIC/RAW are skipped."`
 }
 
-// visionLimits resolves the effective guardrails from config with fallbacks.
 func (tb *ToolBuilder) visionLimits() (maxImages, maxPx, maxBytes int) {
 	maxImages = tb.cfg.VisionMaxImagesPerBatch
 	if maxImages <= 0 {
@@ -57,10 +54,8 @@ func (tb *ToolBuilder) visionLimits() (maxImages, maxPx, maxBytes int) {
 	return
 }
 
-// viewImage loads images from the remote FS, downscales them to thumbnails and
-// returns them as multimodal tool-result parts (text note + image per file).
-// Per-file problems (unsupported format, too large, read/decode errors) become
-// text notes so one bad file never fails the whole call.
+// Per-file problems become text notes so one bad file never fails the whole
+// call.
 func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*schema.ToolResult, error) {
 	maxImages, maxPx, maxBytes := tb.visionLimits()
 	if len(input.Paths) == 0 {
@@ -124,8 +119,7 @@ func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*s
 	return result, nil
 }
 
-// imageFormatFor maps a file extension to a decodable image format.
-// HEIC/RAW and anything else are intentionally unsupported (no pure-Go decoder).
+// HEIC/RAW are unsupported: no pure-Go decoder.
 func imageFormatFor(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".jpg", ".jpeg":
@@ -138,8 +132,6 @@ func imageFormatFor(path string) string {
 	return ""
 }
 
-// loadThumbnail reads one image, downscales it so its long edge is at most
-// maxPx, and re-encodes it (jpeg stays jpeg, png/gif become png).
 func (tb *ToolBuilder) loadThumbnail(ctx context.Context, path, format string, maxPx, maxBytes int) (data []byte, mime string, origW, origH, thumbW, thumbH int, err error) {
 	reader, err := tb.fs.ReadFile(ctx, path)
 	if err != nil {
@@ -191,9 +183,8 @@ func (tb *ToolBuilder) loadThumbnail(ctx context.Context, path, format string, m
 	return buf.Bytes(), mime, origW, origH, thumbW, thumbH, nil
 }
 
-// downscaleToFit returns img unchanged when it already fits, otherwise an
-// area-averaged downscale with the long edge at maxPx. Area averaging keeps
-// text screenshots legible compared to nearest-neighbor and needs only stdlib.
+// Area averaging keeps text screenshots legible compared to nearest-neighbor
+// and needs only stdlib.
 func downscaleToFit(img image.Image, maxPx int) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -254,10 +245,7 @@ func downscaleToFit(img image.Image, maxPx int) image.Image {
 	return dst
 }
 
-// describeMessageParts renders a compact text stand-in for multimodal message
-// parts: text parts are kept verbatim (they carry per-file notes), non-text
-// parts are summarized by count. Used for tool-result events/logs where the
-// raw base64 payloads must not appear.
+// Raw base64 payloads must never reach tool-result events or logs.
 func describeMessageParts(parts []schema.MessageInputPart) string {
 	var sb strings.Builder
 	images := 0

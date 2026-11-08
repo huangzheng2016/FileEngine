@@ -100,7 +100,6 @@ type streamEvent struct {
 	Data map[string]any
 }
 
-// collectEvents flushes pending deltas and drains everything sub received.
 func collectEvents(t *testing.T, sub *db.Subscriber) []streamEvent {
 	t.Helper()
 	db.FlushEvents()
@@ -182,8 +181,6 @@ func TestRunADKOnceStreamsEvents(t *testing.T) {
 	}
 }
 
-// Models that omit tool call ids still get a generated call_id that pairs
-// the tool_call with its tool_result.
 func TestRunADKOnceGeneratesCallIDs(t *testing.T) {
 	setupToolTestRepo(t)
 	const sid = 202
@@ -208,8 +205,6 @@ func TestRunADKOnceGeneratesCallIDs(t *testing.T) {
 	}
 }
 
-// Under streaming the token tracker still counts usage (Stream path), and
-// runADKWithRetry adds it to the run totals.
 func TestRunADKWithRetryCountsStreamingTokens(t *testing.T) {
 	setupToolTestRepo(t)
 	tracker := newTokenTrackingModel(&scriptedModel{})

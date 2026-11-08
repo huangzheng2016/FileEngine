@@ -16,14 +16,11 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// fakeStep is one streamed answer of fakeModel: text and/or tool calls.
 type fakeStep struct {
 	text  string
 	calls []schema.ToolCall
 }
 
-// fakeModel replays scripted streamed steps (agent turns) and Generate
-// answers (one-shot calls), recording every input.
 type fakeModel struct {
 	mu       sync.Mutex
 	steps    []fakeStep
@@ -64,8 +61,6 @@ func toolCall(id, name string, args any) schema.ToolCall {
 	return schema.ToolCall{Index: &idx, ID: id, Type: "function", Function: schema.FunctionCall{Name: name, Arguments: string(b)}}
 }
 
-// brainAgent sets up a session (id 1, filesystem 1, local fs) and an Agent
-// whose runs use model.
 func brainAgent(t *testing.T, model *fakeModel) (*db.Repository, *Agent, *db.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
@@ -111,8 +106,6 @@ func historyBytes(t *testing.T, summary *db.ChatTurn, turns []db.ChatTurn) strin
 	return strings.TrimSuffix(string(b), "]")
 }
 
-// History grows append-only: the rendered history of turn k is a byte
-// prefix of turn k+1's, across a fold too, and a fold happens once.
 func TestChatHistoryAppendOnly(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	folds := 0
@@ -150,7 +143,6 @@ func TestChatHistoryAppendOnly(t *testing.T) {
 		}
 		if folds != before {
 			foldsAt = append(foldsAt, i)
-			// The next turn must extend the folded history.
 			prev = cur
 			continue
 		}
@@ -209,7 +201,6 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 		t.Fatal("turns carry their run id")
 	}
 
-	// Turn 1 input: system, shared context, user (with selected files).
 	in1 := model.streamed[0]
 	if in1[0].Role != schema.System || in1[0].Content != chatPrompt {
 		t.Fatal("system prompt first and static")
@@ -221,7 +212,6 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	if !strings.Contains(last.Content, "a.jpg") || !strings.HasSuffix(last.Content, "帮我整理照片") {
 		t.Fatalf("selected files then the message last: %q", last.Content)
 	}
-	// Turn 2 input: the turn 1 prefix is reused, history follows.
 	in2 := model.streamed[1]
 	if in2[1].Content != in1[1].Content {
 		t.Fatal("shared context must be byte-identical across turns")
@@ -301,7 +291,6 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 		t.Fatalf("survey input: %q", user)
 	}
 
-	// A survey that never writes the plan fails.
 	model.steps = []fakeStep{{text: "我看完了"}}
 	if _, err := a.RunSurvey(context.Background(), NewLogger(session.ID, 4, 0), ""); err != errNoPlanWritten {
 		t.Fatalf("no plan written: %v", err)
@@ -335,7 +324,7 @@ func TestBuildReviewMaterial(t *testing.T) {
 	}
 	for _, w := range []string{
 		"### 照片（/照片，共 1 项）", "mix/a.jpg → /照片/a.jpg（照片）",
-		"### 图片（/照片/图片，共 1 项）", // longest prefix wins
+		"### 图片（/照片/图片，共 1 项）",
 		"## 没有规划的分类\n\n空分类（/空）",
 		"## 不在任何分类下的规划（共 1 项）", "mix/d.exe → /杂项/d.exe",
 		"## 同目录文件被分到多个分类", "mix（4 个文件）",

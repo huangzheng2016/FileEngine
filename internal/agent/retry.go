@@ -17,25 +17,18 @@ import (
 	"FileEngine/internal/config"
 )
 
-// errorClass buckets a failed agent run by its retry semantics. The class is
-// carried in every retry log line so cron log patrols can tell throttling
-// apart from real failures at a glance.
+// The class is in every retry log line so throttling is distinguishable from
+// real failures.
 type errorClass int
 
 const (
-	// errClassHard errors can never succeed on retry with the same input:
-	// 4xx client errors (400/401/403/404/413/context-length/…) and caller
-	// cancellation. They fail immediately.
+	// Hard errors cannot succeed on retry with the same input: 4xx and caller
+	// cancellation.
 	errClassHard errorClass = iota
-	// errClassRateLimit is HTTP 429. It gets its own (larger) retry budget,
-	// honors server Retry-After hints, and deepens backoff fleet-wide while
-	// throttling persists.
 	errClassRateLimit
-	// errClassServer is HTTP 5xx — plus any unrecognized error, so oddball
-	// transient failures stay retryable.
+	// Unrecognized errors count as server errors so odd transient failures stay
+	// retryable.
 	errClassServer
-	// errClassNetwork is a transport-level failure: timeouts (including the
-	// per-run agent_timeout), refused/dropped connections, DNS errors.
 	errClassNetwork
 )
 
@@ -52,16 +45,11 @@ func (c errorClass) String() string {
 	}
 }
 
-// errStatusCodeRe recovers an HTTP status from the rendered error text of
-// go-openai error types. eino-ext converts *go-openai.APIError into its own
-// *openai.APIError (caught structurally by errors.As above), but
-// *go-openai.RequestError — a non-JSON error body, the usual shape of proxy
-// 502/503 pages — passes through unconverted; both render as
-// "error, status code: NNN, ...".
+// eino-ext converts go-openai's APIError (caught by errors.As), but a
+// RequestError (non-JSON body, typical of proxy 502/503 pages) passes through
+// unconverted; both render as "error, status code: NNN, ...".
 var errStatusCodeRe = regexp.MustCompile(`error, status code: (\d+)`)
 
-// httpStatusFromError extracts the HTTP status code from a model call error,
-// if the error carries one.
 func httpStatusFromError(err error) (int, bool) {
 	var apiErr *einoopenai.APIError
 	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode > 0 {
@@ -75,17 +63,13 @@ func httpStatusFromError(err error) (int, bool) {
 	return 0, false
 }
 
-// classifyRunError decides the retry class of a failed run with no transport
-// hints; see classifyRunErrorWithStatus.
 func classifyRunError(err error) errorClass {
 	return classifyRunErrorWithStatus(err, 0)
 }
 
-// classifyRunErrorWithStatus decides the retry class of a failed run.
-// statusHint is the error response's status code captured by the hint
-// transport (0 when unknown) — the least precise source, used only when the
-// error itself carries no status. The caller checks the parent ctx first, so
-// a context error here means the per-attempt timeout, not user stop.
+// statusHint is the least precise source and only used when err carries no
+// status. The caller checks the parent ctx first, so a context error here
+// means the per-attempt timeout, not a user stop.
 func classifyRunErrorWithStatus(err error, statusHint int) errorClass {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return errClassHard
@@ -103,13 +87,9 @@ func classifyRunErrorWithStatus(err error, statusHint int) errorClass {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return errClassNetwork
 	}
-	// Unknown errors stay retryable.
 	return errClassServer
 }
 
-// classForStatus maps an HTTP status code to its retry class: 429 is rate
-// limiting, 5xx a server error, everything else (other 4xx, odd 1xx/2xx/3xx
-// error responses) is hard.
 func classForStatus(status int) errorClass {
 	switch {
 	case status == http.StatusTooManyRequests:
@@ -121,19 +101,13 @@ func classForStatus(status int) errorClass {
 	}
 }
 
-// retryAfterCarrier is implemented by error types that surface a
-// server-provided Retry-After hint. The primary Retry-After source is the
-// response header captured per attempt via modelfactory.ResponseHints (see
-// runWithRetry); this interface and the message parse below are fallbacks for
-// providers that put the hint only in the error payload.
+// Fallback for providers that put the hint only in the error payload; the
+// primary source is the response header captured per attempt.
 type retryAfterCarrier interface {
 	RetryAfter() time.Duration
 }
 
-// retryAfterPatterns are a best-effort fallback for providers that put a
-// retry hint only in the error message text ("please retry after 3 seconds",
-// "try again in 500ms"). A bare number means seconds, per the HTTP
-// Retry-After convention.
+// A bare number means seconds, per the HTTP Retry-After convention.
 var retryAfterPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)retry[- ]after[:\s]+(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes)?\b`),
 	regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes)\b`),
@@ -161,8 +135,6 @@ func parseRetryAfterMessage(msg string) time.Duration {
 	return 0
 }
 
-// retryAfterFromError returns the server-provided retry hint, or 0 when the
-// error carries none.
 func retryAfterFromError(err error) time.Duration {
 	var carrier retryAfterCarrier
 	if errors.As(err, &carrier) {
@@ -177,18 +149,14 @@ func retryAfterFromError(err error) time.Duration {
 	return 0
 }
 
-// retryRandFloat64 is the jitter source (stubbed in tests).
 var retryRandFloat64 = rand.Float64
 
-// rateLimitStreak counts consecutive rate_limit failures fleet-wide with no
-// intervening success. While the server keeps throttling, every worker's
-// backoff deepens (up to rateLimitStreakBoostMax extra exponent slots) — the
-// simplest form of adaptive slowdown: no shared state beyond one atomic.
+// While the server keeps throttling, every worker's backoff deepens (up to
+// rateLimitStreakBoostMax extra exponent slots).
 var rateLimitStreak atomic.Int64
 
 const rateLimitStreakBoostMax = 4
 
-// retryCfg returns the live agent config (hot-reloadable), never nil.
 func retryCfg() *config.AgentConfig {
 	cfg := config.Get()
 	if cfg == nil {
@@ -197,9 +165,6 @@ func retryCfg() *config.AgentConfig {
 	return &cfg.Agent
 }
 
-// maxRetriesForClass returns the retry budget for a class: rate limiting gets
-// its own larger budget, server/network errors use max_retries, hard errors
-// get zero.
 func maxRetriesForClass(class errorClass, cfg *config.AgentConfig) int {
 	switch class {
 	case errClassRateLimit:
@@ -217,12 +182,9 @@ func maxRetriesForClass(class errorClass, cfg *config.AgentConfig) int {
 	}
 }
 
-// backoffDelay computes how long to wait before retry attempt `attempt`
-// (1-based): exponential backoff with full jitter,
-// rand[0, min(maxDelay, base*2^(attempt-1))]. Rate limiting adds the
-// fleet-wide streak to the exponent and, when the server provided a
-// Retry-After hint, waits that long instead (clamped to 4*maxDelay) plus one
-// jittered base slot to de-synchronize workers.
+// Full jitter: rand[0, min(maxDelay, base*2^(attempt-1))]. A Retry-After hint
+// replaces it (clamped to 4*maxDelay) plus one jittered base slot to
+// de-synchronize workers.
 func backoffDelay(class errorClass, attempt int, retryAfter time.Duration, cfg *config.AgentConfig) time.Duration {
 	base := time.Duration(cfg.RetryBaseDelay) * time.Second
 	if base <= 0 {
@@ -258,8 +220,6 @@ func backoffDelay(class errorClass, attempt int, retryAfter time.Duration, cfg *
 	return time.Duration(retryRandFloat64() * float64(raw))
 }
 
-// retrySleep waits for d or returns early when ctx is done (stubbed in
-// tests).
 var retrySleep = func(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()

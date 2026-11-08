@@ -11,8 +11,7 @@ import (
 	"FileEngine/internal/config"
 )
 
-// estimateTokens provides a language-aware token estimate.
-// ASCII text ≈ 4 chars/token, CJK text ≈ 1.5 chars/token.
+// ASCII text is about 4 chars per token, CJK about 1.5.
 func estimateTokens(s string) int64 {
 	var ascii, nonAscii int
 	for _, r := range s {
@@ -25,7 +24,6 @@ func estimateTokens(s string) int64 {
 	return int64(float64(ascii)/4.0 + float64(nonAscii)/1.5)
 }
 
-// countTokens estimates the total tokens of messages and tool definitions.
 func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 	var tokens int64
 	for _, msg := range msgs {
@@ -58,11 +56,8 @@ func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 	return tokens
 }
 
-// agentRunTimeout returns the per-attempt timeout for one full agent run
-// (the entire ReAct loop of up to max_step tool rounds, not a single Generate
-// call). It reads the live config so agent_timeout is hot-reloadable.
-// A configured value <= 0 (the default) means no timeout: the run is bounded
-// only by the caller's context (user stop) and max_step.
+// agentRunTimeout bounds one full ReAct run, not a single model call;
+// <= 0 means no timeout.
 func agentRunTimeout() time.Duration {
 	secs := config.Get().Agent.AgentTimeout
 	if secs <= 0 {
@@ -71,8 +66,6 @@ func agentRunTimeout() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// withRunTimeout wraps ctx with the configured per-run timeout, or returns ctx
-// unchanged when agent_timeout is disabled (<= 0, the default).
 func withRunTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if timeout := agentRunTimeout(); timeout > 0 {
 		return context.WithTimeout(ctx, timeout)

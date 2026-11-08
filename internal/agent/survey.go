@@ -23,8 +23,6 @@ const (
 	overviewRootFilesMax = 10
 )
 
-// overviewMarkerNames are entry names (lower-case) that reveal what a
-// directory is: a code project, a camera roll, an installer, a disc rip.
 var overviewMarkerNames = map[string]string{
 	".git": "Git 仓库", "package.json": "Node 项目", "go.mod": "Go 项目", "cargo.toml": "Rust 项目",
 	"pom.xml": "Maven 项目", "build.gradle": "Gradle 项目", "cmakelists.txt": "CMake 项目",
@@ -33,7 +31,6 @@ var overviewMarkerNames = map[string]string{
 	"autorun.inf": "光盘镜像", ".svn": "SVN 仓库",
 }
 
-// overviewMarkerExts are directory-name extensions that mark bundles.
 var overviewMarkerExts = map[string]string{
 	".xcodeproj": "Xcode 项目", ".sln": "VS 解决方案", ".photoslibrary": "照片图库", ".app": "macOS 应用",
 	".msi": "安装包",
@@ -59,8 +56,6 @@ type overviewMarker struct {
 	label string
 }
 
-// TreeOverview is the deterministic picture of a scanned tree the survey
-// agent starts from (no LLM involved).
 type TreeOverview struct {
 	Files, Dirs   int
 	Size          int64
@@ -76,7 +71,6 @@ type TreeOverview struct {
 	MoreMarkers   int
 }
 
-// relToRoot strips the scan root prefix from an entry path.
 func relToRoot(root, p string) string {
 	root = strings.Trim(root, "/")
 	p = strings.Trim(p, "/")
@@ -97,8 +91,6 @@ func fileExt(name string) string {
 	return ext
 }
 
-// ComputeTreeOverview aggregates the session's entries into a TreeOverview
-// in one streaming pass.
 func ComputeTreeOverview(repo *db.Repository, session *db.ScanSession) (*TreeOverview, error) {
 	ov := &TreeOverview{DepthFiles: map[int]int{}}
 	top := map[string]*overviewDir{}
@@ -217,9 +209,7 @@ func ComputeTreeOverview(repo *db.Repository, session *db.ScanSession) (*TreeOve
 	return ov, nil
 }
 
-// outermostMarkers sorts markers shallowest first and drops those inside an
-// already marked directory (a project's vendored packages are not projects
-// of their own).
+// A project's vendored packages are not projects of their own.
 func outermostMarkers(markers []overviewMarker) []overviewMarker {
 	sort.Slice(markers, func(i, j int) bool {
 		di, dj := strings.Count(markers[i].dir, "/"), strings.Count(markers[j].dir, "/")
@@ -257,7 +247,6 @@ func outermostMarkers(markers []overviewMarker) []overviewMarker {
 	return out
 }
 
-// humanSize renders a byte count with a binary unit.
 func humanSize(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -296,8 +285,6 @@ func topExts(m map[string]int, n int) string {
 	return strings.Join(parts, " ")
 }
 
-// Render formats the overview as the Chinese Markdown block given to the
-// survey agent.
 func (ov *TreeOverview) Render() string {
 	var sb strings.Builder
 	sb.WriteString("## 目录树概览（系统统计）\n\n")
@@ -367,12 +354,8 @@ func (ov *TreeOverview) Render() string {
 	return sb.String()
 }
 
-// errNoPlanWritten fails a survey run whose agent never called write_plan.
 var errNoPlanWritten = errors.New("助手没有写入整理方案")
 
-// RunSurvey drafts the session plan: deterministic tree overview first, then
-// a main-model agent that explores top-down, curates categories and writes
-// the plan. Returns the agent's closing summary.
 func (a *Agent) RunSurvey(ctx context.Context, logger *Logger, instructions string) (string, error) {
 	before, err := a.repo.GetPlan(a.sessionID)
 	if err != nil {

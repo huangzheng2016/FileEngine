@@ -87,8 +87,6 @@ func TestSharedContextSectionsAndStability(t *testing.T) {
 		}
 		last = i
 	}
-	// Planning activity (usage counts, rule matches, recall hits) must not
-	// change the block.
 	if _, _, err := repo.SetTargetUnique(session.ID, "Photos", "/照片/Photos", "directory"); err != nil {
 		t.Fatal(err)
 	}

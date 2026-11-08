@@ -9,7 +9,6 @@ import (
 	"FileEngine/internal/pathutil"
 )
 
-// maxBatchItems caps one set_targets / decide_dirs call.
 const maxBatchItems = 200
 
 type TargetItem struct {
@@ -46,7 +45,6 @@ type BatchRenamed struct {
 	NewPath string `json:"new_path"`
 }
 
-// BatchOutput is the compact result of set_targets / decide_dirs.
 type BatchOutput struct {
 	Success     bool           `json:"success"`
 	OK          int            `json:"ok"`
@@ -67,9 +65,7 @@ type SplitUnitOutput struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// targetChecker validates targets against the category system once per
-// batch: a target must lie under a category path unless the session has a
-// plan.
+// A target must lie under a category path unless the session has a plan.
 type targetChecker struct {
 	cats    []db.Category
 	hasPlan bool
@@ -110,7 +106,6 @@ func (c *targetChecker) check(newPath string) string {
 	return fmt.Sprintf("目标 %s 不在任何分类路径下，未写入。现有分类：%s", np, strings.Join(paths, "、"))
 }
 
-// pathUnder reports whether p equals dir or lies below it ("/"-rooted paths).
 func pathUnder(p, dir string) bool {
 	if dir == "/" {
 		return true
@@ -118,9 +113,6 @@ func pathUnder(p, dir string) bool {
 	return p == dir || strings.HasPrefix(p, dir+"/")
 }
 
-// decide is the shared core of every decision tool and script builtin:
-// category check, then the repository's invariant-enforcing DecideBatch.
-// Rejections land in the output; only storage failures return an error.
 func (tb *ToolBuilder) decide(ds []db.Decision) (*BatchOutput, []db.DecideOutcome, error) {
 	out := &BatchOutput{}
 	if len(ds) == 0 {
@@ -210,7 +202,6 @@ func (tb *ToolBuilder) splitUnit(ctx context.Context, in *SplitUnitInput) (*Spli
 	return &SplitUnitOutput{Success: true, Released: n}, nil
 }
 
-// decideOne is the single-decision path used by script builtins.
 func (tb *ToolBuilder) decideOne(d db.Decision) (*db.DecideResult, error) {
 	out, outcomes, err := tb.decide([]db.Decision{d})
 	if err != nil {

@@ -16,8 +16,6 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-// ============ Tool Input/Output Types ============
-
 type ListFilesInput struct {
 	ParentPath string `json:"parent_path" jsonschema_description:"目录路径；空=扫描根目录"`
 	FileType   string `json:"file_type,omitempty" jsonschema_description:"file / directory"`
@@ -26,7 +24,6 @@ type ListFilesInput struct {
 	Limit      int    `json:"limit,omitempty" jsonschema_description:"默认 100，最多 500"`
 }
 
-// ListFilesOutput is a compact TSV listing; names are relative to Parent.
 type ListFilesOutput struct {
 	Parent     string `json:"parent"`
 	Columns    string `json:"columns"`
@@ -97,19 +94,13 @@ type CreateCategoryOutput struct {
 	Success bool   `json:"success"`
 	Name    string `json:"name"`
 	Path    string `json:"path"`
-	// Error carries an agent-recoverable rejection (guard rails, duplicates,
-	// invalid input) with guidance for the next decision; Success is false.
-	// System failures still abort the run as Go errors.
-	Error string `json:"error,omitempty"`
-	// SimilarCategories lists fuzzy lookalikes found after a successful
-	// creation (path overlap/containment) — reference info for the model to
-	// judge whether a merge is warranted; empty when there are none.
+	// Error carries an agent-recoverable rejection with guidance; system
+	// failures abort the run as Go errors.
+	Error             string                `json:"error,omitempty"`
 	SimilarCategories []SimilarCategoryItem `json:"similar_categories,omitempty"`
 	Guidance          string                `json:"guidance,omitempty"`
 }
 
-// SimilarCategoryItem is one fuzzy-similar existing category attached to a
-// successful create_category result.
 type SimilarCategoryItem struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
@@ -141,11 +132,8 @@ type DeleteCategoryOutput struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// rejectError marks agent-recoverable tool rejections: the model can fix its
-// input (guard-rail rejection, duplicate, not-found, invalid argument) and
-// continue, so tool handlers report these as success=false results instead of
-// aborting the whole agent run — eino makes any tool error fatal to the ReAct
-// loop. System failures (DB/FS errors) stay ordinary fatal errors.
+// eino makes any tool error fatal to the ReAct loop, so input the model can
+// fix is reported as a success=false result instead.
 type rejectError struct{ msg string }
 
 func (e *rejectError) Error() string { return e.msg }
@@ -154,33 +142,21 @@ func rejectf(format string, args ...interface{}) error {
 	return &rejectError{msg: fmt.Sprintf(format, args...)}
 }
 
-// ============ Tool Builder ============
-
 type ToolBuilder struct {
-	repo         *db.Repository
-	fs           remotefs.RemoteFS
-	sessionID    uint
-	filesystemID uint
-	logger       *Logger
-	cfg          config.AgentConfig
-	session      *db.ScanSession
-	// modelVisionEnabled is the model-level vision switch
-	// (ModelProvider.VisionEnabled); view_image is registered only when it and
-	// ScanSession.AllowVision are both on.
+	repo               *db.Repository
+	fs                 remotefs.RemoteFS
+	sessionID          uint
+	filesystemID       uint
+	logger             *Logger
+	cfg                config.AgentConfig
+	session            *db.ScanSession
 	modelVisionEnabled bool
-	// guard remembers the category-set snapshot this worker's agent last saw
-	// and backs the create_category guard rails (see category_guard.go).
-	guard categoryGuard
+	guard              categoryGuard
 
-	// RunID is the agent run these tools act for; tool-originated events
-	// (plan_updated, memory_updated) carry it. 0 outside a run.
-	RunID uint
-	// unitRoot is the directory of the work unit being processed; script
-	// set_category keeps file paths relative to it (see SetUnitRoot).
+	// Tool-originated events carry RunID; 0 outside a run.
+	RunID    uint
 	unitRoot string
-	// notes tracks which shared session notes this worker has already seen
-	// (see TakeNewNotes).
-	notes notesCursor
+	notes    notesCursor
 }
 
 func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
@@ -196,10 +172,6 @@ func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, f
 	}
 }
 
-// buildVisionTool returns the view_image tool when both vision switches are on
-// (model-level ModelProvider.VisionEnabled ∩ session-level AllowVision), or
-// (nil, nil) when gated off. Default state is off in both places, so the tool
-// is absent unless explicitly enabled.
 func (tb *ToolBuilder) buildVisionTool() (tool.BaseTool, error) {
 	if !tb.modelVisionEnabled || !tb.session.AllowVision {
 		return nil, nil
@@ -213,9 +185,6 @@ func (tb *ToolBuilder) buildVisionTool() (tool.BaseTool, error) {
 	return viewImage, nil
 }
 
-// ============ Tool Implementations ============
-
-// normalizePath strips leading slash to match DB storage format.
 func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
@@ -253,8 +222,7 @@ func (tb *ToolBuilder) listFiles(ctx context.Context, input *ListFilesInput) (*L
 	return out, nil
 }
 
-// entryRows renders entries as compact TSV rows (see listColumns): names
-// only (relative to their parent), sanitized since they are untrusted.
+// Names are sanitized since they are untrusted.
 func entryRows(files []db.FileEntry) string {
 	var sb strings.Builder
 	for _, f := range files {
@@ -307,13 +275,10 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 	return out, nil
 }
 
-// defaultReadChars is read_file's page size in characters.
 const defaultReadChars = 8000
 
-// sensitiveNotice is returned instead of the content of a sensitive file.
 const sensitiveNotice = "[敏感文件（密钥/凭证/证件/税务类），不读取内容；只按文件名和位置判断]"
 
-// isSensitivePath reports whether an entry must never be read or viewed.
 func (tb *ToolBuilder) isSensitivePath(p string) bool {
 	p, _, _ = strings.Cut(p, "::")
 	if db.IsSensitiveName(p) {
@@ -355,8 +320,8 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 }
 
 func (tb *ToolBuilder) readFileRaw(ctx context.Context, input *ReadFileInput, maxSize int) (*ReadFileOutput, error) {
-	// Archive entry syntax: "path/to/archive.zip::entry/inside.txt". Split
-	// first; the filesystem-facing part is validated like every other path.
+	// Split first; the filesystem-facing part is validated like every other
+	// path.
 	archivePath, entryName, hasEntry := strings.Cut(input.Path, "::")
 	if err := pathutil.ValidateFSPath(archivePath); err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
@@ -375,10 +340,8 @@ func (tb *ToolBuilder) readFileRaw(ctx context.Context, input *ReadFileInput, ma
 		return tb.readArchive(ctx, input, archivePath, entryName, arch, maxSize)
 	}
 
-	// Document formats (pdf/docx/xlsx/pptx) must be parsed whole — zip
-	// central directories and PDF xref tables live at the end of the file —
-	// so they get a larger read budget; the extracted text is still capped
-	// to maxSize runes. Everything else stays on the text path.
+	// Documents must be parsed whole (zip central directories and PDF xref
+	// tables are at the end), so they get a larger read budget.
 	readCap := int64(maxSize)*4 + 1
 	if ext != "" {
 		readCap = maxDocumentReadBytes + 1
@@ -402,7 +365,6 @@ func (tb *ToolBuilder) readFileRaw(ctx context.Context, input *ReadFileInput, ma
 		return out, nil
 	}
 
-	// Peek at the first 1KB to detect binary content.
 	peek := data
 	if len(peek) > 1024 {
 		peek = peek[:1024]
@@ -417,12 +379,6 @@ func (tb *ToolBuilder) readFileRaw(ctx context.Context, input *ReadFileInput, ma
 	return out, nil
 }
 
-// readArchive handles zip/tar/tar.gz files: a capped listing of the archive's
-// directory, or one entry's text via the path::entry syntax. rar/7z are
-// explicitly unsupported. zip needs random access (central directory at the
-// end of the file); how that is served per backend is in
-// resolveArchiveReaderAt — stream-only backends beyond the download cap get
-// an explicit degradation notice, never a silent retry.
 func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, archivePath, entryName, kind string, maxChars int) (*ReadFileOutput, error) {
 	log := func(out *ReadFileOutput) (*ReadFileOutput, error) {
 		return out, nil
@@ -460,9 +416,8 @@ func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, ar
 		return log(&ReadFileOutput{Content: content, Truncated: cut})
 	}
 
-	// zip: random access required. Entry reads are gated on the archive size;
-	// listing is not — the central directory alone
-	// is cheap on random-access backends.
+	// Entry reads are gated on the archive size; listing is not, since the
+	// central directory alone is cheap on random-access backends.
 	size := int64(-1)
 	if st, serr := tb.fs.Stat(ctx, normalizePath(archivePath)); serr == nil {
 		size = st.Size
@@ -497,7 +452,6 @@ func (tb *ToolBuilder) readArchive(ctx context.Context, input *ReadFileInput, ar
 	return log(&ReadFileOutput{Content: content, Truncated: cut})
 }
 
-// capRunes truncates s to maxChars runes, reporting whether it cut anything.
 func capRunes(s string, maxChars int) (string, bool) {
 	if maxChars <= 0 {
 		return s, false
@@ -517,15 +471,14 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 		return out, nil
 	}
 
-	// Idempotency check: description already matches
 	if f.Description == input.Description {
 		out := &UpdateDescriptionOutput{Success: true}
 		return out, nil
 	}
 
-	// Column-scoped write: a full-row Save of the struct loaded above races
-	// with parallel tool calls on the same row (e.g. set_target) and would
-	// silently restore their fields to stale values.
+	// Column-scoped: a full-row Save of the struct loaded above races with
+	// parallel tool calls on the same row and would restore their fields to
+	// stale values.
 	if err := tb.repo.UpdateDescription(tb.sessionID, normalizePath(input.Path), input.Description); err != nil {
 		return nil, err
 	}
@@ -552,7 +505,7 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 		}
 	}
 
-	// The agent is receiving the category list — record its snapshot for the
+	// The agent is receiving the category list: record the snapshot for the
 	// create_category version guard.
 	names := make([]string, len(cats))
 	for i, c := range cats {
@@ -567,9 +520,6 @@ func (tb *ToolBuilder) listCategories(ctx context.Context, input *ListCategories
 func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 	out, err := tb.createCategoryCore(ctx, input)
 	if err != nil {
-		// Guard rejections are guidance, not failure: hand them to the model
-		// as a success=false result so the run continues and the next
-		// decision is made from the rejection's reference info.
 		var rj *rejectError
 		if errors.As(err, &rj) {
 			out := &CreateCategoryOutput{Error: rj.msg}
@@ -580,14 +530,12 @@ func (tb *ToolBuilder) createCategory(ctx context.Context, input *CreateCategory
 	return out, nil
 }
 
-// createCategoryCore is the create_category logic shared by the tool handler
-// and the run_script builtin: ValidateFSPath, the categoryGuard version
-// fingerprint, and the M14 similarity semantics all live here so a script can
-// never bypass the guard rails. Only the tool handler logs.
+// Shared by the tool handler and the run_script builtin so a script can never
+// bypass the guard rails; only the tool handler logs.
 func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCategoryInput) (*CreateCategoryOutput, error) {
 
-	// Category paths become new_path prefixes for planned files; apply the
-	// same root-confinement rules as set_target.
+	// Category paths become new_path prefixes, so they follow the same root
+	// confinement as set_target.
 	if err := pathutil.ValidateFSPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
 			err = fmt.Errorf("path must not be empty")
@@ -595,8 +543,6 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, rejectf("invalid category path: %v", err)
 	}
 
-	// Fresh category state feeds both guard rails below (and its per-category
-	// file counts feed the reference info in rejections).
 	usages, err := tb.repo.GetCategoryUsageSummary(tb.filesystemID, tb.sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("create category: read current categories: %w", err)
@@ -606,12 +552,9 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		names[i] = u.Name
 	}
 
-	// Version guard: creation is only allowed from a category list the agent
-	// has just seen (batch-prompt summary or list_categories). If the set
-	// changed since — or the agent never saw one — reject and hand back the
-	// latest complete list. The rejection doubles as the agent's re-read, so
-	// it is also recorded as the new snapshot: a retry decided from that list
-	// passes (unless the set changed again).
+	// The rejection doubles as the agent's re-read, so it is recorded as the new
+	// snapshot: a retry decided from that list passes unless the set changed
+	// again.
 	if lastFP, seen := tb.guard.last(); !seen || lastFP != categoryFingerprint(names) {
 		tb.guard.note(names)
 		list := strings.TrimSpace(buildCategorySummary(usages))
@@ -621,11 +564,6 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, rejectf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
 	}
 
-	// Similarity guard, two classes: objective duplicates (normalized identical
-	// name or path) are hard-rejected with the existing category as reference;
-	// fuzzy lookalikes (path containment/prefix overlap) never block — the
-	// creation proceeds and they are attached to the result as reference info
-	// so the model itself can judge whether to merge.
 	hard, soft := findSimilarCategories(usages, input.Name, input.Path)
 	if len(hard) > 0 {
 		var sb strings.Builder
@@ -653,9 +591,8 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, rejectf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
 	}
 
-	// The agent knows the post-create set (its snapshot plus its own
-	// creation), so back-to-back creations are not re-challenged; a change
-	// made by anyone else still mismatches and forces a re-read.
+	// The agent knows the post-create set, so back-to-back creations are not
+	// re-challenged; anyone else's change still forces a re-read.
 	tb.guard.note(append(names, cat.Name))
 
 	out := &CreateCategoryOutput{Success: true, Name: cat.Name, Path: cat.Path}
@@ -689,13 +626,12 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 		return reject(fmt.Sprintf("category '%s' is not editable by agent (user-managed)", input.Name))
 	}
 
-	// Guard against no-op: at least one field must be provided for update
 	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
 		return reject(fmt.Sprintf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name))
 	}
 
-	// A changed category path cascades into planned files' new_path; apply the
-	// same root-confinement rules as set_target.
+	// A changed category path cascades into planned targets, so it follows the
+	// same root confinement as set_target.
 	if input.NewPath != "" {
 		if err := pathutil.ValidateFSPath(input.NewPath); err != nil {
 			return reject(fmt.Sprintf("invalid new_path: %v", err))
@@ -740,7 +676,6 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 		return reject(fmt.Sprintf("category '%s' is not deletable by agent (user-managed)", input.Name))
 	}
 
-	// Clear all planned files under this category and reset tagged for re-classification
 	if err := tb.repo.ClearPlannedByTargetPath(tb.filesystemID, cat.Path); err != nil {
 		return nil, fmt.Errorf("failed to clear planned files: %w", err)
 	}
@@ -753,14 +688,12 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 	return out, nil
 }
 
-// isTextContent checks if content appears to be text (not binary).
-// It samples multiple positions in the string to avoid missing null bytes
-// that appear after the first 512 bytes.
+// Samples several positions so NUL bytes past the first 512 bytes are not
+// missed.
 func isTextContent(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	// Sample positions: start, middle, end
 	positions := []int{0, len(s) / 2, len(s) - 512}
 	for _, start := range positions {
 		if start < 0 {

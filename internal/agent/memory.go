@@ -15,10 +15,8 @@ import (
 	"FileEngine/internal/db"
 )
 
-// memoryBlockTokenBudget bounds the always-on "## 记忆" prompt block.
 const memoryBlockTokenBudget = 1500
 
-// memoryPathRelatedMax caps the path-specific items injected beyond the budget.
 const memoryPathRelatedMax = 8
 
 var memoryKindLabel = map[string]string{
@@ -29,8 +27,6 @@ var memoryKindLabel = map[string]string{
 	db.MemoryNote:       "笔记",
 }
 
-// memoryItemPath returns the source path an item is about: its Path, or the
-// subject of a "path:" key. Lower-cased (keys are), no leading slash.
 func memoryItemPath(m db.MemoryItem) string {
 	p := m.Path
 	if p == "" {
@@ -41,8 +37,6 @@ func memoryItemPath(m db.MemoryItem) string {
 	return strings.ToLower(strings.Trim(p, "/"))
 }
 
-// memoryPathRelated reports whether an item's path is one of the unit's
-// directory prefixes (the unit lies at or below the item's path).
 func memoryPathRelated(m db.MemoryItem, unitPaths []string) bool {
 	ip := memoryItemPath(m)
 	if ip == "" || ip == "." {
@@ -57,8 +51,6 @@ func memoryPathRelated(m db.MemoryItem, unitPaths []string) bool {
 	return false
 }
 
-// memoryRank orders the general section: pinned, then global preferences,
-// then filesystem conventions and corrections, then everything else.
 func memoryRank(m db.MemoryItem) int {
 	switch {
 	case m.Pinned:
@@ -94,13 +86,8 @@ func memoryLine(m db.MemoryItem) string {
 	return line + "\n"
 }
 
-// BuildMemoryBlock renders the always-on "## 记忆" block from long-term
-// items (global + filesystem). Items about one of the unit's directory
-// prefixes come first and are always included (up to memoryPathRelatedMax);
-// the rest are ranked (pinned → global preferences → filesystem conventions
-// and corrections → others; hits then recency within a rank) and added while
-// the block stays within budget tokens. Left-out items are counted in a
-// closing "另有 N 条，可用 recall 查询" line. Returns "" for no items.
+// Items about the unit's directory prefixes always come first (up to
+// memoryPathRelatedMax); the rest are added by rank while within budget.
 func BuildMemoryBlock(items []db.MemoryItem, unitPaths []string, budget int) string {
 	if len(items) == 0 {
 		return ""
@@ -166,8 +153,6 @@ func BuildMemoryBlock(items []db.MemoryItem, unitPaths []string, budget int) str
 	return sb.String()
 }
 
-// BuildNotesBlock renders shared session notes written by other workers
-// ("## 其他 worker 的发现"), newest last, at most maxItems (the newest).
 func BuildNotesBlock(notes []db.MemoryItem, maxItems int) string {
 	if len(notes) == 0 {
 		return ""
@@ -187,20 +172,15 @@ func BuildNotesBlock(notes []db.MemoryItem, maxItems int) string {
 	return sb.String()
 }
 
-// notesCursor is a worker's last-seen position in the session's shared notes.
-// Tools can run in parallel, so it is mutex-guarded.
+// Tools can run in parallel, so the cursor is mutex-guarded.
 type notesCursor struct {
 	mu   sync.Mutex
 	seen uint
 	own  map[uint]bool
 }
 
-// notesPerUnitMax caps the notes injected before one work unit.
 const notesPerUnitMax = 20
 
-// TakeNewNotes returns the "## 其他 worker 的发现" block of notes written by
-// other workers since this worker's last call, and advances the cursor. The
-// tagging loop calls it before each new work unit.
 func (tb *ToolBuilder) TakeNewNotes() (string, error) {
 	tb.notes.mu.Lock()
 	defer tb.notes.mu.Unlock()
@@ -220,8 +200,7 @@ func (tb *ToolBuilder) TakeNewNotes() (string, error) {
 	return BuildNotesBlock(others, notesPerUnitMax), nil
 }
 
-// SetUnitRoot sets the directory of the work unit being processed; script
-// set_category keeps file paths relative to it.
+// Script set_category keeps file paths relative to the unit root.
 func (tb *ToolBuilder) SetUnitRoot(dir string) {
 	tb.unitRoot = strings.Trim(normalizePath(dir), "/")
 }
@@ -229,8 +208,6 @@ func (tb *ToolBuilder) SetUnitRoot(dir string) {
 func (tb *ToolBuilder) emitMemoryUpdated(m *db.MemoryItem) {
 	db.Emit(tb.sessionID, tb.RunID, db.EvMemoryUpdated, db.MemoryUpdatedData{RunID: tb.RunID, Scope: m.Scope, ID: m.ID})
 }
-
-// ============ Memory tools ============
 
 type RememberInput struct {
 	Scope   string `json:"scope" jsonschema_description:"filesystem = 此文件系统的长期约定/纠正；global = 用户的通用偏好（对所有文件系统生效）"`
@@ -306,8 +283,6 @@ func (tb *ToolBuilder) note(ctx context.Context, in *NoteInput) (*MemoryWriteOut
 	return out, err
 }
 
-// writeMemory upserts one item; validation failures are agent-recoverable
-// results, DB failures are fatal.
 func (tb *ToolBuilder) writeMemory(m *db.MemoryItem) (*MemoryWriteOutput, error) {
 	m.Key = db.NormalizeMemoryKey(m.Key)
 	m.Content = strings.TrimSpace(m.Content)
@@ -322,7 +297,6 @@ func (tb *ToolBuilder) writeMemory(m *db.MemoryItem) (*MemoryWriteOutput, error)
 	return &MemoryWriteOutput{Success: true, ID: m.ID, Created: created}, nil
 }
 
-// recallLimit caps one recall result.
 const recallLimit = 20
 
 func (tb *ToolBuilder) recall(ctx context.Context, in *RecallInput) (*RecallOutput, error) {
@@ -360,10 +334,6 @@ func (tb *ToolBuilder) recall(ctx context.Context, in *RecallInput) (*RecallOutp
 	return out, nil
 }
 
-// ============ Reflection ops ============
-
-// Memory consolidation operations (mem0-style) produced by the reflection
-// LLM call at the end of a tagging run.
 const (
 	MemoryOpAdd    = "ADD"
 	MemoryOpUpdate = "UPDATE"
@@ -383,19 +353,14 @@ type MemoryOp struct {
 	Path    string `json:"path,omitempty"`
 }
 
-// MemoryOpsResult summarizes ApplyMemoryOps. Rejected lists ops that were
-// skipped as invalid or not permitted (they never abort the batch).
 type MemoryOpsResult struct {
 	Added, Updated, Deleted, Noop int
 	Rejected                      []string
 	Changed                       []db.MemoryItem
 }
 
-// ApplyMemoryOps applies reflection ops to the long-term memory of one
-// filesystem (plus global). The user is the final curator: pinned items and
-// items the user wrote are never updated or deleted by reflection, and
-// session notes are out of reach. Invalid ops are skipped and reported; only
-// DB failures return an error.
+// The user is the final curator: pinned items and items the user wrote are
+// never updated or deleted by reflection, and session notes are out of reach.
 func ApplyMemoryOps(repo *db.Repository, filesystemID uint, ops []MemoryOp) (MemoryOpsResult, error) {
 	var res MemoryOpsResult
 	reject := func(i int, msg string) { res.Rejected = append(res.Rejected, fmt.Sprintf("#%d %s", i+1, msg)) }
@@ -504,12 +469,8 @@ func isDBFailure(err error) bool {
 	return !errors.As(err, &v)
 }
 
-// ============ Correction capture ============
-
-// correctionSourcePrefix is the source directory a correction is keyed on:
-// the first (up to) two segments of the entry's parent directory, so one
-// correction covers sibling folders of the same area ("Design/2023/x" →
-// "Design/2023"). The scan root yields "".
+// The first two segments of the parent, so one correction covers sibling
+// folders of the same area.
 func correctionSourcePrefix(parent string) string {
 	parent = strings.Trim(parent, "/")
 	if parent == "" || parent == "." {
@@ -522,12 +483,8 @@ func correctionSourcePrefix(parent string) string {
 	return strings.Join(segs, "/")
 }
 
-// CorrectionMemory turns a user's manual re-targeting of an entry into a
-// filesystem-scope correction memory, keyed by extension (or "dir") plus the
-// source directory prefix, so the same kind of file from the same area is
-// classified the user's way next time. Returns nil when there is nothing to
-// learn (target cleared, or only the file name changed within the same
-// directory).
+// Keyed by extension (or "dir") plus the source prefix, so the same kind of
+// file from the same area is classified the user's way next time.
 func CorrectionMemory(f db.FileEntry, oldTarget, newTarget string, filesystemID uint) *db.MemoryItem {
 	newTarget = db.NormalizeTargetPath(newTarget)
 	oldTarget = db.NormalizeTargetPath(oldTarget)

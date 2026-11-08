@@ -38,7 +38,6 @@ func seedCategory(t *testing.T, repo *db.Repository, filesystemID uint, name, pa
 	}
 }
 
-// Category paths become new_path prefixes, so they follow the same rules.
 func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)

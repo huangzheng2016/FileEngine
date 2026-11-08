@@ -8,8 +8,6 @@ import (
 	"FileEngine/internal/config"
 )
 
-// agent_timeout semantics: <= 0 or unset means no timeout (no context
-// deadline at all); a positive value caps one full agent run in seconds.
 func TestAgentRunTimeoutSemantics(t *testing.T) {
 	old := config.Get()
 	defer func() {
@@ -18,7 +16,6 @@ func TestAgentRunTimeoutSemantics(t *testing.T) {
 		}
 	}()
 
-	// Default (unset / zero): unlimited.
 	config.Update(&config.Config{})
 	if got := agentRunTimeout(); got != 0 {
 		t.Fatalf("default agentRunTimeout: got %v, want 0 (unlimited)", got)
@@ -29,7 +26,6 @@ func TestAgentRunTimeoutSemantics(t *testing.T) {
 		t.Fatal("unlimited run must not wrap ctx with a deadline")
 	}
 
-	// Negative: also unlimited.
 	config.Update(&config.Config{Agent: config.AgentConfig{AgentTimeout: -5}})
 	if got := agentRunTimeout(); got != 0 {
 		t.Fatalf("negative agentRunTimeout: got %v, want 0 (unlimited)", got)
@@ -40,7 +36,6 @@ func TestAgentRunTimeoutSemantics(t *testing.T) {
 		t.Fatal("negative agent_timeout must not wrap ctx with a deadline")
 	}
 
-	// Positive: enforced per run.
 	config.Update(&config.Config{Agent: config.AgentConfig{AgentTimeout: 45}})
 	if got := agentRunTimeout(); got != 45*time.Second {
 		t.Fatalf("agentRunTimeout: got %v, want 45s", got)

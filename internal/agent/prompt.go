@@ -7,8 +7,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// DefaultSystemPrompt is the tagging system prompt of a default session
-// (create_category and run_script on) under the built-in category policy.
 var DefaultSystemPrompt = defaultSystemPrompt(true, true, config.DefaultCategoryPolicy)
 
 const systemPromptHead = `你是 FileEngine 的文件整理 Agent。你理解用户想把文件整理成什么样，然后为文件和目录做出决定。你只写数据库里的规划，不移动实际文件——用户预览确认后才执行。
@@ -72,7 +70,6 @@ const systemPromptTail = `
 完成当前任务后用一两句中文说明做了什么、哪里拿不准；不要复述工具调用细节。
 `
 
-// categoryPolicySection renders the default category policy, or "".
 func categoryPolicySection(policy string) string {
 	if strings.TrimSpace(policy) == "" {
 		return ""
@@ -80,7 +77,6 @@ func categoryPolicySection(policy string) string {
 	return "\n## 分类规范\n\n（默认建议：与用户目标或整理方案冲突时，以目标和方案为准）\n\n" + policy + "\n"
 }
 
-// categoryPolicySuffix renders the policy for tool descriptions, or "".
 func categoryPolicySuffix(policy string) string {
 	if strings.TrimSpace(policy) == "" {
 		return ""
@@ -88,9 +84,8 @@ func categoryPolicySuffix(policy string) string {
 	return "\n\n分类规范：\n" + policy
 }
 
-// defaultSystemPrompt builds the tagging system prompt for the session's tool
-// switches. It is static per session: no goal, ids, counts or timestamps
-// (those live in the shared-context and unit messages).
+// Static per session: goal, ids, counts and timestamps live in the
+// shared-context and unit messages.
 func defaultSystemPrompt(allowAutoCategory, allowScript bool, policy string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptHead)
@@ -107,8 +102,6 @@ func defaultSystemPrompt(allowAutoCategory, allowScript bool, policy string) str
 	return sb.String()
 }
 
-// systemPromptForSession returns the configured tagging prompt (verbatim) or
-// the default for the session's switches.
 func systemPromptForSession(cfg config.AgentConfig, session *db.ScanSession) string {
 	if cfg.SystemPrompt != "" {
 		return cfg.SystemPrompt

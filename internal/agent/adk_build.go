@@ -18,8 +18,6 @@ import (
 	modelfactory "FileEngine/internal/model"
 )
 
-// reductionProfile sets how aggressively old tool results are cleared and
-// single results truncated for one kind of run.
 type reductionProfile struct {
 	clearAt    func(contextWindow int) int64 // token count that triggers clearing
 	keepRounds int                           // most recent tool rounds never cleared
@@ -27,16 +25,13 @@ type reductionProfile struct {
 }
 
 var (
-	// interactiveReduction: survey / review / chat / instruct runs — clear
-	// late (75% of the window), truncate only huge single results.
 	interactiveReduction = reductionProfile{
 		clearAt:    func(w int) int64 { return int64(float64(w) * 0.75) },
 		keepRounds: 2,
 		truncChars: 32000,
 	}
-	// workerReduction: long-running tagging workers — every pulled unit is
-	// self-contained, so old tool results are cleared early (~35K tokens)
-	// and single results are capped at ~8K characters.
+	// Every pulled unit is self-contained, so workers clear old tool results
+	// early.
 	workerReduction = reductionProfile{
 		clearAt:    func(w int) int64 { return min(35_000, int64(float64(w)*0.75)) },
 		keepRounds: 2,
@@ -49,16 +44,12 @@ type agentOptions struct {
 	summaryModel einomodel.ChatModel
 }
 
-// agentOption customizes buildADKAgent.
 type agentOption func(*agentOptions)
 
-// withWorkerReduction applies the long-running worker reduction profile.
 func withWorkerReduction() agentOption {
 	return func(o *agentOptions) { o.reduction = workerReduction }
 }
 
-// withSummaryModel makes the summarization middleware use m (the session's
-// bulk model) instead of the agent's own model.
 func withSummaryModel(m einomodel.ChatModel) agentOption {
 	return func(o *agentOptions) {
 		if m != nil {
@@ -67,8 +58,6 @@ func withSummaryModel(m einomodel.ChatModel) agentOption {
 	}
 }
 
-// bulkSummaryOption makes summarization of a main-model run use the session's
-// bulk model (when one is set), counted by the run's tracker.
 func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *db.ScanSession, main *db.ModelProvider, tracker *tokenTrackingModel) (agentOption, error) {
 	bulk, err := modelfactory.ResolveBulkProvider(repo, session, main)
 	if err != nil || bulk == main {
@@ -81,10 +70,6 @@ func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *db.Sca
 	return withSummaryModel(tracker.sibling(m)), nil
 }
 
-// buildADKAgent creates the ReAct agent of one worker/run: per-request
-// class-aware retries (ModelRetryConfig) and the middleware chain
-// patchtoolcalls → reduction (truncate single results, clear old ones) →
-// summarization (90% of the context window).
 func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int, opts ...agentOption) (*adk.ChatModelAgent, error) {
 	o := agentOptions{reduction: interactiveReduction, summaryModel: model}
 	for _, opt := range opts {
@@ -133,10 +118,8 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 	return agent, nil
 }
 
-// buildReduction clears old tool results past the profile's threshold
-// (keeping the last rounds) and truncates every single tool result to the
-// profile's character cap. Nothing is offloaded: a truncated result tells the
-// model to narrow its query instead.
+// Nothing is offloaded: a truncated result tells the model to narrow its
+// query instead.
 func buildReduction(ctx context.Context, tools []tool.BaseTool, p reductionProfile, contextWindow int) (adk.ChatModelAgentMiddleware, error) {
 	trunc := &reduction.ToolReductionConfig{TruncHandler: truncateToolResult(p.truncChars)}
 	perTool := make(map[string]*reduction.ToolReductionConfig, len(tools))
@@ -162,8 +145,6 @@ func buildReduction(ctx context.Context, tools []tool.BaseTool, p reductionProfi
 	return mw, nil
 }
 
-// truncateToolResult caps every text part of a tool result at maxChars
-// characters; image parts pass through.
 func truncateToolResult(maxChars int) func(context.Context, *reduction.ToolDetail) (*reduction.TruncResult, error) {
 	return func(_ context.Context, d *reduction.ToolDetail) (*reduction.TruncResult, error) {
 		if d.ToolResult == nil {

@@ -1,8 +1,7 @@
 package agent
 
-// System prompts of the main-model run kinds. Each is static text (no ids,
-// counts or session data) so provider prompt caches hit across runs; the
-// session-specific context arrives in the shared-context message.
+// Static text (no ids, counts or session data) so provider prompt caches hit
+// across runs.
 
 const chatPrompt = `你是 FileEngine 的会话整理助手，和用户一起完成这个会话的文件整理。你通过工具修改数据库里的整理规划（目标路径、分类、方案、记忆），从不移动实际文件。
 

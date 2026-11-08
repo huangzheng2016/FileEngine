@@ -13,9 +13,6 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
-// scriptTestBuilder seeds a repo with files (ParentPath set, as the scanner
-// would) and two categories, and returns a ToolBuilder wired for run_script
-// tests (filesystem 7, session 1).
 func scriptTestBuilder(t *testing.T, session *db.ScanSession) (*ToolBuilder, *db.Repository) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
@@ -64,9 +61,6 @@ func runScript(t *testing.T, tb *ToolBuilder, src string) (*RunScriptOutput, err
 	return tb.runScript(context.Background(), &RunScriptInput{Script: src})
 }
 
-// Script failures come back as the tool result's error field (the agent fixes
-// the script in-loop); only context cancellation stays a hard error so a user
-// stop / run kill still aborts the run.
 func TestRunScriptErrorAsResultVsCancel(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 
@@ -91,7 +85,6 @@ func mustRunScript(t *testing.T, tb *ToolBuilder, src string) *RunScriptOutput {
 	return out
 }
 
-// resultValue decodes the script's `result` global from the tool output.
 func resultValue(t *testing.T, out *RunScriptOutput) map[string]interface{} {
 	t.Helper()
 	if out.Value == "" {
@@ -113,8 +106,6 @@ func hasToolNamed(tools []tool.BaseTool, name string) bool {
 	}
 	return false
 }
-
-// --- builtin matrix: read side ---
 
 func TestScriptReadBuiltins(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
@@ -201,7 +192,6 @@ func TestScriptQueryFilesRejectsOffset(t *testing.T) {
 	}
 }
 
-// print() output is captured per-run and returned, never written to stdout.
 func TestScriptPrintAndResultContract(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
@@ -219,8 +209,6 @@ result = "done"`)
 		t.Fatal("small run must not be truncated")
 	}
 
-	// The pre-declared result global takes plain assignment; an untouched
-	// result yields no value.
 	out2 := mustRunScript(t, tb, `result = 41 + 1`)
 	if out2.Value != `42` {
 		t.Fatalf("result assignment: got %q", out2.Value)
@@ -231,8 +219,6 @@ result = "done"`)
 	}
 }
 
-// Unknown filter keys and bad argument shapes are loud errors, not silent
-// pass-throughs.
 func TestScriptBuiltinArgumentValidation(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	for _, src := range []string{
@@ -251,12 +237,9 @@ func TestScriptBuiltinArgumentValidation(t *testing.T) {
 	}
 }
 
-// --- builtin matrix: mutating side (tool guard rails apply) ---
-
 func TestScriptSetTargetBuiltin(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 
-	// Legal target: written. Illegal target: error value, nothing written.
 	out := mustRunScript(t, tb, `
 ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg")
 bad := set_target("incoming/photo2.jpg", "/../escape")
@@ -278,7 +261,6 @@ result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 		t.Fatalf("illegal target must not be written: %+v", f2)
 	}
 
-	// Clearing with "" works too.
 	mustRunScript(t, tb, `set_target("incoming/photo1.jpg", "")`)
 	f, _ = repo.GetFileByPath(1, "incoming/photo1.jpg")
 	if f.NewPath != "" || f.Operation != "" {
@@ -322,12 +304,9 @@ result = {ok: ok, locked_err: is_error(locked), missing_err: is_error(missing)}`
 	}
 }
 
-// create_category inside scripts enforces the identical guard rails as the
-// tool: version guard first, then objective-duplicate rejection.
 func TestScriptCreateCategoryBuiltinGuard(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: true})
 
-	// Without a preceding get_categories the version guard rejects.
 	out := mustRunScript(t, tb, `
 r := create_category("软件", "/organized/software", "apps")
 result = {err: is_error(r), msg: string(r)}`)
@@ -336,8 +315,6 @@ result = {err: is_error(r), msg: string(r)}`)
 		t.Fatalf("version guard must reject unseen-list creation: %+v", v)
 	}
 
-	// After get_categories the creation passes; a duplicate is rejected; and
-	// the script's own creation updates the snapshot (back-to-back allowed).
 	out = mustRunScript(t, tb, `
 get_categories()
 a := create_category("软件", "/organized/software", "apps")
@@ -359,8 +336,6 @@ result = {a_ok: a.success, a_path: a.path, dup_err: is_error(dup), b_ok: b.succe
 	}
 }
 
-// Without allow_auto_category the create_category builtin is not registered —
-// scripts cannot bypass the session gate.
 func TestScriptCreateCategoryGatedBySession(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: false})
 	out, err := runScript(t, tb, `create_category("x", "/x", "d")`)
@@ -368,8 +343,6 @@ func TestScriptCreateCategoryGatedBySession(t *testing.T) {
 		t.Fatalf("create_category must be undefined when allow_auto_category is off (err=%v out=%+v)", err, out)
 	}
 }
-
-// --- guardrails ---
 
 func TestScriptSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
@@ -381,7 +354,6 @@ func TestScriptSizeGuard(t *testing.T) {
 	if out, err := runScript(t, tb, "   \n  "); err != nil || out.Error == "" {
 		t.Fatalf("empty script must be rejected: err=%v out=%+v", err, out)
 	}
-	// Just under the cap runs fine.
 	if out, err := runScript(t, tb, `result = 1`); err != nil || out.Error != "" {
 		t.Fatalf("small script must run: err=%v out=%+v", err, out)
 	}
@@ -400,8 +372,6 @@ func TestScriptTimeoutGuard(t *testing.T) {
 	}
 }
 
-// The print buffer is capped during the run: a print loop truncates instead
-// of exhausting memory.
 func TestScriptResultSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptMaxResultSize = 64
@@ -413,7 +383,6 @@ result = "ok"`)
 	}
 }
 
-// A huge result value is truncated to the cap as well.
 func TestScriptValueSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptMaxResultSize = 32
@@ -423,8 +392,6 @@ func TestScriptValueSizeGuard(t *testing.T) {
 	}
 }
 
-// A runaway allocation loop dies by the alloc cap or the timeout — never by
-// taking the process down — and the abort surfaces as a tool-result error.
 func TestScriptAllocGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptTimeout = 3
@@ -434,12 +401,6 @@ func TestScriptAllocGuard(t *testing.T) {
 	}
 }
 
-// --- stdlib trimming ---
-
-// Dangerous modules are not registered: os (exec/env/file/process), fmt
-// (process stdout) and times (its sleep blocks inside a VM builtin where the
-// timeout's abort flag cannot interrupt it) must be unavailable, as must
-// tengo's file import.
 func TestScriptDangerousModulesUnavailable(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	dangerous := []string{
@@ -458,7 +419,6 @@ func TestScriptDangerousModulesUnavailable(t *testing.T) {
 	}
 }
 
-// The whitelisted pure-function modules all work.
 func TestScriptWhitelistedModulesWork(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
@@ -487,8 +447,6 @@ result = {
 	}
 }
 
-// Scripts have no I/O beyond builtins: undefined identifiers fail at compile
-// time (spot-check a few process-y names a model might try).
 func TestScriptNoUnexpectedGlobals(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	for _, src := range []string{`exec("ls")`, `open("/etc/passwd")`, `http_get("http://x")`} {
@@ -499,9 +457,6 @@ func TestScriptNoUnexpectedGlobals(t *testing.T) {
 	}
 }
 
-// --- session switch & registration ---
-
-// run_script registers only when the session allows it (default on).
 func TestScriptToolRegistration(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true})
 	tools, err := tb.BuildTools()
@@ -536,9 +491,8 @@ func TestScriptToolRegistration(t *testing.T) {
 	}
 }
 
-// The tool name and description stay stable: stream
-// tool_call/tool_result events key off the registered tool name, and the
-// description is where the model learns the builtin API.
+// Stream events key off the registered tool name, and the description is
+// where the model learns the builtin API.
 func TestScriptToolNameStable(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	st, err := tb.buildScriptTool()
@@ -557,8 +511,6 @@ func TestScriptToolNameStable(t *testing.T) {
 	}
 }
 
-// Example-shaped smoke test: the "类似 ipy" workflow end to end — query a
-// directory, then bulk-classify everything in it.
 func TestScriptBulkWorkflow(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `

@@ -8,9 +8,8 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-// ToolsetKind selects the tool set of a run kind. Each kind has one fixed,
-// deterministically ordered tool list per session (cache affinity: tools are
-// the first part of every request prefix).
+// Each kind has one fixed, deterministically ordered tool list per session:
+// tools are the first part of every request prefix (cache affinity).
 type ToolsetKind int
 
 const (
@@ -28,9 +27,7 @@ func infer[I, O any](fn func(context.Context, *I) (*O, error)) func(string, stri
 	return func(n, d string) (tool.BaseTool, error) { return utils.InferTool(n, d, fn) }
 }
 
-// BuildToolset returns the tools of a run kind in a fixed order. Session
-// switches (read_file, create_category, view_image, run_script) are decided
-// once here, never per unit.
+// Session switches are decided once here, never per unit.
 func (tb *ToolBuilder) BuildToolset(kind ToolsetKind) ([]tool.BaseTool, error) {
 	s := tb.session
 	specs := []toolSpec{
@@ -79,9 +76,6 @@ func (tb *ToolBuilder) BuildToolset(kind ToolsetKind) ([]tool.BaseTool, error) {
 	return tools, nil
 }
 
-// BuildTools is the tagging worker tool set.
 func (tb *ToolBuilder) BuildTools() ([]tool.BaseTool, error) { return tb.BuildToolset(ToolsetTagging) }
 
-// BuildChatTools is the tool set of the main-model runs (chat, survey,
-// review): the tagging set plus write_plan.
 func (tb *ToolBuilder) BuildChatTools() ([]tool.BaseTool, error) { return tb.BuildToolset(ToolsetChat) }

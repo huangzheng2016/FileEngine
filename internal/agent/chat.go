@@ -14,29 +14,23 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// newChatModel builds the model of a chat / survey / review run.
 var newChatModel = modelfactory.NewChatModelFromProvider
 
-// SetModelFactory replaces the model factory of chat, survey and review runs
-// and returns a restore func. Tests use it to drive runs with fake models.
 func SetModelFactory(f func(context.Context, *db.ModelProvider) (einomodel.ChatModel, error)) (restore func()) {
 	old := newChatModel
 	newChatModel = f
 	return func() { newChatModel = old }
 }
 
-// mainRunSpec describes one main-model agent run (chat, survey, review).
 type mainRunSpec struct {
 	label       string
 	maxStep     int
-	instruction string // static system prompt of the run kind
+	instruction string
 	// messages follow the shared-context message: history, then this run's
 	// own input last.
 	messages []*schema.Message
 }
 
-// sharedContextMessage wraps the shared context block as the cached message
-// that precedes everything run-specific.
 func sharedContextMessage(block string) *schema.Message {
 	if strings.TrimSpace(block) == "" {
 		block = "（还没有目标、方案、记忆或分类）\n"
@@ -44,9 +38,6 @@ func sharedContextMessage(block string) *schema.Message {
 	return modelfactory.MarkCacheBreakpoint(&schema.Message{Role: schema.User, Content: "# 会话共享上下文\n\n" + block})
 }
 
-// runMainAgent runs a main-model agent with the session assistant tool set
-// over: system prompt → shared context → spec.messages. Returns the final
-// assistant text.
 func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSpec) (string, error) {
 	chatModel, err := newChatModel(ctx, a.modelProvider)
 	if err != nil {
@@ -98,13 +89,11 @@ const (
 	chatHistoryBudget = 12000
 	// chatKeepTurns is how many recent turns stay verbatim after a fold.
 	chatKeepTurns = 6
-	// chatFilesMax caps the selected files listed in one message.
-	chatFilesMax = 100
+	chatFilesMax  = 100
 )
 
-// chatHistoryMessages renders persisted history as prompt messages. The
-// output for a history is a prefix of the output for the same history plus
-// later turns, so provider prefix caches hit turn after turn.
+// The output for a history is a prefix of the output for that history plus
+// later turns, so provider prefix caches keep hitting.
 func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn) []*schema.Message {
 	var msgs []*schema.Message
 	if summary != nil {
@@ -128,14 +117,10 @@ func turnsTokens(turns []db.ChatTurn) int64 {
 	return n
 }
 
-// chatSummarizer condenses the previous summary plus older turns into one
-// summary text.
 type chatSummarizer func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error)
 
-// compactChatHistory returns the history to send for a new turn. While the
-// verbatim turns fit chatHistoryBudget nothing changes (append-only); past it
-// all but the last chatKeepTurns are folded into a new persisted summary
-// turn once, so the next turns again share a stable prefix.
+// Folding happens once past chatHistoryBudget, so later turns again share a
+// stable prefix.
 func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, runID uint, summary *db.ChatTurn, turns []db.ChatTurn, summarize chatSummarizer) (*db.ChatTurn, []db.ChatTurn, error) {
 	if len(turns) <= chatKeepTurns || turnsTokens(turns) <= chatHistoryBudget {
 		return summary, turns, nil
@@ -156,7 +141,6 @@ func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, run
 	return s, keep, nil
 }
 
-// modelChatSummarizer summarizes with one plain model call.
 func modelChatSummarizer(m einomodel.BaseChatModel) chatSummarizer {
 	return func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error) {
 		var sb strings.Builder
@@ -182,7 +166,6 @@ func modelChatSummarizer(m einomodel.BaseChatModel) chatSummarizer {
 	}
 }
 
-// renderSelectedFiles lists the files the user attached to a chat message.
 func renderSelectedFiles(files []db.FileEntry) string {
 	if len(files) == 0 {
 		return ""
@@ -210,9 +193,6 @@ func renderSelectedFiles(files []db.FileEntry) string {
 	return sb.String() + "\n"
 }
 
-// RunChat answers one user turn of the session assistant. The user turn and
-// the final answer are persisted as ChatTurns; the answer is returned as the
-// run summary.
 func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, files []db.FileEntry) (string, error) {
 	user := &db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: db.ChatRoleUser, Content: content}
 	if err := a.repo.AddChatTurn(user); err != nil {
@@ -245,8 +225,6 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 	return answer, nil
 }
 
-// chatSummarizer folds history with the session's bulk model, counted on
-// the run's tokens.
 func (a *Agent) chatSummarizer(logger *Logger) chatSummarizer {
 	return func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error) {
 		p, err := modelfactory.ResolveBulkProvider(a.repo, a.session, a.modelProvider)

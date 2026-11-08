@@ -9,7 +9,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// planMaxRunes caps a plan written by the agent.
 const planMaxRunes = 20000
 
 type WritePlanInput struct {

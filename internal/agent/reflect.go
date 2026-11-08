@@ -11,12 +11,8 @@ import (
 	"FileEngine/internal/db"
 )
 
-// reflectionNotesMax caps the session notes given to reflection.
 const reflectionNotesMax = 200
 
-// ParseMemoryOps extracts reflection ops from a model answer: a JSON object
-// {"ops": [...]} or a bare array, optionally wrapped in prose or a code
-// fence.
 func ParseMemoryOps(text string) ([]MemoryOp, error) {
 	text = strings.TrimSpace(text)
 	if i, j := strings.Index(text, "{"), strings.LastIndex(text, "}"); i >= 0 && j > i {
@@ -36,8 +32,6 @@ func ParseMemoryOps(text string) ([]MemoryOp, error) {
 	return nil, fmt.Errorf("记忆整理结果不是合法的 JSON：%.200s", text)
 }
 
-// buildReflectionInput renders the reflection material, or "" when there is
-// nothing new to learn from (no notes, no corrections, no failures).
 func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSession, tagging *db.AgentRun) string {
 	var corrections []db.MemoryItem
 	for _, m := range longTerm {
@@ -100,9 +94,6 @@ func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSessi
 	return sb.String()
 }
 
-// Reflect consolidates the session's learnings into long-term memory with
-// one model call and applies the resulting ops; every changed item emits
-// memory_updated. It is a no-op without notes, corrections or failures.
 func (a *Agent) Reflect(ctx context.Context, logger *Logger, tagging *db.AgentRun) (MemoryOpsResult, error) {
 	notes, err := a.repo.NotesSince(a.sessionID, 0, reflectionNotesMax)
 	if err != nil {

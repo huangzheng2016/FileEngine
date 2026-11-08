@@ -11,8 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// buildCategorySummary renders the complete category list (name order, no
-// usage counts) for guard rejections.
 func buildCategorySummary(usages []db.CategoryUsage) string {
 	if len(usages) == 0 {
 		return ""
@@ -24,27 +22,21 @@ func buildCategorySummary(usages []db.CategoryUsage) string {
 	return renderCategoryList(cats)
 }
 
-// oneLine collapses whitespace (newlines included) to single spaces.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// planPromptMaxRunes caps the plan injected into a prompt; read_plan returns
-// the full text.
 const planPromptMaxRunes = 8000
 
-// SharedContext is the run-stable context every agent request of a session
-// carries: goal, plan, categories, the memory core block and the rules. It is
-// rendered as ONE message that stays byte-identical across all workers and
-// units of a run until its content changes (cache affinity): no counts, no
-// usage-based ordering, no per-unit data.
+// SharedContext renders as one message that stays byte-identical across all
+// workers and units of a run until its content changes: no counts,
+// usage-based ordering or per-unit data.
 type SharedContext struct {
 	Goal       string
 	Plan       *db.SessionPlan // nil or Version 0 = no plan
-	Memory     []db.MemoryItem // long-term (global + filesystem)
+	Memory     []db.MemoryItem
 	Categories []db.Category
 	Rules      []db.PlanRule
 }
 
-// LoadSharedContext gathers the shared context of a session.
 func LoadSharedContext(repo *db.Repository, session *db.ScanSession) (SharedContext, error) {
 	c := SharedContext{Goal: session.Goal}
 	var err error
@@ -63,8 +55,6 @@ func LoadSharedContext(repo *db.Repository, session *db.ScanSession) (SharedCont
 	return c, nil
 }
 
-// RenderSharedContext renders the shared context block; empty sections are
-// omitted and the goal leads.
 func RenderSharedContext(c SharedContext) string {
 	var sb strings.Builder
 	if g := strings.TrimSpace(c.Goal); g != "" {
@@ -92,8 +82,7 @@ func RenderSharedContext(c SharedContext) string {
 	return strings.TrimRight(sb.String(), "\n") + "\n"
 }
 
-// renderCategoryList lists every category sorted by name, with what belongs
-// there and its structure — never usage counts (they change every unit).
+// Never usage counts: they change every unit.
 func renderCategoryList(cats []db.Category) string {
 	if len(cats) == 0 {
 		return "## 分类\n\n（还没有分类）\n\n"
@@ -115,7 +104,6 @@ func renderCategoryList(cats []db.Category) string {
 	return sb.String() + "\n"
 }
 
-// renderRules lists the rules in application order (without match counts).
 func renderRules(rules []db.PlanRule) string {
 	if len(rules) == 0 {
 		return ""
@@ -144,7 +132,6 @@ func renderRules(rules []db.PlanRule) string {
 	return sb.String() + "\n"
 }
 
-// BuildSharedContext loads and renders the shared context block.
 func BuildSharedContext(repo *db.Repository, session *db.ScanSession) (string, error) {
 	c, err := LoadSharedContext(repo, session)
 	if err != nil {
@@ -153,14 +140,10 @@ func BuildSharedContext(repo *db.Repository, session *db.ScanSession) (string, e
 	return RenderSharedContext(c), nil
 }
 
-// SharedContextMessage wraps the shared context block as the first user
-// message of a request, marked as a cache breakpoint.
 func SharedContextMessage(text string) *schema.Message {
 	return modelfactory.MarkCacheBreakpoint(schema.UserMessage("# 会话共享上下文\n\n" + text))
 }
 
-// UnitContext is the per-unit part of a request: described ancestors, memory
-// about this location and new notes from other workers.
 type UnitContext struct {
 	ParentChain []db.FileEntry
 	Memory      []db.MemoryItem // only items about the unit's location are rendered
@@ -168,8 +151,6 @@ type UnitContext struct {
 	Notes       string
 }
 
-// sourceAncestors returns the ancestor directories of a source path
-// ("a/b/c.txt" → [a/b, a]); the root is excluded.
 func sourceAncestors(p string) []string {
 	var out []string
 	p = strings.Trim(p, "/")
@@ -183,8 +164,6 @@ func sourceAncestors(p string) []string {
 	}
 }
 
-// LoadUnitContext gathers the per-unit context for unitPaths (a directory
-// unit: its path; a folder group: its parent directory).
 func LoadUnitContext(repo *db.Repository, session *db.ScanSession, unitPaths []string, notes string) (UnitContext, error) {
 	u := UnitContext{UnitPaths: unitPaths, Notes: notes}
 	seen := map[string]bool{}
@@ -207,7 +186,6 @@ func LoadUnitContext(repo *db.Repository, session *db.ScanSession, unitPaths []s
 	return u, nil
 }
 
-// RenderUnitContext renders the per-unit context sections ("" when empty).
 func RenderUnitContext(u UnitContext) string {
 	var sb strings.Builder
 	if chain := renderParentChain(u.ParentChain); chain != "" {
@@ -232,7 +210,6 @@ func RenderUnitContext(u UnitContext) string {
 	return sb.String()
 }
 
-// renderParentChain lists the described ancestors top-down under "## 上级目录".
 func renderParentChain(entries []db.FileEntry) string {
 	var described []db.FileEntry
 	for _, e := range entries {
@@ -252,7 +229,6 @@ func renderParentChain(entries []db.FileEntry) string {
 	return sb.String()
 }
 
-// unitListingMax is how many children a unit prompt lists inline.
 const unitListingMax = 100
 
 func listingBlock(title string, rows []db.FileEntry, total int) string {
@@ -277,7 +253,6 @@ func displayPath(p string) string {
 	return SanitizeUntrustedName(p)
 }
 
-// buildDirUnitPrompt asks for one directory decision.
 func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSignals, unitCtx string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：决定一个目录\n\n")
@@ -299,7 +274,6 @@ func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSigna
 	return sb.String()
 }
 
-// buildGroupUnitPrompt asks for decisions on the loose files of one folder.
 func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, hints map[uint]string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：归类一个目录里的散文件\n\n")
@@ -326,7 +300,6 @@ func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, h
 	return sb.String()
 }
 
-// buildVersionUnitPrompt asks for one version group.
 func buildVersionUnitPrompt(parent string, g VersionGroup, suggested string, unitCtx string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：归类一组版本\n\n")

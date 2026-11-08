@@ -43,7 +43,6 @@ func TestShouldRetryModelCallBudgets(t *testing.T) {
 	if got := rateLimitStreak.Load(); got != 3 {
 		t.Fatalf("streak = %d, want 3", got)
 	}
-	// A success resets the fleet streak.
 	if d := shouldRetryModelCall(ctx, &adk.RetryContext{RetryAttempt: 1}); d != nil || rateLimitStreak.Load() != 0 {
 		t.Fatalf("success: decision %+v streak %d", d, rateLimitStreak.Load())
 	}
@@ -80,8 +79,6 @@ func TestShouldRetryModelCallRetryAfter(t *testing.T) {
 		t.Fatalf("message hint: %+v, want 7s + 1s jitter slot", d)
 	}
 
-	// Transport hints classify a status-less error and set the wait; they are
-	// consumed so the next request starts clean.
 	ctx, hints := modelfactory.WithResponseHints(context.Background())
 	hints.Record(429, 5*time.Second)
 	if d := decide(ctx, 1, errors.New("boom")); d == nil || d.Backoff != 6*time.Second {
@@ -109,8 +106,6 @@ func (f *fakeAttempts) run(_ context.Context) (*schema.Message, error) {
 	return &schema.Message{Role: schema.Assistant, Content: "ok"}, nil
 }
 
-// The outer loop replays a run only for network failures before any model
-// response; everything else was already retried per request.
 func TestRunWithRetryOnlyReplaysEarlyNetworkFailures(t *testing.T) {
 	sleeps := stubRetryEnv(t, testRetryCfg)
 	logger := NewLogger(900, 0, 1)
@@ -155,8 +150,6 @@ func TestRunWithRetryOnlyReplaysEarlyNetworkFailures(t *testing.T) {
 	}
 }
 
-// flakyModel answers like scriptedModel but fails its second request once
-// with a 429.
 type flakyModel struct {
 	scripted scriptedModel
 	requests int
@@ -176,7 +169,6 @@ func (m *flakyModel) Stream(ctx context.Context, in []*schema.Message, opts ...e
 
 func (m *flakyModel) BindTools([]*schema.ToolInfo) error { return nil }
 
-// A 429 on turn 2 retries only that request: turn 1 is not replayed.
 func TestModelRetryIsPerRequest(t *testing.T) {
 	setupToolTestRepo(t)
 	stubRetryEnv(t, config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 4, RetryBaseDelay: 1, RetryMaxDelay: 1})

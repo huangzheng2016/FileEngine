@@ -9,7 +9,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// Marker kinds.
 const (
 	markerCode     = "code"     // source project root
 	markerBundle   = "bundle"   // OS bundle that must stay whole (.app, .photoslibrary)
@@ -18,7 +17,6 @@ const (
 	markerSoftware = "software" // installer / portable software folder
 )
 
-// Marker is one deterministic hint that a directory is a whole unit.
 type Marker struct {
 	Name  string `json:"name"`
 	Kind  string `json:"kind"`
@@ -60,13 +58,11 @@ var selfMarkers = []struct {
 	{".bundle", Marker{Kind: markerBundle, Label: "应用包"}},
 }
 
-// ExtCount is one bucket of the extension histogram.
 type ExtCount struct {
 	Ext   string `json:"ext"`
 	Count int    `json:"count"`
 }
 
-// DirSignals are the deterministic facts shown with a directory unit.
 type DirSignals struct {
 	Markers    []Marker       `json:"markers,omitempty"`
 	Exts       []ExtCount     `json:"exts,omitempty"` // direct child files, most common first (≤8)
@@ -78,8 +74,6 @@ type DirSignals struct {
 	Versions   []VersionGroup `json:"versions,omitempty"`
 }
 
-// ComputeSignals derives the signals of dir from its direct children and the
-// recursive totals.
 func ComputeSignals(dir *db.FileEntry, children []db.FileEntry, totalFiles, totalSize int64) DirSignals {
 	s := DirSignals{TotalFiles: totalFiles, TotalSize: totalSize}
 	if dir != nil {
@@ -148,8 +142,6 @@ func ComputeSignals(dir *db.FileEntry, children []db.FileEntry, totalFiles, tota
 	return s
 }
 
-// LoadDirSignals loads a directory (nil for the root ""), its direct children
-// and its signals.
 func LoadDirSignals(repo *db.Repository, sessionID uint, dir string) (DirSignals, *db.FileEntry, []db.FileEntry, error) {
 	var entry *db.FileEntry
 	if dir != "" {
@@ -175,8 +167,6 @@ func (tb *ToolBuilder) dirSignals(dir string) (DirSignals, error) {
 	return s, err
 }
 
-// strongMarker returns the first marker that by itself identifies a whole
-// unit (project root or OS bundle), or nil.
 func (s DirSignals) strongMarker() *Marker {
 	for i := range s.Markers {
 		if k := s.Markers[i].Kind; k == markerCode || k == markerBundle {
@@ -186,7 +176,6 @@ func (s DirSignals) strongMarker() *Marker {
 	return nil
 }
 
-// Render formats the signals for a unit prompt.
 func (s DirSignals) Render() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("- 规模：直接子项 %d 个文件、%d 个目录；共 %d 个文件，%s；深度 %d\n", s.Files, s.Dirs, s.TotalFiles, humanBytes(s.TotalSize), s.Depth))
@@ -210,15 +199,12 @@ func (s DirSignals) Render() string {
 	return sb.String()
 }
 
-// VersionMember is one entry of a version group.
 type VersionMember struct {
 	Path    string `json:"path"`
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// VersionGroup is a set of siblings that are versions of the same thing
-// ("app-1.2.zip", "app-1.3.zip"); it is decided as one work unit.
 type VersionGroup struct {
 	Name    string          `json:"name"`
 	Members []VersionMember `json:"members"`
@@ -242,8 +228,6 @@ var (
 	}
 )
 
-// versionKey splits a name into its normalized base name and version token;
-// ok is false when the name carries no version.
 func versionKey(e db.FileEntry) (key, display, version string, ok bool) {
 	stem := e.Name
 	if e.FileType != "directory" {
@@ -266,9 +250,8 @@ func versionKey(e db.FileEntry) (key, display, version string, ok bool) {
 	return strings.ToLower(display), display, version, true
 }
 
-// DetectVersionGroups groups undecided siblings whose names differ only by a
-// version (and arch / setup noise). Only directories and software/archive
-// files qualify, so numbered photos never form a group.
+// Only directories and software/archive files qualify, so numbered photos
+// never form a group.
 func DetectVersionGroups(entries []db.FileEntry) []VersionGroup {
 	type acc struct {
 		display string

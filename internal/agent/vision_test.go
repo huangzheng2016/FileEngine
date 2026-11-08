@@ -25,7 +25,6 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// writeGradientJPEG writes a w×h non-uniform JPEG into dir.
 func writeGradientJPEG(t *testing.T, dir, name string, w, h int) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -44,7 +43,6 @@ func writeGradientJPEG(t *testing.T, dir, name string, w, h int) {
 	}
 }
 
-// writeSolidPNG writes a w×h solid PNG into dir.
 func writeSolidPNG(t *testing.T, dir, name string, w, h int) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -85,9 +83,6 @@ func hasTool(names []string, name string) bool {
 	return false
 }
 
-// The two vision switches gate view_image: model-level (ModelProvider.
-// VisionEnabled, passed into NewToolBuilder) ∩ session-level (AllowVision).
-// Both default off, so the tool is absent unless explicitly enabled twice.
 func TestBuildToolsVisionGating(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -124,7 +119,6 @@ func TestBuildToolsVisionGating(t *testing.T) {
 	}
 }
 
-// imageParts extracts the image parts of a ToolResult.
 func imageParts(res *schema.ToolResult) []schema.ToolOutputPart {
 	var out []schema.ToolOutputPart
 	for _, p := range res.Parts {
@@ -171,7 +165,6 @@ func TestViewImageThumbnails(t *testing.T) {
 		t.Fatalf("image parts: got %d, want 2 (result: %s)", len(imgs), textParts(res))
 	}
 
-	// photo.jpg: 1200x800 -> long edge capped at 256, stays jpeg.
 	if imgs[0].Image == nil || imgs[0].Image.Base64Data == nil {
 		t.Fatalf("image part 0 missing base64: %+v", imgs[0])
 	}
@@ -193,7 +186,6 @@ func TestViewImageThumbnails(t *testing.T) {
 		t.Fatalf("thumbnail dims: %dx%d, want 256x171", decCfg.Width, decCfg.Height)
 	}
 
-	// icon.png: already small -> unchanged dims, stays png.
 	if imgs[1].Image.MIMEType != "image/png" {
 		t.Fatalf("image part 1 mime: %q, want image/png", imgs[1].Image.MIMEType)
 	}
@@ -206,7 +198,6 @@ func TestViewImageThumbnails(t *testing.T) {
 		t.Fatalf("png dims: %dx%d, want 100x50 (must not upscale)", decCfg2.Width, decCfg2.Height)
 	}
 
-	// Text notes carry per-file dimensions, never base64.
 	notes := textParts(res)
 	if !strings.Contains(notes, "photo.jpg (1200x800 -> 256x171") {
 		t.Fatalf("missing dimension note for photo.jpg: %q", notes)
@@ -249,7 +240,6 @@ func TestViewImageGuardrails(t *testing.T) {
 	writeGradientJPEG(t, dir, "b.jpg", 64, 64)
 	writeGradientJPEG(t, dir, "c.jpg", 64, 64)
 
-	// Per-call image cap.
 	tb := newVisionToolBuilder(t, dir, config.AgentConfig{VisionMaxImagesPerBatch: 2})
 	_, err := tb.viewImage(context.Background(), &ViewImageInput{Paths: []string{"a.jpg", "b.jpg", "c.jpg"}})
 	if err == nil || !strings.Contains(err.Error(), "too many") {
@@ -259,7 +249,6 @@ func TestViewImageGuardrails(t *testing.T) {
 		t.Fatal("empty paths: expected error")
 	}
 
-	// Byte cap: reject source files larger than the limit.
 	bigInfo, err := os.Stat(filepath.Join(dir, "a.jpg"))
 	if err != nil {
 		t.Fatal(err)
@@ -277,8 +266,6 @@ func TestViewImageGuardrails(t *testing.T) {
 	}
 }
 
-// countTokens must account for multimodal tool results: image parts get a flat
-// per-image estimate (dimension-based billing), text parts are estimated as text.
 func TestCountTokensMultimodalParts(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString([]byte("fake-image-bytes"))
 	withParts := []adk.Message{
@@ -294,16 +281,12 @@ func TestCountTokensMultimodalParts(t *testing.T) {
 		t.Fatalf("countTokens with image part: got %d, want >= %d", got, estimatedTokensPerImagePart)
 	}
 
-	// Sanity: a plain text message of the same text scores lower than one
-	// carrying an additional image part.
 	plain := []adk.Message{{Role: schema.Tool, Content: "notes about the file"}}
 	if countTokens(plain, nil) >= got {
 		t.Fatalf("image part not reflected in estimate: plain=%d parts=%d", countTokens(plain, nil), got)
 	}
 }
 
-// Enhanced tool results (multimodal) must surface in the M9 event stream as a
-// text stand-in — never as raw base64.
 func TestRunADKOnceEnhancedToolResultPlaceholder(t *testing.T) {
 	ctx := context.Background()
 
@@ -372,8 +355,6 @@ func pngBombStream(w, h uint32) []byte {
 	return buf.Bytes()
 }
 
-// A tiny compressed file advertising huge dimensions must be rejected by the
-// pixel cap before Decode allocates (decompression bomb / OOM guard).
 func TestViewImageRejectsPixelBomb(t *testing.T) {
 	dir := t.TempDir()
 	// 60000x60000 = 3.6GP, far over the 50MP cap, compressed to ~70 bytes.

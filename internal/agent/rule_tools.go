@@ -54,8 +54,6 @@ func (in *RuleInput) toRule(sessionID uint) *db.PlanRule {
 		Source: db.MemorySourceAgent}
 }
 
-// ruleTargetPrefix is the static part of a target template before the first
-// variable, "/"-rooted.
 func ruleTargetPrefix(target string) string {
 	if i := strings.IndexByte(target, '{'); i >= 0 {
 		target = target[:i]
@@ -68,8 +66,6 @@ func ruleTargetPrefix(target string) string {
 	return db.NormalizeTargetPath(target)
 }
 
-// checkRuleTarget applies the set_target category rule to a template's static
-// prefix: agent rules must land under a category unless a plan exists.
 func (tb *ToolBuilder) checkRuleTarget(target string) (string, error) {
 	checker, err := tb.newTargetChecker()
 	if err != nil {

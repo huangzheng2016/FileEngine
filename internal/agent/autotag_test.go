@@ -9,8 +9,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-// Batch failures are recorded (concurrently, from workers) and Failures
-// returns an independent copy.
 func TestAutoTagAgentFailuresCollection(t *testing.T) {
 	a := &AutoTagAgent{}
 
@@ -35,7 +33,6 @@ func TestAutoTagAgentFailuresCollection(t *testing.T) {
 		t.Fatalf("failures: got %d, want 100", len(got))
 	}
 
-	// Mutating the returned slice must not affect the agent's own state.
 	got[0].Err = "mutated"
 	if a.Failures()[0].Err == "mutated" {
 		t.Fatal("Failures must return a copy")

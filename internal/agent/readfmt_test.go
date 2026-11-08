@@ -18,8 +18,6 @@ import (
 	"FileEngine/internal/remotefs"
 )
 
-// buildTestPDF assembles a minimal but well-formed single-font PDF (correct
-// xref offsets) whose pages each show one line of ASCII text.
 func buildTestPDF(t *testing.T, pages ...string) []byte {
 	t.Helper()
 	escape := func(s string) string {
@@ -62,7 +60,6 @@ func buildTestPDF(t *testing.T, pages ...string) []byte {
 	return buf.Bytes()
 }
 
-// buildTestZip packs the given members (name → content) into a zip archive.
 func buildTestZip(t *testing.T, members map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -82,7 +79,6 @@ func buildTestZip(t *testing.T, members map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// newReadFileToolBuilder wires a ToolBuilder against a local temp dir.
 func newReadFileToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *ToolBuilder {
 	t.Helper()
 	fs, err := remotefs.NewLocalFS(dir)
@@ -99,7 +95,6 @@ func writeTestFile(t *testing.T, dir, name string, data []byte) {
 	}
 }
 
-// read_file extracts text from PDF pages instead of reporting a binary blob.
 func TestReadFilePDFExtraction(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "report.pdf", buildTestPDF(t, "Hello PDF page one", "Second page text"))
@@ -119,7 +114,6 @@ func TestReadFilePDFExtraction(t *testing.T) {
 	}
 }
 
-// A PDF whose text exceeds the character cap is cut and flagged truncated.
 func TestReadFilePDFCharCapTruncation(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "long.pdf", buildTestPDF(t, "abcdefghij", "klmnopqrst"))
@@ -137,7 +131,6 @@ func TestReadFilePDFCharCapTruncation(t *testing.T) {
 	}
 }
 
-// docx paragraphs come out as text lines via the zip+xml stdlib path.
 func TestReadFileDocxExtraction(t *testing.T) {
 	dir := t.TempDir()
 	docx := buildTestZip(t, map[string]string{
@@ -158,8 +151,6 @@ func TestReadFileDocxExtraction(t *testing.T) {
 	}
 }
 
-// xlsx worksheets render as TSV with shared strings resolved and inline
-// strings used directly; .rels members must not be picked up as sheets.
 func TestReadFileXlsxExtraction(t *testing.T) {
 	dir := t.TempDir()
 	xlsx := buildTestZip(t, map[string]string{
@@ -182,7 +173,6 @@ func TestReadFileXlsxExtraction(t *testing.T) {
 	}
 }
 
-// pptx slides contribute their text runs in slide order.
 func TestReadFilePptxExtraction(t *testing.T) {
 	dir := t.TempDir()
 	pptx := buildTestZip(t, map[string]string{
@@ -207,8 +197,6 @@ func TestReadFilePptxExtraction(t *testing.T) {
 	}
 }
 
-// The legacy binary .doc format is refused with a clear unsupported note,
-// never parsed and never mistaken for a generic binary blob.
 func TestReadFileDocUnsupported(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "old.doc", []byte{0xD0, 0xCF, 0x11, 0xE0, 0x00, 0x01})
@@ -226,8 +214,6 @@ func TestReadFileDocUnsupported(t *testing.T) {
 	}
 }
 
-// Plain-text behavior is unchanged: byte cap + truncated flag, binary sniff,
-// and a corrupt document returns a loud extraction error.
 func TestReadFileTextAndErrorPaths(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "big.txt", []byte(strings.Repeat("a", 200)))
@@ -261,10 +247,7 @@ func TestReadFileTextAndErrorPaths(t *testing.T) {
 	}
 }
 
-// ============ Archive support ============
-
-// streamOnlyFS hides any ReaderAt/Seeker the wrapped backend's files have,
-// simulating an FTP-style stream-only backend.
+// streamOnlyFS hides ReaderAt and Seeker, like the FTP backend.
 type streamOnlyFS struct{ remotefs.RemoteFS }
 
 func (s streamOnlyFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
@@ -278,8 +261,7 @@ func (s streamOnlyFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, er
 	}{rc, rc}, nil
 }
 
-// seekOnlyFS hides ReaderAt but keeps Seek, simulating the NFS backend
-// (*nfs.File: Seek without ReadAt).
+// seekOnlyFS hides ReaderAt but keeps Seek, like *nfs.File.
 type seekOnlyFS struct{ remotefs.RemoteFS }
 
 func (s seekOnlyFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
@@ -295,8 +277,6 @@ func (s seekOnlyFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, erro
 	}{rc, sk, rc}, nil
 }
 
-// buildOversizedZip builds a valid zip whose single stored entry pushes the
-// archive past the 32MB document cap.
 func buildOversizedZip(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -314,7 +294,6 @@ func buildOversizedZip(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// buildTar packs entries (name → content) into a tar, optionally gzipped.
 func buildTar(t *testing.T, gz bool, entries map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -344,8 +323,6 @@ func buildTar(t *testing.T, gz bool, entries map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// zip listing shows entry names/sizes with a read hint; the entry list is
-// capped with a truncation trailer.
 func TestReadFileZipListing(t *testing.T) {
 	dir := t.TempDir()
 	z := buildTestZip(t, map[string]string{
@@ -370,8 +347,6 @@ func TestReadFileZipListing(t *testing.T) {
 	}
 }
 
-// Entry reads via the path::entry syntax: small text entries come back as
-// content; oversized entries and missing entries are refused explicitly.
 func TestReadFileZipEntryRead(t *testing.T) {
 	dir := t.TempDir()
 	z := buildTestZip(t, map[string]string{
@@ -402,14 +377,11 @@ func TestReadFileZipEntryRead(t *testing.T) {
 		t.Fatal("missing entry must return an error")
 	}
 
-	// Entry syntax on a non-archive path is rejected loudly.
 	if _, err := tb.readFile(context.Background(), &ReadFileInput{Path: "bundle.zip::"}); err == nil {
 		t.Fatal("empty entry name must be rejected")
 	}
 }
 
-// Entry-list truncation: more than maxArchiveListEntries entries shows the
-// cap and the remainder count.
 func TestReadFileZipListingTruncation(t *testing.T) {
 	dir := t.TempDir()
 	members := map[string]string{}
@@ -432,8 +404,6 @@ func TestReadFileZipListingTruncation(t *testing.T) {
 	}
 }
 
-// Oversized archives: listing still works on a random-access backend, but
-// entry reads are refused (list-only mandate).
 func TestReadFileZipOversizedListOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "huge.zip", buildOversizedZip(t))
@@ -456,7 +426,6 @@ func TestReadFileZipOversizedListOnly(t *testing.T) {
 	}
 }
 
-// rar/7z are refused with an explicit unsupported note.
 func TestReadFileUnsupportedArchiveFormats(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "a.rar", []byte("Rar!\x1a\x07\x00"))
@@ -474,8 +443,6 @@ func TestReadFileUnsupportedArchiveFormats(t *testing.T) {
 	}
 }
 
-// tar and tar.gz list and serve entries via plain streaming — no random
-// access needed.
 func TestReadFileTarAndTarGz(t *testing.T) {
 	dir := t.TempDir()
 	entries := map[string]string{
@@ -504,10 +471,6 @@ func TestReadFileTarAndTarGz(t *testing.T) {
 	}
 }
 
-// The backend capability matrix: native ReaderAt is used directly, a
-// seek-only file goes through the adapter, a stream-only backend downloads to
-// a temp file within the cap, and beyond the cap gets an explicit degradation
-// notice (never a silent retry).
 func TestResolveArchiveReaderAtMatrix(t *testing.T) {
 	payload := []byte("0123456789abcdefghijklmnopqrstuvwxyz")
 
@@ -598,9 +561,6 @@ func TestResolveArchiveReaderAtMatrix(t *testing.T) {
 	})
 }
 
-// End-to-end backend behavior through readFile: NFS-style seek-only backend
-// serves zip listings via the adapter; FTP-style stream-only backend serves
-// small archives via temp download and refuses oversized ones explicitly.
 func TestReadFileZipBackendPaths(t *testing.T) {
 	dir := t.TempDir()
 	z := buildTestZip(t, map[string]string{"a.txt": "alpha"})
@@ -612,7 +572,6 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
 
-	// NFS-style: seek but no ReaderAt → adapter, listing works.
 	tbNFS := NewToolBuilder(nil, seekOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "nfs"}, false)
 	out, err := tbNFS.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
@@ -622,7 +581,6 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 		t.Fatalf("seek-only listing wrong:\n%s", out.Content)
 	}
 
-	// FTP-style: stream only → small archive still works via temp download.
 	tbFTP := NewToolBuilder(nil, streamOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "ftp"}, false)
 	out, err = tbFTP.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
@@ -632,7 +590,6 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 		t.Fatalf("stream-only listing wrong:\n%s", out.Content)
 	}
 
-	// FTP-style oversized → explicit degradation, not a retry loop.
 	out, err = tbFTP.readFile(context.Background(), &ReadFileInput{Path: "huge.zip"})
 	if err != nil {
 		t.Fatalf("stream-only oversized must not error: %v", err)

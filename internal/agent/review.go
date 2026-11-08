@@ -35,8 +35,7 @@ type reviewCategory struct {
 	rng     *rand.Rand
 }
 
-// add counts an entry and keeps a uniform reservoir sample; the fixed seed
-// makes the material reproducible for the same data.
+// The fixed seed makes the material reproducible for the same data.
 func (c *reviewCategory) add(s reviewSample) {
 	c.count++
 	if len(c.samples) < reviewSamplesPerCategory {
@@ -54,11 +53,6 @@ type splitDir struct {
 	cats  map[string]int
 }
 
-// BuildReviewMaterial computes the deterministic review input of a finished
-// tagging run in one pass over the planned entries: per-category samples,
-// targets outside every category, source directories whose files were
-// scattered across categories, overlapping categories and the run's
-// failures.
 func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *db.AgentRun) (string, error) {
 	cats, err := repo.ListCategories(session.FilesystemID)
 	if err != nil {
@@ -187,9 +181,6 @@ func writeSamples(sb *strings.Builder, samples []reviewSample) {
 	sb.WriteString("\n")
 }
 
-// reviewFailureSection reports what the tagging run left behind: its error,
-// the failure / reconciliation sections of its report and the untagged
-// remainder.
 func reviewFailureSection(repo *db.Repository, session *db.ScanSession, tagging *db.AgentRun) string {
 	var sb strings.Builder
 	if tagging != nil {
@@ -207,8 +198,6 @@ func reviewFailureSection(repo *db.Repository, session *db.ScanSession, tagging 
 	return "## 失败与遗漏\n\n" + sb.String()
 }
 
-// failureSections extracts the "## …" sections of a run report whose
-// heading mentions failures or reconciliation.
 func failureSections(report string) string {
 	var sb strings.Builder
 	keep := false
@@ -226,9 +215,7 @@ func failureSections(report string) string {
 	return sb.String()
 }
 
-// RunReview runs the post-tagging review: a main-model consistency pass over
-// the planned tree whose final answer is the review report, then memory
-// reflection. Reflection problems never fail the review.
+// Reflection problems never fail the review.
 func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *db.AgentRun) (string, error) {
 	material, err := BuildReviewMaterial(a.repo, a.session, tagging)
 	if err != nil {

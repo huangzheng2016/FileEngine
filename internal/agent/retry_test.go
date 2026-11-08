@@ -14,9 +14,7 @@ import (
 	"FileEngine/internal/config"
 )
 
-// stubRetryEnv freezes the retry environment: config, jitter source, sleep
-// recorder and the fleet-wide rate-limit streak. Restores everything on
-// cleanup. Not parallel-safe by design (package-level knobs).
+// Not parallel-safe: the retry knobs are package-level.
 func stubRetryEnv(t *testing.T, cfg config.AgentConfig) *[]time.Duration {
 	t.Helper()
 	oldCfg := config.Get()
@@ -124,7 +122,6 @@ func TestMaxRetriesForClass(t *testing.T) {
 	if got := maxRetriesForClass(errClassHard, cfg); got != 0 {
 		t.Fatalf("hard budget: got %d, want 0", got)
 	}
-	// Zero-value config falls back to built-in defaults.
 	zero := &config.AgentConfig{}
 	if got := maxRetriesForClass(errClassRateLimit, zero); got != 8 {
 		t.Fatalf("rate_limit default budget: got %d, want 8", got)
@@ -146,11 +143,9 @@ func TestBackoffDelaySequence(t *testing.T) {
 			t.Fatalf("attempt %d: got %v, want %v", attempt, got, want[attempt-1]*time.Second)
 		}
 	}
-	// Huge attempt numbers must not overflow the shift.
 	if got := backoffDelay(errClassServer, 60, 0, cfg); got != 30*time.Second {
 		t.Fatalf("attempt 60: got %v, want 30s (capped)", got)
 	}
-	// Full jitter bounds: rand 0 → 0, rand →1 approaches raw.
 	retryRandFloat64 = func() float64 { return 0 }
 	if got := backoffDelay(errClassServer, 3, 0, cfg); got != 0 {
 		t.Fatalf("jitter 0: got %v, want 0", got)
@@ -169,11 +164,9 @@ func TestBackoffDelayHonorsRetryAfter(t *testing.T) {
 	if got := backoffDelay(errClassRateLimit, 1, 7*time.Second, cfg); got != 8*time.Second {
 		t.Fatalf("retry-after 7s: got %v, want 8s", got)
 	}
-	// Absurd hints are clamped to 4*maxDelay.
 	if got := backoffDelay(errClassRateLimit, 1, time.Hour, cfg); got != 241*time.Second {
 		t.Fatalf("retry-after 1h: got %v, want 241s (clamped)", got)
 	}
-	// Retry-After only applies to rate limiting.
 	if got := backoffDelay(errClassServer, 1, 7*time.Second, cfg); got != time.Second {
 		t.Fatalf("server class ignores hint: got %v, want 1s", got)
 	}
