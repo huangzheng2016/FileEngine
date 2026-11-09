@@ -8,6 +8,7 @@ import { toast } from './toast'
 
 export const app = {
   name: 'FileEngine',
+  logo: '/favicon.svg',
   // prefix for every localStorage key the shell and templates write
   storagePrefix: 'fe',
 }
