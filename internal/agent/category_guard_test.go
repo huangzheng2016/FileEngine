@@ -146,8 +146,8 @@ func TestCreateCategorySimilaritySoftReference(t *testing.T) {
 		out.SimilarCategories[0].Reason == "" {
 		t.Fatalf("contained create must carry similar reference: %+v", out.SimilarCategories)
 	}
-	if !strings.Contains(out.Guidance, "set_target") {
-		t.Fatalf("guidance must steer to set_target merge: %q", out.Guidance)
+	if !strings.Contains(out.Guidance, "set_targets") {
+		t.Fatalf("guidance must steer to a set_targets merge: %q", out.Guidance)
 	}
 	if _, err := repo.GetCategoryByName(7, "2025相册"); err != nil {
 		t.Fatalf("soft-similar category must exist in DB: %v", err)
@@ -190,5 +190,24 @@ func TestCategoryFingerprint(t *testing.T) {
 	}
 	if categoryFingerprint(nil) != categoryFingerprint([]string{}) {
 		t.Fatal("nil and empty set must share a fingerprint")
+	}
+}
+
+func TestUpdateCategoryClashIsRejection(t *testing.T) {
+	repo, tb := setupGuardTest(t)
+	ctx := context.Background()
+	for _, c := range []*db.Category{{FilesystemID: 7, Name: "照片", Path: "/照片", AgentEditable: true}, {FilesystemID: 7, Name: "相片", Path: "/相片", AgentEditable: true}} {
+		if err := repo.CreateCategory(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, in := range []UpdateCategoryInput{{Name: "相片", NewPath: "/照片/"}, {Name: "相片", NewName: "照片"}} {
+		out, err := tb.updateCategory(ctx, &in)
+		if err != nil || out.Success || !strings.Contains(out.Error, "已被分类「照片」使用") {
+			t.Fatalf("clash %+v: got %+v, %v — want a tool rejection", in, out, err)
+		}
+	}
+	if out, err := tb.updateCategory(ctx, &UpdateCategoryInput{Name: "相片", NewPath: "/相片", Description: "手机照片"}); err != nil || !out.Success {
+		t.Fatalf("keeping its own path is no clash: %+v, %v", out, err)
 	}
 }

@@ -17,10 +17,10 @@ import (
 )
 
 type ListFilesInput struct {
-	ParentPath string `json:"parent_path" jsonschema_description:"目录路径；空=扫描根目录"`
-	FileType   string `json:"file_type,omitempty" jsonschema_description:"file / directory"`
+	ParentPath string `json:"parent_path" jsonschema_description:"目录的原路径；空字符串表示扫描根目录"`
+	FileType   string `json:"file_type,omitempty" jsonschema_description:"只列出 file 或 directory；不填列出全部"`
 	Undecided  bool   `json:"undecided,omitempty" jsonschema_description:"只列出尚未决定的条目"`
-	Cursor     uint   `json:"cursor,omitempty" jsonschema_description:"翻页：上一页返回的 next_cursor"`
+	Cursor     uint   `json:"cursor,omitempty" jsonschema_description:"上一页返回的 next_cursor；第一页不填"`
 	Limit      int    `json:"limit,omitempty" jsonschema_description:"默认 100，最多 500"`
 }
 
@@ -34,7 +34,7 @@ type ListFilesOutput struct {
 }
 
 type GetFileInfoInput struct {
-	Path string `json:"path" jsonschema_description:"Original path of the file/directory"`
+	Path string `json:"path" jsonschema_description:"条目的原路径"`
 }
 
 type GetFileInfoOutput struct {
@@ -50,8 +50,8 @@ type GetFileInfoOutput struct {
 }
 
 type ReadFileInput struct {
-	Path   string `json:"path" jsonschema_description:"文件路径；压缩包条目用 路径::条目"`
-	Offset int    `json:"offset,omitempty" jsonschema_description:"从第几个字符开始读（续读用 next_offset）"`
+	Path   string `json:"path" jsonschema_description:"文件的原路径；读压缩包内的条目用 压缩包路径::条目路径"`
+	Offset int    `json:"offset,omitempty" jsonschema_description:"起始字符位置；续读时传上次返回的 next_offset"`
 }
 
 type ReadFileOutput struct {
@@ -61,8 +61,8 @@ type ReadFileOutput struct {
 }
 
 type UpdateDescriptionInput struct {
-	Path        string `json:"path" jsonschema_description:"Original path of the file/directory"`
-	Description string `json:"description" jsonschema_description:"AI-generated description"`
+	Path        string `json:"path" jsonschema_description:"条目的原路径"`
+	Description string `json:"description" jsonschema_description:"一句中文描述，200 字以内"`
 }
 
 type UpdateDescriptionOutput struct {
@@ -85,9 +85,9 @@ type CategoryItem struct {
 }
 
 type CreateCategoryInput struct {
-	Name        string `json:"name" jsonschema_description:"Category name, e.g. 'Photos', 'Software'"`
-	Path        string `json:"path" jsonschema_description:"Target path for this category, e.g. '/organized/photos'"`
-	Description string `json:"description" jsonschema_description:"What kind of files belong in this category"`
+	Name        string `json:"name" jsonschema_description:"分类名：2–6 个字的中文名词，如 照片、软件"`
+	Path        string `json:"path" jsonschema_description:"分类路径，以 / 开头，如 /照片、/文档/合同"`
+	Description string `json:"description" jsonschema_description:"放什么：一句话说明哪些文件属于这个分类"`
 }
 
 type CreateCategoryOutput struct {
@@ -109,11 +109,11 @@ type SimilarCategoryItem struct {
 }
 
 type UpdateCategoryInput struct {
-	Name        string `json:"name" jsonschema_description:"Category name to update (used to find the category)"`
-	NewName     string `json:"new_name,omitempty" jsonschema_description:"New name for the category (optional)"`
-	NewPath     string `json:"new_path,omitempty" jsonschema_description:"New path for the category. Files under old path will be cascaded (optional)"`
-	Description string `json:"description,omitempty" jsonschema_description:"New description (optional)"`
-	Structure   string `json:"structure,omitempty" jsonschema_description:"New structure hint (optional)"`
+	Name        string `json:"name" jsonschema_description:"要修改的分类的当前名称"`
+	NewName     string `json:"new_name,omitempty" jsonschema_description:"新名称（可选）"`
+	NewPath     string `json:"new_path,omitempty" jsonschema_description:"新路径（可选），以 / 开头；旧路径下已规划的目标随之更新"`
+	Description string `json:"description,omitempty" jsonschema_description:"新的放什么说明（可选）"`
+	Structure   string `json:"structure,omitempty" jsonschema_description:"分类下的子目录结构说明（可选），如 按 年/月 分目录"`
 }
 
 type UpdateCategoryOutput struct {
@@ -124,7 +124,7 @@ type UpdateCategoryOutput struct {
 }
 
 type DeleteCategoryInput struct {
-	Name string `json:"name" jsonschema_description:"Name of the category to delete"`
+	Name string `json:"name" jsonschema_description:"要删除的分类名称"`
 }
 
 type DeleteCategoryOutput struct {
@@ -277,6 +277,13 @@ func (tb *ToolBuilder) getFileInfo(ctx context.Context, input *GetFileInfoInput)
 
 const defaultReadChars = 8000
 
+func (tb *ToolBuilder) readPageChars() int {
+	if tb.cfg.MaxFileReadSize > 0 {
+		return tb.cfg.MaxFileReadSize
+	}
+	return defaultReadChars
+}
+
 const sensitiveNotice = "[敏感文件（密钥/凭证/证件/税务类），不读取内容；只按文件名和位置判断]"
 
 func (tb *ToolBuilder) isSensitivePath(p string) bool {
@@ -295,10 +302,7 @@ func (tb *ToolBuilder) readFile(ctx context.Context, input *ReadFileInput) (*Rea
 	if tb.isSensitivePath(input.Path) {
 		return &ReadFileOutput{Content: sensitiveNotice}, nil
 	}
-	limit := tb.cfg.MaxFileReadSize
-	if limit <= 0 {
-		limit = defaultReadChars
-	}
+	limit := tb.readPageChars()
 	offset := max(input.Offset, 0)
 	out, err := tb.readFileRaw(ctx, input, offset+limit)
 	if err != nil || out == nil {
@@ -467,7 +471,7 @@ func (tb *ToolBuilder) updateDescription(ctx context.Context, input *UpdateDescr
 
 	f, err := tb.repo.GetFileByPath(tb.sessionID, normalizePath(input.Path))
 	if err != nil {
-		out := &UpdateDescriptionOutput{Error: fmt.Sprintf("file not found: %s", input.Path)}
+		out := &UpdateDescriptionOutput{Error: fmt.Sprintf("条目不存在：%s", input.Path)}
 		return out, nil
 	}
 
@@ -538,9 +542,9 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 	// confinement as set_target.
 	if err := pathutil.ValidateFSPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
-			err = fmt.Errorf("path must not be empty")
+			err = errors.New("路径不能为空")
 		}
-		return nil, rejectf("invalid category path: %v", err)
+		return nil, rejectf("分类路径非法：%v", err)
 	}
 
 	usages, err := tb.repo.GetCategoryUsageSummary(tb.filesystemID, tb.sessionID)
@@ -561,7 +565,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		if list == "" {
 			list = "（当前没有任何分类）"
 		}
-		return nil, rejectf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_target 把文件归入现有分类；确认没有合适分类后，再重新调用 create_category", list)
+		return nil, rejectf("分类列表自你上次查看后已变化（或你尚未查看过），本次创建已拒绝。最新完整分类列表：\n%s\n请基于该列表重新决定：优先用 set_targets 把文件归入现有分类；确认没有合适分类后再调用 create_category", list)
 	}
 
 	hard, soft := findSimilarCategories(usages, input.Name, input.Path)
@@ -571,7 +575,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		for _, s := range hard {
 			sb.WriteString(fmt.Sprintf("- %s (%s): 已归入 %d 项（%s）\n", s.usage.Name, s.usage.Path, s.usage.FileCount, s.reason))
 		}
-		sb.WriteString("请改用 set_target 把文件归入上述现有分类（或用 update_category 调整它）；若确需新分类，换用不同的名称和路径")
+		sb.WriteString("请改用 set_targets 把文件归入上述现有分类（或用 update_category 调整它）；确需新分类时换用不同的名称和路径")
 		return nil, rejectf("%s", sb.String())
 	}
 
@@ -588,7 +592,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, fmt.Errorf("create category: %w", err)
 	}
 	if !created {
-		return nil, rejectf("category with name '%s' or path '%s' already exists. Use set_target to assign files to it, or update_category to modify it", input.Name, input.Path)
+		return nil, rejectf("名称 %q 或路径 %q 已被其他分类使用，未创建：请用 set_targets 把文件归入现有分类，或用 update_category 调整它", input.Name, input.Path)
 	}
 
 	// The agent knows the post-create set, so back-to-back creations are not
@@ -605,7 +609,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		})
 	}
 	if len(out.SimilarCategories) > 0 {
-		out.Guidance = "提示：存在路径重叠的相似分类（见 similar_categories）。若语义重复，请改用 set_target 把文件归入现有分类（或用 update_category/delete_category 归并）；确认确有必要则无需处理"
+		out.Guidance = "已创建，但存在路径重叠的相似分类（见 similar_categories）。如果职责重复，用 set_targets 把文件归入现有分类并删除新分类；确有必要保留则无需处理"
 	}
 	return out, nil
 }
@@ -619,23 +623,29 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return reject(fmt.Sprintf("category not found: %s", input.Name))
+		return reject(fmt.Sprintf("分类不存在：%s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return reject(fmt.Sprintf("category '%s' is not editable by agent (user-managed)", input.Name))
+		return reject(fmt.Sprintf("分类「%s」由用户维护，不能修改", input.Name))
 	}
 
 	if input.NewName == "" && input.NewPath == "" && input.Description == "" && input.Structure == "" {
-		return reject(fmt.Sprintf("no update fields provided for category '%s'. Provide at least one of: new_name, new_path, description, structure", input.Name))
+		return reject(fmt.Sprintf("没有要修改的字段：至少给出 new_name、new_path、description、structure 之一（分类「%s」）", input.Name))
 	}
 
 	// A changed category path cascades into planned targets, so it follows the
 	// same root confinement as set_target.
 	if input.NewPath != "" {
 		if err := pathutil.ValidateFSPath(input.NewPath); err != nil {
-			return reject(fmt.Sprintf("invalid new_path: %v", err))
+			return reject(fmt.Sprintf("new_path 非法：%v", err))
 		}
+	}
+	if msg, err := tb.categoryClash(cat.ID, input.NewName, input.NewPath); err != nil || msg != "" {
+		if err != nil {
+			return nil, err
+		}
+		return reject(msg)
 	}
 
 	oldPath := cat.Path
@@ -660,6 +670,30 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	return out, nil
 }
 
+// Name and path are unique per filesystem; a clash is the agent's to fix,
+// not a database error.
+func (tb *ToolBuilder) categoryClash(id uint, newName, newPath string) (string, error) {
+	if newName == "" && newPath == "" {
+		return "", nil
+	}
+	cats, err := tb.repo.ListCategories(tb.filesystemID)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range cats {
+		if c.ID == id {
+			continue
+		}
+		if newName != "" && normalizeCategoryName(c.Name) == normalizeCategoryName(newName) {
+			return fmt.Sprintf("名称「%s」已被分类「%s」使用", newName, c.Name), nil
+		}
+		if newPath != "" && normalizeCategoryPath(c.Path) == normalizeCategoryPath(newPath) {
+			return fmt.Sprintf("路径 %s 已被分类「%s」使用；合并分类时先把规划改到保留的分类，再删除多余的分类", db.NormalizeTargetPath(newPath), c.Name), nil
+		}
+	}
+	return "", nil
+}
+
 func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategoryInput) (*DeleteCategoryOutput, error) {
 
 	reject := func(msg string) (*DeleteCategoryOutput, error) {
@@ -669,11 +703,11 @@ func (tb *ToolBuilder) deleteCategory(ctx context.Context, input *DeleteCategory
 
 	cat, err := tb.repo.GetCategoryByName(tb.filesystemID, input.Name)
 	if err != nil {
-		return reject(fmt.Sprintf("category not found: %s", input.Name))
+		return reject(fmt.Sprintf("分类不存在：%s", input.Name))
 	}
 
 	if !cat.AgentEditable {
-		return reject(fmt.Sprintf("category '%s' is not deletable by agent (user-managed)", input.Name))
+		return reject(fmt.Sprintf("分类「%s」由用户维护，不能删除", input.Name))
 	}
 
 	if err := tb.repo.ClearPlannedByTargetPath(tb.filesystemID, cat.Path); err != nil {

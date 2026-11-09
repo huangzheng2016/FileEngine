@@ -10,16 +10,16 @@ import (
 )
 
 type RuleInput struct {
-	Name       string `json:"name" jsonschema_description:"规则名（中文，说明用途）"`
-	Exts       string `json:"exts,omitempty" jsonschema_description:"扩展名，逗号分隔，如 jpg,heic"`
-	NameRegex  string `json:"name_regex,omitempty" jsonschema_description:"文件名正则（Go 语法）"`
-	PathPrefix string `json:"path_prefix,omitempty" jsonschema_description:"只匹配该源目录下的条目"`
-	FileType   string `json:"file_type,omitempty" jsonschema_description:"file / directory，空=都可"`
-	MinSize    int64  `json:"min_size,omitempty"`
-	MaxSize    int64  `json:"max_size,omitempty"`
-	Target     string `json:"target" jsonschema_description:"目标模板，如 照片/{year}/{month}；变量 {name} {stem} {ext} {year} {month} {day} {parent} {rel} {taken_year} {taken_month} {camera}；不含 {name}/{stem}/{rel} 时自动追加文件名"`
-	Role       string `json:"role,omitempty" jsonschema_description:"file（默认）或 unit（目录整体移动）"`
-	Position   int    `json:"position,omitempty" jsonschema_description:"顺序，小的先匹配；0=追加到最后"`
+	Name       string `json:"name" jsonschema_description:"规则名：中文，说明用途，如 照片按年份"`
+	Exts       string `json:"exts,omitempty" jsonschema_description:"扩展名，逗号分隔、不带点，如 jpg,heic"`
+	NameRegex  string `json:"name_regex,omitempty" jsonschema_description:"文件名正则（Go RE2 语法），匹配文件名而不是路径"`
+	PathPrefix string `json:"path_prefix,omitempty" jsonschema_description:"只匹配这个源目录（含子目录）下的条目"`
+	FileType   string `json:"file_type,omitempty" jsonschema_description:"只匹配 file 或 directory；不填两者都匹配"`
+	MinSize    int64  `json:"min_size,omitempty" jsonschema_description:"最小字节数，0 表示不限"`
+	MaxSize    int64  `json:"max_size,omitempty" jsonschema_description:"最大字节数，0 表示不限"`
+	Target     string `json:"target" jsonschema_description:"目标路径模板，如 /照片/{year}/{month}。变量：{name} 文件名，{stem} 不含扩展名的文件名，{ext} 扩展名，{year} {month} {day} 拍摄日期（没有时用修改日期），{taken_year} {taken_month} 拍摄日期（没有时为 未知日期），{camera} 相机型号，{parent} 源目录名，{rel} 相对 path_prefix 的路径。不含 {name}、{stem}、{rel} 时自动追加文件名"`
+	Role       string `json:"role,omitempty" jsonschema_description:"file（默认）；unit 表示匹配到的目录整体移动"`
+	Position   int    `json:"position,omitempty" jsonschema_description:"顺序，小的先匹配；0 表示追加到最后"`
 }
 
 type UpdateRuleInput struct {
@@ -32,8 +32,8 @@ type RuleIDInput struct {
 }
 
 type ApplyRulesInput struct {
-	Preview bool `json:"preview,omitempty" jsonschema_description:"true=只预览匹配数和样例，不写入"`
-	RuleID  uint `json:"rule_id,omitempty" jsonschema_description:"只应用这一条规则；0=全部"`
+	Preview bool `json:"preview,omitempty" jsonschema_description:"true 时只返回匹配数和样例，不写入"`
+	RuleID  uint `json:"rule_id,omitempty" jsonschema_description:"只应用这条规则；不填应用全部"`
 }
 
 type RuleOutput struct {
