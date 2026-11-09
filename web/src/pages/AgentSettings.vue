@@ -197,12 +197,13 @@ async function fillPolicy(id: string) {
           恢复默认
         </button>
       </div>
-      <textarea
+      <CodeEditor
         v-model="form.category_policy"
+        wrap
+        autogrow
+        :rows="4"
         name="category_policy"
-        rows="8"
         placeholder="默认规范"
-        aria-label="分类规范"
       />
     </section>
 
@@ -215,6 +216,7 @@ async function fillPolicy(id: string) {
           {{ promptOpen ? '收起' : '编辑' }}
         </button>
       </div>
+      <p v-if="promptOpen" class="text-sm text-muted">分类规范会附在提示词之后，自定义提示词时同样生效。</p>
       <CodeEditor v-if="promptOpen" v-model="form.prompt" wrap autogrow name="prompt" />
     </section>
 
