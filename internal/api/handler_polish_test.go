@@ -65,7 +65,7 @@ func TestFilePatchKeepInPlace(t *testing.T) {
 
 	url := fmt.Sprintf("/api/v1/files/%d", logo.ID)
 	code, f := doModelRequest(t, s, http.MethodPatch, url, map[string]any{"new_path": "/Design//logo.psd"})
-	if code != http.StatusOK || f["new_path"] != "" || f["operation"] != "" || f["reason"] != db.ReasonUserEdit {
+	if code != http.StatusOK || f["role"] != db.RoleSkip || f["new_path"] != "" || f["operation"] != "" || f["reason"] != db.ReasonUserEdit {
 		t.Fatalf("keep in place: %d %v", code, f)
 	}
 	if items, _ := repo.ListMemory(db.MemoryScopeFilesystem, nil); len(items) != 0 {
