@@ -74,7 +74,7 @@ function select(node: TreeNode) {
 </script>
 
 <template>
-  <nav class="tree" aria-label="目录">
+  <nav class="tree" aria-label="文件夹">
     <button type="button" class="tree-row" :class="{ selected: model === '' }" @click="model = ''">
       <Icon name="folder" :size="14" />全部
     </button>

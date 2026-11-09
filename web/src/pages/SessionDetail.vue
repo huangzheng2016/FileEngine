@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ActionMenu, { type MenuItem } from '@/base/ActionMenu.vue'
-import Alert from '@/base/Alert.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
 import EmptyState from '@/base/EmptyState.vue'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
-import StatusPill from '@/base/StatusPill.vue'
+import Steps from '@/base/Steps.vue'
 import Tabs from '@/base/Tabs.vue'
-import { fmtLabel, fmtNumber } from '@/base/format'
-import { ENTRY_FLAG, SESSION_STAGE } from '@/base/labels'
 import { toast } from '@/base/toast'
 import { useConfirm } from '@/base/useConfirm'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
@@ -24,13 +21,22 @@ import { approvePlan, getPlan, listRuns, stopRun } from '@/api/runs'
 import { deleteSession, getSession, plansExportUrl, rescanSession, startTagging, updateSession } from '@/api/sessions'
 import { listFilesystems } from '@/api/settings'
 import ChatPanel from '@/components/ChatPanel.vue'
-import { executable, nextAction, runningRun, sessionPath, stageOf } from '@/lib/sessionView'
+import {
+  FLOW_STEPS,
+  executable,
+  flowRun,
+  flowStep,
+  nextAction,
+  runningRun,
+  sessionPath,
+  stageOf,
+} from '@/lib/sessionView'
 import { useMedia } from '@/lib/useMedia'
 import { useSessionStream } from '@/lib/useSessionStream'
 import ExecuteDialog from './ExecuteDialog.vue'
 import SessionFiles from './SessionFiles.vue'
+import SessionOverview from './SessionOverview.vue'
 import SessionPlan from './SessionPlan.vue'
-import SessionPreview from './SessionPreview.vue'
 import SessionProgress from './SessionProgress.vue'
 
 const route = useRoute()
@@ -74,7 +80,8 @@ usePolling(
 )
 
 const running = computed(() => runningRun(runs.data.value ?? []))
-const stage = computed(() => (s.value ? stageOf(s.value, running.value) : 'ready'))
+const stage = computed(() => (s.value ? stageOf(s.value, flowRun(running.value)) : 'ready'))
+const step = computed(() => flowStep(stage.value))
 const hasDraft = computed(() => plan.data.value?.status === 'draft' && !!plan.data.value.content.trim())
 const next = computed(() => (s.value ? nextAction(s.value, running.value, hasDraft.value) : null))
 const busyReason = computed(() => {
@@ -85,56 +92,55 @@ const busyReason = computed(() => {
 // The chat sits beside every tab on wide screens and is a tab of its own otherwise.
 const wide = useMedia('(min-width: 1280px)')
 const TABS_ALL = [
-  { key: 'progress', label: '进展' },
-  { key: 'plan', label: '方案' },
-  { key: 'preview', label: '预览' },
-  { key: 'files', label: '文件' },
+  { key: 'overview', label: '概览' },
+  { key: 'files', label: '全部文件' },
+  { key: 'plan', label: '整理方案' },
+  { key: 'runs', label: '运行记录' },
   { key: 'chat', label: '助手' },
 ] as const
 type TabKey = (typeof TABS_ALL)[number]['key']
 const tabs = computed(() => TABS_ALL.filter((t) => t.key !== 'chat' || !wide.value))
-const { query, set } = useRouteQuery({ tab: '', view: 'tree' })
-// Without a tab in the URL a session with pending moves opens on its preview.
-const initialTab = ref<TabKey>('progress')
-watch(
-  () => s.value?.id,
-  (sid, old) => {
-    if (sid && sid !== old) initialTab.value = stage.value === 'planned' ? 'preview' : 'progress'
-  },
-)
+const { query, set } = useRouteQuery({ tab: '' })
 const tab = computed<TabKey>({
-  get: () => tabs.value.find((t) => t.key === query.value.tab)?.key ?? initialTab.value,
-  set: (t) => set({ tab: t }),
+  get: () => tabs.value.find((t) => t.key === query.value.tab)?.key ?? 'overview',
+  set: (t) => set({ tab: t === 'overview' ? '' : t }),
 })
-const openReview = () => set({ tab: 'preview', view: 'review' })
+async function openReview() {
+  tab.value = 'overview'
+  await nextTick()
+  document.querySelector('[aria-label="需要你确认"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 const executing = ref(false)
 const busy = ref(false)
 
-async function doNext() {
+function doNext() {
   const n = next.value
-  if (!n || busy.value) return
-  if (n.kind === 'execute') {
-    tab.value = 'preview'
-    executing.value = true
-    return
-  }
-  if (n.kind === 'review') return openReview()
+  if (!n) return
+  if (n.kind === 'execute') executing.value = true
+  else if (n.kind === 'review') void openReview()
+  else if (n.kind !== 'none') void start(n.kind)
+}
+
+const doTag = () => void start('tag')
+
+async function start(kind: 'rescan' | 'tag' | 'plan_tag') {
+  if (busy.value) return
   busy.value = true
   try {
-    if (n.kind === 'rescan') {
+    if (kind === 'rescan') {
       await rescanSession(id.value)
       toast.success('已开始扫描')
     } else {
-      if (n.kind === 'plan_tag') await approvePlan(id.value)
+      if (kind === 'plan_tag') await approvePlan(id.value)
       await startTagging(id.value)
       toast.success('已开始整理')
-      tab.value = 'progress'
+      tab.value = 'overview'
     }
     void runs.refresh()
     void detail.refresh()
   } catch (e) {
-    toast.error(n.kind === 'rescan' ? '重新扫描失败' : '开始整理失败', e)
+    toast.error(kind === 'rescan' ? '重新扫描失败' : '开始整理失败', e)
   } finally {
     busy.value = false
   }
@@ -270,36 +276,42 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
     <template v-else-if="s">
       <div :class="{ 'with-chat': wide }">
         <div class="main-col">
-          <Alert v-if="s.status === 'scanning'" tone="info">
-            已发现 {{ fmtNumber(s.scanned_count) }} 个文件<template v-if="s.current_path"
-              >，正在扫描 {{ s.current_path }}</template
-            >
-          </Alert>
-          <Alert v-else-if="s.status === 'error'" tone="danger" title="扫描失败">{{ s.error_message || '—' }}</Alert>
-
           <div class="toolbar session-head">
-            <StatusPill :value="stage" :map="SESSION_STAGE" />
-            <span class="text-muted text-sm tabular">
-              {{ storage?.name ?? '—' }} · {{ fmtNumber(s.total_files) }} 个文件<template v-if="pending">
-                · 待移动 {{ fmtNumber(pending) }}</template
-              ><template v-if="s.executed_ops"> · 已执行 {{ fmtNumber(s.executed_ops) }}</template>
+            <Steps class="flow" :steps="FLOW_STEPS" :index="step" :reached="step" locked />
+            <span class="head-actions">
+              <button v-if="running" type="button" :disabled="stopping" @click="stop">
+                <Icon name="stop" />{{ stopping ? '停止中' : '停止' }}
+              </button>
+              <button
+                v-if="next && next.kind !== 'none'"
+                type="button"
+                class="primary"
+                :disabled="busy"
+                @click="doNext"
+              >
+                <Icon :name="next.kind === 'review' ? 'eye' : 'play'" />{{ next.label }}
+              </button>
+              <ActionMenu :items="menu" />
             </span>
-            <button v-if="s.review_count" type="button" class="ghost btn-sm" @click="openReview">
-              {{ fmtLabel(ENTRY_FLAG, 'needs_review') }} {{ fmtNumber(s.review_count) }}
-            </button>
-            <span class="spacer" />
-            <button v-if="running" type="button" :disabled="stopping" @click="stop">
-              <Icon name="stop" />{{ stopping ? '停止中' : '停止' }}
-            </button>
-            <button v-if="next && next.kind !== 'none'" type="button" class="primary" :disabled="busy" @click="doNext">
-              <Icon :name="next.kind === 'review' ? 'eye' : 'play'" />{{ next.label }}
-            </button>
-            <ActionMenu :items="menu" />
           </div>
-          <p v-if="s.goal" class="goal">{{ s.goal }}</p>
+          <p class="text-muted text-sm truncate">
+            {{ storage?.name ?? '—' }}<template v-if="s.goal && stage !== 'ready'"> · {{ s.goal }}</template>
+          </p>
           <p v-if="stream.error.value" class="text-danger text-sm">实时进展连接中断：{{ stream.error.value }}</p>
           <Tabs v-model="tab" :items="tabs">
-            <template #progress>
+            <template #overview>
+              <SessionOverview
+                :session="s"
+                :runs="runs.data.value ?? []"
+                :timeline="stream.timeline.value"
+                :has-draft="hasDraft"
+                @changed="(detail.refresh(), runs.refresh())"
+                @tag="doTag"
+                @goal="openGoal"
+                @tab="tab = $event as TabKey"
+              />
+            </template>
+            <template #runs>
               <SessionProgress
                 :session-id="id"
                 :runs="runs.data.value ?? []"
@@ -313,11 +325,8 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
                 :session-id="id"
                 :rev="planRev"
                 :busy-reason="busyReason"
-                @started="((tab = 'progress'), runs.refresh())"
+                @started="((tab = 'overview'), runs.refresh())"
               />
-            </template>
-            <template #preview>
-              <SessionPreview :session-id="id" @changed="detail.refresh" />
             </template>
             <template #files>
               <SessionFiles :session="s" @changed="detail.refresh" />
@@ -350,7 +359,7 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
         :resume="s.executed_ops > 0"
         @close="executing = false"
         @review="((executing = false), openReview())"
-        @started="((tab = 'progress'), runs.refresh())"
+        @started="((tab = 'overview'), runs.refresh())"
       />
 
       <BaseDialog :open="goalForm.open" title="修改整理要求" width="520px" @close="closeGoal">
@@ -361,7 +370,7 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
               rows="4"
               name="goal"
               aria-label="整理要求"
-              placeholder="例如：照片按年份整理，项目目录保持完整"
+              placeholder="例如：照片按年份整理，项目文件夹保持完整"
               :aria-invalid="!!goalCheck.error('goal')"
             />
             <span v-if="goalCheck.error('goal')" class="field-error">{{ goalCheck.error('goal') }}</span>
@@ -380,16 +389,23 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
 
 <style scoped>
 .session-head {
-  min-height: var(--control-h);
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
 }
-.goal {
-  margin-top: calc(-1 * var(--space-2));
-  color: var(--text-secondary);
+.flow {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 .main-col {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   min-width: 0;
 }
 .with-chat {

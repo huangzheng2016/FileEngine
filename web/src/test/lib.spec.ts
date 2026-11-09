@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PreviewItem, ScanSession } from '@/api/types'
 import { contextError, effortError, effortOptions, fmtTokens, isContextPreset, parseTokens } from '@/lib/modelForm'
-import { countChanges, crumbs, parentOf, resetReason, sortItems } from '@/lib/paths'
+import { crumbs, parentOf, sortItems } from '@/lib/paths'
 import { describeMatch, splitExts, targetError } from '@/lib/rules'
 import { nextAction, stageOf } from '@/lib/sessionView'
 import { scopeExts } from '@/data/presets'
@@ -49,19 +49,13 @@ describe('preview paths', () => {
     expect(parentOf('a')).toBe('')
   })
 
-  it('lists folders first and counts changes', () => {
+  it('lists folders first', () => {
     const items = [
       { name: 'b.jpg', is_dir: false, status: 'moved' },
       { name: 'z', is_dir: true, status: 'partial' },
       { name: 'a', is_dir: true },
     ] as PreviewItem[]
     expect(sortItems(items).map((i) => i.name)).toEqual(['a', 'z', 'b.jpg'])
-    expect(countChanges(items)).toEqual({ moved: 1, partial: 1, kept: 1 })
-  })
-
-  it('only lets entries with their own decision be sent back', () => {
-    expect(resetReason({ file_id: 3 } as PreviewItem)).toBe('')
-    expect(resetReason({ is_dir: true } as PreviewItem)).not.toBe('')
   })
 })
 

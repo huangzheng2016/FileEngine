@@ -130,7 +130,7 @@ async function submit() {
         <summary>更多条件</summary>
         <div class="form-grid more">
           <label class="field">
-            <span class="field-label">位于目录</span>
+            <span class="field-label">位于文件夹</span>
             <input v-model="form.path_prefix" name="path_prefix" placeholder="下载" />
           </label>
           <label class="field">
@@ -163,7 +163,7 @@ async function submit() {
         </div>
       </details>
       <label class="field">
-        <span class="field-label required">目标位置</span>
+        <span class="field-label required">新位置</span>
         <input
           v-model="form.target"
           name="target"
@@ -173,7 +173,8 @@ async function submit() {
         />
         <span v-if="v.error('target')" class="field-error">{{ v.error('target') }}</span>
         <span v-else class="field-hint">
-          可用 {name} 文件名、{year} {month} 年月、{taken_year} {taken_month} 拍摄年月、{camera} 相机、{parent} 上级目录
+          可用 {name} 文件名、{year} {month} 年月、{taken_year} {taken_month} 拍摄年月、{camera} 相机、{parent}
+          上级文件夹
         </span>
       </label>
     </form>

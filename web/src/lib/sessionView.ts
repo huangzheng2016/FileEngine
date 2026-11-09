@@ -3,7 +3,7 @@ import { fmtNumber } from '@/base/format'
 
 export function sessionPath(s: Pick<ScanSession, 'scan_path'>): string {
   const p = s.scan_path.replace(/^\/+|\/+$/g, '')
-  return p ? `/${p}` : '全部目录'
+  return p ? `/${p}` : '整个存储'
 }
 
 type Counts = Pick<ScanSession, 'planned_ops' | 'executed_ops' | 'review_count'>
@@ -52,6 +52,10 @@ export type Stage =
   | 'planned'
   | 'done'
 
+// A chat turn does not move the task along; the page shows the stage under it.
+export const flowRun = <T extends Pick<AgentRun, 'phase'>>(running: T | undefined) =>
+  running?.phase === 'chat' ? undefined : running
+
 export function stageOf(s: ScanSession, running: Pick<AgentRun, 'phase'> | undefined): Stage {
   if (s.status === 'scanning') return 'scanning'
   if (s.status === 'error') return 'scan_failed'
@@ -59,4 +63,35 @@ export function stageOf(s: ScanSession, running: Pick<AgentRun, 'phase'> | undef
   if (running) return running.phase === 'revert' ? 'executing' : running.phase
   if (s.planned_ops === 0) return s.tagged_files > 0 ? 'no_moves' : 'ready'
   return executable(s) > 0 || s.review_count > 0 ? 'planned' : 'done'
+}
+
+// The four steps a task goes through, as the page's progress line shows them.
+export const FLOW_STEPS = [
+  { key: 'scan', label: '扫描' },
+  { key: 'organize', label: 'AI 整理' },
+  { key: 'confirm', label: '确认结果' },
+  { key: 'execute', label: '执行' },
+] as const
+
+// Index of the current step; FLOW_STEPS.length once everything is done.
+export function flowStep(stage: Stage): number {
+  switch (stage) {
+    case 'scanning':
+    case 'scan_failed':
+    case 'scan_interrupted':
+      return 0
+    case 'ready':
+    case 'chat':
+    case 'survey':
+    case 'tagging':
+    case 'review':
+      return 1
+    case 'planned':
+    case 'no_moves':
+      return 2
+    case 'executing':
+      return 3
+    case 'done':
+      return FLOW_STEPS.length
+  }
 }

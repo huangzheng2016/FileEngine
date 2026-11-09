@@ -1,5 +1,3 @@
-import type { PreviewItem } from '@/api/types'
-
 // Paths are slash paths relative to the scan root; '' is the root itself.
 export function normalize(p: string): string {
   return p
@@ -41,23 +39,4 @@ export function crumbs(p: string, rootLabel = '全部', rooted = false): Crumb[]
 
 export function sortItems<T extends { is_dir: boolean; name: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name, 'zh-CN'))
-}
-
-export interface ChangeCounts {
-  moved: number
-  partial: number
-  kept: number
-}
-
-export function countChanges(items: readonly PreviewItem[]): ChangeCounts {
-  const c: ChangeCounts = { moved: 0, partial: 0, kept: 0 }
-  for (const it of items) c[it.status ?? 'kept']++
-  return c
-}
-
-// Only entries with their own decision can be sent back; a virtual target folder
-// is just where several decisions land.
-export function resetReason(item: PreviewItem): string {
-  if (item.file_id) return ''
-  return '进入目录后逐项重置'
 }

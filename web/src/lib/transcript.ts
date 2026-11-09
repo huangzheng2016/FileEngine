@@ -23,6 +23,8 @@ export interface ToolItem {
   output?: unknown
   error?: string
   durationMs?: number
+  // sequence number of the result, to order results across workers
+  seq?: number
 }
 
 export interface UnitItem {
@@ -292,6 +294,7 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
         it.output = d.output
         it.error = d.error ? str(d.error) : undefined
         it.durationMs = num(d.duration_ms)
+        it.seq = ev.seq
         break
       }
     }
