@@ -3,6 +3,8 @@ import { computed, reactive, ref, watch } from 'vue'
 import BaseDialog from '@/base/BaseDialog.vue'
 import Segmented from '@/base/Segmented.vue'
 import UnitInput from '@/base/UnitInput.vue'
+import { labelOptions } from '@/base/format'
+import { RULE_ROLE } from '@/base/labels'
 import { toast } from '@/base/toast'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
@@ -54,24 +56,27 @@ watch(
           }
         : empty(),
     )
+    more.value = !!(form.path_prefix || form.name_regex || form.min_size || form.max_size)
     v.reset()
     guard.reset()
   },
 )
 
-const KINDS = [
-  { value: 'file' as const, label: '逐个文件' },
-  { value: 'unit' as const, label: '整个文件夹' },
-]
+const KINDS = labelOptions(RULE_ROLE) as { value: 'file' | 'unit'; label: string }[]
+const more = ref(false)
 
-const title = computed(() => (props.editing ? '编辑规则' : '添加规则'))
+const title = computed(() => (props.editing ? '编辑规则' : '新建规则'))
 
 async function close() {
   if (await guard.confirmDiscard()) emit('close')
 }
 
 async function submit() {
-  if (!v.validate() || saving.value) return
+  if (saving.value) return
+  if (!v.validate()) {
+    if (v.error('name_regex') || v.error('max_size')) more.value = true
+    return
+  }
   saving.value = true
   const body: RuleInput = {
     name: form.name.trim(),
@@ -87,12 +92,12 @@ async function submit() {
   try {
     if (props.editing) await updateRule(props.editing.id, body)
     else await createRule(props.sessionId, { ...body, position: props.position, source: 'user' })
-    toast.success(props.editing ? '已保存' : '已添加')
+    toast.success(props.editing ? '已保存' : '已创建')
     guard.reset()
     emit('saved')
     emit('close')
   } catch (e) {
-    toast.error(props.editing ? '保存失败' : '添加失败', e)
+    toast.error(props.editing ? '保存失败' : '创建失败', e)
   } finally {
     saving.value = false
   }
@@ -114,46 +119,49 @@ async function submit() {
         <span v-if="v.error('name')" class="field-error">{{ v.error('name') }}</span>
       </label>
       <div class="field">
-        <span class="field-label">处理</span>
-        <Segmented v-model="form.kind" :options="KINDS" label="处理" />
+        <span class="field-label">移动方式</span>
+        <Segmented v-model="form.kind" :options="KINDS" label="移动方式" />
       </div>
-      <div class="form-grid">
-        <label class="field">
-          <span class="field-label">扩展名</span>
-          <input v-model="form.exts" name="exts" placeholder="jpg, png" />
-        </label>
-        <label class="field">
-          <span class="field-label">位于目录</span>
-          <input v-model="form.path_prefix" name="path_prefix" placeholder="下载" />
-        </label>
-        <label class="field span-2">
-          <span class="field-label">名称规则</span>
-          <input
-            v-model="form.name_regex"
-            name="name_regex"
-            class="mono"
-            placeholder="^IMG_\d+"
-            :aria-invalid="!!v.error('name_regex')"
-          />
-          <span v-if="v.error('name_regex')" class="field-error">{{ v.error('name_regex') }}</span>
-          <span v-else class="field-hint">正则表达式，留空不限</span>
-        </label>
-        <div class="field">
-          <span class="field-label">最小</span>
-          <UnitInput v-model="form.min_size" kind="bytes" name="min_size" label="最小" />
+      <label class="field">
+        <span class="field-label">扩展名</span>
+        <input v-model="form.exts" name="exts" placeholder="jpg, png" />
+      </label>
+      <details :open="more" @toggle="more = ($event.target as HTMLDetailsElement).open">
+        <summary>更多条件</summary>
+        <div class="form-grid more">
+          <label class="field">
+            <span class="field-label">位于目录</span>
+            <input v-model="form.path_prefix" name="path_prefix" placeholder="下载" />
+          </label>
+          <label class="field">
+            <span class="field-label">文件名正则</span>
+            <input
+              v-model="form.name_regex"
+              name="name_regex"
+              class="mono"
+              placeholder="^IMG_\d+"
+              :aria-invalid="!!v.error('name_regex')"
+            />
+            <span v-if="v.error('name_regex')" class="field-error">{{ v.error('name_regex') }}</span>
+            <span v-else class="field-hint">留空不限</span>
+          </label>
+          <div class="field">
+            <span class="field-label">最小</span>
+            <UnitInput v-model="form.min_size" kind="bytes" name="min_size" label="最小" />
+          </div>
+          <div class="field">
+            <span class="field-label">最大</span>
+            <UnitInput
+              v-model="form.max_size"
+              kind="bytes"
+              name="max_size"
+              label="最大"
+              :invalid="!!v.error('max_size')"
+            />
+            <span v-if="v.error('max_size')" class="field-error">{{ v.error('max_size') }}</span>
+          </div>
         </div>
-        <div class="field">
-          <span class="field-label">最大</span>
-          <UnitInput
-            v-model="form.max_size"
-            kind="bytes"
-            name="max_size"
-            label="最大"
-            :invalid="!!v.error('max_size')"
-          />
-          <span v-if="v.error('max_size')" class="field-error">{{ v.error('max_size') }}</span>
-        </div>
-      </div>
+      </details>
       <label class="field">
         <span class="field-label required">目标位置</span>
         <input
@@ -177,3 +185,9 @@ async function submit() {
     </template>
   </BaseDialog>
 </template>
+
+<style scoped>
+.more {
+  margin-top: var(--space-3);
+}
+</style>
