@@ -14,8 +14,10 @@ vi.mock('@/api/sessions', () => ({
       status: 'scanned',
       total_files: 1200,
       scanned_count: 1200,
+      tagged_files: 300,
       planned_ops: 300,
       executed_ops: 0,
+      review_count: 0,
       total_size: 1024,
       created_at: '2026-11-01T00:00:00Z',
       updated_at: '2026-11-01T00:00:00Z',
@@ -61,16 +63,16 @@ afterEach(() => {
 })
 
 describe('SessionList', () => {
-  it('lists sessions with their storage and opens the detail pane on click', async () => {
+  it('lists sessions with their storage and stage and opens the task on click', async () => {
     const { default: SessionList } = await import('@/pages/SessionList.vue')
     const { w, router } = await withRouter(SessionList, '/sessions')
     expect(w.text()).toContain('/照片')
     expect(w.text()).toContain('家里的 NAS')
-    expect(w.text()).toContain('扫描完成')
+    expect(w.text()).toContain('照片按年份整理')
+    expect(w.text()).toContain('待执行')
     await w.find('tbody tr.clickable').trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value.query.id).toBe('7')
-    expect(w.text()).toContain('照片按年份整理')
+    expect(router.currentRoute.value.path).toBe('/sessions/7')
     w.unmount()
   })
 })

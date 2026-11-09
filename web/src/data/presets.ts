@@ -81,7 +81,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'media-by-month',
     name: '照片视频按年月',
-    goal: '照片和视频按拍摄年份、月份归档，相册和活动文件夹保持完整。',
+    goal: '照片和视频按拍摄年份、月份归档，相册和活动目录保持完整。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.image, ...SCOPE_EXTS.video] },
     rules: [
       rule({ name: '照片按年月', exts: exts('image'), target: '照片/{year}/{month}/{name}' }),
@@ -109,7 +109,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'downloads-cleanup',
     name: '下载目录清理',
-    goal: '把下载目录里的文件按类型归位，安装包和压缩包单独放，项目文件夹保持完整。',
+    goal: '把下载目录里的文件按类型归位，安装包和压缩包单独放，项目目录保持完整。',
     scope: { key: 'all', exts: [] },
     rules: [
       rule({ name: '安装包', exts: exts('installer'), target: '安装包/{name}' }),
@@ -153,14 +153,14 @@ export const TASK_PRESETS: TaskPreset[] = [
     scope: { key: 'custom', exts: [...SCOPE_EXTS.video, 'srt', 'ass', 'ssa', 'sub', 'nfo'] },
     rules: [],
     categories: [
-      { name: '电影', path: '/影视/电影', description: '电影，每部一个文件夹' },
+      { name: '电影', path: '/影视/电影', description: '电影，每部一个目录' },
       { name: '剧集', path: '/影视/剧集', description: '电视剧与番剧，按 剧名/季 存放' },
     ],
   },
   {
     id: 'music-by-artist',
     name: '音乐按艺人专辑',
-    goal: '音乐按艺人和专辑整理，专辑文件夹保持完整。',
+    goal: '音乐按艺人和专辑整理，专辑目录保持完整。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.audio, 'cue', 'lrc', 'jpg', 'png'] },
     rules: [],
     categories: [{ name: '音乐', path: '/音乐', description: '按 艺人/专辑 存放的音乐' }],
