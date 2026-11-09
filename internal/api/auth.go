@@ -228,7 +228,7 @@ func (s *Server) logout(c *gin.Context) {
 }
 
 func (s *Server) me(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"authenticated": true})
+	c.JSON(http.StatusOK, gin.H{"authenticated": true, "desktop": len(s.opts.AllowedHosts) > 0})
 }
 
 // The desktop window opens this as its start URL; in server mode it doubles

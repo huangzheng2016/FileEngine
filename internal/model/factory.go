@@ -64,8 +64,7 @@ func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	// headers, which the eino/go-openai error types drop. The client is shared by
 	// all workers; hints travel per request context, so they never mix.
 	cfg.HTTPClient = &http.Client{Transport: newHintCaptureTransport(nil)}
-	temp := float32(p.Temperature)
-	cfg.Temperature = &temp
+	cfg.Temperature = temperature(p)
 	if p.MaxTokens > 0 {
 		maxTokens := p.MaxTokens
 		cfg.MaxTokens = &maxTokens
@@ -86,6 +85,8 @@ const (
 	claudeMinBudget    = 1024 // API minimum budget_tokens
 	claudeMaxBudget    = 32768
 	claudeAnswerTokens = 4096 // output room kept above the thinking budget
+	// The Messages API requires max_tokens; used when the provider leaves it 0.
+	claudeDefaultMaxTokens = 8192
 )
 
 // The budget is capped below maxTokens, and maxTokens is raised when it
@@ -128,7 +129,18 @@ func claudeConfig(p *db.ModelProvider) *claude.Config {
 		cfg.ThinkingConfig = &thinking
 		return cfg
 	}
-	temp := float32(p.Temperature)
-	cfg.Temperature = &temp
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = claudeDefaultMaxTokens
+	}
+	cfg.Temperature = temperature(p)
 	return cfg
+}
+
+// 0 means the model's default, so nothing is sent.
+func temperature(p *db.ModelProvider) *float32 {
+	if p.Temperature == 0 {
+		return nil
+	}
+	t := float32(p.Temperature)
+	return &t
 }

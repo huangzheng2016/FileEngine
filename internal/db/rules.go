@@ -243,6 +243,7 @@ type RuleApplyStat struct {
 	RuleID  uint         `json:"rule_id"`
 	Name    string       `json:"name"`
 	Matched int          `json:"matched"`
+	Skipped int          `json:"skipped"` // matched but not decided: bad target, or rejected by the decision rules
 	Samples []RuleSample `json:"samples,omitempty"`
 }
 
@@ -317,6 +318,7 @@ func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]Ru
 				}
 				target, err := RenderRuleTarget(rule, e)
 				if err != nil {
+					stat.Skipped++
 					continue
 				}
 				if preview {
@@ -344,6 +346,9 @@ func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]Ru
 				return nil, err
 			}
 			for j, o := range outcomes {
+				if o.Err != nil {
+					stat.Skipped++
+				}
 				if o.Err == nil && o.Result != nil {
 					stat.Matched++
 					if len(stat.Samples) < 10 {

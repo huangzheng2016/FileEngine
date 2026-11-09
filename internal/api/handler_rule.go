@@ -148,11 +148,12 @@ func (s *Server) applyRules(c *gin.Context) {
 		writeRuleError(c, err)
 		return
 	}
-	applied := 0
+	applied, skipped := 0, 0
 	for _, st := range stats {
 		applied += st.Matched
+		skipped += st.Skipped
 	}
-	c.JSON(http.StatusOK, gin.H{"items": stats, "applied": applied})
+	c.JSON(http.StatusOK, gin.H{"items": stats, "applied": applied, "skipped": skipped})
 }
 
 type FileIDsRequest struct {

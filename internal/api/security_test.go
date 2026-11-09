@@ -76,7 +76,7 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Fatalf("cookie = %+v", cookies)
 	}
 	withCookie := func(r *http.Request) { r.AddCookie(cookies[0]) }
-	if w := do(s, "GET", "/api/v1/auth/me", nil, withCookie); w.Code != http.StatusOK {
+	if w := do(s, "GET", "/api/v1/auth/me", nil, withCookie); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"desktop":false`) {
 		t.Fatalf("me with cookie = %d", w.Code)
 	}
 
@@ -143,6 +143,9 @@ func TestCrossSiteAndHostGuards(t *testing.T) {
 	}
 	if w := do(pinned, "GET", "/api/v1/sessions", nil, func(r *http.Request) { r.Host = "127.0.0.1:43210"; bearer(pinned.opts.Token)(r) }); w.Code != http.StatusOK {
 		t.Fatalf("pinned host = %d", w.Code)
+	}
+	if w := do(pinned, "GET", "/api/v1/auth/me", nil, func(r *http.Request) { r.Host = "127.0.0.1:43210"; bearer(pinned.opts.Token)(r) }); !strings.Contains(w.Body.String(), `"desktop":true`) {
+		t.Fatalf("desktop me = %s", w.Body)
 	}
 }
 

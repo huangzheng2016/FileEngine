@@ -78,3 +78,15 @@ func TestClaudeThinkingParams(t *testing.T) {
 		}
 	}
 }
+
+func TestZeroTemperatureMeansModelDefault(t *testing.T) {
+	if cfg := openAIConfig(&db.ModelProvider{Model: "m"}, ""); cfg.Temperature != nil {
+		t.Fatalf("openai temperature 0 must not be sent: %v", *cfg.Temperature)
+	}
+	if cfg := claudeConfig(&db.ModelProvider{Model: "m"}); cfg.Temperature != nil || cfg.MaxTokens != claudeDefaultMaxTokens {
+		t.Fatalf("claude defaults: temperature=%v max_tokens=%d", cfg.Temperature, cfg.MaxTokens)
+	}
+	if cfg := openAIConfig(&db.ModelProvider{Model: "m", Temperature: 0.4}, ""); cfg.Temperature == nil || *cfg.Temperature != float32(0.4) {
+		t.Fatal("non-zero temperature must be sent")
+	}
+}

@@ -40,7 +40,7 @@ func TestRuleEndpoints(t *testing.T) {
 		t.Fatal("preview writes nothing")
 	}
 	code, ap := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions/1/rules/apply", nil)
-	if code != http.StatusOK || ap["applied"].(float64) != 2 {
+	if code != http.StatusOK || ap["applied"].(float64) != 2 || ap["skipped"] != float64(0) {
 		t.Fatalf("apply: %d %v", code, ap)
 	}
 	if e, _ := repo.GetFileByPath(1, "Design/logo.psd"); e.Reason != "规则：设计稿" || e.Role != db.RoleFile {

@@ -19,7 +19,8 @@ type configView struct {
 	Database struct {
 		Driver string `json:"driver"`
 	} `json:"database"`
-	Agent config.AgentConfig `json:"agent"`
+	Agent                 config.AgentConfig `json:"agent"`
+	DefaultCategoryPolicy string             `json:"default_category_policy"`
 }
 
 func toConfigView(cfg *config.Config) configView {
@@ -27,6 +28,7 @@ func toConfigView(cfg *config.Config) configView {
 	v.Server.Host, v.Server.Port = cfg.Server.Host, cfg.Server.Port
 	v.Database.Driver = cfg.Database.Driver
 	v.Agent = cfg.Agent
+	v.DefaultCategoryPolicy = config.DefaultCategoryPolicy
 	return v
 }
 
