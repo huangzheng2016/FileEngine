@@ -11,7 +11,6 @@ import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
 import { deleteFilesystem, listFilesystems } from '@/api/settings'
 import type { Filesystem } from '@/api/types'
-import { PROTOCOL_HINT } from '@/lib/storage'
 import StorageFormDialog from './StorageFormDialog.vue'
 
 const confirm = useConfirm()
@@ -32,7 +31,7 @@ const where = (f: Filesystem) =>
 async function remove(f: Filesystem) {
   if (
     !(await confirm({
-      message: `删除存储「${f.name}」？存储里的文件不受影响。`,
+      message: `删除存储「${f.name}」？已有任务会无法继续。存储里的文件不受影响。`,
       confirmText: '删除',
       danger: true,
     }))
@@ -52,10 +51,7 @@ async function remove(f: Filesystem) {
   <div class="page">
     <div class="toolbar">
       <span class="spacer" />
-      <button type="button" class="btn-icon" aria-label="刷新" :disabled="list.loading.value" @click="list.refresh">
-        <Icon name="refresh-cw" />
-      </button>
-      <button type="button" class="primary" @click="edit(null)"><Icon name="plus" />新建</button>
+      <button type="button" class="primary" @click="edit(null)"><Icon name="plus" />新建存储</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -80,19 +76,12 @@ async function remove(f: Filesystem) {
               {{ f.name }}
               <span v-if="f.description" class="cell-sub">{{ f.description }}</span>
             </td>
-            <td>
-              <span v-tip="PROTOCOL_HINT[f.protocol]"><StatusPill :value="f.protocol" :map="PROTOCOL" /></span>
-            </td>
+            <td><StatusPill :value="f.protocol" :map="PROTOCOL" /></td>
             <td class="mono">
-              <span class="truncate">{{ where(f) || '—' }}</span>
+              <span v-tip="where(f)" class="truncate">{{ where(f) || '—' }}</span>
             </td>
             <td class="row-actions">
-              <span>
-                <button type="button" class="ghost btn-sm" @click.stop="edit(f)">编辑</button>
-                <ActionMenu
-                  :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(f) }]"
-                />
-              </span>
+              <ActionMenu :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(f) }]" />
             </td>
           </tr>
           <TableState
@@ -102,7 +91,9 @@ async function remove(f: Filesystem) {
             :empty="!list.data.value?.length"
             empty-text="暂无存储"
             @retry="list.refresh"
-          />
+          >
+            <button type="button" class="primary" @click="edit(null)">新建存储</button>
+          </TableState>
         </tbody>
       </table>
     </div>

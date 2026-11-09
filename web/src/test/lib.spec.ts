@@ -19,6 +19,8 @@ describe('model form', () => {
     expect(effortOptions('').map((o) => o.value)).toEqual(['low', 'medium', 'high', 'max'])
     expect(effortOptions('hi').map((o) => o.value)).toEqual(['high', 'hi'])
     expect(effortOptions('max').map((o) => o.value)).toEqual(['max'])
+    expect(effortOptions('高').map((o) => o.value)).toEqual(['high', 'max'])
+    expect(effortOptions('').map((o) => o.label)).toEqual(['低', '中', '高', '最高'])
   })
 
   it('parses and formats context lengths in tokens', () => {
@@ -78,7 +80,7 @@ describe('rules', () => {
     ).toBe('扩展名 jpg、png · 位于 /下载')
     expect(
       describeMatch({ exts: '', name_regex: '', path_prefix: '', file_type: 'file', min_size: 0, max_size: 0 }),
-    ).toBe('所有待定条目')
+    ).toBe('所有未整理的条目')
   })
 
   it('rejects unknown template variables and parent segments', () => {
@@ -97,18 +99,29 @@ describe('rules', () => {
 })
 
 describe('session next step', () => {
-  const base = { status: 'scanned', planned_ops: 0, executed_ops: 0 } as ScanSession
+  const base = { status: 'scanned', tagged_files: 0, planned_ops: 0, executed_ops: 0, review_count: 0 } as ScanSession
   it('offers exactly one next action for each state', () => {
-    expect(nextAction({ ...base, status: 'scanning' }, undefined, false).kind).toBe('none')
-    expect(nextAction({ ...base, status: 'error' }, undefined, false).kind).toBe('rescan')
-    expect(nextAction(base, undefined, false).kind).toBe('tag')
-    const planned = { ...base, planned_ops: 10 }
-    expect(nextAction(planned, undefined, false).kind).toBe('preview')
-    expect(nextAction(planned, undefined, true).kind).toBe('execute')
-    expect(nextAction({ ...planned, executed_ops: 10 }, undefined, true).kind).toBe('none')
-    const running = { id: 1, phase: 'tagging', status: 'running' } as const
-    expect(nextAction(planned, running as never, false).kind).toBe('none')
-    expect(stageOf(planned, running as never)).toBe('tagging')
+    expect(nextAction({ ...base, status: 'scanning' }, undefined).kind).toBe('none')
+    expect(nextAction({ ...base, status: 'error' }, undefined).kind).toBe('rescan')
+    expect(nextAction(base, undefined)).toEqual({ kind: 'tag', label: '开始整理' })
+    expect(nextAction(base, undefined, true)).toEqual({ kind: 'plan_tag', label: '按方案整理' })
+    const tagged = { ...base, tagged_files: 9 }
+    expect(nextAction(tagged, undefined)).toEqual({ kind: 'tag', label: '继续整理' })
+    expect(stageOf(tagged, undefined)).toBe('no_moves')
+    expect(stageOf(base, undefined)).toBe('ready')
+    const planned = { ...tagged, planned_ops: 30 }
+    expect(nextAction(planned, undefined)).toEqual({ kind: 'execute', label: '执行' })
+    expect(nextAction({ ...planned, executed_ops: 20 }, undefined)).toEqual({
+      kind: 'execute',
+      label: '执行其余 10 项',
+    })
+    expect(nextAction({ ...planned, executed_ops: 25, review_count: 5 }, undefined).kind).toBe('review')
+    expect(nextAction({ ...planned, executed_ops: 30 }, undefined).kind).toBe('none')
+    const running = { phase: 'tagging' } as const
+    expect(nextAction(planned, running).kind).toBe('none')
+    expect(stageOf(planned, running)).toBe('tagging')
+    expect(stageOf(planned, { phase: 'revert' })).toBe('executing')
     expect(stageOf(planned, undefined)).toBe('planned')
+    expect(stageOf({ ...planned, executed_ops: 30 }, undefined)).toBe('done')
   })
 })

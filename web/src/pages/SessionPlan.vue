@@ -85,21 +85,33 @@ function discardMine() {
   toast.success('已载入最新方案')
 }
 
-const working = ref(false)
+// Stays set after a successful start until busyReason reports the run, so a second
+// click cannot race the run event and hit 409.
+const generating = ref(false)
+watch(
+  () => props.busyReason,
+  (r) => {
+    if (r) generating.value = false
+  },
+)
+const generateBlocked = computed(() => props.busyReason || (generating.value ? '正在生成方案' : ''))
+
 async function generate() {
-  working.value = true
+  if (generateBlocked.value) return
+  generating.value = true
   try {
     await draftPlan(props.sessionId, '')
-    toast.success('已开始出方案')
+    toast.success('已开始生成方案')
     emit('started')
   } catch (e) {
-    toast.error('出方案失败', e)
-  } finally {
-    working.value = false
+    generating.value = false
+    toast.error('生成方案失败', e)
   }
 }
 
+const working = ref(false)
 async function approve() {
+  if (working.value) return
   working.value = true
   try {
     plan.data.value = await approvePlan(props.sessionId)
@@ -113,10 +125,10 @@ async function approve() {
 
 const planMenu = computed(() => [
   {
-    label: '重新出方案',
+    label: '重新生成',
     icon: 'refresh-cw' as const,
-    disabled: !!props.busyReason,
-    title: props.busyReason || undefined,
+    disabled: !!generateBlocked.value,
+    title: generateBlocked.value || undefined,
     onSelect: () => void generate(),
   },
 ])
@@ -136,16 +148,27 @@ function openRule(r: PlanRule | null) {
 }
 const nextPosition = computed(() => items.value.reduce((m, r) => Math.max(m, r.position), 0) + 1)
 
+const moving = ref(false)
 async function move(r: PlanRule, dir: -1 | 1) {
   const i = items.value.indexOf(r)
   const other = items.value[i + dir]
-  if (!other) return
+  if (!other || moving.value) return
+  moving.value = true
   try {
     await Promise.all([updateRule(r.id, { position: other.position }), updateRule(other.id, { position: r.position })])
     await rules.refresh()
   } catch (e) {
     toast.error('调整顺序失败', e)
+  } finally {
+    moving.value = false
   }
+}
+
+function moveBlocked(i: number, dir: -1 | 1): string {
+  if (moving.value) return '正在调整顺序'
+  if (dir < 0 && i === 0) return '已经是第一条'
+  if (dir > 0 && i === items.value.length - 1) return '已经是最后一条'
+  return ''
 }
 
 async function removeRule(r: PlanRule) {
@@ -170,15 +193,15 @@ const ruleMenu = (r: PlanRule, i: number) => [
   {
     label: '上移',
     icon: 'arrow-up' as const,
-    disabled: i === 0,
-    title: i === 0 ? '已经是第一条' : undefined,
+    disabled: !!moveBlocked(i, -1),
+    title: moveBlocked(i, -1) || undefined,
     onSelect: () => void move(r, -1),
   },
   {
     label: '下移',
     icon: 'arrow-down' as const,
-    disabled: i === items.value.length - 1,
-    title: i === items.value.length - 1 ? '已经是最后一条' : undefined,
+    disabled: !!moveBlocked(i, 1),
+    title: moveBlocked(i, 1) || undefined,
     onSelect: () => void move(r, 1),
   },
   { label: '删除', icon: 'trash-2' as const, danger: true, onSelect: () => void removeRule(r) },
@@ -189,18 +212,20 @@ const previewing = ref(false)
 const applying = ref(false)
 const previewOf = (id: number) => preview.value?.find((x) => x.rule_id === id)
 
-async function dryRun() {
+async function estimate() {
+  if (previewing.value) return
   previewing.value = true
   try {
     preview.value = await previewRules(props.sessionId)
   } catch (e) {
-    toast.error('试运行失败', e)
+    toast.error('预估失败', e)
   } finally {
     previewing.value = false
   }
 }
 
 async function apply() {
+  if (applying.value || props.busyReason) return
   applying.value = true
   try {
     const n = await applyRules(props.sessionId)
@@ -220,7 +245,7 @@ async function apply() {
     <section class="card">
       <div class="card-head">
         <div>
-          <h3>整理方案</h3>
+          <h3>方案</h3>
           <p v-if="exists && p" class="card-desc">
             版本 {{ p.version }} · 更新于 {{ fmtRelative(toSec(p.updated_at)) }}
           </p>
@@ -228,20 +253,14 @@ async function apply() {
         <StatusPill v-if="exists && p" :value="p.status" :map="PLAN_STATUS" />
         <template v-if="editing">
           <button type="button" class="btn-sm" @click="cancelEdit">取消</button>
-          <button type="button" class="primary btn-sm" :disabled="saving" @click="save()">
+          <button type="button" class="btn-sm" :disabled="saving" @click="save()">
             {{ saving ? '保存中' : '保存' }}
           </button>
         </template>
         <template v-else-if="exists">
           <button type="button" class="btn-sm" @click="edit"><Icon name="pencil" :size="14" />编辑</button>
-          <button
-            v-if="p?.status === 'draft'"
-            type="button"
-            class="primary btn-sm"
-            :disabled="working"
-            @click="approve"
-          >
-            批准
+          <button v-if="p?.status === 'draft'" type="button" class="btn-sm" :disabled="working" @click="approve">
+            {{ working ? '批准中' : '批准' }}
           </button>
           <ActionMenu :items="planMenu" />
         </template>
@@ -250,25 +269,26 @@ async function apply() {
       <p v-else-if="plan.error.value" class="text-danger">加载失败：{{ plan.error.value }}</p>
       <MarkdownEditor v-else-if="editing" v-model="draftText" :rows="20" name="plan" />
       <StreamMarkdown v-else-if="exists && p" :source="p.content" />
-      <EmptyState v-else icon="list" title="还没有整理方案" hint="不出方案也可以直接开始整理">
-        <button v-tip="busyReason" type="button" class="primary" :disabled="working || !!busyReason" @click="generate">
-          生成方案
+      <EmptyState v-else icon="list" title="还没有方案">
+        <button v-tip="generateBlocked" type="button" :disabled="!!generateBlocked" @click="generate">
+          {{ generating ? '生成中' : '生成方案' }}
         </button>
       </EmptyState>
     </section>
 
-    <section class="card">
-      <div class="card-head">
+    <section class="rules">
+      <div class="toolbar">
         <h3>规则</h3>
-        <button type="button" class="btn-sm" @click="openRule(null)"><Icon name="plus" :size="14" />添加</button>
-        <button v-if="items.length" type="button" class="btn-sm" :disabled="previewing" @click="dryRun">
-          {{ previewing ? '试运行中' : '试运行' }}
+        <span class="spacer" />
+        <button type="button" class="btn-sm" @click="openRule(null)"><Icon name="plus" :size="14" />新建</button>
+        <button v-if="items.length" type="button" class="btn-sm" :disabled="previewing" @click="estimate">
+          {{ previewing ? '预估中' : '预估命中' }}
         </button>
         <button
           v-if="items.length"
           v-tip="busyReason"
           type="button"
-          class="primary btn-sm"
+          class="btn-sm"
           :disabled="applying || !!busyReason"
           @click="apply"
         >
@@ -351,3 +371,11 @@ async function apply() {
     />
   </div>
 </template>
+
+<style scoped>
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+</style>

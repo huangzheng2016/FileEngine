@@ -52,7 +52,7 @@ watch(
       if (kind.value === 'image') url.value = URL.createObjectURL(blob)
       else text.value = await blob.text()
     } catch (e) {
-      if (!c.signal.aborted) error.value = errorMessage(e)
+      if (!c.signal.aborted) error.value = `读取失败：${errorMessage(e)}`
     } finally {
       if (ctrl === c) loading.value = false
     }
@@ -64,8 +64,14 @@ onBeforeUnmount(clear)
 <template>
   <BaseDialog :open="!!file" :title="file?.name ?? ''" width="760px" @close="emit('close')">
     <Loading v-if="loading" />
-    <p v-else-if="error" class="text-danger">读取失败：{{ error }}</p>
-    <img v-else-if="kind === 'image' && url" :src="url" :alt="file?.name" class="preview-img" />
+    <p v-else-if="error" class="text-danger">{{ error }}</p>
+    <img
+      v-else-if="kind === 'image' && url"
+      :src="url"
+      :alt="file?.name"
+      class="preview-img"
+      @error="error = '无法显示这张图片'"
+    />
     <CodeBlock v-else-if="kind === 'text'" :value="text" lang="text" :max-lines="200" />
     <EmptyState
       v-else

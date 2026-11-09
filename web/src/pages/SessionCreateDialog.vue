@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import BaseDialog from '@/base/BaseDialog.vue'
-import Icon from '@/base/Icon.vue'
 import Combobox, { type ComboOption } from '@/base/Combobox.vue'
 import Segmented from '@/base/Segmented.vue'
 import Select from '@/base/Select.vue'
 import Switch from '@/base/Switch.vue'
+import { fmtNumber, labelOptions } from '@/base/format'
+import { FILTER_MODE } from '@/base/labels'
 import { toast } from '@/base/toast'
+import { vTip } from '@/base/tooltip'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
 import { importCategories } from '@/api/files'
@@ -44,12 +47,13 @@ const advanced = ref(false)
 const saving = ref(false)
 const storages = ref<Filesystem[]>([])
 const models = ref<ModelProvider[]>([])
+const loaded = ref(false)
 
 const guard = useDirtyGuard(() => form)
 const v = useFormValidation(() => ({
   storage: form.storage ? '' : '请选择存储',
   scan_path: form.scan_path.split('/').includes('..') ? '目录不能包含 ..' : '',
-  goal: form.goal.trim().length > 1000 ? '整理目标不超过 1000 个字符' : '',
+  goal: form.goal.trim().length > 1000 ? '整理要求不超过 1000 个字符' : '',
   custom_exts: form.scope === 'custom' && !splitExts(form.custom_exts).length ? '请输入至少一个扩展名' : '',
 }))
 
@@ -59,6 +63,8 @@ watch(
     if (!open) return
     Object.assign(form, empty())
     advanced.value = false
+    ownGoal = ''
+    loaded.value = false
     v.reset()
     try {
       const [fs, ms] = await Promise.all([listFilesystems(), listModels()])
@@ -66,6 +72,7 @@ watch(
       models.value = ms
       if (fs.length === 1) form.storage = { value: String(fs[0].id), label: fs[0].name }
       if (ms.length) form.model = ms[0].id
+      loaded.value = true
     } catch (e) {
       toast.error('加载存储和模型失败', e)
     }
@@ -80,17 +87,20 @@ const modelOptions = computed(() => models.value.map((m) => ({ value: m.id, labe
 const bulkOptions = computed(() => [{ value: 0, label: '同主模型' }, ...modelOptions.value])
 const chosenModel = computed(() => models.value.find((m) => m.id === form.model))
 
+const presetOptions = [{ value: '', label: '不用模板' }, ...TASK_PRESETS.map((p) => ({ value: p.id, label: p.name }))]
 const preset = computed<TaskPreset | undefined>(() => TASK_PRESETS.find((p) => p.id === form.preset))
 
-function pick(p: TaskPreset) {
-  if (form.preset === p.id) {
-    form.preset = ''
-    return
-  }
-  form.preset = p.id
-  form.goal = p.goal
-  form.scope = p.scope.key
-  form.custom_exts = p.scope.key === 'custom' ? p.scope.exts.join(', ') : ''
+// The goal typed before a template was picked; a template only replaces an empty goal or its own.
+let ownGoal = ''
+function pick(id: string) {
+  const prev = preset.value
+  const next = TASK_PRESETS.find((p) => p.id === id)
+  const untouched = !form.goal.trim() || form.goal === prev?.goal
+  if (!prev) ownGoal = form.goal
+  form.preset = id
+  if (untouched) form.goal = next?.goal ?? ownGoal
+  form.scope = next?.scope.key ?? 'all'
+  form.custom_exts = next?.scope.key === 'custom' ? next.scope.exts.join(', ') : ''
 }
 
 async function close() {
@@ -119,6 +129,7 @@ async function submit() {
       exclude_category_dirs: form.exclude_category_dirs,
       filter_mode: form.filter_mode,
       filter_dirs: form.filter_dirs,
+      auto_tag: true,
     })
     const p = preset.value
     if (p) {
@@ -126,10 +137,10 @@ async function submit() {
         for (const [i, r] of p.rules.entries()) await createRule(s.id, { ...r, position: i })
         if (p.categories.length) await importCategories(fsId, p.categories)
       } catch (e) {
-        toast.error('任务已创建，模板规则未能全部添加', e)
+        toast.error('任务已创建，模板规则未能全部新建', e)
       }
     }
-    toast.success('已创建，开始扫描')
+    toast.success('已创建')
     guard.reset()
     emit('created', s)
     emit('close')
@@ -140,27 +151,13 @@ async function submit() {
   }
 }
 
-const FILTER_OPTIONS = [
-  { value: 'blacklist' as const, label: '跳过这些目录' },
-  { value: 'whitelist' as const, label: '只扫描这些目录' },
-]
+const FILTER_OPTIONS = labelOptions(FILTER_MODE) as { value: 'blacklist' | 'whitelist'; label: string }[]
+const blocked = computed(() => (loaded.value && !models.value.length ? '先新建模型' : ''))
 </script>
 
 <template>
   <BaseDialog :open="open" title="新建整理任务" width="600px" @close="close">
     <form id="session-form" class="form" novalidate v-on="v.form" @submit.prevent="submit">
-      <div class="presets" role="group" aria-label="模板">
-        <button
-          v-for="p in TASK_PRESETS"
-          :key="p.id"
-          type="button"
-          class="btn-sm"
-          :aria-pressed="form.preset === p.id"
-          @click="pick(p)"
-        >
-          <Icon v-if="form.preset === p.id" name="check" :size="14" />{{ p.name }}
-        </button>
-      </div>
       <div class="form-grid">
         <div class="field">
           <span class="field-label required">存储</span>
@@ -171,7 +168,9 @@ const FILTER_OPTIONS = [
             :invalid="!!v.error('storage')"
           />
           <span v-if="v.error('storage')" class="field-error">{{ v.error('storage') }}</span>
-          <span v-else-if="!storages.length" class="field-hint">先在 设置 / 存储 中添加</span>
+          <span v-else-if="loaded && !storages.length" class="field-hint">
+            还没有存储，<RouterLink to="/settings/storage">新建存储</RouterLink>
+          </span>
         </div>
         <label class="field">
           <span class="field-label">目录</span>
@@ -184,7 +183,7 @@ const FILTER_OPTIONS = [
           <span v-if="v.error('scan_path')" class="field-error">{{ v.error('scan_path') }}</span>
         </label>
         <label class="field span-2">
-          <span class="field-label">整理目标</span>
+          <span class="field-label">整理要求</span>
           <textarea
             v-model="form.goal"
             name="goal"
@@ -194,7 +193,14 @@ const FILTER_OPTIONS = [
           />
           <span v-if="v.error('goal')" class="field-error">{{ v.error('goal') }}</span>
         </label>
-        <div class="field span-2">
+        <div class="field">
+          <span class="field-label">模板</span>
+          <Select :model-value="form.preset" :options="presetOptions" label="模板" @update:model-value="pick" />
+          <span v-if="preset?.categories.length" class="field-hint">
+            会给这个存储新建 {{ fmtNumber(preset.categories.length) }} 个分类
+          </span>
+        </div>
+        <div class="field">
           <span class="field-label">整理范围</span>
           <Select v-model="form.scope" :options="SCOPE_OPTIONS" label="整理范围" />
         </div>
@@ -210,17 +216,18 @@ const FILTER_OPTIONS = [
           <span v-else class="field-hint">范围外的文件保持不动</span>
         </label>
       </div>
+      <p v-if="blocked" class="field-hint">还没有模型，<RouterLink to="/settings/models">新建模型</RouterLink></p>
 
       <details :open="advanced" @toggle="advanced = ($event.target as HTMLDetailsElement).open">
         <summary>高级选项</summary>
         <div class="form-grid advanced">
-          <div class="field">
+          <div v-if="models.length" class="field">
             <span class="field-label">模型</span>
-            <Select v-model="form.model" :options="modelOptions" label="模型" placeholder="使用默认模型" />
+            <Select v-model="form.model" :options="modelOptions" label="模型" placeholder="选择模型" />
           </div>
           <div class="field">
-            <span class="field-label">批量处理模型</span>
-            <Select v-model="form.bulk_model" :options="bulkOptions" label="批量处理模型" />
+            <span class="field-label">简单文件用的模型</span>
+            <Select v-model="form.bulk_model" :options="bulkOptions" label="简单文件用的模型" />
           </div>
           <div class="field">
             <span class="field-label">读取文件内容</span>
@@ -236,8 +243,8 @@ const FILTER_OPTIONS = [
             <span v-if="!chosenModel?.vision_enabled" class="field-hint">所选模型不能读图</span>
           </div>
           <div class="field">
-            <span class="field-label">批量脚本</span>
-            <Switch v-model="form.allow_script" label="批量脚本" />
+            <span class="field-label">允许运行脚本</span>
+            <Switch v-model="form.allow_script" label="允许运行脚本" />
           </div>
           <div class="field">
             <span class="field-label">读取拍摄信息</span>
@@ -249,8 +256,8 @@ const FILTER_OPTIONS = [
             <span class="field-hint">扫描会变慢</span>
           </div>
           <div class="field">
-            <span class="field-label">跳过分类目录</span>
-            <Switch v-model="form.exclude_category_dirs" label="跳过分类目录" />
+            <span class="field-label">跳过已有的分类目录</span>
+            <Switch v-model="form.exclude_category_dirs" label="跳过已有的分类目录" />
           </div>
           <div class="field span-2">
             <span class="field-label">目录过滤</span>
@@ -269,19 +276,14 @@ const FILTER_OPTIONS = [
     </form>
     <template #footer>
       <button type="button" @click="close">取消</button>
-      <button type="submit" form="session-form" class="primary" :disabled="saving">
-        {{ saving ? '创建中' : '创建并扫描' }}
+      <button v-tip="blocked" type="submit" form="session-form" class="primary" :disabled="saving || !!blocked">
+        {{ saving ? '创建中' : '创建并整理' }}
       </button>
     </template>
   </BaseDialog>
 </template>
 
 <style scoped>
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
 .advanced {
   margin-top: var(--space-3);
 }

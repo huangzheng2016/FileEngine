@@ -1,6 +1,10 @@
+import { fmtLabel, fmtNumber } from '@/base/format'
+import { REASONING_EFFORT } from '@/base/labels'
+
 export const EFFORT_PRESETS = ['low', 'medium', 'high', 'max'] as const
 
-export const EFFORT_LABEL: Record<string, string> = { low: '低', medium: '中', high: '高', max: '最高' }
+// Custom levels typed by the user fall through as-is.
+export const effortLabel = (v: string) => fmtLabel(REASONING_EFFORT, v)
 
 const EFFORT_RE = /^[a-zA-Z0-9_-]{1,32}$/
 
@@ -19,9 +23,9 @@ export interface EffortOption {
 // typed text itself so any level the provider accepts can be entered.
 export function effortOptions(query: string): EffortOption[] {
   const q = query.trim()
-  const presets: EffortOption[] = EFFORT_PRESETS.map((p) => ({ value: p, label: p, hint: EFFORT_LABEL[p] }))
-  const shown = q ? presets.filter((o) => o.value.includes(q.toLowerCase())) : presets
-  if (q && !EFFORT_PRESETS.some((p) => p === q)) shown.push({ value: q, label: q, hint: '自定义' })
+  const presets: EffortOption[] = EFFORT_PRESETS.map((p) => ({ value: p, label: effortLabel(p), hint: p }))
+  const shown = q ? presets.filter((o) => o.value.includes(q.toLowerCase()) || o.label.includes(q)) : presets
+  if (q && !presets.some((o) => o.value === q || o.label === q)) shown.push({ value: q, label: q, hint: '自定义' })
   return shown
 }
 
@@ -54,7 +58,7 @@ export function fmtTokens(n: number): string {
   if (!n) return '—'
   if (n % 1_000_000 === 0) return `${n / 1_000_000}M`
   if (n % 1000 === 0) return `${n / 1000}K`
-  return n.toLocaleString('zh-CN')
+  return fmtNumber(n)
 }
 
 export function contextError(v: number): string {

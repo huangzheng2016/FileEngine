@@ -59,5 +59,5 @@ export function countChanges(items: readonly PreviewItem[]): ChangeCounts {
 // is just where several decisions land.
 export function resetReason(item: PreviewItem): string {
   if (item.file_id) return ''
-  return '这是由多个文件组成的目标目录，请进入后逐项退回'
+  return '进入目录后逐项重置'
 }
