@@ -86,11 +86,11 @@ func sameEndpoint(stored *db.Filesystem, req *FilesystemConn) bool {
 var validProtocols = map[string]bool{"local": true, "sftp": true, "ftp": true, "smb": true, "nfs": true}
 
 var basePathMissing = map[string]string{
-	"local": "请选择本机目录",
+	"local": "请选择本机文件夹",
 	"smb":   "请选择共享文件夹",
 	"nfs":   "请输入 NFS 导出路径",
-	"sftp":  "请选择根目录",
-	"ftp":   "请选择根目录",
+	"sftp":  "请选择根文件夹",
+	"ftp":   "请选择根文件夹",
 }
 
 const msgReenterPassword = "连接目标已变化，请重新输入密码"

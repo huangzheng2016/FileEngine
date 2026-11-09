@@ -196,7 +196,7 @@ describe('StorageFormDialog', () => {
       expect.objectContaining({ protocol: 'smb', host: '192.168.1.10', base_path: 'photos', password: 'pw' }),
       expect.anything(),
     )
-    buttonByText('使用这个目录').click()
+    buttonByText('使用这个文件夹').click()
     await flushPromises()
     expect((document.body.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('photos（192.168.1.10）')
     buttonByText('保存').click()

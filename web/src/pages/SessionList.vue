@@ -113,7 +113,7 @@ const menuFor = (s: ScanSession) => [
   <div class="page">
     <div class="toolbar">
       <template v-if="list.items.value.length || filtered">
-        <input v-model="list.filters.q" type="search" class="search" placeholder="搜索目录或要求" aria-label="搜索" />
+        <input v-model="list.filters.q" type="search" class="search" placeholder="搜索文件夹或要求" aria-label="搜索" />
         <Segmented v-model="list.filters.status" :options="STATUS_OPTIONS" label="状态" />
       </template>
       <span class="spacer" />
@@ -132,7 +132,7 @@ const menuFor = (s: ScanSession) => [
       <table>
         <thead>
           <tr>
-            <th>目录</th>
+            <th>文件夹</th>
             <th class="hide-sm">存储</th>
             <th>状态</th>
             <th class="num hide-sm">文件</th>
@@ -211,7 +211,7 @@ const menuFor = (s: ScanSession) => [
                 <span class="setup-num">3</span>
                 <span class="setup-text">
                   <strong>新建整理任务</strong>
-                  <span class="text-muted text-sm">选好目录、说说想怎么整理，先出方案，确认后才会移动</span>
+                  <span class="text-muted text-sm">选好文件夹、说说想怎么整理，先出方案，确认后才会移动</span>
                 </span>
               </li>
             </ol>

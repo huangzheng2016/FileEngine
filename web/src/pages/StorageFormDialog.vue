@@ -145,7 +145,7 @@ const topLabel = computed(() =>
   form.protocol === 'smb'
     ? '全部共享'
     : form.protocol === 'local'
-      ? '允许的目录'
+      ? '允许的文件夹'
       : form.protocol === 'nfs'
         ? browseTop.value
         : '/',
@@ -212,7 +212,7 @@ const wizard = useWizard([
   },
   {
     key: 'dir',
-    label: '目录',
+    label: '文件夹',
     validate: () => {
       if (!canUseFolder.value) return false
       form.base_path = probe.path
@@ -534,7 +534,7 @@ const showConn = computed(() => !!props.editing || step.value === 'conn')
       <template v-if="!editing && step === 'dir'">
         <p class="text-sm step-intro">
           <Icon name="check-circle" :size="14" class="text-success" />
-          已连接 {{ where }}。选择要整理的{{ meta.pathLabel }}，进入后点「使用这个目录」。
+          已连接 {{ where }}。选择要整理的{{ meta.pathLabel }}，进入后点「使用这个文件夹」。
         </p>
         <FolderPicker
           :protocol="form.protocol"
@@ -548,7 +548,7 @@ const showConn = computed(() => !!props.editing || step.value === 'conn')
             form.protocol === 'smb' && !probe.path
               ? '没有看到共享文件夹，检查账号是否有权限'
               : form.protocol === 'local' && !probe.path
-                ? '没有允许的目录：启动时用 FE_LOCAL_ROOTS 指定'
+                ? '没有允许的文件夹：启动时用 FE_LOCAL_ROOTS 指定'
                 : undefined
           "
           @open="browse"
@@ -626,7 +626,7 @@ const showConn = computed(() => !!props.editing || step.value === 'conn')
           <div class="browse-actions">
             <button type="button" class="ghost btn-sm" @click="browsing = false">收起</button>
             <button type="button" class="btn-sm" :disabled="!canUseFolder" @click="useFolder(probe.path)">
-              使用这个目录
+              使用这个文件夹
             </button>
           </div>
         </div>
@@ -661,7 +661,7 @@ const showConn = computed(() => !!props.editing || step.value === 'conn')
           {{ wizard.busy.value ? '正在连接' : '连接' }}
         </button>
         <button v-else-if="step === 'dir'" type="button" class="primary" :disabled="!canUseFolder" @click="wizard.next">
-          使用这个目录
+          使用这个文件夹
         </button>
         <button v-else-if="step === 'name'" type="submit" form="storage-form" class="primary" :disabled="saving">
           {{ saving ? '保存中' : '保存' }}

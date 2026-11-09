@@ -54,7 +54,7 @@ const loaded = ref(false)
 const guard = useDirtyGuard(() => form)
 const v = useFormValidation(() => ({
   storage: form.storage ? '' : '请选择存储',
-  scan_path: form.scan_path.split('/').includes('..') ? '目录不能包含 ..' : '',
+  scan_path: form.scan_path.split('/').includes('..') ? '文件夹不能包含 ..' : '',
   goal: form.goal.trim().length > 1000 ? '整理要求不超过 1000 个字符' : '',
   custom_exts: form.scope === 'custom' && !splitExts(form.custom_exts).length ? '请输入至少一个扩展名' : '',
 }))
@@ -243,12 +243,12 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
           </span>
         </div>
         <div class="field">
-          <span class="field-label">目录</span>
+          <span class="field-label">文件夹</span>
           <div class="path-row">
             <input
               v-model="form.scan_path"
               name="scan_path"
-              placeholder="留空整理全部"
+              placeholder="留空整理整个存储"
               autocapitalize="off"
               spellcheck="false"
               :aria-invalid="!!v.error('scan_path')"
@@ -270,7 +270,7 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
             @open="openFolder"
           />
           <span v-if="browser.error" class="field-error">{{ browser.error }}</span>
-          <span v-else class="field-hint">点文件夹进入，进入的文件夹就是要整理的目录</span>
+          <span v-else class="field-hint">点文件夹进入，进入的文件夹就是要整理的文件夹</span>
         </div>
         <label class="field span-2">
           <span class="field-label">整理要求</span>
@@ -346,20 +346,20 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
             <span class="field-hint">扫描会变慢</span>
           </div>
           <div class="field">
-            <span class="field-label">跳过已有的分类目录</span>
-            <Switch v-model="form.exclude_category_dirs" label="跳过已有的分类目录" />
+            <span class="field-label">跳过已有的分类文件夹</span>
+            <Switch v-model="form.exclude_category_dirs" label="跳过已有的分类文件夹" />
           </div>
           <div class="field span-2">
-            <span class="field-label">目录过滤</span>
-            <Segmented v-model="form.filter_mode" :options="FILTER_OPTIONS" label="目录过滤" />
+            <span class="field-label">文件夹过滤</span>
+            <Segmented v-model="form.filter_mode" :options="FILTER_OPTIONS" label="文件夹过滤" />
             <textarea
               v-model="form.filter_dirs"
               name="filter_dirs"
               rows="3"
               placeholder="/backup"
-              aria-label="过滤的目录"
+              aria-label="过滤的文件夹"
             />
-            <span class="field-hint">每行一个目录</span>
+            <span class="field-hint">每行一个文件夹</span>
           </div>
         </div>
       </details>

@@ -78,7 +78,7 @@ export const PROTOCOL = {
   smb: { text: 'SMB', tone: 'accent' },
   sftp: { text: 'SFTP', tone: 'accent' },
   nfs: { text: 'NFS', tone: 'info' },
-  local: { text: '本机目录', tone: 'neutral' },
+  local: { text: '本机文件夹', tone: 'neutral' },
   ftp: { text: 'FTP', tone: 'warning' },
 } satisfies LabelMap
 

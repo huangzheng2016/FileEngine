@@ -23,7 +23,7 @@ export const PROTOCOLS: Record<Protocol, ProtocolMeta> = {
     desc: '能用 SSH 登录的服务器或 NAS',
     port: 22,
     browseRoot: '/',
-    pathLabel: '根目录',
+    pathLabel: '根文件夹',
   },
   nfs: {
     title: 'NFS',
@@ -37,15 +37,15 @@ export const PROTOCOLS: Record<Protocol, ProtocolMeta> = {
     desc: '只有 FTP 时使用；大于 32 MB 的 zip 看不到内容',
     port: 21,
     browseRoot: '/',
-    pathLabel: '根目录',
+    pathLabel: '根文件夹',
     hint: '大于 32 MB 的 zip 看不到内容，建议用 SMB 或 SFTP',
   },
   local: {
-    title: '本机目录',
+    title: '本机文件夹',
     desc: 'FileEngine 所在电脑上的文件夹',
     port: 0,
     browseRoot: '',
-    pathLabel: '本机目录',
+    pathLabel: '本机文件夹',
   },
 }
 
@@ -92,6 +92,6 @@ export function crumbs(protocol: Protocol, path: string, top: string, roots: str
 // A readable default name: the chosen folder, else the host.
 export function suggestName(protocol: Protocol, host: string, basePath: string): string {
   const last = basePath.split(SEP).filter(Boolean).pop() ?? ''
-  if (protocol === 'local') return last || '本机目录'
+  if (protocol === 'local') return last || '本机文件夹'
   return last ? `${last}（${host}）` : host
 }
