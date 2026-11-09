@@ -21,6 +21,7 @@ vars:
     sh: test -n "$VERSION" && echo "$VERSION" || git describe --tags --always --dirty 2>/dev/null || echo dev
   # Target OS: GOOS from the environment (cross builds), else the host.
   TARGET_OS: '{{env "GOOS" | default OS}}'
+  TARGET_ARCH: '{{env "GOARCH" | default ARCH}}'
   EXE: '{{if eq .TARGET_OS "windows"}}.exe{{end}}'
   LDFLAGS: -s -w -buildid= -X main.Version={{.VERSION}}
 
@@ -127,8 +128,24 @@ tasks:
     env:
       CGO_ENABLED: '{{if eq .TARGET_OS "windows"}}0{{else}}1{{end}}'
     cmds:
+      - rm -f cmd/fileengine-desktop/*.syso
+      # icon, DPI manifest and version info for the Windows exe (needs wails3 on PATH)
+      - '{{if eq .TARGET_OS "windows"}}GOOS= GOARCH= go run ./scripts/package -kind syso -os windows -arch {{.TARGET_ARCH}} -version {{.VERSION}} -bin cmd/fileengine-desktop/rsrc_windows_{{.TARGET_ARCH}}.syso{{else}}true{{end}}'
       - go build -tags production -trimpath -buildvcs=false -ldflags "{{.LDFLAGS}}{{if eq .TARGET_OS "windows"}} -H windowsgui{{end}}" -o {{.BIN_DIR}}/fileengine-desktop{{.EXE}} ./cmd/fileengine-desktop
+      - rm -f cmd/fileengine-desktop/*.syso
       - GOOS= GOARCH= go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine-desktop{{.EXE}}
+
+  package:server:
+    desc: Build the server download for this target into dist/ (.tar.gz, or .zip for Windows)
+    deps: [build]
+    cmds:
+      - GOOS= GOARCH= go run ./scripts/package -kind server -os {{.TARGET_OS}} -arch {{.TARGET_ARCH}} -version {{.VERSION}} -bin {{.BIN_DIR}}/fileengine{{.EXE}} -out dist
+
+  package:desktop:
+    desc: Build the desktop installer for this target into dist/ (.deb needs dpkg-deb, .dmg needs macOS, Setup.exe needs makensis)
+    deps: [desktop:build]
+    cmds:
+      - GOOS= GOARCH= go run ./scripts/package -kind desktop -os {{.TARGET_OS}} -arch {{.TARGET_ARCH}} -version {{.VERSION}} -bin {{.BIN_DIR}}/fileengine-desktop{{.EXE}} -out dist
 
   wails:install:
     desc: Install the pinned Wails v3 CLI (wails3) into GOBIN
