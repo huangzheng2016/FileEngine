@@ -6,6 +6,7 @@ import Combobox, { type ComboOption } from '@/base/Combobox.vue'
 import Segmented from '@/base/Segmented.vue'
 import Select from '@/base/Select.vue'
 import Switch from '@/base/Switch.vue'
+import { errorMessage } from '@/base/errors'
 import { fmtNumber, labelOptions } from '@/base/format'
 import { FILTER_MODE } from '@/base/labels'
 import { toast } from '@/base/toast'
@@ -15,10 +16,11 @@ import { useFormValidation } from '@/base/useFormValidation'
 import { importCategories } from '@/api/files'
 import { createRule } from '@/api/rules'
 import { createSession } from '@/api/sessions'
-import { listFilesystems, listModels } from '@/api/settings'
+import { listFilesystems, listModels, testFilesystem } from '@/api/settings'
 import type { Filesystem, ModelProvider, ScanSession } from '@/api/types'
 import { SCOPE_OPTIONS, TASK_PRESETS, scopeExts, type ScopeKey, type TaskPreset } from '@/data/presets'
 import { joinExts, splitExts } from '@/lib/rules'
+import FolderPicker from './FolderPicker.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; created: [ScanSession] }>()
@@ -151,6 +153,74 @@ async function submit() {
   }
 }
 
+// ---- choosing the folder by browsing the storage ----
+
+const chosenStorage = computed(() => storages.value.find((f) => String(f.id) === form.storage?.value))
+const browser = reactive({
+  open: false,
+  path: '',
+  dirs: [] as { name: string; path: string }[],
+  loading: false,
+  error: '',
+})
+let browseCtl: AbortController | null = null
+
+const relOf = (fs: Filesystem, p: string) =>
+  p
+    .slice(fs.base_path.length)
+    .replace(/\\/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+const fullOf = (fs: Filesystem, rel: string) => {
+  if (!rel) return fs.base_path
+  const sep = fs.protocol === 'local' && fs.base_path.includes('\\') ? '\\' : '/'
+  return fs.base_path.replace(/[\\/]+$/, '') + sep + rel.split('/').join(sep)
+}
+
+async function browse(path: string) {
+  const fs = chosenStorage.value
+  if (!fs) return
+  browseCtl?.abort()
+  const ctl = (browseCtl = new AbortController())
+  Object.assign(browser, { open: true, path, loading: true, error: '' })
+  try {
+    const r = await testFilesystem(
+      { id: fs.id, protocol: fs.protocol, host: fs.host, port: fs.port, username: fs.username, base_path: path },
+      ctl.signal,
+    )
+    if (ctl.signal.aborted) return
+    browser.dirs = r.dirs
+    browser.error = r.success ? '' : (r.error ?? '读取失败')
+  } catch (e) {
+    if (!ctl.signal.aborted) Object.assign(browser, { dirs: [], error: errorMessage(e) })
+  } finally {
+    if (browseCtl === ctl) browser.loading = false
+  }
+}
+
+function toggleBrowser() {
+  const fs = chosenStorage.value
+  if (browser.open || !fs) {
+    browser.open = false
+    return
+  }
+  void browse(fullOf(fs, form.scan_path.trim().replace(/^\/+|\/+$/g, '')))
+}
+
+function openFolder(path: string) {
+  const fs = chosenStorage.value
+  if (!fs) return
+  form.scan_path = relOf(fs, path)
+  void browse(path)
+}
+
+watch(
+  () => form.storage?.value,
+  () => {
+    browseCtl?.abort()
+    browser.open = false
+  },
+)
+
 const FILTER_OPTIONS = labelOptions(FILTER_MODE) as { value: 'blacklist' | 'whitelist'; label: string }[]
 const blocked = computed(() => (loaded.value && !models.value.length ? '先新建模型' : ''))
 </script>
@@ -172,16 +242,36 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
             还没有存储，<RouterLink to="/settings/storage">新建存储</RouterLink>
           </span>
         </div>
-        <label class="field">
+        <div class="field">
           <span class="field-label">目录</span>
-          <input
-            v-model="form.scan_path"
-            name="scan_path"
-            placeholder="留空整理全部"
-            :aria-invalid="!!v.error('scan_path')"
-          />
+          <div class="path-row">
+            <input
+              v-model="form.scan_path"
+              name="scan_path"
+              placeholder="留空整理全部"
+              autocapitalize="off"
+              spellcheck="false"
+              :aria-invalid="!!v.error('scan_path')"
+            />
+            <button type="button" :disabled="!chosenStorage" @click="toggleBrowser">
+              {{ browser.open ? '收起' : '浏览' }}
+            </button>
+          </div>
           <span v-if="v.error('scan_path')" class="field-error">{{ v.error('scan_path') }}</span>
-        </label>
+        </div>
+        <div v-if="browser.open && chosenStorage" class="field span-2">
+          <FolderPicker
+            :protocol="chosenStorage.protocol"
+            :path="browser.path"
+            :top="chosenStorage.base_path"
+            :dirs="browser.dirs"
+            :loading="browser.loading"
+            :top-label="chosenStorage.name"
+            @open="openFolder"
+          />
+          <span v-if="browser.error" class="field-error">{{ browser.error }}</span>
+          <span v-else class="field-hint">点文件夹进入，进入的文件夹就是要整理的目录</span>
+        </div>
         <label class="field span-2">
           <span class="field-label">整理要求</span>
           <textarea
@@ -284,6 +374,14 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
 </template>
 
 <style scoped>
+.path-row {
+  display: flex;
+  gap: var(--space-2);
+}
+.path-row input {
+  flex: 1;
+  min-width: 0;
+}
 .advanced {
   margin-top: var(--space-3);
 }

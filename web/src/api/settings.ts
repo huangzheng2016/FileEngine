@@ -1,19 +1,34 @@
 import { http } from './http'
 import type { Filesystem, ModelProvider, Protocol } from './types'
 
-export interface FilesystemInput {
-  name: string
-  description: string
+export interface FilesystemConn {
   protocol: Protocol
   base_path: string
   host: string
   port: number
   username: string
-  // sent only when the user typed a new one
+  // secrets: omitted keeps the stored value, '' clears it
   password?: string
-  key_path: string
+  private_key?: string
+  key_passphrase?: string
   // SFTP fingerprint the user saw in a test; pins (or re-pins) the server key
   host_key?: string
+}
+
+export interface FilesystemInput extends FilesystemConn {
+  name: string
+  description: string
+}
+
+export interface ProbeResult {
+  success: boolean
+  // plain sentence with the next step; detail is the raw error
+  error?: string
+  detail?: string
+  host_key?: string
+  host_key_changed?: boolean
+  // folders at base_path; path is the base_path value that opens one
+  dirs: { name: string; path: string }[]
 }
 
 export async function listFilesystems(signal?: AbortSignal) {
@@ -35,9 +50,10 @@ export async function deleteFilesystem(id: number) {
   await http.delete(`/filesystems/${id}`)
 }
 
-export async function testFilesystem(body: FilesystemInput & { id?: number }) {
-  const { data } = await http.post<{ success: boolean; error?: string; host_key?: string }>('/filesystems/test', body)
-  return data
+// Tests the connection and lists the folders at base_path.
+export async function testFilesystem(body: FilesystemConn & { id?: number }, signal?: AbortSignal) {
+  const { data } = await http.post<ProbeResult>('/filesystems/test', body, { signal })
+  return { ...data, dirs: data.dirs ?? [] }
 }
 
 export interface ModelInput {
@@ -75,8 +91,28 @@ export async function deleteModel(id: number) {
 }
 
 export async function testModel(body: ModelInput & { id?: number }) {
-  const { data } = await http.post<{ success: boolean; reply?: string; error?: string }>('/models/test', body)
+  const { data } = await http.post<{ success: boolean; reply?: string; error?: string; detail?: string }>(
+    '/models/test',
+    body,
+  )
   return data
+}
+
+export interface CatalogInput {
+  provider: ModelProvider['provider']
+  base_url: string
+  api_key?: string
+  id?: number
+}
+
+// The models the provider says this key can use.
+export async function listProviderModels(body: CatalogInput, signal?: AbortSignal) {
+  const { data } = await http.post<{ success: boolean; models: string[]; error?: string; detail?: string }>(
+    '/models/catalog',
+    body,
+    { signal },
+  )
+  return { ...data, models: data.models ?? [] }
 }
 
 export interface AgentConfig {

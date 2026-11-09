@@ -39,6 +39,14 @@ const missing = computed(() => ({
 const setup = computed(() => missing.value.storage || missing.value.model)
 const adding = ref<'' | 'storage' | 'model'>('')
 
+// First run walks storage → model → first task without leaving the page.
+async function afterSetup(kind: 'storage' | 'model') {
+  await (kind === 'storage' ? storages : models).refresh()
+  if (missing.value.storage) adding.value = 'storage'
+  else if (missing.value.model) adding.value = 'model'
+  else creating.value = true
+}
+
 const stage = (s: ScanSession) => stageOf(s, listRunning(s))
 
 // The filter groups the stages a person acts on; running stages show only under 全部.
@@ -160,22 +168,53 @@ const menuFor = (s: ScanSession) => [
             :loading="list.loading.value && !list.items.value.length"
             :error="list.error.value"
             :empty="list.items.value.length === 0"
-            :empty-text="filtered ? '没有符合条件的整理任务' : setup ? '开始前需要：' : '暂无整理任务'"
+            :empty-text="filtered ? '没有符合条件的整理任务' : setup ? '三步开始整理' : '暂无整理任务'"
             @retry="list.refresh"
           >
             <button v-if="filtered" type="button" class="btn-sm" @click="list.reset">清除筛选</button>
-            <ul v-else-if="setup" class="setup">
+            <ol v-else-if="setup" class="setup">
               <li>
-                <Icon v-if="!missing.storage" name="check" class="text-success" />存储
-                <button v-if="missing.storage" type="button" class="btn-sm" @click="adding = 'storage'">
-                  新建存储
+                <Icon v-if="!missing.storage" name="check-circle" class="text-success" />
+                <span v-else class="setup-num">1</span>
+                <span class="setup-text">
+                  <strong>添加存储</strong>
+                  <span class="text-muted text-sm">要整理的文件在哪：NAS、服务器或本机文件夹</span>
+                </span>
+                <button
+                  v-if="missing.storage"
+                  type="button"
+                  class="btn-sm"
+                  :class="{ primary: missing.storage }"
+                  @click="adding = 'storage'"
+                >
+                  添加存储
                 </button>
               </li>
               <li>
-                <Icon v-if="!missing.model" name="check" class="text-success" />模型
-                <button v-if="missing.model" type="button" class="btn-sm" @click="adding = 'model'">新建模型</button>
+                <Icon v-if="!missing.model" name="check-circle" class="text-success" />
+                <span v-else class="setup-num">2</span>
+                <span class="setup-text">
+                  <strong>添加模型</strong>
+                  <span class="text-muted text-sm">由哪个大模型来理解文件、给出整理方案</span>
+                </span>
+                <button
+                  v-if="missing.model"
+                  type="button"
+                  class="btn-sm"
+                  :class="{ primary: !missing.storage }"
+                  @click="adding = 'model'"
+                >
+                  添加模型
+                </button>
               </li>
-            </ul>
+              <li>
+                <span class="setup-num">3</span>
+                <span class="setup-text">
+                  <strong>新建整理任务</strong>
+                  <span class="text-muted text-sm">选好目录、说说想怎么整理，先出方案，确认后才会移动</span>
+                </span>
+              </li>
+            </ol>
             <button v-else type="button" @click="creating = true">新建整理任务</button>
           </TableState>
         </tbody>
@@ -192,8 +231,13 @@ const menuFor = (s: ScanSession) => [
     />
 
     <SessionCreateDialog :open="creating" @close="creating = false" @created="open" />
-    <StorageFormDialog :open="adding === 'storage'" :editing="null" @close="adding = ''" @saved="storages.refresh()" />
-    <ModelFormDialog :open="adding === 'model'" :editing="null" @close="adding = ''" @saved="models.refresh()" />
+    <StorageFormDialog
+      :open="adding === 'storage'"
+      :editing="null"
+      @close="adding = ''"
+      @saved="afterSetup('storage')"
+    />
+    <ModelFormDialog :open="adding === 'model'" :editing="null" @close="adding = ''" @saved="afterSetup('model')" />
   </div>
 </template>
 
@@ -201,14 +245,33 @@ const menuFor = (s: ScanSession) => [
 .setup {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  width: min(460px, 100%);
+  margin: 0 auto;
   padding: 0;
   list-style: none;
+  text-align: left;
 }
 .setup li {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
+}
+.setup-num {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+.setup-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 </style>

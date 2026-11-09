@@ -209,7 +209,8 @@ export interface Filesystem {
   port: number
   username: string
   password_set: boolean
-  key_path: string
+  private_key_set: boolean
+  key_passphrase_set: boolean
   host_key: string
   created_at: string
   updated_at: string
