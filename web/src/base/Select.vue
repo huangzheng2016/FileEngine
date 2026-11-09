@@ -42,9 +42,8 @@ const active = ref(-1)
 
 const current = computed(() => props.options.find((o) => o.value === model.value))
 // An unknown value stays visible instead of looking unset.
-const shownLabel = computed(() =>
-  current.value ? current.value.label : model.value === '' || model.value == null ? '' : String(model.value),
-)
+// A value with no matching option shows the placeholder, never the raw value.
+const shownLabel = computed(() => current.value?.label ?? '')
 
 const enabled = (i: number) => !!props.options[i] && !props.options[i].disabledReason
 

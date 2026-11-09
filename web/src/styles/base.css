@@ -154,6 +154,17 @@ button:disabled,
 .btn[aria-disabled='true'] {
   pointer-events: none;
 }
+/* Filled buttons lose their fill when disabled: a faded accent still reads as
+   clickable on a dark background. */
+button.primary:disabled,
+button.danger:disabled,
+.btn.primary[aria-disabled='true'],
+.btn.danger[aria-disabled='true'] {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-color: var(--border);
+  opacity: 1;
+}
 
 button.primary,
 .btn.primary {
@@ -484,8 +495,15 @@ fieldset {
   gap: var(--space-1);
 }
 .stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+/* an inline help button must not grow the label row */
+.stat-label button {
+  margin: -6px 0;
 }
 .stat-value {
   font-size: var(--text-2xl);
