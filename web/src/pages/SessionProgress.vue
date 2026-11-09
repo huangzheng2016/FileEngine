@@ -135,7 +135,9 @@ async function revert() {
 
       <section v-if="selected" class="card run-card" aria-label="运行过程">
         <div class="card-head">
-          <h3 v-tip="tokens ? `用量 ${fmtNumber(tokens)} token` : ''" class="truncate">{{ runName(selected) }}</h3>
+          <div>
+            <h3 v-tip="tokens ? `用量 ${fmtNumber(tokens)} token` : ''" class="truncate">{{ runName(selected) }}</h3>
+          </div>
           <StatusPill :value="status" :map="RUN_STATUS" />
           <button v-if="canRevert" type="button" class="btn-sm" :disabled="reverting" @click="revert">
             <Icon name="rotate-ccw" :size="14" />撤销
