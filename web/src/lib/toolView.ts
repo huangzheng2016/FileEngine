@@ -11,7 +11,7 @@ export function toolSubject(t: ToolItem): string {
   const a = obj(t.args)
   switch (t.name) {
     case 'set_target':
-      return a.new_path ? `${s(a.path)} → ${s(a.new_path)}` : `${s(a.path)} 取消目标`
+      return a.new_path ? `${s(a.path)} → ${s(a.new_path)}` : `${s(a.path)} 取消目标位置`
     case 'set_targets':
     case 'decide_dirs': {
       const items = Array.isArray(a.items) ? a.items : Array.isArray(t.args) ? (t.args as unknown[]) : []
