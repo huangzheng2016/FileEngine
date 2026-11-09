@@ -211,9 +211,4 @@ const menuFor = (s: ScanSession) => [
   justify-content: center;
   gap: var(--space-2);
 }
-@media (max-width: 760px) {
-  .hide-sm {
-    display: none;
-  }
-}
 </style>

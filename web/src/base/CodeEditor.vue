@@ -5,9 +5,19 @@ import { highlight, type CodeLang } from './highlight'
 // Editable code with highlighting: a transparent textarea over a highlighted
 // copy of the same text. Tab inserts two spaces instead of leaving the field;
 // Esc then Tab still moves focus on. For JSON fields use JsonField.
+// `wrap` soft-wraps long lines; `autogrow` grows with the text (rows is then the
+// minimum), so a long prompt on a settings page leaves the page as the only scroller.
 const props = withDefaults(
-  defineProps<{ lang?: CodeLang; rows?: number; placeholder?: string; invalid?: boolean; name?: string }>(),
-  { lang: 'text', rows: 8, placeholder: '', invalid: false, name: undefined },
+  defineProps<{
+    lang?: CodeLang
+    rows?: number
+    placeholder?: string
+    invalid?: boolean
+    name?: string
+    wrap?: boolean
+    autogrow?: boolean
+  }>(),
+  { lang: 'text', rows: 8, placeholder: '', invalid: false, name: undefined, wrap: false, autogrow: false },
 )
 const model = defineModel<string>({ required: true })
 
@@ -36,7 +46,7 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="code-editor" :class="{ invalid }" :style="{ '--rows': rows }">
+  <div class="code-editor" :class="{ invalid, wrap, autogrow }" :style="{ '--rows': rows }">
     <!-- eslint-disable-next-line vue/no-v-html -->
     <pre ref="pre" aria-hidden="true" v-html="html" />
     <textarea
@@ -111,5 +121,24 @@ function onKeydown(e: KeyboardEvent) {
 }
 .code-editor textarea::placeholder {
   color: var(--text-muted);
+}
+.code-editor.wrap :is(pre, textarea) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* both layers wrap at the same width whether or not the textarea scrolls */
+  scrollbar-gutter: stable;
+}
+/* The overlay stays in flow and sets the height; the textarea covers it and never scrolls. */
+.code-editor.autogrow {
+  height: auto;
+  min-height: calc(var(--rows) * 1.6em + 14px);
+  resize: none;
+}
+.code-editor.autogrow pre {
+  position: relative;
+  min-height: inherit;
+}
+.code-editor.autogrow textarea {
+  overflow: hidden;
 }
 </style>

@@ -97,8 +97,6 @@ async function revert() {
 
 const customPrompt = computed(() => form.prompt.trim() !== defaultPrompt.value.trim())
 const promptOpen = ref(false)
-// The editor grows with its text so the page is the only scroller.
-const promptRows = computed(() => form.prompt.split('\n').length + 1)
 function resetPrompt() {
   form.prompt = defaultPrompt.value
 }
@@ -217,7 +215,7 @@ async function fillPolicy(id: string) {
           {{ promptOpen ? '收起' : '编辑' }}
         </button>
       </div>
-      <CodeEditor v-if="promptOpen" v-model="form.prompt" :rows="promptRows" name="prompt" />
+      <CodeEditor v-if="promptOpen" v-model="form.prompt" wrap autogrow name="prompt" />
     </section>
 
     <div v-if="guard.dirty.value" class="save-bar">
