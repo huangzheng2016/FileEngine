@@ -24,7 +24,7 @@ func TestScanConnectErrorSurfaced(t *testing.T) {
 	}
 
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 2,
+		"filesystem_id": 2, "model_provider_id": 1,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d, resp %v", code, created)
@@ -49,8 +49,8 @@ func TestScanWalkErrorSurfaced(t *testing.T) {
 	s := setupSessionTestServer(t)
 
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 1,
-		"scan_path":     "no/such/dir",
+		"filesystem_id": 1, "model_provider_id": 1,
+		"scan_path": "no/such/dir",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d, resp %v", code, created)
@@ -85,7 +85,7 @@ func TestScanSuccessPopulatesProgressFields(t *testing.T) {
 	}
 
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 1,
+		"filesystem_id": 1, "model_provider_id": 1,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d, resp %v", code, created)
@@ -116,7 +116,7 @@ func TestRescanClearsErrorAndProgress(t *testing.T) {
 		t.Fatalf("create broken filesystem: %v", err)
 	}
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 2,
+		"filesystem_id": 2, "model_provider_id": 1,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d", code)
@@ -172,7 +172,7 @@ func registerFakeScan(t *testing.T, sessionID uint, cancel func()) chan struct{}
 // writes land on top of the fresh scan.
 func TestRescanWaitsForPreviousScan(t *testing.T) {
 	s := setupSessionTestServer(t)
-	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1, "model_provider_id": 1})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d", code)
 	}
@@ -214,7 +214,7 @@ func TestRescanWaitsForPreviousScan(t *testing.T) {
 
 func TestRescanScanStopTimeoutFallback(t *testing.T) {
 	s := setupSessionTestServer(t)
-	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1, "model_provider_id": 1})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d", code)
 	}
@@ -240,7 +240,7 @@ func TestRescanScanStopTimeoutFallback(t *testing.T) {
 // row (Save inserts when the update matches nothing).
 func TestDeleteWaitsForScan(t *testing.T) {
 	s := setupSessionTestServer(t)
-	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1})
+	code, _ := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{"filesystem_id": 1, "model_provider_id": 1})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d", code)
 	}

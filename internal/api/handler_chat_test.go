@@ -39,7 +39,7 @@ func (m *stepModel) BindTools([]*schema.ToolInfo) error { return nil }
 func chatServer(t *testing.T, model *stepModel) (*Server, *db.Repository) {
 	t.Helper()
 	s, repo := brainServer(t)
-	mp := &db.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
+	mp := &db.ModelProvider{Name: "fake-chat", Provider: "openai", Model: "fake"}
 	if err := repo.CreateModelProvider(mp); err != nil {
 		t.Fatal(err)
 	}

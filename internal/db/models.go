@@ -103,6 +103,7 @@ type ScanSession struct {
 	ErrorMessage        string    `gorm:"type:text" json:"error_message"`
 	TaggedFiles         int       `json:"tagged_files"`
 	PlannedOps          int       `json:"planned_ops"`
+	ReviewCount         int       `json:"review_count"` // planned, unexecuted entries waiting in needs_review
 	ExecutedOps         int       `json:"executed_ops"`
 	TotalSize           int64     `json:"total_size"`
 	AllowReadFile       bool      `gorm:"default:true" json:"allow_read_file"`

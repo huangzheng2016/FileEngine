@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -77,20 +76,13 @@ func (s *Server) listChat(c *gin.Context) {
 func (s *Server) sessionAgent(sessionID uint) (*db.ScanSession, *agent.Agent, error) {
 	session, err := s.repo.GetSession(sessionID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("会话不存在: %w", err)
+		return nil, nil, fmt.Errorf("session %d: %w", sessionID, err)
 	}
-	if session.ModelProviderID == 0 {
-		return nil, nil, errors.New("会话未配置模型")
-	}
-	provider, err := s.repo.GetModelProvider(session.ModelProviderID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("模型不存在: %w", err)
-	}
-	fsCfg, err := s.resolveFSConfig(session)
+	a, err := s.agentFor(session)
 	if err != nil {
 		return nil, nil, err
 	}
-	return session, agent.New(s.repo, fsCfg, session.ID, provider, session), nil
+	return session, a, nil
 }
 
 func (s *Server) startReviewAfterTagging(sessionID, taggingRunID uint, status string) {
@@ -111,7 +103,7 @@ func (s *Server) RunReviewAfterTagging(sessionID, taggingRunID uint) (*db.AgentR
 	if err != nil {
 		return nil, fmt.Errorf("tagging run %d: %w", taggingRunID, err)
 	}
-	return s.launchRun(sessionID, db.RunPhaseReview, "整理复核", func(ctx context.Context, run *db.AgentRun) runOutcome {
+	return s.launchRun(sessionID, db.RunPhaseReview, "复查", func(ctx context.Context, run *db.AgentRun) runOutcome {
 		logger := agent.NewLogger(sessionID, run.ID, 0)
 		report, err := a.RunReview(ctx, logger, tagging)
 		return runOutcome{Summary: report, Err: err, Tokens: logger.Tokens()}

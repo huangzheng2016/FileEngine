@@ -9,7 +9,7 @@ func TestSessionAllowAutoCategoryToggle(t *testing.T) {
 	s := setupSessionTestServer(t)
 
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 1,
+		"filesystem_id": 1, "model_provider_id": 1,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d, resp %v", code, created)

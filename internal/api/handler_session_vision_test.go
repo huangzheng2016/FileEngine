@@ -22,6 +22,9 @@ func setupSessionTestServer(t *testing.T) *Server {
 	}); err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
+	if err := repo.CreateModelProvider(&db.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
 	return NewServer(repo, nil)
 }
 
@@ -45,7 +48,7 @@ func TestSessionAllowVisionToggle(t *testing.T) {
 	s := setupSessionTestServer(t)
 
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 1,
+		"filesystem_id": 1, "model_provider_id": 1,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("create session: code %d, resp %v", code, created)

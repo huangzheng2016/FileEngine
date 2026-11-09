@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -169,8 +170,8 @@ func (s *Server) createFilesystem(c *gin.Context) {
 	_ = s.repo.CreateCategory(&db.Category{
 		FilesystemID: fs.ID,
 		Name:         "未分类",
-		Path:         "/uncategorized",
-		Description:  "Files that don't fit any other category",
+		Path:         "/未分类",
+		Description:  "不属于其他分类的文件",
 	})
 
 	c.JSON(http.StatusCreated, toFilesystemResponse(fs))
@@ -184,7 +185,7 @@ func (s *Server) getFilesystem(c *gin.Context) {
 	}
 	fs, err := s.repo.GetFilesystem(uint(id))
 	if err != nil {
-		notFound(c, "文件系统不存在")
+		notFound(c, msgNoFilesystem)
 		return
 	}
 	c.JSON(http.StatusOK, toFilesystemResponse(fs))
@@ -198,7 +199,7 @@ func (s *Server) updateFilesystem(c *gin.Context) {
 	}
 	fs, err := s.repo.GetFilesystem(uint(id))
 	if err != nil {
-		notFound(c, "文件系统不存在")
+		notFound(c, msgNoFilesystem)
 		return
 	}
 	var req FilesystemRequest
@@ -247,6 +248,15 @@ func (s *Server) deleteFilesystem(c *gin.Context) {
 		badRequest(c, "无效的 ID")
 		return
 	}
+	n, err := s.repo.CountSessionsUsingFilesystem(uint(id))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if n > 0 {
+		conflict(c, fmt.Sprintf("有 %d 个整理任务在用这个存储，先删除这些任务", n))
+		return
+	}
 	if err := s.repo.DeleteFilesystem(uint(id)); err != nil {
 		internalError(c, err)
 		return
@@ -285,7 +295,7 @@ func (s *Server) testFilesystemConnection(c *gin.Context) {
 	if req.ID != 0 {
 		fs, err := s.repo.GetFilesystem(req.ID)
 		if err != nil {
-			notFound(c, "文件系统不存在")
+			notFound(c, msgNoFilesystem)
 			return
 		}
 		stored = fs

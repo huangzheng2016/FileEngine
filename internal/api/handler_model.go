@@ -91,7 +91,7 @@ func resolveContextWindow(v *int, fallback int) (int, error) {
 		return fallback, nil
 	}
 	if *v <= 0 {
-		return 0, fmt.Errorf("上下文长度必须是正整数（token 数）")
+		return 0, fmt.Errorf("上下文长度需为正整数")
 	}
 	return *v, nil
 }
@@ -202,6 +202,15 @@ func (s *Server) deleteModelProvider(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		badRequest(c, msgBadID)
+		return
+	}
+	n, err := s.repo.CountSessionsUsingModel(uint(id))
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if n > 0 {
+		conflict(c, fmt.Sprintf("有 %d 个整理任务在用这个模型，先删除这些任务", n))
 		return
 	}
 	if err := s.repo.DeleteModelProvider(uint(id)); err != nil {

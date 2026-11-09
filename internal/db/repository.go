@@ -95,6 +95,7 @@ func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
 		Total    int64
 		Tagged   int64
 		Planned  int64
+		Review   int64
 		Executed int64
 		Size     int64
 	}
@@ -102,24 +103,33 @@ func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
 		Select(`COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END), 0) AS tagged,
 			COALESCE(SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END), 0) AS planned,
+			COALESCE(SUM(CASE WHEN operation != '' AND needs_review = ? AND executed = ? THEN 1 ELSE 0 END), 0) AS review,
 			COALESCE(SUM(CASE WHEN executed = ? THEN 1 ELSE 0 END), 0) AS executed,
-			COALESCE(SUM(size), 0) AS size`, true, true).
+			COALESCE(SUM(size), 0) AS size`, true, true, false, true).
 		Scan(&c).Error; err != nil {
 		return err
 	}
 	// Column-scoped (never a Save of a loaded session, which would race the
 	// scan/run writers' status updates); the WHERE makes an unchanged row a
 	// no-op.
-	return r.db.Model(&ScanSession{}).
-		Where("id = ? AND (total_files <> ? OR tagged_files <> ? OR planned_ops <> ? OR executed_ops <> ? OR total_size <> ?)",
-			id, c.Total, c.Tagged, c.Planned, c.Executed, c.Size).
+	res := r.db.Model(&ScanSession{}).
+		Where("id = ? AND (total_files <> ? OR tagged_files <> ? OR planned_ops <> ? OR review_count <> ? OR executed_ops <> ? OR total_size <> ?)",
+			id, c.Total, c.Tagged, c.Planned, c.Review, c.Executed, c.Size).
 		Updates(map[string]any{
 			"total_files":  c.Total,
 			"tagged_files": c.Tagged,
 			"planned_ops":  c.Planned,
+			"review_count": c.Review,
 			"executed_ops": c.Executed,
 			"total_size":   c.Size,
-		}).Error
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		Emit(id, 0, EvSessionUpdated, struct{}{})
+	}
+	return nil
 }
 
 var countsDelay = time.Second
@@ -674,6 +684,18 @@ func (r *Repository) ListFilesystems() ([]Filesystem, error) {
 
 func (r *Repository) UpdateFilesystem(fs *Filesystem) error {
 	return r.db.Save(fs).Error
+}
+
+func (r *Repository) CountSessionsUsingFilesystem(id uint) (int64, error) {
+	var n int64
+	err := r.db.Model(&ScanSession{}).Where("filesystem_id = ?", id).Count(&n).Error
+	return n, err
+}
+
+func (r *Repository) CountSessionsUsingModel(id uint) (int64, error) {
+	var n int64
+	err := r.db.Model(&ScanSession{}).Where("model_provider_id = ? OR bulk_model_provider_id = ?", id, id).Count(&n).Error
+	return n, err
 }
 
 func (r *Repository) DeleteFilesystem(id uint) error {

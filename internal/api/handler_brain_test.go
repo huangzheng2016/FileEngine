@@ -31,7 +31,7 @@ func brainServer(t *testing.T) (*Server, *db.Repository) {
 func TestSessionGoalCreateAndPatch(t *testing.T) {
 	s := setupSessionTestServer(t)
 	code, created := doModelRequest(t, s, http.MethodPost, "/api/v1/sessions", map[string]any{
-		"filesystem_id": 1, "goal": "  照片按年份整理 ",
+		"filesystem_id": 1, "model_provider_id": 1, "goal": "  照片按年份整理 ",
 	})
 	if code != http.StatusCreated || created["goal"] != "照片按年份整理" {
 		t.Fatalf("create: %d %v", code, created)

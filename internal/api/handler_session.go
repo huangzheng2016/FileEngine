@@ -35,7 +35,8 @@ func scanRootPath(scanPath string) string {
 	return strings.Trim(path.Clean("/"+scanPath), "/")
 }
 
-func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig) {
+// autoTag starts a tagging run once the scan has completed.
+func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig, autoTag bool) {
 	// Scan on a copy: the caller may still be serializing its own struct into
 	// the HTTP response while the goroutine mutates status fields — sharing
 	// the pointer is a data race.
@@ -105,6 +106,12 @@ func (s *Server) startScan(session *db.ScanSession, fsCfg config.RemoteFSConfig)
 			session.Status = "error"
 			session.ErrorMessage = err.Error()
 			s.repo.UpdateSession(session)
+			return
+		}
+		if autoTag {
+			if _, err := s.startTaggingRun(session.ID); err != nil {
+				log.Printf("scan session %d: auto tag: %v", session.ID, err)
+			}
 		}
 	}()
 }
@@ -141,6 +148,7 @@ type CreateSessionRequest struct {
 	ExtractMetadata     *bool  `json:"extract_metadata"` // nil = on
 	DetectDuplicates    bool   `json:"detect_duplicates"`
 	Goal                string `json:"goal"`
+	AutoTag             bool   `json:"auto_tag"`
 }
 
 func (s *Server) createSession(c *gin.Context) {
@@ -157,6 +165,10 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 	if err != nil {
 		internalError(c, err)
+		return
+	}
+
+	if !s.modelExists(c, req.ModelProviderID, false) || !s.modelExists(c, req.BulkModelProviderID, true) {
 		return
 	}
 
@@ -194,8 +206,43 @@ func (s *Server) createSession(c *gin.Context) {
 		}
 	}
 
-	s.startScan(session, filesystem.ToRemoteFSConfig())
+	s.startScan(session, filesystem.ToRemoteFSConfig(), req.AutoTag)
 	c.JSON(http.StatusCreated, session)
+}
+
+const msgPickModel = "请选择模型"
+
+// On failure it has already answered the request; optional allows id 0.
+func (s *Server) modelExists(c *gin.Context, id uint, optional bool) bool {
+	if id == 0 && optional {
+		return true
+	}
+	if id == 0 {
+		badRequest(c, msgPickModel)
+		return false
+	}
+	if _, err := s.repo.GetModelProvider(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			badRequest(c, msgPickModel)
+		} else {
+			internalError(c, err)
+		}
+		return false
+	}
+	return true
+}
+
+type sessionView struct {
+	*db.ScanSession
+	LatestRun *db.RunRef `json:"latest_run,omitempty"`
+}
+
+func withLatestRun(s *db.ScanSession, latest map[uint]db.RunRef) sessionView {
+	v := sessionView{ScanSession: s}
+	if ref, ok := latest[s.ID]; ok {
+		v.LatestRun = &ref
+	}
+	return v
 }
 
 func (s *Server) listSessions(c *gin.Context) {
@@ -217,7 +264,20 @@ func (s *Server) listSessions(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, sessions)
+	ids := make([]uint, len(sessions))
+	for i := range sessions {
+		ids[i] = sessions[i].ID
+	}
+	latest, err := s.repo.LatestRuns(ids)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	out := make([]sessionView, len(sessions))
+	for i := range sessions {
+		out[i] = withLatestRun(&sessions[i], latest)
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (s *Server) getSession(c *gin.Context) {
@@ -237,10 +297,15 @@ func (s *Server) getSession(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	latest, err := s.repo.LatestRuns([]uint{session.ID})
+	if err != nil {
+		internalError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, struct {
-		*db.ScanSession
+		sessionView
 		Tokens db.TokenCounts `json:"tokens"`
-	}{session, tokens})
+	}{withLatestRun(session, latest), tokens})
 }
 
 func (s *Server) deleteSession(c *gin.Context) {
@@ -319,6 +384,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 		session.FilterDirs = *req.FilterDirs
 	}
 	if req.ModelProviderID != nil {
+		if !s.modelExists(c, *req.ModelProviderID, false) {
+			return
+		}
 		session.ModelProviderID = *req.ModelProviderID
 	}
 	if req.ExtractMetadata != nil {
@@ -328,6 +396,9 @@ func (s *Server) updateSessionConfig(c *gin.Context) {
 		session.DetectDuplicates = *req.DetectDuplicates
 	}
 	if req.BulkModelProviderID != nil {
+		if !s.modelExists(c, *req.BulkModelProviderID, true) {
+			return
+		}
 		session.BulkModelProviderID = *req.BulkModelProviderID
 	}
 	if req.Goal != nil {
@@ -373,7 +444,7 @@ func (s *Server) rescanSession(c *gin.Context) {
 		return
 	}
 
-	s.startScan(session, fsCfg)
+	s.startScan(session, fsCfg, false)
 	c.JSON(http.StatusOK, session)
 }
 

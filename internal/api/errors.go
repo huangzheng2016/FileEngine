@@ -27,13 +27,14 @@ func conflict(c *gin.Context, msg string) { abortError(c, http.StatusConflict, m
 const (
 	msgBadBody      = "请求参数缺失或格式错误"
 	msgBadID        = "无效的 ID"
-	msgNoSession    = "会话不存在"
+	msgNoSession    = "整理任务不存在"
+	msgBadSessionID = "无效的任务 ID"
 	msgNoFile       = "文件不存在"
 	msgNoRun        = "运行不存在"
 	msgNoCategory   = "分类不存在"
 	msgNoModel      = "模型不存在"
-	msgNoFilesystem = "文件系统不存在"
-	msgFSConnect    = "无法连接文件系统"
+	msgNoFilesystem = "存储不存在"
+	msgFSConnect    = "无法连接存储"
 )
 
 func badBody(c *gin.Context, err error) {

@@ -102,5 +102,8 @@ func (r *Repository) ConfirmReview(sessionID uint, ids []uint) (int64, error) {
 	}
 	res := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND id IN ? AND needs_review = ?", sessionID, ids, true).
 		Update("needs_review", false)
+	if res.RowsAffected > 0 {
+		r.touchCounts(sessionID)
+	}
 	return res.RowsAffected, res.Error
 }
