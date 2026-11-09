@@ -107,10 +107,10 @@ func (s *Server) draftPlan(c *gin.Context) {
 		return
 	}
 	if session.Status == "scanning" {
-		conflict(c, "会话还在扫描中，请等扫描完成后再生成方案")
+		conflict(c, "整理任务还在扫描，扫描完成后再生成方案")
 		return
 	}
-	run, err := s.launchRun(session.ID, db.RunPhaseSurvey, "生成整理方案", func(ctx context.Context, run *db.AgentRun) runOutcome {
+	run, err := s.launchRun(session.ID, db.RunPhaseSurvey, "生成方案", func(ctx context.Context, run *db.AgentRun) runOutcome {
 		logger := agent.NewLogger(session.ID, run.ID, 0)
 		summary, err := a.RunSurvey(ctx, logger, req.Instructions)
 		return runOutcome{Summary: summary, Err: err, Tokens: logger.Tokens()}

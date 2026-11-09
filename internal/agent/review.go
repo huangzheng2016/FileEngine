@@ -231,7 +231,7 @@ func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *db.Agent
 		return "", err
 	}
 	if report == "" {
-		report = "复核完成，助手没有给出报告。"
+		report = "复查完成，助手没有给出报告。"
 	}
 	if res, err := a.Reflect(ctx, logger, tagging); err != nil {
 		if ctx.Err() != nil {

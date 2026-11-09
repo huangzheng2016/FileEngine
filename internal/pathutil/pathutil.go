@@ -23,7 +23,7 @@ func ValidateFSPath(p string) error {
 	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." {
-			return fmt.Errorf("路径「%s」不能包含 ..（会越出文件系统根目录）", p)
+			return fmt.Errorf("路径「%s」不能包含 ..（会越出存储根目录）", p)
 		}
 	}
 	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {

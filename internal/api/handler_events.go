@@ -38,7 +38,7 @@ func queryUint(c *gin.Context, key string) (uint, error) {
 func (s *Server) listSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		badRequest(c, "无效的会话 ID")
+		badRequest(c, msgBadSessionID)
 		return
 	}
 	q := db.EventQuery{SessionID: uint(id)}
@@ -72,7 +72,7 @@ func (s *Server) listSessionEvents(c *gin.Context) {
 func (s *Server) streamSessionEvents(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		badRequest(c, "无效的会话 ID")
+		badRequest(c, msgBadSessionID)
 		return
 	}
 	sessionID := uint(id)

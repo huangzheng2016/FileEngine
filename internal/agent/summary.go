@@ -29,12 +29,11 @@ func (a *SummaryAgent) Run(ctx context.Context) (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# 会话 %d 执行报告\n\n", a.sessionID))
-	sb.WriteString(fmt.Sprintf("- 状态: %s\n", session.Status))
-	sb.WriteString(fmt.Sprintf("- 总文件数: %d\n", session.TotalFiles))
-	sb.WriteString(fmt.Sprintf("- 已标记: %d\n", session.TaggedFiles))
-	sb.WriteString(fmt.Sprintf("- 计划操作: %d\n", session.PlannedOps))
-	sb.WriteString(fmt.Sprintf("- 已执行: %d\n", session.ExecutedOps))
+	sb.WriteString("# 执行报告\n\n")
+	sb.WriteString(fmt.Sprintf("- 总文件数：%d\n", session.TotalFiles))
+	sb.WriteString(fmt.Sprintf("- 已整理：%d\n", session.TaggedFiles))
+	sb.WriteString(fmt.Sprintf("- 待移动：%d\n", session.PlannedOps))
+	sb.WriteString(fmt.Sprintf("- 已执行：%d\n", session.ExecutedOps))
 	sb.WriteString("\n")
 
 	var used []db.CategoryUsage

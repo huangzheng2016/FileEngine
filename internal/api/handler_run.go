@@ -85,7 +85,7 @@ func respondRunStart(c *gin.Context, run *db.AgentRun, err error) {
 func (s *Server) listRuns(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		badRequest(c, "无效的会话 ID")
+		badRequest(c, msgBadSessionID)
 		return
 	}
 	runs, err := s.repo.ListRuns(uint(id))

@@ -114,7 +114,7 @@ func (s *Server) updateFile(c *gin.Context) {
 	}
 	if req.NewPath != nil {
 		if err := pathutil.ValidateFSPath(*req.NewPath); err != nil {
-			badRequest(c, "目标路径非法："+err.Error())
+			badRequest(c, "目标位置无效："+err.Error())
 			return
 		}
 		oldTarget := file.NewPath
@@ -185,7 +185,7 @@ func (s *Server) getFileContent(c *gin.Context) {
 	rfs, err := remotefs.NewFromConfig(fsCfg)
 	if err != nil {
 		slog.Warn("file content: connect filesystem", "file", file.ID, "err", err)
-		abortError(c, http.StatusServiceUnavailable, "无法连接文件系统")
+		abortError(c, http.StatusServiceUnavailable, msgFSConnect)
 		return
 	}
 	defer rfs.Close()
