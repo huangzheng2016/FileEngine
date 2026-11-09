@@ -1,9 +1,9 @@
 import type { Protocol } from '@/api/types'
 
 export const PROTOCOL_HINT: Record<Protocol, string> = {
-  smb: 'NAS 首选，压缩包可以直接查看内容',
-  sftp: '压缩包可以直接查看内容',
-  nfs: '压缩包可以直接查看内容',
-  local: '运行 FileEngine 的这台机器上的目录',
-  ftp: '超过 32 MB 的 zip 压缩包只能看到大小，建议改用 SMB 或 SFTP',
+  smb: '',
+  sftp: '',
+  nfs: '',
+  local: '',
+  ftp: '大于 32 MB 的 zip 看不到内容，建议用 SMB 或 SFTP',
 }

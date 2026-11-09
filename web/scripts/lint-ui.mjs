@@ -1,7 +1,9 @@
 // Catches the UI mistakes that type checks and ESLint miss and that reviews keep finding:
 // classes nobody defined (text runs together, toggles never look on), raw JSON in
 // templates, units glued to values that may be '—', English codes in Chinese brackets,
-// native <select> and title tooltips, and half-width punctuation in Chinese text.
+// native <select> and title tooltips, half-width punctuation in Chinese text, and in project
+// files: literal colors, raw z-index, restyled shared classes, local copies of labels.ts maps
+// and formatting that bypasses base/format.ts.
 // A line containing `lint-ui-ignore` is skipped.
 // Tests find elements by role, label or text, not by style-less hook classes.
 //
@@ -111,6 +113,108 @@ for (const f of files.filter((f) => /\.(ts|vue)$/.test(f) && !f.includes('/test/
       for (const [re, msg] of PUNCT) if (re.test(s)) report(f, offset + i + 1, msg)
     }
   })
+}
+
+// ---------- project files: everything outside the verbatim base/ and styles/ ----------
+
+const isProject = (f) => {
+  const r = relative(SRC, f)
+  return !r.startsWith('base/') && !r.startsWith('styles/') && !r.startsWith('test/')
+}
+const lineAt = (text, index) => text.slice(0, index).split('\n').length
+const ignored = (text, index) => text.split('\n')[lineAt(text, index) - 1].includes('lint-ui-ignore')
+
+// Classes the shared stylesheets define; a page may use them but not restyle them.
+const shared = new Set()
+for (const f of cssFiles.filter((f) => relative(SRC, f).startsWith('styles/')))
+  for (const m of readFileSync(f, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .matchAll(/\.(-?[_a-zA-Z][\w-]*)/g))
+    shared.add(m[1])
+
+const STYLE_RULES = [
+  [/#[0-9a-fA-F]{3,8}\b(?![\w-])/, 'hex color in a page style: use a color token (var(--…))'],
+  [/\b(rgba?|hsla?)\(\s*\d/, 'literal color in a page style: use a color token (var(--…))'],
+  [/z-index\s*:\s*-?\d/, 'raw z-index in a page style: use a --z-* token'],
+]
+
+for (const f of vueFiles.filter(isProject)) {
+  const text = readFileSync(f, 'utf8')
+  for (const m of text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+    const start = m.index + m[0].indexOf(m[1])
+    const css = m[1].replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
+    css.split('\n').forEach((line, i) => {
+      if (line.includes('lint-ui-ignore')) return
+      const n = lineAt(text, start) + i
+      for (const [re, msg] of STYLE_RULES) if (re.test(line)) report(f, n, msg)
+    })
+    // a selector whose subject is only a shared class (or a bare button) restyles it for this page
+    for (const r of css.matchAll(/([^{};]+)\{/g)) {
+      const head = r[1].trim()
+      if (!head || head.startsWith('@') || /^(from|to|\d+%)/.test(head)) continue
+      if (ignored(text, start + r.index)) continue
+      for (const sel of head.split(',')) {
+        const subject = sel
+          .replace(/:(deep|global|slotted)\(([^)]*)\)/g, ' $2')
+          .trim()
+          .split(/[\s>+~]+/)
+          .pop()
+          .replace(/::?[\w-]+(\([^)]*\))?/g, '')
+        const classes = [...subject.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((c) => c[1])
+        const tag = /^[a-z]+/.exec(subject)?.[0]
+        if (tag === 'button' || (!tag && classes.length && classes.every((c) => shared.has(c))))
+          report(
+            f,
+            lineAt(text, start + r.index + r[0].search(/\S/)),
+            `page style restyles shared "${sel.trim()}": use a local class`,
+          )
+      }
+    }
+  }
+}
+
+// Label maps: the keys of every map in labels.ts.
+const labelsFile = join(SRC, 'base', 'labels.ts')
+const labelKeys = new Map()
+for (const m of readFileSync(labelsFile, 'utf8').matchAll(/export const (\w+)[^=]*=\s*\{([\s\S]*?)\n\}/g))
+  labelKeys.set(m[1], new Set([...m[2].matchAll(/^\s*'?([\w-]+)'?\s*:/gm)].map((k) => k[1])))
+// the smallest map holding every value, so a subset of RULE_ROLE is not reported as ENTRY_ROLE
+const labelsFor = (values) =>
+  values.length < 2
+    ? undefined
+    : [...labelKeys]
+        .filter(([, keys]) => values.every((v) => keys.has(v)))
+        .sort((x, y) => x[1].size - y[1].size)[0]?.[0]
+
+const SCRIPT_RULES = [
+  [
+    /\.(toLocaleString|toLocaleDateString|toLocaleTimeString|toFixed)\(/,
+    'number/time formatting outside base/format.ts and base/time.ts: use fmtNumber / fmtRatio / the time helpers',
+  ],
+  [/\b[A-Z][A-Z0-9_]{2,}\[[^\]]+\]\??\.text\b/, 'direct label map access: use fmtLabel(MAP, value) or StatusPill'],
+]
+
+for (const f of files.filter((f) => /\.(ts|vue)$/.test(f) && isProject(f))) {
+  const text = readFileSync(f, 'utf8')
+  text.split('\n').forEach((line, i) => {
+    if (line.includes('lint-ui-ignore') || /^\s*(\/\/|\*)/.test(line)) return
+    for (const [re, msg] of SCRIPT_RULES) if (re.test(line)) report(f, i + 1, msg)
+  })
+  // [{ value: 'a', label: '…' }, …] or { a: '中文', … } named *LABEL* / *TEXT* / *NAME* / *TITLE* whose keys all belong to one labels.ts map
+  for (const m of text.matchAll(/\[((?:\s*\{\s*value:\s*'[\w-]+'[^{}]*\},?)+)\s*\]/g)) {
+    const values = [...m[1].matchAll(/value:\s*'([\w-]+)'/g)].map((v) => v[1])
+    const map = labelsFor(values)
+    if (map && !ignored(text, m.index))
+      report(f, lineAt(text, m.index), `local options copy ${map}: use labelOptions(${map})`)
+  }
+  for (const m of text.matchAll(
+    /\b\w*(?:LABEL|TEXT|NAME|TITLE)\w*\b[^=\n]*=\s*\{((?:\s*'?[\w-]+'?\s*:\s*'[^'\n]*[一-鿿][^'\n]*'\s*,?)+)\s*\}/g,
+  )) {
+    const keys = [...m[1].matchAll(/'?([\w-]+)'?\s*:\s*'/g)].map((k) => k[1])
+    const map = labelsFor(keys)
+    if (map && !ignored(text, m.index))
+      report(f, lineAt(text, m.index), `local label map copies ${map}: use fmtLabel(${map}, …)`)
+  }
 }
 
 if (problems.length) {

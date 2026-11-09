@@ -1,7 +1,10 @@
 // PROJECT FILE: the only template file a project edits. Everything else in this
 // directory is copied verbatim and updated by re-copying from the skill.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { http } from '@/api/http'
+import { resetSignIn, router } from '@/router'
 import type { IconName } from './icons'
+import { toast } from './toast'
 
 export const app = {
   name: 'FileEngine',
@@ -35,7 +38,7 @@ export const nav: NavEntry[] = [
     children: [
       { to: '/settings/models', label: '模型', icon: 'box' },
       { to: '/settings/storage', label: '存储', icon: 'database' },
-      { to: '/settings/agent', label: '智能体配置', icon: 'sliders' },
+      { to: '/settings/agent', label: '助手', icon: 'sliders' },
     ],
   },
 ]
@@ -51,10 +54,32 @@ export async function loadNavBadges(signal?: AbortSignal): Promise<Record<string
   return {}
 }
 
+// The desktop window is signed in by its start URL and has no token to sign back in with.
+const desktop = ref<boolean | null>(null)
+
+function probeDesktop() {
+  if (desktop.value !== null) return
+  desktop.value = false
+  http
+    .get<{ desktop?: boolean }>('/auth/me', { skipAuthRedirect: true })
+    .then((r) => (desktop.value = r.data.desktop === true))
+    .catch(() => {})
+}
+
 export function useShellUser() {
+  probeDesktop()
   return {
-    name: computed(() => ''),
+    name: computed(() => (desktop.value ? '' : '已登录')),
     canSee: (item: NavItem) => !!item,
-    logout: async () => {},
+    logout: async () => {
+      try {
+        await http.post('/auth/logout', undefined, { skipAuthRedirect: true })
+      } catch (e) {
+        toast.error('退出失败', e)
+        return
+      }
+      resetSignIn()
+      await router.replace('/login')
+    },
   }
 }
