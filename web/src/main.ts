@@ -3,11 +3,13 @@ import MainLayout from '@/base/MainLayout.vue'
 import { setUnauthorizedHandler } from '@/api/http'
 import { resetSignIn, router } from '@/router'
 import { installTooltips } from '@/base/tooltip'
+import { installInputAttrs } from '@/lib/inputAttrs'
 import '@/styles/tokens.css'
 import '@/styles/base.css'
 
 const app = createApp(MainLayout).use(router)
 installTooltips()
+installInputAttrs()
 
 setUnauthorizedHandler(() => {
   resetSignIn()
