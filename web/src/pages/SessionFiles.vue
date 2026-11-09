@@ -324,6 +324,7 @@ function openLocate() {
         </table>
       </div>
       <Pagination
+        v-if="(files.data.value?.total ?? 0) > SIZE"
         :total="files.data.value?.total ?? 0"
         :page="query.fp"
         :size="SIZE"

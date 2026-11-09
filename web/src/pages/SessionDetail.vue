@@ -268,70 +268,71 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
       <button type="button" @click="detail.refresh">重试</button>
     </EmptyState>
     <template v-else-if="s">
-      <Alert v-if="s.status === 'scanning'" tone="info">
-        已发现 {{ fmtNumber(s.scanned_count) }} 个文件<template v-if="s.current_path"
-          >，正在扫描 {{ s.current_path }}</template
-        >
-      </Alert>
-      <Alert v-else-if="s.status === 'error'" tone="danger" title="扫描失败">{{ s.error_message || '—' }}</Alert>
-
-      <div class="toolbar session-head">
-        <StatusPill :value="stage" :map="SESSION_STAGE" />
-        <span class="text-muted text-sm tabular">
-          {{ storage?.name ?? '—' }} · {{ fmtNumber(s.total_files) }} 个文件<template v-if="pending">
-            · 待移动 {{ fmtNumber(pending) }}</template
-          ><template v-if="s.executed_ops"> · 已执行 {{ fmtNumber(s.executed_ops) }}</template>
-        </span>
-        <button v-if="s.review_count" type="button" class="ghost btn-sm" @click="openReview">
-          {{ fmtLabel(ENTRY_FLAG, 'needs_review') }} {{ fmtNumber(s.review_count) }}
-        </button>
-        <span class="spacer" />
-        <button v-if="running" type="button" :disabled="stopping" @click="stop">
-          <Icon name="stop" />{{ stopping ? '停止中' : '停止' }}
-        </button>
-        <button v-if="next && next.kind !== 'none'" type="button" class="primary" :disabled="busy" @click="doNext">
-          <Icon :name="next.kind === 'review' ? 'eye' : 'play'" />{{ next.label }}
-        </button>
-        <ActionMenu :items="menu" />
-      </div>
-      <p v-if="s.goal" class="goal">{{ s.goal }}</p>
-      <p v-if="stream.error.value" class="text-danger text-sm">实时进展连接中断：{{ stream.error.value }}</p>
-
       <div :class="{ 'with-chat': wide }">
-        <Tabs v-model="tab" :items="tabs">
-          <template #progress>
-            <SessionProgress
-              :session-id="id"
-              :runs="runs.data.value ?? []"
-              :runs-error="runs.error.value"
-              :timeline="stream.timeline.value"
-              @changed="runs.refresh"
-            />
-          </template>
-          <template #plan>
-            <SessionPlan
-              :session-id="id"
-              :rev="planRev"
-              :busy-reason="busyReason"
-              @started="((tab = 'progress'), runs.refresh())"
-            />
-          </template>
-          <template #preview>
-            <SessionPreview :session-id="id" @changed="detail.refresh" />
-          </template>
-          <template #files>
-            <SessionFiles :session="s" @changed="detail.refresh" />
-          </template>
-          <template #chat>
-            <ChatPanel
-              bare
-              :session-id="id"
-              :timeline="stream.timeline.value"
-              :busy-reason="busyReason"
-              @sent="runs.refresh"
-            />
-          </template>
-        </Tabs>
+        <div class="main-col">
+          <Alert v-if="s.status === 'scanning'" tone="info">
+            已发现 {{ fmtNumber(s.scanned_count) }} 个文件<template v-if="s.current_path"
+              >，正在扫描 {{ s.current_path }}</template
+            >
+          </Alert>
+          <Alert v-else-if="s.status === 'error'" tone="danger" title="扫描失败">{{ s.error_message || '—' }}</Alert>
+
+          <div class="toolbar session-head">
+            <StatusPill :value="stage" :map="SESSION_STAGE" />
+            <span class="text-muted text-sm tabular">
+              {{ storage?.name ?? '—' }} · {{ fmtNumber(s.total_files) }} 个文件<template v-if="pending">
+                · 待移动 {{ fmtNumber(pending) }}</template
+              ><template v-if="s.executed_ops"> · 已执行 {{ fmtNumber(s.executed_ops) }}</template>
+            </span>
+            <button v-if="s.review_count" type="button" class="ghost btn-sm" @click="openReview">
+              {{ fmtLabel(ENTRY_FLAG, 'needs_review') }} {{ fmtNumber(s.review_count) }}
+            </button>
+            <span class="spacer" />
+            <button v-if="running" type="button" :disabled="stopping" @click="stop">
+              <Icon name="stop" />{{ stopping ? '停止中' : '停止' }}
+            </button>
+            <button v-if="next && next.kind !== 'none'" type="button" class="primary" :disabled="busy" @click="doNext">
+              <Icon :name="next.kind === 'review' ? 'eye' : 'play'" />{{ next.label }}
+            </button>
+            <ActionMenu :items="menu" />
+          </div>
+          <p v-if="s.goal" class="goal">{{ s.goal }}</p>
+          <p v-if="stream.error.value" class="text-danger text-sm">实时进展连接中断：{{ stream.error.value }}</p>
+          <Tabs v-model="tab" :items="tabs">
+            <template #progress>
+              <SessionProgress
+                :session-id="id"
+                :runs="runs.data.value ?? []"
+                :runs-error="runs.error.value"
+                :timeline="stream.timeline.value"
+                @changed="runs.refresh"
+              />
+            </template>
+            <template #plan>
+              <SessionPlan
+                :session-id="id"
+                :rev="planRev"
+                :busy-reason="busyReason"
+                @started="((tab = 'progress'), runs.refresh())"
+              />
+            </template>
+            <template #preview>
+              <SessionPreview :session-id="id" @changed="detail.refresh" />
+            </template>
+            <template #files>
+              <SessionFiles :session="s" @changed="detail.refresh" />
+            </template>
+            <template #chat>
+              <ChatPanel
+                bare
+                :session-id="id"
+                :timeline="stream.timeline.value"
+                :busy-reason="busyReason"
+                @sent="runs.refresh"
+              />
+            </template>
+          </Tabs>
+        </div>
         <ChatPanel
           v-if="wide"
           :session-id="id"
@@ -384,6 +385,12 @@ const pending = computed(() => (s.value ? executable(s.value) : 0))
 .goal {
   margin-top: calc(-1 * var(--space-2));
   color: var(--text-secondary);
+}
+.main-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
 }
 .with-chat {
   display: grid;

@@ -14,7 +14,7 @@ import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
-import { useList } from '@/base/useList'
+import { PAGE_SIZES, useList } from '@/base/useList'
 import { usePolling } from '@/base/usePolling'
 import { toSec } from '@/api/http'
 import { deleteSession, listSessions } from '@/api/sessions'
@@ -104,10 +104,20 @@ const menuFor = (s: ScanSession) => [
 <template>
   <div class="page">
     <div class="toolbar">
-      <input v-model="list.filters.q" type="search" class="search" placeholder="搜索目录或要求" aria-label="搜索" />
-      <Segmented v-model="list.filters.status" :options="STATUS_OPTIONS" label="状态" />
+      <template v-if="list.items.value.length || filtered">
+        <input v-model="list.filters.q" type="search" class="search" placeholder="搜索目录或要求" aria-label="搜索" />
+        <Segmented v-model="list.filters.status" :options="STATUS_OPTIONS" label="状态" />
+      </template>
       <span class="spacer" />
-      <button type="button" class="primary" @click="creating = true"><Icon name="plus" />新建</button>
+      <button
+        v-tip="setup ? '先新建存储和模型' : ''"
+        type="button"
+        class="primary"
+        :disabled="setup"
+        @click="creating = true"
+      >
+        <Icon name="plus" />新建
+      </button>
     </div>
 
     <div class="table-wrap">
@@ -173,6 +183,7 @@ const menuFor = (s: ScanSession) => [
     </div>
 
     <Pagination
+      v-if="list.total.value > PAGE_SIZES[0]"
       :total="list.total.value"
       :page="list.page.value"
       :size="list.size.value"
