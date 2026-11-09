@@ -99,8 +99,12 @@ func (l *rateLimiter) allow(key string) bool {
 }
 
 func (s *Server) rateLimited(key string) gin.HandlerFunc {
+	return s.rateLimitedBy(s.limiter, key)
+}
+
+func (s *Server) rateLimitedBy(l *rateLimiter, key string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !s.limiter.allow(key) {
+		if !l.allow(key) {
 			abortError(c, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 			return
 		}

@@ -165,7 +165,7 @@ func (s *Server) updateModelProvider(c *gin.Context) {
 		return
 	}
 	if req.APIKey == nil && m.APIKey != "" && !sameModelEndpoint(m, &req) {
-		badRequest(c, "服务地址已变化，请重新输入 API Key")
+		badRequest(c, msgReenterAPIKey)
 		return
 	}
 	m.Name = req.Name
@@ -220,6 +220,8 @@ func (s *Server) deleteModelProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+const msgReenterAPIKey = "接口地址已变化，请重新输入 API Key"
+
 type ModelTestRequest struct {
 	ModelProviderRequest
 	ID uint `json:"id"`
@@ -229,6 +231,43 @@ type ModelTestRequest struct {
 // endpoint; otherwise a stored key could be sent to an arbitrary base_url.
 func sameModelEndpoint(m *db.ModelProvider, req *ModelProviderRequest) bool {
 	return m.Provider == req.Provider && m.BaseURL == req.BaseURL
+}
+
+type ModelCatalogRequest struct {
+	Provider string  `json:"provider" binding:"required"`
+	BaseURL  string  `json:"base_url"`
+	APIKey   *string `json:"api_key"`
+	ID       uint    `json:"id"`
+}
+
+// listProviderModels asks the provider which models the key can use, so the
+// form offers a list instead of a blank name field.
+func (s *Server) listProviderModels(c *gin.Context) {
+	var req ModelCatalogRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badBody(c, err)
+		return
+	}
+	apiKey := deref(req.APIKey)
+	if req.APIKey == nil && req.ID != 0 {
+		stored, err := s.repo.GetModelProvider(req.ID)
+		if err != nil {
+			notFound(c, msgNoModel)
+			return
+		}
+		if stored.APIKey != "" && (stored.Provider != req.Provider || stored.BaseURL != req.BaseURL) {
+			badRequest(c, msgReenterAPIKey)
+			return
+		}
+		apiKey = stored.APIKey
+	}
+	models, err := modelfactory.ListModels(c.Request.Context(), req.Provider, req.BaseURL, apiKey)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "models": []string{},
+			"error": modelfactory.ExplainError(err, 0), "detail": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "models": models})
 }
 
 func deref(p *string) string {
@@ -253,7 +292,7 @@ func (s *Server) testModelProvider(c *gin.Context) {
 			return
 		}
 		if stored.APIKey != "" && !sameModelEndpoint(stored, &req) {
-			badRequest(c, "服务地址已变化，请重新输入 API Key")
+			badRequest(c, msgReenterAPIKey)
 			return
 		}
 		apiKey = stored.APIKey
@@ -277,11 +316,13 @@ func (s *Server) testModelProvider(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": "模型配置无效：" + err.Error()})
 		return
 	}
-	result, err := chatModel.Generate(c.Request.Context(), []*schema.Message{
+	ctx, hints := modelfactory.WithResponseHints(c.Request.Context())
+	result, err := chatModel.Generate(ctx, []*schema.Message{
 		{Role: schema.User, Content: "Hi"},
 	})
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": "模型调用失败：" + err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false,
+			"error": modelfactory.ExplainError(err, hints.StatusCode()), "detail": err.Error()})
 		return
 	}
 	reply := ""

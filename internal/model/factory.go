@@ -23,7 +23,7 @@ func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.C
 	case "ollama":
 		baseURL := p.BaseURL
 		if baseURL == "" {
-			baseURL = "http://localhost:11434/v1"
+			baseURL = DefaultOllamaBaseURL
 		}
 		return newOpenAIModel(ctx, p, baseURL)
 	default:

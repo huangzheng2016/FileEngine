@@ -16,14 +16,18 @@ type Server struct {
 	frontend fs.FS
 	opts     Options
 	limiter  *rateLimiter
+	// Browsing a storage's folders reconnects per click, so it gets a
+	// roomier budget than the model tests that cost money.
+	browseLimiter *rateLimiter
 }
 
 func NewServer(repo *db.Repository, frontend fs.FS, opts ...Options) *Server {
 	s := &Server{
-		repo:     repo,
-		frontend: frontend,
-		opts:     resolveOptions(opts),
-		limiter:  newRateLimiter(10, time.Minute),
+		repo:          repo,
+		frontend:      frontend,
+		opts:          resolveOptions(opts),
+		limiter:       newRateLimiter(10, time.Minute),
+		browseLimiter: newRateLimiter(120, time.Minute),
 	}
 	s.setupRouter()
 	installRuleHook(repo)
@@ -110,7 +114,7 @@ func (s *Server) setupRouter() {
 		api.GET("/filesystems/:id", s.getFilesystem)
 		api.PUT("/filesystems/:id", s.updateFilesystem)
 		api.DELETE("/filesystems/:id", s.deleteFilesystem)
-		api.POST("/filesystems/test", s.rateLimited("filesystems/test"), s.testFilesystemConnection)
+		api.POST("/filesystems/test", s.rateLimitedBy(s.browseLimiter, "filesystems/test"), s.testFilesystemConnection)
 
 		api.GET("/models", s.listModelProviders)
 		api.POST("/models", s.createModelProvider)
@@ -118,6 +122,7 @@ func (s *Server) setupRouter() {
 		api.PUT("/models/:id", s.updateModelProvider)
 		api.DELETE("/models/:id", s.deleteModelProvider)
 		api.POST("/models/test", s.rateLimited("models/test"), s.testModelProvider)
+		api.POST("/models/catalog", s.rateLimitedBy(s.browseLimiter, "models/catalog"), s.listProviderModels)
 
 		api.GET("/config", s.getConfig)
 		api.PUT("/config", s.updateConfig)
