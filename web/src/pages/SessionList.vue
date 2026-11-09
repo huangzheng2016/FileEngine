@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
 import Pagination from '@/base/Pagination.vue'
@@ -21,7 +21,9 @@ import { deleteSession, listSessions } from '@/api/sessions'
 import { listFilesystems, listModels } from '@/api/settings'
 import type { ScanSession } from '@/api/types'
 import { listRunning, sessionPath, stageOf, type Stage } from '@/lib/sessionView'
+import ModelFormDialog from './ModelFormDialog.vue'
 import SessionCreateDialog from './SessionCreateDialog.vue'
+import StorageFormDialog from './StorageFormDialog.vue'
 
 const router = useRouter()
 const confirm = useConfirm()
@@ -34,6 +36,8 @@ const missing = computed(() => ({
   storage: storages.data.value?.length === 0,
   model: models.data.value?.length === 0,
 }))
+const setup = computed(() => missing.value.storage || missing.value.model)
+const adding = ref<'' | 'storage' | 'model'>('')
 
 const stage = (s: ScanSession) => stageOf(s, listRunning(s))
 
@@ -146,21 +150,23 @@ const menuFor = (s: ScanSession) => [
             :loading="list.loading.value && !list.items.value.length"
             :error="list.error.value"
             :empty="list.items.value.length === 0"
-            :empty-text="
-              filtered
-                ? '没有符合条件的整理任务'
-                : missing.storage || missing.model
-                  ? '开始前需要存储和模型'
-                  : '暂无整理任务'
-            "
+            :empty-text="filtered ? '没有符合条件的整理任务' : setup ? '开始前需要：' : '暂无整理任务'"
             @retry="list.refresh"
           >
             <button v-if="filtered" type="button" class="btn-sm" @click="list.reset">清除筛选</button>
-            <template v-else-if="missing.storage || missing.model">
-              <RouterLink v-if="missing.storage" to="/settings/storage" class="btn btn-sm">新建存储</RouterLink>
-              <RouterLink v-if="missing.model" to="/settings/models" class="btn btn-sm">新建模型</RouterLink>
-            </template>
-            <button v-else type="button" class="btn-sm" @click="creating = true">新建整理任务</button>
+            <ul v-else-if="setup" class="setup">
+              <li>
+                <Icon v-if="!missing.storage" name="check" class="text-success" />存储
+                <button v-if="missing.storage" type="button" class="btn-sm" @click="adding = 'storage'">
+                  新建存储
+                </button>
+              </li>
+              <li>
+                <Icon v-if="!missing.model" name="check" class="text-success" />模型
+                <button v-if="missing.model" type="button" class="btn-sm" @click="adding = 'model'">新建模型</button>
+              </li>
+            </ul>
+            <button v-else type="button" class="primary" @click="creating = true">新建整理任务</button>
           </TableState>
         </tbody>
       </table>
@@ -175,10 +181,25 @@ const menuFor = (s: ScanSession) => [
     />
 
     <SessionCreateDialog :open="creating" @close="creating = false" @created="open" />
+    <StorageFormDialog :open="adding === 'storage'" :editing="null" @close="adding = ''" @saved="storages.refresh()" />
+    <ModelFormDialog :open="adding === 'model'" :editing="null" @close="adding = ''" @saved="models.refresh()" />
   </div>
 </template>
 
 <style scoped>
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+.setup li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
 @media (max-width: 760px) {
   .hide-sm {
     display: none;
