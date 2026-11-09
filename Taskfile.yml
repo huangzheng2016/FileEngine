@@ -114,7 +114,7 @@ tasks:
       CGO_ENABLED: '0'
     cmds:
       - go build -trimpath -buildvcs=false -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/fileengine{{.EXE}} .
-      - go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine{{.EXE}} web/dist
+      - GOOS= GOARCH= go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine{{.EXE}} web/dist
 
   desktop:dev:
     desc: Run the desktop in development mode, serving web/dist from disk
@@ -128,7 +128,7 @@ tasks:
       CGO_ENABLED: '{{if eq .TARGET_OS "windows"}}0{{else}}1{{end}}'
     cmds:
       - go build -tags production -trimpath -buildvcs=false -ldflags "{{.LDFLAGS}}{{if eq .TARGET_OS "windows"}} -H windowsgui{{end}}" -o {{.BIN_DIR}}/fileengine-desktop{{.EXE}} ./cmd/fileengine-desktop
-      - go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine-desktop{{.EXE}}
+      - GOOS= GOARCH= go run ./scripts/stripcheck {{.BIN_DIR}}/fileengine-desktop{{.EXE}}
 
   wails:install:
     desc: Install the pinned Wails v3 CLI (wails3) into GOBIN

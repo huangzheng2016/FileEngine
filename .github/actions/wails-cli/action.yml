@@ -16,21 +16,34 @@ inputs:
 runs:
   using: composite
   steps:
+    # The CLI only needs cgo for desktop features; runners without GTK 4 (server and
+    # cross-compiling jobs) build it with cgo off.
+    - name: Choose the CLI build mode
+      id: mode
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Linux ] && ! pkg-config --exists gtk4 webkitgtk-6.0 2>/dev/null; then
+          echo "cgo=0" >> "$GITHUB_OUTPUT"
+        else
+          echo "cgo=" >> "$GITHUB_OUTPUT"
+        fi
     - name: Restore the pinned Wails CLI
       id: cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/wails-bin
-        key: wails3-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}-go${{ inputs.go-version }}
+        key: wails3-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}-go${{ inputs.go-version }}-cgo${{ steps.mode.outputs.cgo }}
     - name: Install the pinned Wails CLI
       shell: bash
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         WAILS_BIN: ${{ runner.temp }}/wails-bin
         WAILS_VERSION: ${{ inputs.version }}
+        CLI_CGO: ${{ steps.mode.outputs.cgo }}
       run: |
         set -euo pipefail
         if [ "$CACHE_HIT" != "true" ]; then
+          if [ -n "$CLI_CGO" ]; then export CGO_ENABLED="$CLI_CGO"; fi
           GOBIN="$WAILS_BIN" GOFLAGS= go install "github.com/wailsapp/wails/v3/cmd/wails3@$WAILS_VERSION"
         fi
         echo "$WAILS_BIN" >> "$GITHUB_PATH"
