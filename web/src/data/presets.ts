@@ -81,7 +81,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'media-by-month',
     name: '照片视频按年月',
-    goal: '照片和视频按拍摄年份、月份归档，相册和活动目录保持完整。',
+    goal: '照片和视频按拍摄年份和月份归档（/照片/2023/05/），相册和活动文件夹整体保留，不拆散。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.image, ...SCOPE_EXTS.video] },
     rules: [
       rule({ name: '照片按年月', exts: exts('image'), target: '照片/{year}/{month}/{name}' }),
@@ -95,7 +95,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'docs-by-type',
     name: '文档按类型',
-    goal: '文档按用途分类（合同、发票、报告、学习资料等），同一项目的文件放在一起。',
+    goal: '文档按用途分类：合同、发票、报告、学习资料等；同一事务或项目的文件放在一起，不按扩展名拆分。',
     scope: { key: 'doc', exts: [] },
     rules: [],
     categories: [
@@ -109,7 +109,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'downloads-cleanup',
     name: '下载目录清理',
-    goal: '把下载目录里的文件按类型归位，安装包和压缩包单独放，项目目录保持完整。',
+    goal: '把下载目录里的文件按类型归位：安装包、压缩包、图片、视频、音频各放一类；项目文件夹整体保留。',
     scope: { key: 'all', exts: [] },
     rules: [
       rule({ name: '安装包', exts: exts('installer'), target: '安装包/{name}' }),
@@ -130,7 +130,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'software-by-version',
     name: '软件安装包按名称和版本',
-    goal: '安装包按软件名称归类，同一软件的不同版本放在各自的版本目录里。',
+    goal: '安装包按软件名归类，每个版本一个子目录（/软件/Python/3.12.1/）；看不出版本的直接放在软件目录下。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.installer, ...SCOPE_EXTS.archive] },
     rules: [],
     categories: [{ name: '软件', path: '/软件', description: '按 软件/名称/版本 存放的安装包' }],
@@ -138,7 +138,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'code-projects',
     name: '代码项目归档',
-    goal: '代码项目整体归档，不拆散项目内部文件；构建产物和依赖目录跳过。',
+    goal: '代码项目整体归档，项目内部（含依赖和构建目录）不拆散；不属于任何项目的零散脚本单独放。',
     scope: { key: 'all', exts: [] },
     rules: [],
     categories: [
@@ -149,7 +149,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'tv-series',
     name: '影视剧集',
-    goal: '电影按片名归档，剧集按剧名和季整理，字幕跟随对应视频。',
+    goal: '电影每部一个目录（/影视/电影/星际穿越 2014/），剧集按 剧名/季 整理（/影视/剧集/剧名/第1季/），字幕和海报跟随对应视频。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.video, 'srt', 'ass', 'ssa', 'sub', 'nfo'] },
     rules: [],
     categories: [
@@ -160,7 +160,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'music-by-artist',
     name: '音乐按艺人专辑',
-    goal: '音乐按艺人和专辑整理，专辑目录保持完整。',
+    goal: '音乐按 艺人/专辑 整理，专辑文件夹整体保留，歌词和封面跟随专辑。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.audio, 'cue', 'lrc', 'jpg', 'png'] },
     rules: [],
     categories: [{ name: '音乐', path: '/音乐', description: '按 艺人/专辑 存放的音乐' }],
