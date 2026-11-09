@@ -20,13 +20,14 @@ export const SESSION_STAGE = {
   scanning: { text: '扫描中', tone: 'accent' },
   scan_failed: { text: '扫描失败', tone: 'danger' },
   scan_interrupted: { text: '扫描中断', tone: 'warning' },
-  survey: { text: '正在出方案', tone: 'accent' },
+  survey: { text: '正在生成方案', tone: 'accent' },
   tagging: { text: '正在整理', tone: 'accent' },
   review: { text: '正在复查', tone: 'accent' },
   chat: { text: '助手回复中', tone: 'accent' },
   executing: { text: '正在执行', tone: 'accent' },
   ready: { text: '待整理', tone: 'neutral' },
   planned: { text: '待执行', tone: 'info' },
+  no_moves: { text: '无需移动', tone: 'neutral' },
   done: { text: '已完成', tone: 'success' },
 } satisfies LabelMap
 
@@ -39,11 +40,12 @@ export const RUN_STATUS = {
 } satisfies LabelMap
 
 export const RUN_PHASE = {
-  survey: { text: '出方案', tone: 'info' },
+  survey: { text: '生成方案', tone: 'info' },
   tagging: { text: '整理', tone: 'accent' },
   review: { text: '复查', tone: 'info' },
   chat: { text: '对话', tone: 'neutral' },
   executing: { text: '执行', tone: 'accent' },
+  revert: { text: '撤销', tone: 'warning' },
 } satisfies LabelMap
 
 export const PLAN_STATUS = {
@@ -66,8 +68,8 @@ export const MEMORY_KIND = {
 } satisfies LabelMap
 
 export const MEMORY_SOURCE = {
-  user: { text: '手动添加', tone: 'neutral' },
-  agent: { text: '智能体记录', tone: 'neutral' },
+  user: { text: '手动记录', tone: 'neutral' },
+  agent: { text: '助手记录', tone: 'neutral' },
   correction: { text: '来自修正', tone: 'neutral' },
   reflection: { text: '复盘总结', tone: 'neutral' },
 } satisfies LabelMap
@@ -93,7 +95,7 @@ export const PREVIEW_STATUS = {
 } satisfies LabelMap
 
 export const FILE_TYPE = {
-  directory: { text: '文件夹', tone: 'neutral' },
+  directory: { text: '目录', tone: 'neutral' },
   file: { text: '文件', tone: 'neutral' },
   symlink: { text: '链接', tone: 'neutral' },
 } satisfies LabelMap
@@ -111,12 +113,12 @@ export const FILTER_MODE = {
 // Decision of an entry; '' (undecided) is the key `pending`.
 export const ENTRY_ROLE = {
   unit: { text: '整体移动', tone: 'accent' },
-  container: { text: '容器', tone: 'neutral' },
-  member: { text: '随整体', tone: 'info' },
-  file: { text: '单独文件', tone: 'success' },
+  file: { text: '单独移动', tone: 'success' },
+  member: { text: '随目录', tone: 'info' },
+  container: { text: '逐项处理', tone: 'neutral' },
   skip: { text: '跳过', tone: 'neutral' },
-  duplicate: { text: '重复文件', tone: 'warning' },
-  pending: { text: '待定', tone: 'warning' },
+  duplicate: { text: '重复', tone: 'warning' },
+  pending: { text: '未整理', tone: 'warning' },
 } satisfies LabelMap
 
 export const RULE_ROLE = {
@@ -125,11 +127,11 @@ export const RULE_ROLE = {
 } satisfies LabelMap
 
 export const VALIDATION_ISSUE = {
-  invalid_target: { text: '目标路径无效', tone: 'danger' },
-  into_self: { text: '目标在自身内部', tone: 'danger' },
+  invalid_target: { text: '目标位置无效', tone: 'danger' },
+  into_self: { text: '目标位置在自身内部', tone: 'danger' },
   nested: { text: '随上级目录移动', tone: 'neutral' },
-  collision: { text: '目标重名', tone: 'danger' },
-  target_exists: { text: '目标已存在', tone: 'danger' },
+  collision: { text: '目标位置重名', tone: 'danger' },
+  target_exists: { text: '目标位置已有文件', tone: 'danger' },
   source_changed: { text: '源文件已变化', tone: 'warning' },
   source_missing: { text: '源文件不存在', tone: 'warning' },
   failed: { text: '执行失败', tone: 'danger' },
@@ -147,31 +149,35 @@ export const ENTRY_FLAG = {
   sensitive: { text: '敏感文件', tone: 'danger' },
 } satisfies LabelMap
 
+export const REASONING_EFFORT = {
+  low: { text: '低', tone: 'neutral' },
+  medium: { text: '中', tone: 'neutral' },
+  high: { text: '高', tone: 'neutral' },
+  max: { text: '最高', tone: 'neutral' },
+} satisfies LabelMap
+
 // Agent tool names as the person reads them in a transcript.
 export const TOOL_LABEL: Record<string, string> = {
   list_files: '查看文件',
-  query_files: '查询文件',
   get_file_info: '查看文件信息',
+  read_file: '读取文件',
+  view_image: '查看图片',
+  run_script: '运行脚本',
+  set_targets: '设定目标位置',
+  decide_dirs: '决定目录',
+  split_unit: '拆分整体',
   update_description: '写文件说明',
-  mark_tagged: '标记完成',
   list_categories: '查看分类',
   create_category: '新建分类',
   update_category: '修改分类',
   delete_category: '删除分类',
-  set_target: '设定目标',
-  set_category: '归入分类',
-  read_file: '读取文件',
-  view_image: '查看图片',
-  run_script: '运行脚本',
-  write_plan: '写整理方案',
-  remember: '记住',
-  recall: '查记忆',
-  note: '记笔记',
-  set_targets: '批量设定目标',
-  decide_dirs: '决定目录',
-  split_unit: '拆分整体',
-  add_rule: '添加规则',
+  add_rule: '新建规则',
   update_rule: '修改规则',
   delete_rule: '删除规则',
   apply_rules: '应用规则',
+  read_plan: '读方案',
+  write_plan: '写方案',
+  note: '记笔记',
+  remember: '记住',
+  recall: '查记忆',
 }
