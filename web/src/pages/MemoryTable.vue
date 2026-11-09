@@ -77,6 +77,13 @@ async function remove(m: MemoryItem) {
   }
 }
 
+// Agent-written items carry Markdown code spans; the cell is plain text.
+const plain = (text: string) => text.replace(/`/g, '')
+// Manual and correction sources repeat what the row already shows.
+const sourceOf = (m: MemoryItem) =>
+  m.source === 'agent' || m.source === 'reflection' ? fmtLabel(MEMORY_SOURCE, m.source) : ''
+const subOf = (m: MemoryItem) => [sourceOf(m), m.path].filter(Boolean).join(' · ')
+
 const menuFor = (m: MemoryItem) => [
   { label: m.pinned ? '取消置顶' : '置顶', icon: 'pin' as const, onSelect: () => void togglePin(m) },
   { label: '删除', icon: 'trash-2' as const, danger: true, onSelect: () => void remove(m) },
@@ -86,34 +93,43 @@ const menuFor = (m: MemoryItem) => [
 <template>
   <div class="table-wrap">
     <table>
+      <colgroup>
+        <col />
+        <col class="w-kind" />
+        <col class="w-hits" />
+        <col class="w-time" />
+        <col v-if="editable" />
+      </colgroup>
       <thead>
         <tr>
           <th>内容</th>
           <th>类型</th>
           <th class="num">用过</th>
-          <th class="num">更新时间</th>
+          <th>更新时间</th>
           <th v-if="editable" class="col-actions">操作</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="m in rows" :key="m.id">
+        <tr
+          v-for="m in rows"
+          :key="m.id"
+          :class="{ clickable: editable }"
+          :tabindex="editable ? 0 : undefined"
+          @click="editable && openForm(m)"
+          @keydown.enter.self.prevent="editable && openForm(m)"
+        >
           <td class="wrap">
             <span class="content">
               <Icon v-if="m.pinned" v-tip="'置顶'" name="pin" :size="14" />
-              {{ m.content }}
+              {{ plain(m.content) }}
             </span>
-            <span class="cell-sub">
-              {{ fmtLabel(MEMORY_SOURCE, m.source) }}<template v-if="m.path"> · {{ m.path }}</template>
-            </span>
+            <span v-if="subOf(m)" class="cell-sub">{{ subOf(m) }}</span>
           </td>
           <td><StatusPill :value="m.kind" :map="MEMORY_KIND" /></td>
           <td class="num">{{ m.hits ? `${fmtNumber(m.hits)} 次` : '—' }}</td>
-          <td v-tip="fmtTime(toSec(m.updated_at))" class="num">{{ fmtRelative(toSec(m.updated_at)) }}</td>
+          <td v-tip="fmtTime(toSec(m.updated_at))">{{ fmtRelative(toSec(m.updated_at)) }}</td>
           <td v-if="editable" class="row-actions">
-            <span>
-              <button type="button" class="ghost btn-sm" @click="openForm(m)">编辑</button>
-              <ActionMenu :items="menuFor(m)" />
-            </span>
+            <ActionMenu :items="menuFor(m)" />
           </td>
         </tr>
         <TableState
@@ -142,5 +158,14 @@ const menuFor = (m: MemoryItem) => [
   display: inline-flex;
   align-items: flex-start;
   gap: var(--space-1);
+}
+.w-kind {
+  width: 88px;
+}
+.w-hits {
+  width: 72px;
+}
+.w-time {
+  width: 112px;
 }
 </style>
