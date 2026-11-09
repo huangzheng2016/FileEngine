@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"FileEngine/internal/db"
 
@@ -87,6 +89,8 @@ const (
 	claudeAnswerTokens = 4096 // output room kept above the thinking budget
 	// The Messages API requires max_tokens; used when the provider leaves it 0.
 	claudeDefaultMaxTokens = 8192
+	// adaptive thinking shares max_tokens with the answer
+	claudeAdaptiveMaxTokens = 32000
 )
 
 // The budget is capped below maxTokens, and maxTokens is raised when it
@@ -121,6 +125,20 @@ func claudeConfig(p *db.ModelProvider) *claude.Config {
 		baseURL := p.BaseURL
 		cfg.BaseURL = &baseURL
 	}
+	if !claudeLegacyModel(p.Model) {
+		// Current models choose their own thinking depth and reject sampling parameters.
+		if cfg.MaxTokens <= 0 {
+			cfg.MaxTokens = claudeAdaptiveMaxTokens
+		}
+		if p.ThinkingEnabled {
+			thinking := anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
+			cfg.ThinkingConfig = &thinking
+			if effort := claudeEffort(p.ReasoningEffort); effort != "" {
+				cfg.AdditionalRequestFields = map[string]any{"output_config": map[string]any{"effort": effort}}
+			}
+		}
+		return cfg
+	}
 	if p.ThinkingEnabled {
 		// Extended thinking only accepts the default temperature, so none is sent.
 		budget, maxTokens := claudeThinking(p.ReasoningEffort, p.MaxTokens)
@@ -134,6 +152,25 @@ func claudeConfig(p *db.ModelProvider) *claude.Config {
 	}
 	cfg.Temperature = temperature(p)
 	return cfg
+}
+
+// Claude 3.x and 4.0–4.5 take a thinking budget and a temperature; later models
+// (and names this does not recognize, such as proxy aliases) use adaptive thinking.
+var claudeLegacy = regexp.MustCompile(`^claude-(3|instant|(opus|sonnet|haiku)-4(-[0-5])?(-\d{8})?$|(opus|sonnet|haiku)-4-[0-5]-\d{8}$)`)
+
+func claudeLegacyModel(name string) bool {
+	return claudeLegacy.MatchString(strings.ToLower(strings.TrimSpace(name)))
+}
+
+// claudeEffort maps the free-form reasoning effort onto the API's levels; unknown values are not sent.
+func claudeEffort(effort string) string {
+	switch e := strings.ToLower(strings.TrimSpace(effort)); e {
+	case "low", "medium", "high", "xhigh", "max":
+		return e
+	case "ultra", "最高":
+		return "max"
+	}
+	return ""
 }
 
 // 0 means the model's default, so nothing is sent.
