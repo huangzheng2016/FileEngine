@@ -104,10 +104,10 @@ func parentOf(p string) string {
 
 func validTarget(p string) error {
 	if strings.TrimSpace(p) == "" {
-		return errors.New("目标路径为空")
+		return errors.New("目标位置为空")
 	}
 	if err := pathutil.ValidateFSPath(p); err != nil {
-		return fmt.Errorf("目标路径非法：%w", err)
+		return fmt.Errorf("目标位置无效：%w", err)
 	}
 	return nil
 }
@@ -117,15 +117,15 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
-	title := map[string]string{ModeCopy: "执行：复制", ModeMove: "执行：移动"}[opts.Mode]
+	title := "执行"
 	switch {
 	case opts.CategoryPath != "":
-		title += "（分类 " + opts.CategoryPath + "）"
+		title += "（" + opts.CategoryPath + "）"
 	case opts.Sample > 0:
-		title += fmt.Sprintf("（试运行 %d 项）", opts.Sample)
+		title += fmt.Sprintf("（前 %d 项）", opts.Sample)
 	}
-	run, err := repo.CreateRun(sessionID, db.RunPhaseExecuting, title)
-	if err != nil {
+	run := &db.AgentRun{SessionID: sessionID, Phase: db.RunPhaseExecuting, Title: title, ExecMode: opts.Mode}
+	if err := repo.InsertRun(run); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -140,16 +140,21 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 	return run, nil
 }
 
+var ErrNotExecuting = errors.New("只能撤销执行")
+
 func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.AgentRun, error) {
 	var target db.AgentRun
 	if err := repo.DB().First(&target, runID).Error; err != nil {
 		return nil, fmt.Errorf("读取运行 %d：%w", runID, err)
 	}
-	if target.Phase != db.RunPhaseExecuting {
-		return nil, errors.New("只能撤销执行运行")
+	if target.Phase == db.RunPhaseRevert {
+		return nil, db.ErrRevertOfRevert
 	}
-	run, err := repo.CreateRun(target.SessionID, db.RunPhaseExecuting, fmt.Sprintf("撤销运行 #%d", runID))
-	if err != nil {
+	if target.Phase != db.RunPhaseExecuting {
+		return nil, ErrNotExecuting
+	}
+	run := &db.AgentRun{SessionID: target.SessionID, Phase: db.RunPhaseRevert, Title: "撤销", RevertsRunID: &target.ID}
+	if err := repo.InsertRun(run); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -196,16 +201,16 @@ func (e *Executor) emit(res *Result, force bool) {
 	}
 	e.lastEmit = time.Now()
 	db.Emit(e.run.SessionID, e.run.ID, db.EvProgress, db.ProgressData{
-		RunID: e.run.ID, Phase: db.RunPhaseExecuting,
+		RunID: e.run.ID, Phase: e.run.Phase,
 		Total: res.Total, Success: res.Success, Failed: res.Failed, Skipped: res.Skipped,
 	})
 }
 
 var issueLabels = map[string]string{
-	IssueInvalidTarget: "目标路径非法",
+	IssueInvalidTarget: "目标位置无效",
 	IssueIntoSelf:      "目标位于源目录内",
 	IssueNested:        "上级目录已有决定",
-	IssueCollision:     "目标路径冲突",
+	IssueCollision:     "目标位置冲突",
 	IssueTargetExists:  "目标已存在",
 	IssueSourceChanged: "源文件已变化",
 	IssueSourceMissing: "源文件不存在",

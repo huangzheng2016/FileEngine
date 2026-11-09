@@ -34,7 +34,7 @@ func (s *Server) sessionFS(c *gin.Context, sessionID uint) (remotefs.RemoteFS, b
 }
 
 func runStartError(c *gin.Context, err error) {
-	if errors.Is(err, db.ErrSessionBusy) {
+	if errors.Is(err, db.ErrSessionBusy) || errors.Is(err, db.ErrAlreadyReverted) || errors.Is(err, db.ErrRevertOfRevert) {
 		conflict(c, err.Error())
 		return
 	}
@@ -93,16 +93,23 @@ func (s *Server) checkExecute(c *gin.Context) {
 func (s *Server) revertRun(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("run_id"), 10, 32)
 	if err != nil {
-		badRequest(c, "无效的运行 ID")
+		badRequest(c, msgBadID)
 		return
 	}
-	var target db.AgentRun
-	if err := s.repo.DB().First(&target, id).Error; err != nil {
+	target, err := s.repo.GetRun(uint(id))
+	if err != nil {
 		lookupFailed(c, err, msgNoRun)
 		return
 	}
-	if target.Phase != db.RunPhaseExecuting {
-		badRequest(c, "只能撤销执行运行")
+	switch {
+	case target.Phase == db.RunPhaseRevert:
+		conflict(c, db.ErrRevertOfRevert.Error())
+		return
+	case target.Phase != db.RunPhaseExecuting:
+		badRequest(c, executor.ErrNotExecuting.Error())
+		return
+	case target.RevertedByRunID != nil:
+		conflict(c, db.ErrAlreadyReverted.Error())
 		return
 	}
 	fs, ok := s.sessionFS(c, target.SessionID)

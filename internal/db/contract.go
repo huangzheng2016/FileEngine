@@ -8,6 +8,7 @@ const (
 	RunPhaseReview    = "review"
 	RunPhaseChat      = "chat"
 	RunPhaseExecuting = "executing"
+	RunPhaseRevert    = "revert" // undoes one executing run (reverts_run_id)
 )
 
 const (
@@ -25,6 +26,9 @@ type AgentRun struct {
 	Phase            string     `gorm:"size:16" json:"phase"`
 	Status           string     `gorm:"size:16;index" json:"status"`
 	Title            string     `gorm:"size:512" json:"title"`
+	ExecMode         string     `gorm:"size:16" json:"exec_mode,omitempty"`    // executing runs: copy / move
+	RevertsRunID     *uint      `gorm:"index" json:"reverts_run_id,omitempty"` // set on a revert run
+	RevertedByRunID  *uint      `gorm:"-" json:"reverted_by_run_id,omitempty"` // derived from the revert run's reverts_run_id
 	Summary          string     `gorm:"type:text" json:"summary"`
 	Error            string     `gorm:"type:text" json:"error"`
 	PromptTokens     int        `json:"prompt_tokens"`
@@ -131,6 +135,8 @@ const (
 	EvProgress      = "progress"
 	EvPlanUpdated   = "plan_updated"
 	EvMemoryUpdated = "memory_updated"
+	// Payload {}: the session's stored counters changed; refetch the session.
+	EvSessionUpdated = "session_updated"
 )
 
 type TokenCounts struct {

@@ -9,7 +9,15 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrSessionBusy = errors.New("会话正在运行中")
+var ErrSessionBusy = errors.New("整理任务正在运行中")
+
+var (
+	ErrRevertOfRevert  = errors.New("撤销不能再撤销")
+	ErrAlreadyReverted = errors.New("这次执行已撤销")
+)
+
+// A revert that was stopped or failed does not count, so the user can retry.
+var effectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
 
 const RunInterruptedError = "服务重启，运行被中断"
 
@@ -19,24 +27,40 @@ var runCancels = struct {
 }{m: make(map[uint]context.CancelFunc)}
 
 func (r *Repository) CreateRun(sessionID uint, phase, title string) (*AgentRun, error) {
-	run := &AgentRun{SessionID: sessionID, Phase: phase, Status: RunRunning, Title: title, StartedAt: time.Now()}
+	run := &AgentRun{SessionID: sessionID, Phase: phase, Title: title}
+	return run, r.InsertRun(run)
+}
+
+// InsertRun starts run (status running, started now) unless the session
+// already has a running run.
+func (r *Repository) InsertRun(run *AgentRun) error {
+	run.Status, run.StartedAt = RunRunning, time.Now()
 	err := WithRetry(func() error {
 		return r.DB().Transaction(func(tx *gorm.DB) error {
 			var n int64
-			if err := tx.Model(&AgentRun{}).Where("session_id = ? AND status = ?", sessionID, RunRunning).Count(&n).Error; err != nil {
+			if err := tx.Model(&AgentRun{}).Where("session_id = ? AND status = ?", run.SessionID, RunRunning).Count(&n).Error; err != nil {
 				return err
 			}
 			if n > 0 {
 				return ErrSessionBusy
 			}
+			if run.RevertsRunID != nil {
+				if err := tx.Model(&AgentRun{}).Where("reverts_run_id = ? AND status IN ?", *run.RevertsRunID, effectiveRevertStatuses).Count(&n).Error; err != nil {
+					return err
+				}
+				if n > 0 {
+					return ErrAlreadyReverted
+				}
+			}
+			run.ID = 0
 			return tx.Create(run).Error
 		})
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	Emit(sessionID, run.ID, EvRunStatus, RunStatusData{RunID: run.ID, Phase: phase, Status: RunRunning, Title: title})
-	return run, nil
+	Emit(run.SessionID, run.ID, EvRunStatus, RunStatusData{RunID: run.ID, Phase: run.Phase, Status: RunRunning, Title: run.Title})
+	return nil
 }
 
 // Emits the terminal run_status plus run_done exactly once.
@@ -109,14 +133,74 @@ func (r *Repository) SweepStaleRuns() (int64, error) {
 
 func (r *Repository) GetRun(id uint) (*AgentRun, error) {
 	var run AgentRun
-	err := r.db.First(&run, id).Error
-	return &run, err
+	if err := r.db.First(&run, id).Error; err != nil {
+		return &run, err
+	}
+	runs := []AgentRun{run}
+	err := r.fillRevertedBy(runs)
+	return &runs[0], err
 }
 
 func (r *Repository) ListRuns(sessionID uint) ([]AgentRun, error) {
 	var runs []AgentRun
-	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").Find(&runs).Error
-	return runs, err
+	if err := r.db.Where("session_id = ?", sessionID).Order("id DESC").Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return runs, r.fillRevertedBy(runs)
+}
+
+func (r *Repository) fillRevertedBy(runs []AgentRun) error {
+	var ids []uint
+	for _, run := range runs {
+		if run.Phase == RunPhaseExecuting {
+			ids = append(ids, run.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var reverts []AgentRun
+	if err := r.db.Select("id", "reverts_run_id").
+		Where("reverts_run_id IN ? AND status IN ?", ids, effectiveRevertStatuses).
+		Order("id ASC").Find(&reverts).Error; err != nil {
+		return err
+	}
+	by := make(map[uint]uint, len(reverts))
+	for _, rv := range reverts {
+		by[*rv.RevertsRunID] = rv.ID
+	}
+	for i := range runs {
+		if id, ok := by[runs[i].ID]; ok {
+			runs[i].RevertedByRunID = &id
+		}
+	}
+	return nil
+}
+
+type RunRef struct {
+	ID     uint   `json:"id"`
+	Phase  string `json:"phase"`
+	Status string `json:"status"`
+}
+
+// Latest run per session; nil sessionIDs means every session.
+func (r *Repository) LatestRuns(sessionIDs []uint) (map[uint]RunRef, error) {
+	latest := r.db.Model(&AgentRun{}).Select("MAX(id)").Group("session_id")
+	if sessionIDs != nil {
+		if len(sessionIDs) == 0 {
+			return map[uint]RunRef{}, nil
+		}
+		latest = latest.Where("session_id IN ?", sessionIDs)
+	}
+	var rows []AgentRun
+	if err := r.db.Select("id", "session_id", "phase", "status").Where("id IN (?)", latest).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint]RunRef, len(rows))
+	for _, run := range rows {
+		out[run.SessionID] = RunRef{ID: run.ID, Phase: run.Phase, Status: run.Status}
+	}
+	return out, nil
 }
 
 func (r *Repository) RunningRuns(sessionID uint) ([]AgentRun, error) {

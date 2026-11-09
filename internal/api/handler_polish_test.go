@@ -156,9 +156,20 @@ func TestExecuteRevertAndLocate(t *testing.T) {
 		t.Fatalf("created directories left behind: %v", err)
 	}
 
-	code, body = doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/runs/%d/revert", revRun.ID), nil)
-	if code != http.StatusOK {
-		t.Fatalf("revert of a revert run is an executing run too: %d %v", code, body)
+	if revRun.Phase != db.RunPhaseRevert || revRun.Title != "撤销" || revRun.RevertsRunID == nil || *revRun.RevertsRunID != execRun.ID || revRun.ExecMode != "" {
+		t.Fatalf("revert run fields: %+v", revRun)
 	}
-	waitRun(t, repo, runIDOf(t, body))
+	code, got := doModelRequest(t, s, http.MethodGet, fmt.Sprintf("/api/v1/runs/%d", execRun.ID), nil)
+	if code != http.StatusOK || got["exec_mode"] != "move" || got["reverted_by_run_id"] != float64(revRun.ID) {
+		t.Fatalf("executed run after revert: %d %v", code, got)
+	}
+
+	code, body = doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/runs/%d/revert", revRun.ID), nil)
+	if code != http.StatusConflict || body["error"] != db.ErrRevertOfRevert.Error() {
+		t.Fatalf("revert of a revert run: %d %v", code, body)
+	}
+	code, body = doModelRequest(t, s, http.MethodPost, fmt.Sprintf("/api/v1/runs/%d/revert", execRun.ID), nil)
+	if code != http.StatusConflict || body["error"] != "这次执行已撤销" {
+		t.Fatalf("second revert: %d %v", code, body)
+	}
 }
