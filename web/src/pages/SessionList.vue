@@ -166,7 +166,7 @@ const menuFor = (s: ScanSession) => [
                 <button v-if="missing.model" type="button" class="btn-sm" @click="adding = 'model'">新建模型</button>
               </li>
             </ul>
-            <button v-else type="button" class="primary" @click="creating = true">新建整理任务</button>
+            <button v-else type="button" @click="creating = true">新建整理任务</button>
           </TableState>
         </tbody>
       </table>
