@@ -10,7 +10,7 @@ import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
 import { deleteModel, listModels } from '@/api/settings'
 import type { ModelProvider } from '@/api/types'
-import { fmtTokens } from '@/lib/modelForm'
+import { effortLabel, fmtTokens } from '@/lib/modelForm'
 import ModelFormDialog from './ModelFormDialog.vue'
 
 const confirm = useConfirm()
@@ -34,7 +34,7 @@ function host(m: ModelProvider) {
 function abilities(m: ModelProvider) {
   return [
     m.vision_enabled ? '读图' : '',
-    m.thinking_enabled ? `思考${m.reasoning_effort ? ` ${m.reasoning_effort}` : ''}` : '',
+    m.thinking_enabled ? `思考${m.reasoning_effort ? ` ${effortLabel(m.reasoning_effort)}` : ''}` : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -43,7 +43,7 @@ function abilities(m: ModelProvider) {
 async function remove(m: ModelProvider) {
   if (
     !(await confirm({
-      message: `删除模型「${m.name}」？使用它的任务需要改选模型。`,
+      message: `删除模型「${m.name}」？`,
       confirmText: '删除',
       danger: true,
     }))
@@ -63,10 +63,7 @@ async function remove(m: ModelProvider) {
   <div class="page">
     <div class="toolbar">
       <span class="spacer" />
-      <button type="button" class="btn-icon" aria-label="刷新" :disabled="list.loading.value" @click="list.refresh">
-        <Icon name="refresh-cw" />
-      </button>
-      <button type="button" class="primary" @click="edit(null)"><Icon name="plus" />新建</button>
+      <button type="button" class="primary" @click="edit(null)"><Icon name="plus" />新建模型</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -98,12 +95,7 @@ async function remove(m: ModelProvider) {
             <td class="num">{{ fmtTokens(m.context_window) }}</td>
             <td>{{ abilities(m) || '—' }}</td>
             <td class="row-actions">
-              <span>
-                <button type="button" class="ghost btn-sm" @click.stop="edit(m)">编辑</button>
-                <ActionMenu
-                  :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(m) }]"
-                />
-              </span>
+              <ActionMenu :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(m) }]" />
             </td>
           </tr>
           <TableState
@@ -113,7 +105,9 @@ async function remove(m: ModelProvider) {
             :empty="!list.data.value?.length"
             empty-text="暂无模型"
             @retry="list.refresh"
-          />
+          >
+            <button type="button" class="primary" @click="edit(null)">新建模型</button>
+          </TableState>
         </tbody>
       </table>
     </div>

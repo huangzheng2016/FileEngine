@@ -19,6 +19,8 @@ describe('model form', () => {
     expect(effortOptions('').map((o) => o.value)).toEqual(['low', 'medium', 'high', 'max'])
     expect(effortOptions('hi').map((o) => o.value)).toEqual(['high', 'hi'])
     expect(effortOptions('max').map((o) => o.value)).toEqual(['max'])
+    expect(effortOptions('高').map((o) => o.value)).toEqual(['high', 'max'])
+    expect(effortOptions('').map((o) => o.label)).toEqual(['低', '中', '高', '最高'])
   })
 
   it('parses and formats context lengths in tokens', () => {
