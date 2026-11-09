@@ -36,11 +36,13 @@ export interface ScanSession {
   model_provider_id: number
   // 0 = same as model_provider_id
   bulk_model_provider_id: number
+  review_count: number
+  latest_run?: { id: number; phase: RunPhase; status: RunStatus }
   created_at: string
   updated_at: string
 }
 
-export type RunPhase = 'survey' | 'tagging' | 'review' | 'chat' | 'executing'
+export type RunPhase = 'survey' | 'tagging' | 'review' | 'chat' | 'executing' | 'revert'
 export type RunStatus = 'running' | 'done' | 'partial' | 'error' | 'stopped'
 
 export interface AgentRun {
@@ -57,6 +59,9 @@ export interface AgentRun {
   total_tokens: number
   started_at: string
   ended_at: string | null
+  reverts_run_id?: number
+  reverted_by_run_id?: number
+  exec_mode?: 'copy' | 'move'
 }
 
 export interface SessionEvent {

@@ -9,7 +9,8 @@ export interface StreamHooks {
   // a run started, ended or reported progress: refetch runs / session counters
   onRun?: (ev: SessionEvent) => void
   onPlan?: () => void
-  onMemory?: () => void
+  // the session's stored counters changed
+  onSession?: () => void
 }
 
 const RUN_EVENTS = new Set(['run_status', 'run_done'])
@@ -28,7 +29,7 @@ export function useSessionStream(sessionId: Ref<number>, hooks: StreamHooks = {}
       if (ev.seq && ev.seq <= before) continue
       if (RUN_EVENTS.has(ev.type)) hooks.onRun?.(ev)
       else if (ev.type === 'plan_updated') hooks.onPlan?.()
-      else if (ev.type === 'memory_updated') hooks.onMemory?.()
+      else if (ev.type === 'session_updated') hooks.onSession?.()
     }
   })
 
