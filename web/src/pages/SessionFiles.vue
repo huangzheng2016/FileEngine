@@ -8,7 +8,7 @@ import Pagination from '@/base/Pagination.vue'
 import Select from '@/base/Select.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
-import { fmtBytes, fmtLabel } from '@/base/format'
+import { fmtBytes, fmtLabel, fmtNumber } from '@/base/format'
 import { DATE_SOURCE, ENTRY_FLAG, ENTRY_ROLE } from '@/base/labels'
 import { fmtDate } from '@/base/time'
 import { toast } from '@/base/toast'
@@ -23,6 +23,7 @@ import { locateFile } from '@/api/sessions'
 import type { FileEntry, LocateResult, ScanSession } from '@/api/types'
 import DirTree from '@/components/DirTree.vue'
 import { addChatFiles } from '@/lib/chatFiles'
+import { crumbs } from '@/lib/paths'
 import CategoryDialog from './CategoryDialog.vue'
 import FilePreviewDialog from './FilePreviewDialog.vue'
 
@@ -83,10 +84,16 @@ function roleKey(f: FileEntry) {
 }
 
 function detailLine(f: FileEntry): string {
+  if (f.role === 'container') return ''
   if (f.reason) return f.reason
   if (f.role === 'member') return '随上级目录整体移动'
   return ''
 }
+
+// mtime is a fallback every file has; only real capture dates are worth a line.
+const showDate = (f: FileEntry) => !!f.taken_at && f.date_source !== 'mtime'
+
+const trail = computed(() => crumbs(query.value.dir))
 
 function open(f: FileEntry) {
   if (f.file_type === 'directory') dir.value = f.original_path
@@ -101,34 +108,44 @@ function askAssistant(list: FileEntry[]) {
     props.session.id,
     list.map((f) => ({ id: f.id, name: f.name })),
   )
-  toast.success(`已把 ${list.length} 项加入对话`)
+  toast.success(`已把 ${fmtNumber(list.length)} 项加入对话`)
   selection.clear()
 }
 
-async function sendBack(list: FileEntry[]) {
+const resetting = ref(false)
+async function reset(list: FileEntry[]) {
+  if (resetting.value) return
+  resetting.value = true
   try {
     await resetPlans(
       props.session.id,
       list.map((f) => f.id),
     )
-    toast.success(list.length === 1 ? '已退回' : `已退回 ${list.length} 项`)
+    toast.success(list.length === 1 ? '已重置' : `已重置 ${fmtNumber(list.length)} 项`)
     selection.clear()
     void files.refresh()
     emit('changed')
   } catch (e) {
-    toast.error('退回失败', e)
+    toast.error('重置失败', e)
+  } finally {
+    resetting.value = false
   }
+}
+
+function resetBlocked(f: FileEntry): string {
+  if (!f.new_path) return '还没有目标位置'
+  return resetting.value ? '正在重置' : ''
 }
 
 const menuFor = (f: FileEntry) => [
   { label: '预览', icon: 'eye' as const, onSelect: () => (previewing.value = f) },
   { label: '问助手', icon: 'message-square' as const, onSelect: () => askAssistant([f]) },
   {
-    label: '退回',
+    label: '重置',
     icon: 'rotate-ccw' as const,
-    disabled: !f.new_path,
-    title: f.new_path ? undefined : '还没有目标位置',
-    onSelect: () => void sendBack([f]),
+    disabled: !!resetBlocked(f),
+    title: resetBlocked(f) || undefined,
+    onSelect: () => void reset([f]),
   },
 ]
 
@@ -152,7 +169,7 @@ async function saveTarget() {
   target.saving = true
   try {
     await updateFileTarget(target.file.id, target.path.trim())
-    toast.success(target.path.trim() ? '已记住此修正' : '已清除目标')
+    toast.success(target.path.trim() ? '已保存' : '已清除目标位置')
     targetGuard.reset()
     target.file = null
     void files.refresh()
@@ -189,11 +206,26 @@ function openLocate() {
       <DirTree v-model="dir" :session-id="session.id" />
     </aside>
     <section class="files-main">
+      <nav class="files-crumbs text-sm" aria-label="位置">
+        <template v-for="(c, i) in trail" :key="c.path">
+          <Icon v-if="i" name="chevron-right" :size="12" class="text-muted" />
+          <button
+            type="button"
+            class="ghost btn-sm"
+            :aria-current="i === trail.length - 1 || undefined"
+            @click="dir = c.path"
+          >
+            {{ c.label }}
+          </button>
+        </template>
+      </nav>
       <div v-if="selection.count.value" class="toolbar batch">
-        <span>已选 {{ selection.count.value }} 项</span>
+        <span>已选 {{ fmtNumber(selection.count.value) }} 项</span>
         <span class="spacer" />
         <button type="button" class="btn-sm" @click="askAssistant(selectedRows)">问助手</button>
-        <button type="button" class="btn-sm" @click="sendBack(selectedRows)">退回</button>
+        <button type="button" class="btn-sm" :disabled="resetting" @click="reset(selectedRows)">
+          {{ resetting ? '重置中' : '重置' }}
+        </button>
         <button type="button" class="ghost btn-sm" @click="selection.clear">取消选择</button>
       </div>
       <div v-else class="toolbar">
@@ -254,7 +286,7 @@ function openLocate() {
                   <StatusPill v-if="f.sensitive" value="sensitive" :map="ENTRY_FLAG" />
                 </span>
                 <span v-if="detailLine(f)" class="cell-sub">{{ detailLine(f) }}</span>
-                <span v-if="f.taken_at" class="cell-sub">
+                <span v-if="showDate(f)" class="cell-sub">
                   {{ fmtLabel(DATE_SOURCE, f.date_source || 'exif') }} {{ fmtDate(toSec(f.taken_at))
                   }}<template v-if="f.camera"> · {{ f.camera }}</template>
                 </span>
@@ -271,7 +303,7 @@ function openLocate() {
               <td class="num">{{ f.file_type === 'directory' ? '—' : fmtBytes(f.size) }}</td>
               <td class="row-actions">
                 <span>
-                  <button type="button" class="ghost btn-sm" @click.stop="editTarget(f)">改目标</button>
+                  <button type="button" class="ghost btn-sm" @click.stop="editTarget(f)">改位置</button>
                   <ActionMenu :items="menuFor(f)" />
                 </span>
               </td>
@@ -371,8 +403,13 @@ function openLocate() {
   align-items: start;
 }
 .files-tree {
-  max-height: 75vh;
   padding: var(--space-2);
+}
+.files-crumbs {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
 }
 .files-main {
   display: flex;
@@ -393,6 +430,12 @@ function openLocate() {
 @media (max-width: 760px) {
   .files {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .files-tree {
+    display: none;
+  }
+  .files-crumbs {
+    display: flex;
   }
 }
 </style>

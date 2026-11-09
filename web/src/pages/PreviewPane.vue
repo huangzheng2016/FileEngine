@@ -11,7 +11,7 @@ import { PREVIEW_LIMIT, previewTree } from '@/api/files'
 import type { PreviewItem } from '@/api/types'
 import { crumbs, resetReason, sortItems } from '@/lib/paths'
 
-const props = defineProps<{ sessionId: number; side: 'before' | 'after'; path: string; rev: number }>()
+const props = defineProps<{ sessionId: number; side: 'before' | 'after'; path: string; rev: number; busy?: boolean }>()
 const emit = defineEmits<{ open: [path: string]; reset: [item: PreviewItem] }>()
 
 const list = useFetch((signal) => previewTree(props.sessionId, props.side, props.path, signal))
@@ -24,13 +24,16 @@ const items = computed(() => sortItems(list.data.value?.items ?? []))
 const total = computed(() => list.data.value?.total ?? 0)
 const trail = computed(() => crumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'))
 
+const countText = (n?: number) => (n == null ? '—' : `${fmtNumber(n)} 个`)
+const resetBlocked = (it: PreviewItem) => resetReason(it) || (props.busy ? '正在重置' : '')
+
 function open(it: PreviewItem) {
   if (it.is_dir) emit('open', it.path)
 }
 </script>
 
 <template>
-  <section class="card pane" :aria-label="side === 'before' ? '整理前' : '整理后'">
+  <section class="pane" :aria-label="side === 'before' ? '整理前' : '整理后'">
     <nav class="crumbs text-sm" aria-label="位置">
       <template v-for="(c, i) in trail" :key="c.path">
         <Icon v-if="i" name="chevron-right" :size="12" class="text-muted" />
@@ -67,31 +70,31 @@ function open(it: PreviewItem) {
                 其中 {{ fmtNumber(it.moved_count) }} 项将移动
               </span>
               <span v-else-if="side === 'after' && it.original_path" class="cell-sub">来自 {{ it.original_path }}</span>
-              <span v-if="it.reason" class="cell-sub">{{ it.reason }}</span>
+              <span v-if="it.reason && it.role !== 'container'" class="cell-sub">{{ it.reason }}</span>
             </td>
             <td>
               <span class="flags">
                 <StatusPill v-if="side === 'before' && it.status" :value="it.status" :map="PREVIEW_STATUS" />
                 <StatusPill v-if="it.needs_review" value="needs_review" :map="ENTRY_FLAG" />
                 <StatusPill v-if="it.sensitive" value="sensitive" :map="ENTRY_FLAG" />
-                <span v-if="it.confidence" v-tip="'智能体的把握'" class="text-muted text-sm tabular">
+                <span v-if="it.confidence" v-tip="'助手的把握'" class="text-muted text-sm tabular">
                   {{ fmtRatio(it.confidence) }}
                 </span>
               </span>
             </td>
             <td class="num">
-              {{ it.is_dir ? `${fmtNumber(it.file_count)} 个` : fmtBytes(it.size) }}
+              {{ it.is_dir ? countText(it.file_count) : fmtBytes(it.size) }}
             </td>
             <td v-if="side === 'after'" class="row-actions">
               <span>
                 <button
-                  v-tip="resetReason(it)"
+                  v-tip="resetBlocked(it)"
                   type="button"
                   class="ghost btn-sm"
-                  :disabled="!!resetReason(it)"
+                  :disabled="!!resetBlocked(it)"
                   @click.stop="emit('reset', it)"
                 >
-                  退回
+                  重置
                 </button>
               </span>
             </td>
@@ -115,12 +118,10 @@ function open(it: PreviewItem) {
 
 <style scoped>
 .pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   min-width: 0;
-  max-height: 75vh;
-}
-.pane > .table-wrap {
-  flex: 1;
-  min-height: 0;
 }
 .crumbs {
   display: flex;

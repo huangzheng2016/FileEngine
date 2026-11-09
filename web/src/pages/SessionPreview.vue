@@ -21,20 +21,19 @@ const emit = defineEmits<{ changed: [] }>()
 const { query, set } = useRouteQuery({ bp: '', ap: '', view: 'tree', rp: 1 })
 const rev = ref(0)
 
-const VIEWS = [
-  { value: 'tree', label: '全部' },
-  { value: 'review', label: '待确认' },
-]
-
+const resetting = ref(false)
 async function reset(it: PreviewItem) {
-  if (!it.file_id) return
+  if (!it.file_id || resetting.value) return
+  resetting.value = true
   try {
     await resetPlans(props.sessionId, [it.file_id])
-    toast.success('已退回，下次整理会重新决定')
+    toast.success('已重置')
     rev.value++
     emit('changed')
   } catch (e) {
-    toast.error('退回失败', e)
+    toast.error('重置失败', e)
+  } finally {
+    resetting.value = false
   }
 }
 
@@ -43,28 +42,32 @@ const review = useFetch((signal) =>
   listFiles({ session_id: props.sessionId, needs_review: true, page: query.value.rp, size: SIZE }, signal),
 )
 watch(
-  () => [query.value.view, query.value.rp, rev.value],
-  () => {
-    if (query.value.view === 'review') void review.refresh()
-  },
+  () => [query.value.rp, rev.value],
+  () => void review.refresh(),
   { immediate: true },
 )
 const rows = computed(() => review.data.value?.items ?? [])
+const reviewTotal = computed(() => review.data.value?.total ?? 0)
+const views = computed(() => [
+  { value: 'tree', label: '对比' },
+  { value: 'review', label: `待确认 ${fmtNumber(reviewTotal.value)}` },
+])
 const selection = useSelection(computed(() => rows.value.map((r) => ({ id: String(r.id) }))))
 const batching = ref(false)
 
 async function batch(kind: 'confirm' | 'reset') {
+  if (batching.value) return
   const ids = selection.ids.value.map(Number)
   batching.value = true
   try {
     if (kind === 'confirm') await confirmReview(props.sessionId, ids)
     else await resetPlans(props.sessionId, ids)
-    toast.success(kind === 'confirm' ? `已确认 ${ids.length} 项` : `已退回 ${ids.length} 项`)
+    toast.success(`${kind === 'confirm' ? '已确认' : '已重置'} ${fmtNumber(ids.length)} 项`)
     selection.clear()
     rev.value++
     emit('changed')
   } catch (e) {
-    toast.error(kind === 'confirm' ? '确认失败' : '退回失败', e)
+    toast.error(kind === 'confirm' ? '确认失败' : '重置失败', e)
   } finally {
     batching.value = false
   }
@@ -74,28 +77,29 @@ async function batch(kind: 'confirm' | 'reset') {
 <template>
   <div class="page">
     <div v-if="selection.count.value" class="toolbar batch">
-      <span>已选 {{ selection.count.value }} 项</span>
+      <span>已选 {{ fmtNumber(selection.count.value) }} 项</span>
       <span class="spacer" />
       <button type="button" class="btn-sm" :disabled="batching" @click="batch('confirm')">确认</button>
-      <button type="button" class="btn-sm" :disabled="batching" @click="batch('reset')">退回</button>
+      <button type="button" class="btn-sm" :disabled="batching" @click="batch('reset')">重置</button>
       <button type="button" class="ghost btn-sm" @click="selection.clear">取消选择</button>
     </div>
-    <div v-else class="toolbar">
+    <div v-else-if="reviewTotal > 0 || query.view === 'review'" class="toolbar">
       <Segmented
         :model-value="query.view"
-        :options="VIEWS"
+        :options="views"
         label="显示"
         @update:model-value="set({ view: $event, rp: 1 })"
       />
     </div>
 
-    <div v-if="query.view === 'tree'" class="sides">
+    <div v-if="query.view !== 'review'" class="sides">
       <PreviewPane :session-id="sessionId" side="before" :path="query.bp" :rev="rev" @open="set({ bp: $event })" />
       <PreviewPane
         :session-id="sessionId"
         side="after"
         :path="query.ap"
         :rev="rev"
+        :busy="resetting"
         @open="set({ ap: $event })"
         @reset="reset"
       />
@@ -117,7 +121,7 @@ async function batch(kind: 'confirm' | 'reset') {
                 />
               </th>
               <th>文件</th>
-              <th>目标</th>
+              <th>目标位置</th>
               <th class="num">把握</th>
             </tr>
           </thead>
@@ -133,7 +137,7 @@ async function batch(kind: 'confirm' | 'reset') {
               </td>
               <td>
                 <span class="truncate">{{ f.original_path }}</span>
-                <span v-if="f.reason" class="cell-sub">{{ f.reason }}</span>
+                <span v-if="f.reason && f.role !== 'container'" class="cell-sub">{{ f.reason }}</span>
               </td>
               <td>
                 <span class="truncate">{{ f.new_path || '—' }}</span>
@@ -159,9 +163,6 @@ async function batch(kind: 'confirm' | 'reset') {
         :size="SIZE"
         @update:page="set({ rp: $event })"
       />
-      <p v-if="review.data.value?.total" class="text-muted text-sm tabular">
-        待确认的 {{ fmtNumber(review.data.value.total) }} 项在确认前不会执行
-      </p>
     </template>
   </div>
 </template>
