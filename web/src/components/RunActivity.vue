@@ -22,7 +22,8 @@ const showAll = ref(false)
 const decisions = computed(() =>
   showAll.value ? activity.value.decisions.slice(0, 200) : activity.value.decisions.slice(0, SHOWN),
 )
-const detailsOpen = ref(false)
+// A plan draft is the run's output, so it shows while it is written.
+const detailsOpen = ref(props.run.phase === 'survey')
 
 const moves = computed(() => props.run.phase === 'executing' || props.run.phase === 'revert')
 const title = computed(() => {
