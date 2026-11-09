@@ -13,13 +13,13 @@ scan ──▶ (optional) plan draft ──▶ tagging ──▶ review ──�
 | Thing | Lives in |
 |---|---|
 | Storage connections | `Filesystem` (secrets encrypted at rest) |
-| Model providers | `ModelProvider` (`thinking_enabled`, `reasoning_effort`, `context_window`, `vision_enabled`) |
+| Model providers | `ModelProvider` (`thinking_enabled`, `reasoning_effort`, `context_window`, `vision_enabled`; `temperature` 0 = model default, not sent; `max_tokens` 0 = no cap, Claude gets 8192 because its API requires one) |
 | One organizing task | `ScanSession` (scan state, goal, scope, switches, model ids) |
 | Every scanned entry and its decision | `FileEntry` (`role`, `new_path`, `reason`, `confidence`, `needs_review`, metadata, hash) |
 | The 整理方案 | `SessionPlan` (Markdown, versioned, draft/approved) and `PlanRule` rows |
 | Categories | `Category`, scoped to a filesystem |
 | Memory | `MemoryItem`: `session` notes shared by workers, `filesystem` and `global` long-term items |
-| Agent and executor activity | `AgentRun` (phase, status, summary, tokens) |
+| Agent and executor activity | `AgentRun` (phase, status, summary, tokens; `exec_mode` on executing runs, `reverts_run_id` on revert runs) |
 | Everything a run streamed | `SessionEvent` (seq = row id) |
 | Assistant conversation | `ChatTurn` |
 | File operations | `ExecOp` journal (resume and revert) |
@@ -31,14 +31,29 @@ Path columns compare as bytes on every database (SQLite BINARY, MySQL binary tab
 `"C"`), so subtree matches are index ranges (`db.subtreeCond`: `>= dir/` and `< dir0`). `new_path_key`
 (`CollisionKey(new_path)`) backs the indexed case/normalization-insensitive collision check. MySQL indexes use
 key prefixes to fit InnoDB's 3072-byte limit, so `original_path` uniqueness there covers its first 766
-characters. Session counters (`total_files`, `planned_ops`, …) are stored on `ScanSession`: phases refresh them
-when they end and decision writes schedule a coalesced refresh; reads never recompute them.
+characters. Session counters (`total_files`, `tagged_files`, `planned_ops`, `review_count`, `executed_ops`,
+`total_size`) are stored on `ScanSession`: phases refresh them when they end and decision writes (and review
+confirmation) schedule a coalesced refresh; reads never recompute them. `review_count` counts planned, unexecuted
+entries still in `needs_review`, which the executor skips. A refresh that changes a counter emits
+`session_updated`.
+
+A session needs a model: `POST /sessions` and `PATCH /sessions/:id` reject a missing or unknown
+`model_provider_id` (and an unknown non-zero `bulk_model_provider_id`) with `400 请选择模型`. With `auto_tag: true`
+the server starts a tagging run as soon as the scan completes. Deleting a storage or a model that a session still
+uses (either model field) answers `409 有 N 个整理任务在用这个存储/模型，先删除这些任务`. Session list and
+detail responses carry `latest_run: {id, phase, status}` when the session has runs.
 
 ## Runs and events
 
-A session runs at most one run at a time (`409 会话正在运行中` otherwise). Phases: `survey`, `tagging`,
-`review` (chained after a finished tagging run), `chat`, `executing`. Runs end `done`, `partial`, `error` or
-`stopped`; runs left `running` by a crash are swept to `stopped` on startup.
+A session runs at most one run at a time (`409 整理任务正在运行中` otherwise). Phases: `survey`, `tagging`,
+`review` (chained after a finished tagging run), `chat`, `executing`, `revert`. Runs end `done`, `partial`,
+`error` or `stopped`; runs left `running` by a crash are swept to `stopped` on startup. Titles are the phase name
+(`生成方案`, `整理`, `复查`, `执行`, `撤销`) without ids; chat runs carry the user's message.
+
+A `revert` run undoes one executing run and stores its id in `reverts_run_id`; the executing run then reports
+`reverted_by_run_id` (derived from a running, done or partial revert; a stopped or failed revert can be retried).
+`POST /runs/:id/revert` answers `409` for a revert run and for an executing run that is already reverted
+(`这次执行已撤销`).
 
 `db.Emit` is the only publisher. It persists the event, assigns `seq`, then broadcasts; text and reasoning
 deltas are coalesced (150 ms / 2 KB) and flushed before any other event of the same run.
@@ -57,6 +72,7 @@ ordered. History: `GET /sessions/:id/events?run_id&after&before&limit`.
 | `tool_call` / `tool_result` | paired by `call_id`; `ok` false on `success:false` |
 | `progress` | absolute counters |
 | `plan_updated`, `memory_updated` | refetch the plan / memory |
+| `session_updated` | `{}` (run_id 0) — stored counters changed; refetch the session |
 
 ## Decision model
 

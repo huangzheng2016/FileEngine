@@ -20,6 +20,8 @@ export interface SessionInput extends SessionOptions {
   filesystem_id: number
   scan_path: string
   goal: string
+  // start organizing as soon as the scan completes
+  auto_tag?: boolean
 }
 
 export async function listSessions(signal?: AbortSignal) {

@@ -1,5 +1,6 @@
 import axios, { type AxiosError } from 'axios'
 import { HttpError, readEventStream, type SseEvent } from '@/base/sse'
+import type { AuthMe } from './types'
 
 export const API = '/api/v1'
 
@@ -38,6 +39,11 @@ export async function authed(): Promise<boolean> {
   } catch (e) {
     return (e as AxiosError).response?.status !== 401
   }
+}
+
+export async function getMe() {
+  const { data } = await http.get<AuthMe>('/auth/me')
+  return data
 }
 
 export function isConflict(e: unknown): boolean {

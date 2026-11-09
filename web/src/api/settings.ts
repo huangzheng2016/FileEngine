@@ -96,6 +96,8 @@ export interface AppConfig {
   server: Record<string, unknown>
   database: Record<string, unknown>
   agent: AgentConfig
+  // read-only; agent.category_policy equal to it means not customized
+  default_category_policy?: string
 }
 
 export async function getConfig(signal?: AbortSignal) {

@@ -16,6 +16,8 @@ export interface ScanSession {
   error_message: string
   tagged_files: number
   planned_ops: number
+  // planned, unexecuted entries waiting for confirmation (待确认); the executor skips them
+  review_count: number
   executed_ops: number
   total_size: number
   prompt_tokens: number
@@ -38,10 +40,17 @@ export interface ScanSession {
   bulk_model_provider_id: number
   created_at: string
   updated_at: string
+  latest_run?: RunRef
 }
 
-export type RunPhase = 'survey' | 'tagging' | 'review' | 'chat' | 'executing'
+export type RunPhase = 'survey' | 'tagging' | 'review' | 'chat' | 'executing' | 'revert'
 export type RunStatus = 'running' | 'done' | 'partial' | 'error' | 'stopped'
+
+export interface RunRef {
+  id: number
+  phase: RunPhase
+  status: RunStatus
+}
 
 export interface AgentRun {
   id: number
@@ -49,6 +58,12 @@ export interface AgentRun {
   phase: RunPhase
   status: RunStatus
   title: string
+  // executing runs only
+  exec_mode?: 'copy' | 'move'
+  // revert runs only: the executing run they undo
+  reverts_run_id?: number
+  // executing runs that a running or finished (done/partial) revert undoes
+  reverted_by_run_id?: number
   summary: string
   error: string
   prompt_tokens: number
@@ -59,9 +74,30 @@ export interface AgentRun {
   ended_at: string | null
 }
 
+export type SessionEventType =
+  | 'run_status'
+  | 'run_done'
+  | 'pull_begin'
+  | 'pull_done'
+  | 'message'
+  | 'text'
+  | 'reasoning'
+  | 'tool_call'
+  | 'tool_result'
+  | 'progress'
+  | 'plan_updated'
+  | 'memory_updated'
+  // payload {}: stored session counters changed; refetch the session
+  | 'session_updated'
+
+export interface AuthMe {
+  authenticated: boolean
+  desktop: boolean
+}
+
 export interface SessionEvent {
   seq: number
-  type: string
+  type: SessionEventType | (string & {})
   data: Record<string, unknown>
   created_at?: string
 }
@@ -256,6 +292,8 @@ export interface PlanRule {
 export interface RulePreview {
   rule_id: number
   matched: number
+  // matched but not decided (bad target or rejected); 0 on preview unless the target cannot render
+  skipped: number
   samples: { original_path: string; new_path: string }[]
 }
 

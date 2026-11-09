@@ -34,6 +34,12 @@ export async function previewRules(sessionId: number, signal?: AbortSignal) {
 }
 
 export async function applyRules(sessionId: number) {
-  const { data } = await http.post<{ items: RulePreview[] | null }>(`/sessions/${sessionId}/rules/apply`)
-  return (data.items ?? []).reduce((n, r) => n + r.matched, 0)
+  return (await applyRulesSummary(sessionId)).applied
+}
+
+export async function applyRulesSummary(sessionId: number) {
+  const { data } = await http.post<{ items: RulePreview[] | null; applied: number; skipped: number }>(
+    `/sessions/${sessionId}/rules/apply`,
+  )
+  return { applied: data.applied ?? 0, skipped: data.skipped ?? 0 }
 }
