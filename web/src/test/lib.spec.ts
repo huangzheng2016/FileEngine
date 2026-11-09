@@ -78,7 +78,7 @@ describe('rules', () => {
     ).toBe('扩展名 jpg、png · 位于 /下载')
     expect(
       describeMatch({ exts: '', name_regex: '', path_prefix: '', file_type: 'file', min_size: 0, max_size: 0 }),
-    ).toBe('所有待定条目')
+    ).toBe('所有未整理的条目')
   })
 
   it('rejects unknown template variables and parent segments', () => {
