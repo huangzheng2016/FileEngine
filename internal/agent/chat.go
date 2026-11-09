@@ -181,12 +181,12 @@ func renderSelectedFiles(files []db.FileEntry) string {
 		if f.FileType == "directory" {
 			kind = "目录"
 		}
-		sb.WriteString(fmt.Sprintf("- %s（%s，%s）", f.OriginalPath, kind, humanSize(f.Size)))
+		sb.WriteString(fmt.Sprintf("- %s（%s，%s）", SanitizeUntrustedName(f.OriginalPath), kind, humanSize(f.Size)))
 		if f.NewPath != "" {
-			sb.WriteString(" → " + f.NewPath)
+			sb.WriteString(" → " + SanitizeUntrustedName(f.NewPath))
 		}
 		if f.Description != "" {
-			sb.WriteString("：" + oneLine(f.Description))
+			sb.WriteString("：" + SanitizeUntrustedName(oneLine(f.Description)))
 		}
 		sb.WriteString("\n")
 	}
@@ -212,7 +212,7 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 	msgs := chatHistoryMessages(summary, turns)
 	msgs = append(msgs, &schema.Message{Role: schema.User, Content: renderSelectedFiles(files) + content})
 	maxStep := config.Get().Agent.ChatMaxStep
-	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", maxStep: maxStep, instruction: chatPrompt, messages: msgs})
+	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", maxStep: maxStep, instruction: chatSystemPrompt(config.Get().Agent, a.session), messages: msgs})
 	if err != nil {
 		return "", err
 	}

@@ -46,7 +46,7 @@ watch(
 const view = computed<RunView | undefined>(() => live.value ?? history.data.value ?? undefined)
 
 const moves = (r: AgentRun | undefined) => r?.phase === 'executing' || r?.phase === 'revert'
-const runName = (r: AgentRun) => r.title || fmtLabel(RUN_PHASE, r.phase)
+const runName = (r: AgentRun) => (r.phase === 'chat' && r.title) || fmtLabel(RUN_PHASE, r.phase)
 
 const status = computed(() => (live.value?.done || !live.value ? selected.value?.status : 'running'))
 // A run whose transcript ends in the assistant's answer already shows its summary there.

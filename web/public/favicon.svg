@@ -1,11 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
-  <rect width="48" height="48" rx="12" fill="url(#g)"/>
-  <path d="M12 16.5C12 14.567 13.567 13 15.5 13H21L24 17H32.5C34.433 17 36 18.567 36 20.5V31.5C36 33.433 34.433 35 32.5 35H15.5C13.567 35 12 33.433 12 31.5V16.5Z" fill="white" fill-opacity="0.92"/>
-  <path d="M18 24.5H30M18 28.5H26" stroke="#1e66f5" stroke-width="2.4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="g" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1e66f5"/>
-      <stop offset="1" stop-color="#fe640b"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14c3e6"/>
+      <stop offset="1" stop-color="#00799a"/>
     </linearGradient>
   </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <path d="M220 330a62 62 0 0 1 62-62h150a40 40 0 0 1 30 14l42 48h238a62 62 0 0 1 62 62v332a62 62 0 0 1-62 62H282a62 62 0 0 1-62-62Z" fill="#fff"/>
+  <g fill="#00799a">
+    <rect x="300" y="458" width="330" height="56" rx="28"/>
+    <rect x="300" y="562" width="250" height="56" rx="28"/>
+    <rect x="300" y="666" width="170" height="56" rx="28"/>
+  </g>
+  <path d="M760 112c9 55 29 75 84 84-55 9-75 29-84 84-9-55-29-75-84-84 55-9 75-29 84-84Z" fill="#fff"/>
 </svg>

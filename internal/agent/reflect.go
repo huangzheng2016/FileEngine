@@ -65,7 +65,7 @@ func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSessi
 		}
 		sb.WriteString(fmt.Sprintf("- [id=%d，%s，%s%s] %s：%s", m.ID, m.Scope, m.Kind, owner, m.Key, m.Content))
 		if m.Path != "" {
-			sb.WriteString("（路径：" + m.Path + "）")
+			sb.WriteString("（路径：" + SanitizeUntrustedName(m.Path) + "）")
 		}
 		sb.WriteString("\n")
 	}
@@ -73,16 +73,16 @@ func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSessi
 	if len(corrections) > 0 {
 		sb.WriteString("## 本会话期间用户做的纠正\n\n")
 		for _, m := range corrections {
-			sb.WriteString(fmt.Sprintf("- [id=%d] %s\n", m.ID, m.Content))
+			sb.WriteString(fmt.Sprintf("- [id=%d] %s\n", m.ID, SanitizeUntrustedName(m.Content)))
 		}
 		sb.WriteString("\n")
 	}
 	if len(notes) > 0 {
 		sb.WriteString("## 本会话的工作笔记\n\n")
 		for _, n := range notes {
-			sb.WriteString("- " + n.Content)
+			sb.WriteString("- " + SanitizeUntrustedName(n.Content))
 			if n.Path != "" {
-				sb.WriteString("（" + n.Path + "）")
+				sb.WriteString("（" + SanitizeUntrustedName(n.Path) + "）")
 			}
 			sb.WriteString("\n")
 		}

@@ -35,7 +35,7 @@ const estimatedTokensPerImagePart = 400
 const maxImagePixels = 50_000_000
 
 type ViewImageInput struct {
-	Paths []string `json:"paths" jsonschema_description:"Image file paths to view (original_path from list_files). Supported: jpg/jpeg/png/gif. HEIC/RAW are skipped."`
+	Paths []string `json:"paths" jsonschema_description:"要查看的图片的原路径；支持 jpg、jpeg、png、gif，HEIC 和 RAW 会跳过"`
 }
 
 func (tb *ToolBuilder) visionLimits() (maxImages, maxPx, maxBytes int) {

@@ -202,7 +202,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	}
 
 	in1 := model.streamed[0]
-	if in1[0].Role != schema.System || in1[0].Content != chatPrompt {
+	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent, a.session) {
 		t.Fatal("system prompt first and static")
 	}
 	if !strings.HasPrefix(in1[1].Content, "# 会话共享上下文") || !strings.Contains(in1[1].Content, "照片按年份整理") {
@@ -287,7 +287,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 	}
 	in := model.streamed[0]
 	user := in[len(in)-1].Content
-	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveyPrompt {
+	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent, a.session) {
 		t.Fatalf("survey input: %q", user)
 	}
 
@@ -358,7 +358,7 @@ func TestRunReviewSummaryAndReflection(t *testing.T) {
 	if !strings.HasPrefix(sum, report) || !strings.Contains(sum, "记忆已更新：新增 1 条") {
 		t.Fatalf("summary: %q", sum)
 	}
-	if in := model.streamed[0]; in[0].Content != reviewPrompt || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
+	if in := model.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent, a.session) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
 		t.Fatal("review input: static prompt + material")
 	}
 	if len(model.genned) != 1 || !strings.Contains(model.genned[0][1].Content, "mix 是浏览器下载目录") {

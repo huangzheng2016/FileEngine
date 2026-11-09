@@ -285,6 +285,14 @@ func topExts(m map[string]int, n int) string {
 	return strings.Join(parts, " ")
 }
 
+func sanitizedJoin(names []string) string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = SanitizeUntrustedName(n)
+	}
+	return strings.Join(out, "、")
+}
+
 func (ov *TreeOverview) Render() string {
 	var sb strings.Builder
 	sb.WriteString("## 目录树概览（系统统计）\n\n")
@@ -306,13 +314,13 @@ func (ov *TreeOverview) Render() string {
 	if len(ov.TopDirs) > 0 {
 		sb.WriteString("### 顶层目录（按文件数）\n\n")
 		for _, d := range ov.TopDirs {
-			sb.WriteString(fmt.Sprintf("- %s/ — %d 个文件，%d 个子目录，%s", d.name, d.files, d.dirs, humanSize(d.size)))
+			sb.WriteString(fmt.Sprintf("- %s/ — %d 个文件，%d 个子目录，%s", SanitizeUntrustedName(d.name), d.files, d.dirs, humanSize(d.size)))
 			if e := topExts(d.exts, overviewExtsPerDir); e != "" {
 				sb.WriteString("；主要类型 " + e)
 			}
 			sb.WriteString("\n")
 			if len(d.samples) > 0 {
-				sb.WriteString("  示例：" + strings.Join(d.samples, "、") + "\n")
+				sb.WriteString("  示例：" + sanitizedJoin(d.samples) + "\n")
 			}
 		}
 		if ov.MoreTopDirs > 0 {
@@ -323,7 +331,7 @@ func (ov *TreeOverview) Render() string {
 
 	if ov.RootFileCount > 0 {
 		sb.WriteString(fmt.Sprintf("### 根目录散文件（%d 个）\n\n", ov.RootFileCount))
-		sb.WriteString(strings.Join(ov.RootFiles, "、"))
+		sb.WriteString(sanitizedJoin(ov.RootFiles))
 		if ov.RootFileCount > len(ov.RootFiles) {
 			sb.WriteString(" …")
 		}
@@ -333,7 +341,7 @@ func (ov *TreeOverview) Render() string {
 	if len(ov.Exts) > 0 {
 		sb.WriteString("### 扩展名分布\n\n")
 		for _, x := range ov.Exts {
-			sb.WriteString(fmt.Sprintf("- %s：%d 个，%s\n", x.ext, x.count, humanSize(x.size)))
+			sb.WriteString(fmt.Sprintf("- %s：%d 个，%s\n", SanitizeUntrustedName(x.ext), x.count, humanSize(x.size)))
 		}
 		if ov.MoreExts > 0 {
 			sb.WriteString(fmt.Sprintf("- …另有 %d 种扩展名\n", ov.MoreExts))
@@ -344,7 +352,7 @@ func (ov *TreeOverview) Render() string {
 	if len(ov.Markers) > 0 {
 		sb.WriteString("### 特征文件（可能需要整体保留的目录）\n\n")
 		for _, m := range ov.Markers {
-			sb.WriteString(fmt.Sprintf("- %s：%s\n", m.dir, m.label))
+			sb.WriteString(fmt.Sprintf("- %s：%s\n", SanitizeUntrustedName(m.dir), m.label))
 		}
 		if ov.MoreMarkers > 0 {
 			sb.WriteString(fmt.Sprintf("- …另有 %d 处\n", ov.MoreMarkers))
@@ -370,12 +378,12 @@ func (a *Agent) RunSurvey(ctx context.Context, logger *Logger, instructions stri
 	if s := strings.TrimSpace(instructions); s != "" {
 		sb.WriteString("## 用户补充要求\n\n" + s + "\n\n")
 	}
-	sb.WriteString("请按系统提示的步骤调研这棵目录树，建立分类体系，并用 write_plan 写出整理方案。")
+	sb.WriteString("按系统提示的步骤调研这棵目录树，建好分类，并用 write_plan 写出整理方案。")
 
 	res, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "survey",
 		maxStep:     config.Get().Agent.MaxStep,
-		instruction: surveyPrompt,
+		instruction: surveySystemPrompt(config.Get().Agent, a.session),
 		messages:    []*schema.Message{{Role: schema.User, Content: sb.String()}},
 	})
 	if err != nil {

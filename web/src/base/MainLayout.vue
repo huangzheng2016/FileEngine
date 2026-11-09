@@ -200,7 +200,8 @@ const userMenu = computed(() => [{ label: '退出登录', icon: 'log-out' as con
   <div v-else class="shell" :class="{ rail, 'nav-open': navOpen }">
     <aside ref="sidebar" class="sidebar" :aria-label="narrow ? '导航' : undefined">
       <RouterLink to="/" class="brand">
-        <span class="brand-mark">{{ app.name.slice(0, 1) }}</span>
+        <img v-if="app.logo" :src="app.logo" class="brand-logo" alt="" />
+        <span v-else class="brand-mark">{{ app.name.slice(0, 1) }}</span>
         <span v-if="!rail" class="brand-name">{{ app.name }}</span>
       </RouterLink>
 
@@ -365,6 +366,12 @@ const userMenu = computed(() => [{ label: '退出登录', icon: 'log-out' as con
   font-weight: 700;
   color: var(--on-accent);
   background: var(--accent);
+  border-radius: var(--radius-sm);
+}
+.brand-logo {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
 }
 .brand-name {

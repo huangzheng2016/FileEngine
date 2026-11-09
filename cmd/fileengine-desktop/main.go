@@ -5,6 +5,7 @@
 package main
 
 import (
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,9 @@ import (
 // application id (Wayland app_id / X11 WM_CLASS); it keys the single-instance
 // lock everywhere.
 const desktopAppID = "com.fileengine.desktop"
+
+//go:embed appicon.png
+var appIcon []byte
 
 // Version is injected at build time via -ldflags "-X main.Version=x.y.z".
 var Version = "dev"
@@ -71,7 +75,8 @@ func run(args []string) int {
 	service := &Service{}
 	wailsApp := application.New(application.Options{
 		Name:        "FileEngine",
-		Description: "FileEngine desktop",
+		Description: "用 AI 整理 NAS 上的文件",
+		Icon:        appIcon,
 		Logger:      logger,
 		ErrorHandler: func(err error) {
 			logger.Error("Wails error", "error", err)

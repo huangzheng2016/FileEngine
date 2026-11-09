@@ -139,7 +139,14 @@ func (s *Server) setupRouter() {
 				http.FileServer(http.FS(s.frontend)).ServeHTTP(c.Writer, c.Request)
 				return
 			}
-			c.FileFromFS("index.html", http.FS(s.frontend))
+			// http.FileServer redirects any path ending in /index.html to ./, which
+			// sends deep links such as /sessions/1 into a redirect loop.
+			index, err := fs.ReadFile(s.frontend, "index.html")
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", index)
 		})
 	}
 

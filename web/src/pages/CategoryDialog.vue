@@ -37,7 +37,7 @@ const saving = ref(false)
 const guard = useDirtyGuard(() => (formOpen.value ? form : null))
 const v = useFormValidation(() => ({
   name: form.name.trim() ? '' : '请输入名称',
-  path: !form.path.trim() ? '请输入目录' : form.path.split('/').includes('..') ? '目录不能包含 ..' : '',
+  path: !form.path.trim() ? '请输入文件夹' : form.path.split('/').includes('..') ? '文件夹不能包含 ..' : '',
 }))
 
 const title = computed(() => (!formOpen.value ? '分类' : editing.value ? '编辑分类' : '新建分类'))
@@ -89,7 +89,7 @@ async function save() {
 
 async function remove(c: Category) {
   const ok = await confirm({
-    message: `删除分类「${c.name}」？这个分类下的文件会重置，重新整理。`,
+    message: `删除分类「${c.name}」？这个分类下的文件会交给 AI 重新整理。`,
     confirmText: '删除',
     danger: true,
   })
@@ -142,7 +142,7 @@ const presetMenu = computed(() =>
         <span v-if="v.error('name')" class="field-error">{{ v.error('name') }}</span>
       </label>
       <label class="field">
-        <span class="field-label required">目录</span>
+        <span class="field-label required">文件夹</span>
         <input v-model="form.path" name="path" placeholder="/照片" :aria-invalid="!!v.error('path')" />
         <span v-if="v.error('path')" class="field-error">{{ v.error('path') }}</span>
       </label>
@@ -165,7 +165,7 @@ const presetMenu = computed(() =>
           <thead>
             <tr>
               <th>名称</th>
-              <th>目录</th>
+              <th>文件夹</th>
               <th class="col-actions">操作</th>
             </tr>
           </thead>
