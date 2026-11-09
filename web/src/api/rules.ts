@@ -33,10 +33,6 @@ export async function previewRules(sessionId: number, signal?: AbortSignal) {
   return data.items ?? []
 }
 
-export async function applyRules(sessionId: number) {
-  return (await applyRulesSummary(sessionId)).applied
-}
-
 export async function applyRulesSummary(sessionId: number) {
   const { data } = await http.post<{ items: RulePreview[] | null; applied: number; skipped: number }>(
     `/sessions/${sessionId}/rules/apply`,

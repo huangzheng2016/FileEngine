@@ -27,6 +27,7 @@ const form = reactive({
 })
 const snapshot = ref<AppConfig | null>(null)
 const defaultPrompt = ref('')
+const defaultPolicy = ref('')
 const guard = useDirtyGuard(() => form, { route: true })
 
 const v = useFormValidation(() => ({
@@ -47,6 +48,7 @@ const load = useFetch(
 function apply(cfg: AppConfig, def = defaultPrompt.value) {
   snapshot.value = cfg
   defaultPrompt.value = def
+  defaultPolicy.value = cfg.default_category_policy ?? ''
   const a = cfg.agent
   Object.assign(form, {
     concurrency: a.concurrency,
@@ -188,7 +190,12 @@ async function fillPolicy(id: string) {
           size="sm"
           @update:model-value="fillPolicy"
         />
-        <button v-if="form.category_policy.trim()" type="button" class="btn-sm" @click="form.category_policy = ''">
+        <button
+          v-if="form.category_policy.trim() !== defaultPolicy.trim()"
+          type="button"
+          class="btn-sm"
+          @click="form.category_policy = defaultPolicy"
+        >
           恢复默认
         </button>
       </div>

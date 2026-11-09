@@ -18,7 +18,7 @@ import { useConfirm } from '@/base/useConfirm'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFetch } from '@/base/useFetch'
 import { isConflict, toSec } from '@/api/http'
-import { applyRules, deleteRule, listRules, previewRules, updateRule } from '@/api/rules'
+import { applyRulesSummary, deleteRule, listRules, previewRules, updateRule } from '@/api/rules'
 import { approvePlan, draftPlan, getPlan, savePlan } from '@/api/runs'
 import type { AxiosError } from 'axios'
 import type { PlanRule, RulePreview, SessionPlan } from '@/api/types'
@@ -228,8 +228,12 @@ async function apply() {
   if (applying.value || props.busyReason) return
   applying.value = true
   try {
-    const n = await applyRules(props.sessionId)
-    toast.success(`已按规则决定 ${fmtNumber(n)} 项`)
+    const r = await applyRulesSummary(props.sessionId)
+    toast.success(
+      r.skipped
+        ? `已按规则决定 ${fmtNumber(r.applied)} 项，跳过 ${fmtNumber(r.skipped)} 项`
+        : `已按规则决定 ${fmtNumber(r.applied)} 项`,
+    )
     preview.value = null
     void rules.refresh()
   } catch (e) {
