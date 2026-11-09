@@ -36,8 +36,7 @@ const guard = useDirtyGuard(() => form)
 const pathRequired = computed(() => form.protocol === 'local' || form.protocol === 'smb')
 const remote = computed(() => form.protocol !== 'local')
 
-const v = useFormValidation(() => ({
-  name: form.name.trim() ? '' : '请输入名称',
+const connectionRules = () => ({
   base_path:
     form.protocol === 'local' && !form.base_path.trim()
       ? '请输入本机目录'
@@ -46,10 +45,15 @@ const v = useFormValidation(() => ({
         : '',
   host: remote.value && !form.host.trim() ? '请输入地址' : '',
   port:
-    remote.value && (!Number.isInteger(form.port) || form.port < 0 || form.port > 65535)
-      ? '端口需在 0 到 65535 之间'
+    remote.value && (!Number.isInteger(form.port) || form.port < 1 || form.port > 65535)
+      ? '端口需在 1 到 65535 之间'
       : '',
-}))
+})
+const v = useFormValidation(() => ({ name: form.name.trim() ? '' : '请输入名称', ...connectionRules() }))
+// 测试连接 checks only what the connection needs.
+const vt = useFormValidation(connectionRules)
+type ConnKey = keyof ReturnType<typeof connectionRules>
+const err = (k: ConnKey | 'name') => v.error(k) || (k === 'name' ? '' : vt.error(k))
 
 watch(
   () => props.open,
@@ -59,6 +63,7 @@ watch(
     Object.assign(form, f ? { ...empty(), ...f, password: '' } : empty())
     tested.value = null
     v.reset()
+    vt.reset()
     guard.reset()
   },
 )
@@ -110,9 +115,13 @@ interface TestResult {
 }
 const tested = ref<TestResult | null>(null)
 const testing = ref(false)
+watch(
+  () => JSON.stringify({ ...body(), name: '', description: '' }),
+  () => (tested.value = null),
+)
 
 async function test() {
-  if (!v.validate() || testing.value) return
+  if (!vt.validate() || testing.value) return
   const b = body()
   const target = remote.value ? `${b.host}${b.port ? `:${b.port}` : ''}` : b.base_path
   testing.value = true
@@ -141,12 +150,12 @@ async function submit() {
     }
     if (props.editing) await updateFilesystem(props.editing.id, b)
     else await createFilesystem(b)
-    toast.success(props.editing ? '已保存' : '已添加')
+    toast.success(props.editing ? '已保存' : '已创建')
     guard.reset()
     emit('saved')
     emit('close')
   } catch (e) {
-    toast.error(props.editing ? '保存失败' : '添加失败', e)
+    toast.error(props.editing ? '保存失败' : '创建失败', e)
   } finally {
     saving.value = false
   }
@@ -154,7 +163,7 @@ async function submit() {
 </script>
 
 <template>
-  <BaseDialog :open="open" :title="editing ? '编辑存储' : '添加存储'" width="600px" @close="close">
+  <BaseDialog :open="open" :title="editing ? '编辑存储' : '新建存储'" width="600px" @close="close">
     <form id="storage-form" class="form" novalidate v-on="v.form" @submit.prevent="submit">
       <div class="form-grid">
         <label class="field">
@@ -164,14 +173,14 @@ async function submit() {
             name="name"
             maxlength="64"
             placeholder="家里的 NAS"
-            :aria-invalid="!!v.error('name')"
+            :aria-invalid="!!err('name')"
           />
-          <span v-if="v.error('name')" class="field-error">{{ v.error('name') }}</span>
+          <span v-if="err('name')" class="field-error">{{ err('name') }}</span>
         </label>
         <div class="field">
           <span class="field-label">连接方式</span>
           <Select v-model="form.protocol" :options="PROTOCOLS" label="连接方式" />
-          <span class="field-hint">{{ PROTOCOL_HINT[form.protocol] }}</span>
+          <span v-if="PROTOCOL_HINT[form.protocol]" class="field-hint">{{ PROTOCOL_HINT[form.protocol] }}</span>
         </div>
         <template v-if="remote">
           <label class="field">
@@ -181,9 +190,9 @@ async function submit() {
               name="host"
               class="mono"
               placeholder="192.168.1.10"
-              :aria-invalid="!!v.error('host')"
+              :aria-invalid="!!err('host')"
             />
-            <span v-if="v.error('host')" class="field-error">{{ v.error('host') }}</span>
+            <span v-if="err('host')" class="field-error">{{ err('host') }}</span>
           </label>
           <label class="field">
             <span class="field-label">端口</span>
@@ -191,26 +200,13 @@ async function submit() {
               v-model.number="form.port"
               name="port"
               type="number"
-              min="0"
+              min="1"
               max="65535"
-              :aria-invalid="!!v.error('port')"
+              :aria-invalid="!!err('port')"
             />
-            <span v-if="v.error('port')" class="field-error">{{ v.error('port') }}</span>
+            <span v-if="err('port')" class="field-error">{{ err('port') }}</span>
           </label>
         </template>
-        <label class="field" :class="{ 'span-2': !remote }">
-          <span class="field-label" :class="{ required: pathRequired }">
-            {{ basePathLabel }}
-          </span>
-          <input
-            v-model="form.base_path"
-            name="base_path"
-            class="mono"
-            :placeholder="form.protocol === 'smb' ? 'share' : '/volume1/data'"
-            :aria-invalid="!!v.error('base_path')"
-          />
-          <span v-if="v.error('base_path')" class="field-error">{{ v.error('base_path') }}</span>
-        </label>
         <template v-if="remote && form.protocol !== 'nfs'">
           <label class="field">
             <span class="field-label">用户名</span>
@@ -227,6 +223,19 @@ async function submit() {
             />
           </label>
         </template>
+        <label class="field span-2">
+          <span class="field-label" :class="{ required: pathRequired }">
+            {{ basePathLabel }}
+          </span>
+          <input
+            v-model="form.base_path"
+            name="base_path"
+            class="mono"
+            :placeholder="form.protocol === 'smb' ? 'share' : '/volume1/data'"
+            :aria-invalid="!!err('base_path')"
+          />
+          <span v-if="err('base_path')" class="field-error">{{ err('base_path') }}</span>
+        </label>
         <label v-if="form.protocol === 'sftp'" class="field span-2">
           <span class="field-label">私钥文件</span>
           <input v-model="form.key_path" name="key_path" class="mono" placeholder="/home/me/.ssh/id_ed25519" />
@@ -243,6 +252,7 @@ async function submit() {
     </form>
     <template #footer>
       <button type="button" :disabled="testing" @click="test">{{ testing ? '测试中' : '测试连接' }}</button>
+      <span class="foot-spacer" />
       <button type="button" @click="close">取消</button>
       <button type="submit" form="storage-form" class="primary" :disabled="saving">
         {{ saving ? '保存中' : '保存' }}
@@ -257,5 +267,8 @@ async function submit() {
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+.foot-spacer {
+  flex: 1;
 }
 </style>
