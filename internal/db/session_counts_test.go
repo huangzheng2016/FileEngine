@@ -38,6 +38,16 @@ func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
 		t.Fatalf("event after refresh = %+v", ev)
 	}
 
+	// The refresh CreateFiles scheduled may still land; let it settle first.
+	settle := time.After(5 * countsDelay)
+drain:
+	for {
+		select {
+		case <-sub.C:
+		case <-settle:
+			break drain
+		}
+	}
 	if err := r.RefreshSessionCounts(sess.ID); err != nil {
 		t.Fatal(err)
 	}
