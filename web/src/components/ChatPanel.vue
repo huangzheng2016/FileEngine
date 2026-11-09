@@ -12,7 +12,8 @@ import { laneBlocks, type Block, type Timeline } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import TranscriptBlock from './TranscriptBlock.vue'
 
-const props = defineProps<{ sessionId: number; timeline: Timeline; busyReason: string }>()
+// bare: rendered inside the 助手 tab, which already names it.
+const props = defineProps<{ sessionId: number; timeline: Timeline; busyReason: string; bare?: boolean }>()
 const emit = defineEmits<{ sent: [runId: number] }>()
 
 const turns = useFetch((signal) => listChat(props.sessionId, signal), { immediate: true })
@@ -126,8 +127,8 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <section class="chat card" aria-label="助手">
-    <div class="card-head"><h3>助手</h3></div>
+  <section class="chat card" :class="{ docked: !bare }" aria-label="助手">
+    <div v-if="!bare" class="card-head"><h3>助手</h3></div>
     <div ref="box" class="chat-list" @scroll.passive="onScroll">
       <Loading v-if="!turns.loaded.value" />
       <p v-else-if="turns.error.value" class="text-danger">加载对话失败：{{ turns.error.value }}</p>
@@ -162,7 +163,6 @@ function onKey(e: KeyboardEvent) {
         @keydown="onKey"
       />
       <div class="form-actions">
-        <span class="text-muted text-sm">Enter 发送，Shift + Enter 换行</span>
         <span class="spacer" />
         <button v-tip="blocked" type="submit" class="primary btn-sm" :disabled="sending || !!blocked || !draft.trim()">
           <Icon name="send" :size="14" />{{ sending ? '发送中' : '发送' }}
@@ -175,8 +175,21 @@ function onKey(e: KeyboardEvent) {
 <style scoped>
 .chat {
   position: relative;
-  min-height: 0;
-  height: min(78vh, 820px);
+  min-height: 360px;
+  height: calc(100dvh - var(--header-h) - 240px);
+}
+.chat.docked {
+  position: sticky;
+  top: 0;
+  height: calc(100dvh - var(--header-h) - 2 * var(--space-5));
+}
+@media (max-width: 760px) {
+  .chat {
+    height: auto;
+  }
+  .chat .chat-list {
+    overflow: visible;
+  }
 }
 .chat-list {
   display: flex;

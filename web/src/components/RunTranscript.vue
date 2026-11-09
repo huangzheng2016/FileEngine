@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import EmptyState from '@/base/EmptyState.vue'
 import type { RunView, UnitItem } from '@/lib/transcript'
 import LaneView from './LaneView.vue'
 
@@ -17,14 +16,13 @@ function current(items: readonly { kind: string }[]): UnitItem | undefined {
 </script>
 
 <template>
-  <EmptyState v-if="!lanes.length && !live" title="这次运行没有留下过程记录" icon="inbox" />
-  <div v-else-if="!multi" class="lanes">
+  <div v-if="!multi && (lanes.length || live)" class="lanes">
     <LaneView :items="lanes[0]?.items ?? []" :prompts="run.phase === 'chat'" :live="live" />
   </div>
-  <div v-else class="lanes multi">
-    <section v-for="l in lanes" :key="l.workerId" class="lane-col" :aria-label="`工作线程 ${l.workerId}`">
+  <div v-else-if="multi" class="lanes multi">
+    <section v-for="l in lanes" :key="l.workerId" class="lane-col" :aria-label="`助手 ${l.workerId}`">
       <header class="lane-head text-sm">
-        <span class="lane-title">线程 {{ l.workerId }}</span>
+        <span class="lane-title">助手 {{ l.workerId }}</span>
         <span class="truncate text-muted">{{ current(l.items)?.label ?? '' }}</span>
       </header>
       <LaneView :items="l.items" :live="live" />
@@ -35,9 +33,15 @@ function current(items: readonly { kind: string }[]): UnitItem | undefined {
 <style scoped>
 .lanes {
   display: flex;
-  height: min(70vh, 720px);
+  height: calc(100dvh - var(--header-h) - 240px);
   min-height: 320px;
   min-width: 0;
+}
+@media (max-width: 760px) {
+  .lanes {
+    height: auto;
+    min-height: 0;
+  }
 }
 .lanes.multi {
   display: grid;

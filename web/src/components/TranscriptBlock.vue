@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Icon from '@/base/Icon.vue'
+import Loading from '@/base/Loading.vue'
+import { fmtNumber } from '@/base/format'
 import { stepSummary, type Block } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import ToolCard from './ToolCard.vue'
@@ -16,14 +18,14 @@ const thinkingOpen = ref(false)
   <div v-if="block.kind === 'unit'" class="unit-line text-sm">
     <Icon name="folder" :size="14" />
     <span class="truncate">{{ block.item.label }}</span>
-    <span v-if="block.item.count" class="text-muted">{{ block.item.count }} 个</span>
+    <span v-if="block.item.count" class="text-muted">{{ fmtNumber(block.item.count) }} 个</span>
     <span v-if="block.item.done" class="unit-result">
-      已处理 {{ block.item.tagged
+      已处理 {{ fmtNumber(block.item.tagged)
       }}<template v-if="block.item.failed"
-        >，<span class="text-danger">失败 {{ block.item.failed }}</span></template
+        >，<span class="text-danger">失败 {{ fmtNumber(block.item.failed) }}</span></template
       >
     </span>
-    <span v-else class="tool-spinner" aria-label="处理中" />
+    <Loading v-else class="unit-result" inline label="" :delay="0" />
   </div>
 
   <div v-else-if="block.kind === 'prompt'" class="prompt">
@@ -67,7 +69,7 @@ const thinkingOpen = ref(false)
             <StreamMarkdown :source="it.reasoning" :streaming="it.streaming && !it.text" />
           </div>
           <div v-if="it.role === 'user'" class="thinking">
-            <div class="field-label">任务说明</div>
+            <div class="field-label">指令</div>
             <StreamMarkdown :source="it.text" />
           </div>
           <StreamMarkdown v-else-if="it.text" :source="it.text" :streaming="it.streaming" />
@@ -135,20 +137,5 @@ const thinkingOpen = ref(false)
 .thinking {
   color: var(--text-secondary);
   font-size: var(--text-sm);
-}
-.tool-spinner {
-  width: 12px;
-  height: 12px;
-  margin-left: auto;
-  flex-shrink: 0;
-  border: 2px solid var(--accent-soft);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue'
 import CodeBlock from '@/base/CodeBlock.vue'
 import Icon from '@/base/Icon.vue'
-import { fmtMs } from '@/base/format'
+import Loading from '@/base/Loading.vue'
+import { fmtMs, fmtNumber } from '@/base/format'
 import { fileRows, readExcerpt, toolLabel, toolSubject } from '@/lib/toolView'
 import type { ToolItem } from '@/lib/transcript'
 
@@ -24,7 +25,7 @@ const script = computed(() =>
 <template>
   <div class="tool" :class="tool.status">
     <button type="button" class="tool-head" :aria-expanded="open" @click="toggled = !open">
-      <span v-if="tool.status === 'running'" class="tool-spinner" aria-label="运行中" />
+      <Loading v-if="tool.status === 'running'" inline label="" :delay="0" />
       <Icon v-else :name="tool.status === 'ok' ? 'check-circle' : 'x-circle'" :size="14" class="tool-icon" />
       <span class="tool-name">{{ toolLabel(tool.name) }}</span>
       <span class="tool-subject truncate">{{ subject }}</span>
@@ -53,7 +54,9 @@ const script = computed(() =>
           </tbody>
         </table>
       </div>
-      <p v-if="files && files.total > files.rows.length" class="text-muted text-sm">共 {{ files.total }} 项</p>
+      <p v-if="files && files.total > files.rows.length" class="text-muted text-sm">
+        共 {{ fmtNumber(files.total) }} 项
+      </p>
       <pre v-if="excerpt" class="tool-excerpt">{{ excerpt }}</pre>
       <CodeBlock v-if="script" :value="script" lang="text" :max-lines="16" />
       <details class="tool-raw">
@@ -118,20 +121,6 @@ const script = computed(() =>
 }
 .tool-head[aria-expanded='true'] .tool-chevron {
   transform: rotate(90deg);
-}
-.tool-spinner {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  border: 2px solid var(--accent-soft);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .tool-body {
   display: flex;
