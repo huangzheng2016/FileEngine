@@ -273,7 +273,12 @@ async function apply() {
       <p v-else-if="plan.error.value" class="text-danger">加载失败：{{ plan.error.value }}</p>
       <MarkdownEditor v-else-if="editing" v-model="draftText" :rows="20" name="plan" />
       <StreamMarkdown v-else-if="exists && p" :source="p.content" />
-      <EmptyState v-else icon="list" title="还没有方案">
+      <EmptyState
+        v-else
+        icon="list"
+        title="还没有方案"
+        hint="可以先让 AI 看一遍文件，写出整理思路；你改好后，整理时会照着做"
+      >
         <button v-tip="generateBlocked" type="button" :disabled="!!generateBlocked" @click="generate">
           {{ generating ? '生成中' : '生成方案' }}
         </button>
@@ -305,7 +310,7 @@ async function apply() {
             <tr>
               <th>名称</th>
               <th>匹配条件</th>
-              <th>目标位置</th>
+              <th>新位置</th>
               <th class="num">命中</th>
               <th class="col-actions">操作</th>
             </tr>
@@ -337,7 +342,7 @@ async function apply() {
               :loading="!rules.loaded.value"
               :error="rules.error.value"
               :empty="items.length === 0"
-              empty-text="暂无规则"
+              empty-text="暂无规则。规则能一次决定一类文件的去向，例如所有照片按年份放"
               @retry="rules.refresh"
             />
           </tbody>

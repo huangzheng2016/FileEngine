@@ -23,7 +23,7 @@ export function describeMatch(
   r: Pick<PlanRule, 'exts' | 'name_regex' | 'path_prefix' | 'file_type' | 'min_size' | 'max_size'>,
 ): string {
   const parts: string[] = []
-  if (r.file_type === 'directory') parts.push('目录')
+  if (r.file_type === 'directory') parts.push('文件夹')
   const exts = splitExts(r.exts)
   if (exts.length) parts.push(`扩展名 ${exts.slice(0, 6).join('、')}${exts.length > 6 ? ` 等 ${exts.length} 种` : ''}`)
   if (r.name_regex) parts.push(`文件名符合 ${r.name_regex}`)
@@ -52,8 +52,8 @@ const KNOWN = new Set<string>(TEMPLATE_VARS)
 
 export function targetError(t: string): string {
   const v = t.trim()
-  if (!v) return '请输入目标位置'
-  if (v.split('/').some((s) => s === '..')) return '目标位置不能包含 ..'
+  if (!v) return '请输入新位置'
+  if (v.split('/').some((s) => s === '..')) return '新位置不能包含 ..'
   const unknown = [...v.matchAll(/\{[^}]*\}/g)].map((m) => m[0]).filter((m) => !KNOWN.has(m))
   if (unknown.length) return `无法识别 ${unknown.join('、')}`
   return ''

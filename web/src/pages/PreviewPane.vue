@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
-import { fmtBytes, fmtNumber, fmtRatio } from '@/base/format'
-import { ENTRY_FLAG, PREVIEW_STATUS } from '@/base/labels'
-import { vTip } from '@/base/tooltip'
+import { fmtBytes, fmtNumber } from '@/base/format'
+import { ENTRY_FLAG } from '@/base/labels'
 import { useFetch } from '@/base/useFetch'
 import { PREVIEW_LIMIT, previewTree } from '@/api/files'
 import type { PreviewItem } from '@/api/types'
-import { crumbs, resetReason, sortItems } from '@/lib/paths'
+import { crumbs, sortItems } from '@/lib/paths'
+import { shownPath } from '@/lib/toolView'
 
-const props = defineProps<{ sessionId: number; side: 'before' | 'after'; path: string; rev: number; busy?: boolean }>()
-const emit = defineEmits<{ open: [path: string]; reset: [item: PreviewItem] }>()
+// settled: every planned move has been executed
+const props = defineProps<{
+  sessionId: number
+  side: 'before' | 'after'
+  path: string
+  rev: number
+  busy?: boolean
+  settled?: boolean
+}>()
+const emit = defineEmits<{ open: [path: string]; edit: [item: PreviewItem]; keep: [item: PreviewItem] }>()
 
 const list = useFetch((signal) => previewTree(props.sessionId, props.side, props.path, signal))
 watch(
@@ -25,7 +34,26 @@ const total = computed(() => list.data.value?.total ?? 0)
 const trail = computed(() => crumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'))
 
 const countText = (n?: number) => (n == null ? '—' : `${fmtNumber(n)} 个`)
-const resetBlocked = (it: PreviewItem) => resetReason(it) || (props.busy ? '正在重置' : '')
+
+function menu(it: PreviewItem) {
+  const blocked = props.busy ? '正在保存' : ''
+  return [
+    {
+      label: '改位置',
+      icon: 'pencil' as const,
+      disabled: !!blocked,
+      title: blocked || undefined,
+      onSelect: () => emit('edit', it),
+    },
+    {
+      label: '保持原位',
+      icon: 'x' as const,
+      disabled: !!blocked,
+      title: blocked || undefined,
+      onSelect: () => emit('keep', it),
+    },
+  ]
+}
 
 function open(it: PreviewItem) {
   if (it.is_dir) emit('open', it.path)
@@ -60,51 +88,37 @@ function open(it: PreviewItem) {
           >
             <td>
               <span class="name">
-                <Icon :name="it.is_dir ? 'folder' : 'file'" :size="14" />
+                <Icon :name="it.is_dir ? 'folder' : 'file'" :size="14" class="text-muted" />
                 <span class="truncate">{{ it.name }}</span>
-              </span>
-              <span v-if="side === 'before' && it.status === 'moved' && it.new_path" class="cell-sub">
-                → {{ it.new_path }}
-              </span>
-              <span v-else-if="side === 'before' && it.status === 'partial' && it.moved_count" class="cell-sub">
-                其中 {{ fmtNumber(it.moved_count) }} 项将移动
-              </span>
-              <span v-else-if="side === 'after' && it.original_path" class="cell-sub">来自 {{ it.original_path }}</span>
-              <span v-if="it.reason && it.role !== 'container'" class="cell-sub">{{ it.reason }}</span>
-            </td>
-            <td>
-              <span class="flags">
-                <StatusPill v-if="side === 'before' && it.status" :value="it.status" :map="PREVIEW_STATUS" />
                 <StatusPill v-if="it.needs_review" value="needs_review" :map="ENTRY_FLAG" />
                 <StatusPill v-if="it.sensitive" value="sensitive" :map="ENTRY_FLAG" />
-                <span v-if="it.confidence" v-tip="'助手的把握'" class="text-muted text-sm tabular">
-                  {{ fmtRatio(it.confidence) }}
-                </span>
               </span>
+              <span v-if="side === 'before' && it.status === 'moved' && it.new_path" class="cell-sub">
+                <span class="moved"><Icon name="arrow-right" :size="12" />{{ shownPath(it.new_path) }}</span>
+              </span>
+              <span v-else-if="side === 'before' && it.status === 'partial' && it.moved_count" class="cell-sub">
+                <span class="moved">其中 {{ fmtNumber(it.moved_count) }} 项{{ settled ? '已整理' : '会移走' }}</span>
+              </span>
+              <span v-else-if="side === 'after' && it.original_path" class="cell-sub">
+                原在 {{ shownPath(it.original_path) }}
+              </span>
+              <span v-if="it.reason && it.role !== 'container'" class="cell-sub">{{ it.reason }}</span>
             </td>
             <td class="num">
               {{ it.is_dir ? countText(it.file_count) : fmtBytes(it.size) }}
             </td>
             <td v-if="side === 'after'" class="row-actions">
-              <span>
-                <button
-                  v-tip="resetBlocked(it)"
-                  type="button"
-                  class="ghost btn-sm"
-                  :disabled="!!resetBlocked(it)"
-                  @click.stop="emit('reset', it)"
-                >
-                  重置
-                </button>
+              <span v-if="it.file_id">
+                <ActionMenu :items="menu(it)" />
               </span>
             </td>
           </tr>
           <TableState
-            :colspan="side === 'after' ? 4 : 3"
+            :colspan="side === 'after' ? 3 : 2"
             :loading="list.loading.value && !items.length"
             :error="list.error.value"
             :empty="items.length === 0"
-            :empty-text="side === 'after' && !path ? '还没有要移动的文件' : '这个目录是空的'"
+            :empty-text="side === 'after' && !path ? '还没有要移动的文件' : '这个文件夹是空的'"
             @retry="list.refresh"
           />
         </tbody>
@@ -135,9 +149,10 @@ function open(it: PreviewItem) {
   gap: var(--space-2);
   min-width: 0;
 }
-.flags {
+.moved {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 4px;
+  color: var(--accent);
 }
 </style>

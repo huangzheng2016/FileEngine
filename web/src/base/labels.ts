@@ -20,9 +20,9 @@ export const SESSION_STAGE = {
   scanning: { text: '扫描中', tone: 'accent' },
   scan_failed: { text: '扫描失败', tone: 'danger' },
   scan_interrupted: { text: '扫描中断', tone: 'warning' },
-  survey: { text: '正在生成方案', tone: 'accent' },
+  survey: { text: '正在写方案', tone: 'accent' },
   tagging: { text: '正在整理', tone: 'accent' },
-  review: { text: '正在复查', tone: 'accent' },
+  review: { text: '正在检查', tone: 'accent' },
   chat: { text: '助手回复中', tone: 'accent' },
   executing: { text: '正在执行', tone: 'accent' },
   ready: { text: '待整理', tone: 'neutral' },
@@ -40,9 +40,9 @@ export const RUN_STATUS = {
 } satisfies LabelMap
 
 export const RUN_PHASE = {
-  survey: { text: '生成方案', tone: 'info' },
+  survey: { text: '写方案', tone: 'info' },
   tagging: { text: '整理', tone: 'accent' },
-  review: { text: '复查', tone: 'info' },
+  review: { text: '检查', tone: 'info' },
   chat: { text: '对话', tone: 'neutral' },
   executing: { text: '执行', tone: 'accent' },
   revert: { text: '撤销', tone: 'warning' },
@@ -88,14 +88,8 @@ export const PROVIDER = {
   ollama: { text: 'Ollama', tone: 'neutral' },
 } satisfies LabelMap
 
-export const PREVIEW_STATUS = {
-  moved: { text: '将移动', tone: 'accent' },
-  partial: { text: '部分移动', tone: 'info' },
-  kept: { text: '不动', tone: 'neutral' },
-} satisfies LabelMap
-
 export const FILE_TYPE = {
-  directory: { text: '目录', tone: 'neutral' },
+  directory: { text: '文件夹', tone: 'neutral' },
   file: { text: '文件', tone: 'neutral' },
   symlink: { text: '链接', tone: 'neutral' },
 } satisfies LabelMap
@@ -113,23 +107,23 @@ export const FILTER_MODE = {
 // Decision of an entry; '' (undecided) is the key `pending`.
 export const ENTRY_ROLE = {
   unit: { text: '整体移动', tone: 'accent' },
-  file: { text: '单独移动', tone: 'success' },
-  member: { text: '随目录', tone: 'info' },
-  container: { text: '逐项处理', tone: 'neutral' },
-  skip: { text: '跳过', tone: 'neutral' },
+  file: { text: '移动', tone: 'success' },
+  member: { text: '随文件夹移动', tone: 'info' },
+  container: { text: '拆开整理', tone: 'neutral' },
+  skip: { text: '保持原位', tone: 'neutral' },
   duplicate: { text: '重复', tone: 'warning' },
   pending: { text: '未整理', tone: 'warning' },
 } satisfies LabelMap
 
 export const RULE_ROLE = {
   file: { text: '逐个文件', tone: 'neutral' },
-  unit: { text: '整个目录', tone: 'neutral' },
+  unit: { text: '整个文件夹', tone: 'neutral' },
 } satisfies LabelMap
 
 export const VALIDATION_ISSUE = {
   invalid_target: { text: '目标位置无效', tone: 'danger' },
   into_self: { text: '目标位置在自身内部', tone: 'danger' },
-  nested: { text: '随上级目录移动', tone: 'neutral' },
+  nested: { text: '随上级文件夹移动', tone: 'neutral' },
   collision: { text: '目标位置重名', tone: 'danger' },
   target_exists: { text: '目标位置已有文件', tone: 'danger' },
   source_changed: { text: '源文件已变化', tone: 'warning' },
@@ -145,7 +139,7 @@ export const DATE_SOURCE = {
 } satisfies LabelMap
 
 export const ENTRY_FLAG = {
-  needs_review: { text: '待确认', tone: 'warning' },
+  needs_review: { text: '需要确认', tone: 'warning' },
   sensitive: { text: '敏感文件', tone: 'danger' },
 } satisfies LabelMap
 
@@ -164,7 +158,7 @@ export const TOOL_LABEL: Record<string, string> = {
   view_image: '查看图片',
   run_script: '运行脚本',
   set_targets: '设定目标位置',
-  decide_dirs: '决定目录',
+  decide_dirs: '决定文件夹',
   split_unit: '拆分整体',
   update_description: '写文件说明',
   list_categories: '查看分类',
