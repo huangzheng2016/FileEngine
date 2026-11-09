@@ -10,12 +10,11 @@ import (
 )
 
 // LocalPolicy bounds what a filesystem connection may read from the machine
-// FileEngine itself runs on: LOCAL protocol base paths and SFTP private-key
-// files. Without it, anyone able to create a filesystem could point it at
+// FileEngine itself runs on: LOCAL protocol base paths. Without it, anyone able to create a filesystem could point it at
 // /etc or at FileEngine's own database and read it back through the agent.
 type LocalPolicy struct {
-	// Roots are the host directories LOCAL base paths and SFTP key files must
-	// live under. Empty disables the LOCAL protocol and key files entirely.
+	// Roots are the host directories LOCAL base paths must live under. Empty
+	// disables the LOCAL protocol.
 	Roots []string
 	// Denied are host paths that stay unreachable even inside a root: the app
 	// data dir, the DB file, the config file, the secret key file.
@@ -64,6 +63,20 @@ func SetLocalPolicy(p LocalPolicy) error {
 	policy = out
 	policyMu.Unlock()
 	return nil
+}
+
+// LocalRoots returns the allowed roots that exist and are not denied, as the
+// starting points for browsing the host.
+func LocalRoots() []string {
+	var out []string
+	for _, r := range currentPolicy().Roots {
+		if CheckLocalPath(r) == nil {
+			if st, err := os.Stat(r); err == nil && st.IsDir() {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
 }
 
 func currentPolicy() LocalPolicy {

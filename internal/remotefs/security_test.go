@@ -106,11 +106,6 @@ func TestLocalPolicy(t *testing.T) {
 	if _, err := fs.ReadFile(context.Background(), "docs/a.txt"); err != nil {
 		t.Fatalf("legal read refused: %v", err)
 	}
-
-	_, err = NewFromConfig(config.RemoteFSConfig{Protocol: "sftp", Host: "127.0.0.1", Port: 1, HostKey: "SHA256:x", KeyPath: filepath.Join(data, "fileengine.db")})
-	if err == nil || !strings.Contains(err.Error(), "私钥") {
-		t.Fatalf("key path in data dir: got %v", err)
-	}
 }
 
 func startSSHServer(t *testing.T) (string, int, string) {

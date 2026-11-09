@@ -50,7 +50,7 @@ func smbStreamTimeout() time.Duration {
 	return 10 * opTimeout()
 }
 
-func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
+func dialSMB(cfg config.RemoteFSConfig) (*smb2.Session, net.Conn, error) {
 	port := cfg.Port
 	if port == 0 {
 		port = 445
@@ -60,7 +60,7 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 	dialer := net.Dialer{Timeout: timeout}
 	conn, err := dialer.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(port)))
 	if err != nil {
-		return nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
+		return nil, nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
 	d := &smb2.Dialer{
@@ -78,8 +78,44 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 	session, err := d.DialContext(dialCtx, conn)
 	if err != nil {
 		conn.Close()
-		return nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
+		return nil, nil, &OpError{Protocol: "smb", Op: "dial", Path: cfg.Host, Err: err}
 	}
+	return session, conn, nil
+}
+
+// ListSMBShares returns the disk shares a user can pick from; administrative
+// and IPC shares (trailing $) are left out.
+func ListSMBShares(ctx context.Context, cfg config.RemoteFSConfig) ([]string, error) {
+	session, conn, err := dialSMB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	opCtx, cancel := context.WithTimeout(ctx, opTimeout())
+	defer cancel()
+	s := session.WithContext(opCtx)
+	defer s.Logoff()
+	names, err := s.ListSharenames()
+	if err != nil {
+		return nil, &OpError{Protocol: "smb", Op: "shares", Path: cfg.Host, Err: err}
+	}
+	out := names[:0]
+	for _, n := range names {
+		if n != "" && !strings.HasSuffix(n, "$") {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
+	timeout := opTimeout()
+	session, conn, err := dialSMB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	// basePath format: "sharename/path/to/dir" (backslashes normalized to forward slashes)
 	normalized := strings.ReplaceAll(cfg.BasePath, "\\", "/")

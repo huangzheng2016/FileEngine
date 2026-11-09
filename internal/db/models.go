@@ -61,31 +61,33 @@ type Category struct {
 }
 
 type Filesystem struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;size:256" json:"name"`
-	Description string    `gorm:"type:text" json:"description"`
-	Protocol    string    `gorm:"size:32" json:"protocol"` // local, sftp, ftp, smb, nfs
-	BasePath    string    `gorm:"size:1024" json:"base_path"`
-	Host        string    `gorm:"size:256" json:"host"`
-	Port        int       `json:"port"`
-	Username    string    `gorm:"size:256" json:"username"`
-	Password    string    `gorm:"size:2048;serializer:secret" json:"-"` // AES-GCM encrypted at rest, never serialized
-	KeyPath     string    `gorm:"size:1024" json:"key_path"`
-	HostKey     string    `gorm:"size:256" json:"host_key"` // SFTP: pinned server key fingerprint (SHA256:…), TOFU
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Name          string    `gorm:"uniqueIndex;size:256" json:"name"`
+	Description   string    `gorm:"type:text" json:"description"`
+	Protocol      string    `gorm:"size:32" json:"protocol"` // local, sftp, ftp, smb, nfs
+	BasePath      string    `gorm:"size:1024" json:"base_path"`
+	Host          string    `gorm:"size:256" json:"host"`
+	Port          int       `json:"port"`
+	Username      string    `gorm:"size:256" json:"username"`
+	Password      string    `gorm:"size:2048;serializer:secret" json:"-"` // AES-GCM encrypted at rest, never serialized
+	PrivateKey    string    `gorm:"type:text;serializer:secret" json:"-"`
+	KeyPassphrase string    `gorm:"size:2048;serializer:secret" json:"-"`
+	HostKey       string    `gorm:"size:256" json:"host_key"` // SFTP: pinned server key fingerprint (SHA256:…), TOFU
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (f *Filesystem) ToRemoteFSConfig() config.RemoteFSConfig {
 	return config.RemoteFSConfig{
-		Protocol: f.Protocol,
-		BasePath: f.BasePath,
-		Host:     f.Host,
-		Port:     f.Port,
-		Username: f.Username,
-		Password: f.Password,
-		KeyPath:  f.KeyPath,
-		HostKey:  f.HostKey,
+		Protocol:      f.Protocol,
+		BasePath:      f.BasePath,
+		Host:          f.Host,
+		Port:          f.Port,
+		Username:      f.Username,
+		Password:      f.Password,
+		PrivateKey:    f.PrivateKey,
+		KeyPassphrase: f.KeyPassphrase,
+		HostKey:       f.HostKey,
 	}
 }
 

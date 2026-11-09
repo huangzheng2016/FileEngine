@@ -37,7 +37,9 @@ type RemoteFSConfig struct {
 	Port     int
 	Username string
 	Password string
-	KeyPath  string
+	// PEM private key content; KeyPassphrase decrypts it when protected.
+	PrivateKey    string
+	KeyPassphrase string
 	// SFTP connections refuse to start without a pinned key and fail on
 	// mismatch.
 	HostKey string

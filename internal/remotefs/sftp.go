@@ -3,6 +3,7 @@ package remotefs
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -88,22 +89,48 @@ func FetchSSHHostKey(host string, port int) (string, error) {
 	return "", &OpError{Protocol: "sftp", Op: "hostkey", Path: host, Err: err}
 }
 
+var (
+	ErrKeyInvalid           = errors.New("私钥格式不对：请粘贴完整的私钥内容，包括 BEGIN 和 END 两行")
+	ErrKeyPassphraseMissing = errors.New("这把私钥有口令：请填写私钥口令")
+	ErrKeyPassphraseWrong   = errors.New("私钥口令不对")
+)
+
+func ParsePrivateKey(pem, passphrase string) (ssh.Signer, error) {
+	data := []byte(strings.TrimSpace(pem) + "\n")
+	if passphrase == "" {
+		signer, err := ssh.ParsePrivateKey(data)
+		var missing *ssh.PassphraseMissingError
+		switch {
+		case errors.As(err, &missing):
+			return nil, ErrKeyPassphraseMissing
+		case err != nil:
+			return nil, ErrKeyInvalid
+		}
+		return signer, nil
+	}
+	signer, err := ssh.ParsePrivateKeyWithPassphrase(data, []byte(passphrase))
+	switch {
+	case errors.Is(err, x509.IncorrectPasswordError):
+		return nil, ErrKeyPassphraseWrong
+	case err != nil && strings.Contains(err.Error(), "not password protected"):
+		return ssh.ParsePrivateKey(data)
+	case err != nil && strings.Contains(err.Error(), "decryption password incorrect"):
+		return nil, ErrKeyPassphraseWrong
+	case err != nil:
+		return nil, ErrKeyInvalid
+	}
+	return signer, nil
+}
+
 func NewSFTPFS(cfg config.RemoteFSConfig) (*SFTPFS, error) {
 	if cfg.HostKey == "" {
 		return nil, ErrHostKeyNotPinned
 	}
 	var authMethods []ssh.AuthMethod
-	if cfg.KeyPath != "" {
-		if err := CheckLocalPath(cfg.KeyPath); err != nil {
-			return nil, fmt.Errorf("SFTP 私钥文件: %w", err)
-		}
-		key, err := os.ReadFile(cfg.KeyPath)
+	if cfg.PrivateKey != "" {
+		signer, err := ParsePrivateKey(cfg.PrivateKey, cfg.KeyPassphrase)
 		if err != nil {
-			return nil, fmt.Errorf("read key file: %w", err)
-		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
+			return nil, err
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}

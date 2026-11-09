@@ -11,7 +11,7 @@ import (
 )
 
 // secretSerializer transparently encrypts string columns tagged
-// `serializer:secret` (Filesystem.Password, ModelProvider.APIKey) with the
+// `serializer:secret` (Filesystem.Password, PrivateKey, KeyPassphrase, ModelProvider.APIKey) with the
 // AES-GCM key from internal/secret. The in-memory struct always holds
 // plaintext; only the DB sees ciphertext.
 type secretSerializer struct{}
