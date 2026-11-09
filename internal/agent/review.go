@@ -148,7 +148,7 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 				sb.WriteString(fmt.Sprintf("- …另有 %d 个目录\n", len(split)-reviewSplitDirsMax))
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s（%d 个文件）：%s\n", d.dir, d.files, topExts(d.cats, 6)))
+			sb.WriteString(fmt.Sprintf("- %s（%d 个文件）：%s\n", SanitizeUntrustedName(d.dir), d.files, topExts(d.cats, 6)))
 		}
 		sb.WriteString("\n")
 	}
@@ -172,9 +172,9 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 
 func writeSamples(sb *strings.Builder, samples []reviewSample) {
 	for _, s := range samples {
-		sb.WriteString(fmt.Sprintf("- %s → %s", s.from, s.to))
+		sb.WriteString(fmt.Sprintf("- %s → %s", SanitizeUntrustedName(s.from), SanitizeUntrustedName(s.to)))
 		if r := strings.TrimSpace(s.reason); r != "" {
-			sb.WriteString("（" + oneLine(r) + "）")
+			sb.WriteString("（" + SanitizeUntrustedName(oneLine(r)) + "）")
 		}
 		sb.WriteString("\n")
 	}
@@ -224,7 +224,7 @@ func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *db.Agent
 	report, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "review",
 		maxStep:     config.Get().Agent.MaxStep,
-		instruction: reviewPrompt,
+		instruction: reviewSystemPrompt(config.Get().Agent, a.session),
 		messages:    []*schema.Message{{Role: schema.User, Content: material + "请复核以上规划，修正明显的错误，最后输出复核报告。"}},
 	})
 	if err != nil {

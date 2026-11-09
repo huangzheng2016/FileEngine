@@ -12,10 +12,10 @@ import (
 const maxBatchItems = 200
 
 type TargetItem struct {
-	Path       string  `json:"path" jsonschema_description:"原路径"`
-	NewPath    string  `json:"new_path" jsonschema_description:"目标路径（分类路径/子目录/文件名）"`
-	Reason     string  `json:"reason" jsonschema_description:"一句话理由"`
-	Confidence float64 `json:"confidence,omitempty" jsonschema_description:"把握 0-1；低于 0.6 会交给用户确认"`
+	Path       string  `json:"path" jsonschema_description:"文件的原路径"`
+	NewPath    string  `json:"new_path" jsonschema_description:"含文件名的完整目标路径，如 /照片/2023/IMG_0012.jpg；空字符串表示撤销决定"`
+	Reason     string  `json:"reason" jsonschema_description:"给用户看的一句话理由"`
+	Confidence float64 `json:"confidence,omitempty" jsonschema_description:"把握程度 0–1，不填视为有把握；低于 0.6 交给用户确认"`
 }
 
 type SetTargetsInput struct {
@@ -23,12 +23,12 @@ type SetTargetsInput struct {
 }
 
 type DecideItem struct {
-	Path       string  `json:"path" jsonschema_description:"原路径"`
-	Role       string  `json:"role" jsonschema_description:"unit=整体移动（需 new_path）；container=不移动，子项逐个处理；skip=保持原位（目录连同子项）"`
-	NewPath    string  `json:"new_path,omitempty" jsonschema_description:"unit 的目标路径"`
-	Reason     string  `json:"reason" jsonschema_description:"一句话理由"`
-	Confidence float64 `json:"confidence,omitempty" jsonschema_description:"把握 0-1；低于 0.6 会交给用户确认"`
-	Override   bool    `json:"override,omitempty" jsonschema_description:"目录下已有单独决定时，确认整体覆盖"`
+	Path       string  `json:"path" jsonschema_description:"目录（skip 时也可以是文件）的原路径"`
+	Role       string  `json:"role" jsonschema_description:"unit：整体移动，需要 new_path；container：本身不动，子项逐个处理；skip：连同全部内容保持原位"`
+	NewPath    string  `json:"new_path,omitempty" jsonschema_description:"unit 的目标：目录移动后的完整路径，如 /项目/blog"`
+	Reason     string  `json:"reason" jsonschema_description:"给用户看的一句话理由"`
+	Confidence float64 `json:"confidence,omitempty" jsonschema_description:"把握程度 0–1，不填视为有把握；低于 0.6 交给用户确认"`
+	Override   bool    `json:"override,omitempty" jsonschema_description:"目录下已有单独决定时，true 表示确认用整体决定覆盖它们"`
 }
 
 type DecideDirsInput struct {
@@ -56,7 +56,7 @@ type BatchOutput struct {
 }
 
 type SplitUnitInput struct {
-	Path string `json:"path" jsonschema_description:"整体移动或整体跳过的目录"`
+	Path string `json:"path" jsonschema_description:"整体移动或整体跳过的目录的原路径"`
 }
 
 type SplitUnitOutput struct {

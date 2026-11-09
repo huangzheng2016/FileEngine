@@ -9,7 +9,7 @@ import (
 )
 
 func TestSystemPromptMatchesToolAvailability(t *testing.T) {
-	off := defaultSystemPrompt(false, true, "")
+	off := defaultSystemPrompt(false, true)
 	if strings.Contains(off, "create_category") {
 		t.Fatal("prompt without create_category must not teach category creation")
 	}
@@ -17,7 +17,7 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatal("prompt without create_category must steer to the fallback category")
 	}
 
-	on := defaultSystemPrompt(true, true, "")
+	on := defaultSystemPrompt(true, true)
 	if !strings.Contains(on, "确无合适分类才 create_category") {
 		t.Fatal("prompt with create_category must teach the create workflow")
 	}
@@ -25,8 +25,8 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 		t.Fatal("prompt with create_category must not forbid creation")
 	}
 
-	if DefaultSystemPrompt != defaultSystemPrompt(true, true, config.DefaultCategoryPolicy) {
-		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=true, AllowScript=true variant with the default category policy")
+	if DefaultSystemPrompt != defaultSystemPrompt(true, true) {
+		t.Fatal("DefaultSystemPrompt must equal the AllowAutoCategory=true, AllowScript=true variant")
 	}
 
 	custom := systemPromptForSession(config.AgentConfig{SystemPrompt: "自定义"}, &db.ScanSession{AllowAutoCategory: true})
@@ -36,12 +36,27 @@ func TestSystemPromptMatchesToolAvailability(t *testing.T) {
 }
 
 func TestSystemPromptMatchesScriptAvailability(t *testing.T) {
-	on := defaultSystemPrompt(false, true, "")
-	if !strings.Contains(on, "run_script") {
-		t.Fatal("prompt with AllowScript must mention run_script")
+	cfg := config.AgentConfig{}
+	for _, allow := range []bool{true, false} {
+		s := &db.ScanSession{AllowScript: allow}
+		for name, p := range map[string]string{
+			"tagging": defaultSystemPrompt(false, allow),
+			"chat":    chatSystemPrompt(cfg, s),
+			"review":  reviewSystemPrompt(cfg, s),
+		} {
+			if strings.Contains(p, "run_script") != allow {
+				t.Fatalf("%s prompt mentions run_script = %v, want %v", name, !allow, allow)
+			}
+		}
 	}
-	off := defaultSystemPrompt(false, false, "")
-	if strings.Contains(off, "run_script") {
-		t.Fatal("prompt without AllowScript must not mention run_script")
+}
+
+func TestSurveyPromptMatchesCategoryCreation(t *testing.T) {
+	cfg := config.AgentConfig{}
+	if p := surveySystemPrompt(cfg, &db.ScanSession{AllowAutoCategory: false}); strings.Contains(p, "create_category") {
+		t.Fatal("survey without create_category must not teach it")
+	}
+	if p := surveySystemPrompt(cfg, &db.ScanSession{AllowAutoCategory: true}); !strings.Contains(p, "create_category") {
+		t.Fatal("survey with create_category must teach it")
 	}
 }

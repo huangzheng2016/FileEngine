@@ -241,7 +241,7 @@ func listingBlock(title string, rows []db.FileEntry, total int) string {
 	sb.WriteString(WrapUntrusted(title, entryRows(shown)))
 	sb.WriteString("\n")
 	if total > len(shown) {
-		sb.WriteString(fmt.Sprintf("（只列出前 %d 项，共 %d 项；其余用 list_files 翻页，或用规则/脚本批量处理）\n", len(shown), total))
+		sb.WriteString(fmt.Sprintf("（只列出前 %d 项，共 %d 项；其余用 list_files 翻页查看，或用规则批量处理）\n", len(shown), total))
 	}
 	return sb.String()
 }
@@ -266,10 +266,10 @@ func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSigna
 	sb.WriteString(`## 要做的事
 
 用 decide_dirs 决定这个目录：
-- 是完整单元（项目、软件、相册/活动、数据集、备份集…）→ role=unit，给出目标路径，整体移动
-- 是分组/杂物目录 → role=container（不移动；子目录和散文件之后会作为单独任务交给 worker）
-- 不该动 → role=skip
-信号里有项目标记时几乎一定是 unit。决定 container 时不要处理子项。
+- 一个完整的整体（项目、软件、相册或活动、数据集、备份集）→ unit，new_path 写它移动后的完整路径
+- 只是分组或杂物目录 → container；子目录和散文件之后作为单独任务处理，现在不要处理它们
+- 不该整理 → skip
+信号里有项目标记时几乎一定是 unit。
 `)
 	return sb.String()
 }
@@ -294,8 +294,7 @@ func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, h
 	sb.WriteString("\n" + unitCtx)
 	sb.WriteString(`## 要做的事
 
-把这些文件逐个决定：set_targets 批量设目标（每条带 reason；拿不准时 confidence 低于 0.6），不该动的用 decide_dirs 设 skip。
-超过约 20 个同类文件时先 add_rule + apply_rules（或 run_script），剩下的再逐个处理。独立的工具调用请在同一轮并行发出。
+为每个文件做决定：set_targets 批量设目标（每条带 reason，拿不准时 confidence 低于 0.6）；不该整理的用 decide_dirs 设 skip。同类文件约 20 个以上时先用规则批量处理，剩下的再逐个决定。
 `)
 	return sb.String()
 }
@@ -309,8 +308,8 @@ func buildVersionUnitPrompt(parent string, g VersionGroup, suggested string, uni
 		rows = append(rows, fmt.Sprintf("%s\t版本 %s", m.Name, m.Version))
 	}
 	sb.WriteString(WrapUntrusted("版本组", SanitizeUntrustedName(strings.Join(rows, " | "))) + "\n\n")
-	sb.WriteString("建议目标：" + suggested + "/<版本>/<原名>（目录版本用 decide_dirs 设 unit，文件用 set_targets）\n\n")
+	sb.WriteString("建议目标：" + SanitizeUntrustedName(suggested) + "/<版本>/<原名>（目录用 decide_dirs 设 unit，文件用 set_targets）\n\n")
 	sb.WriteString(unitCtx)
-	sb.WriteString("## 要做的事\n\n一次把整组版本决定完，保持同一命名方式；明显不是同一软件的成员单独处理。\n")
+	sb.WriteString("## 要做的事\n\n一次决定完整组版本，各版本用同一种路径格式；明显不是同一软件的成员按普通文件单独决定。\n")
 	return sb.String()
 }
