@@ -136,6 +136,23 @@ func TestDecideRolesAndReview(t *testing.T) {
 	}
 }
 
+func TestDecideOntoOwnPathKeepsInPlace(t *testing.T) {
+	r := decisionFixture(t)
+	res, err := r.Decide(1, Decision{Path: "loose.txt", Role: RoleFile, NewPath: "/Loose.txt", Reason: "已在合适位置", Confidence: 0.4})
+	if err != nil || res.Role != RoleSkip || res.NewPath != "" || res.NeedsReview {
+		t.Fatalf("decide: %+v %v", res, err)
+	}
+	if e := entry(t, r, "loose.txt"); e.Role != RoleSkip || e.NewPath != "" || e.Operation != "" || !e.Tagged {
+		t.Fatalf("stored: %+v", e)
+	}
+	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleUnit, NewPath: "/proj"}); err != nil {
+		t.Fatal(err)
+	}
+	if m := entry(t, r, "proj/main.go"); m.Role != RoleMember || entry(t, r, "proj").Role != RoleSkip {
+		t.Fatalf("unit onto itself: %+v", m)
+	}
+}
+
 func TestDecideBatchReportsPerItem(t *testing.T) {
 	r := decisionFixture(t)
 	out, err := r.DecideBatch(1, []Decision{

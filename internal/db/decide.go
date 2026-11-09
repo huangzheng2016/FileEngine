@@ -140,6 +140,11 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 		if target == "" {
 			return nil, reject("%s 需要目标路径 new_path", p)
 		}
+		// A move onto its own path would only fail at execution; it means the
+		// entry already sits where it belongs.
+		if CollisionKey(target) == CollisionKey(p) {
+			role, target = RoleSkip, ""
+		}
 	}
 
 	res := &DecideResult{Path: p, Role: role}
