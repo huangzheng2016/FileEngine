@@ -95,7 +95,12 @@ async function remove(m: ModelProvider) {
             <td class="num">{{ fmtTokens(m.context_window) }}</td>
             <td>{{ abilities(m) || '—' }}</td>
             <td class="row-actions">
-              <ActionMenu :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(m) }]" />
+              <ActionMenu
+                :items="[
+                  { label: '编辑', icon: 'pencil', onSelect: () => edit(m) },
+                  { label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(m) },
+                ]"
+              />
             </td>
           </tr>
           <TableState
@@ -106,7 +111,7 @@ async function remove(m: ModelProvider) {
             empty-text="暂无模型"
             @retry="list.refresh"
           >
-            <button type="button" class="primary" @click="edit(null)">新建模型</button>
+            <button type="button" @click="edit(null)">新建模型</button>
           </TableState>
         </tbody>
       </table>
