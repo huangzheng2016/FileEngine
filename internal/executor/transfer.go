@@ -30,12 +30,17 @@ func (e *Executor) setState(op *db.ExecOp, state, msg string) error {
 	return e.repo.SetExecOpState(op, state, msg)
 }
 
-// failOp records a failure that is already being reported to the caller; a
-// lost journal write is logged because nothing else can act on it.
-func (e *Executor) failOp(op *db.ExecOp, msg string) {
-	if err := e.setState(op, db.ExecFailed, msg); err != nil {
-		log.Printf("executor: journal op %d failed state: %v", op.ID, err)
+// keepState records a state that is already being reported to the caller via
+// another error; a lost journal write is logged because nothing else can act
+// on it.
+func (e *Executor) keepState(op *db.ExecOp, state, msg string) {
+	if err := e.setState(op, state, msg); err != nil {
+		log.Printf("executor: journal op %d state %s: %v", op.ID, state, err)
 	}
+}
+
+func (e *Executor) failOp(op *db.ExecOp, msg string) {
+	e.keepState(op, db.ExecFailed, msg)
 }
 
 // stat separates "absent" from "could not tell": only a not-exist error is
@@ -239,7 +244,7 @@ func (e *Executor) copyJournaled(ctx context.Context, op *db.ExecOp) error {
 			// happen the dst is still ours, so retry here, and failing that
 			// leave the op pending for Recover.
 			if derr := e.fs.Delete(context.WithoutCancel(ctx), dst); derr != nil && !remotefs.IsNotExist(derr) {
-				e.setState(op, db.ExecPending, "复制失败，未能清理不完整的目标："+derr.Error())
+				e.keepState(op, db.ExecPending, "复制失败，未能清理不完整的目标："+derr.Error())
 				return err
 			}
 		}
@@ -290,7 +295,7 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 	}
 	if ok {
 		if st.Size != op.Size || (!op.ModTime.IsZero() && st.ModTime.Unix() != op.ModTime.Unix()) {
-			e.setState(op, db.ExecVerified, "源文件在复制后被修改，未删除源")
+			e.keepState(op, db.ExecVerified, "源文件在复制后被修改，未删除源")
 			return skip(IssueSourceChanged, "源文件在复制后被修改，已保留两份")
 		}
 		if ds == nil {
@@ -307,7 +312,7 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 			}
 		}
 		if err := e.fs.Delete(ctx, op.Src); err != nil {
-			e.setState(op, db.ExecVerified, "删除源失败："+err.Error())
+			e.keepState(op, db.ExecVerified, "删除源失败："+err.Error())
 			return &unfinishedError{fmt.Errorf("副本已校验，但删除源失败：%w", err)}
 		}
 	}
@@ -421,7 +426,7 @@ func (e *Executor) removeEmptyDir(ctx context.Context, entryID uint, dir string)
 		return err
 	}
 	if err := e.fs.Delete(ctx, dir); err != nil {
-		e.setState(op, db.ExecFailed, err.Error())
+		e.failOp(op, err.Error())
 		return fmt.Errorf("源目录未清空，已保留：%w", err)
 	}
 	return e.setState(op, db.ExecDone, "")
