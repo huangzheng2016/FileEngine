@@ -82,11 +82,16 @@ func openAIConfig(p *dbmodel.ModelProvider, baseURL string) *openai.ChatModelCon
 }
 
 func newClaudeModel(ctx context.Context, p *dbmodel.ModelProvider) (model.ChatModel, error) {
-	m, err := claude.NewChatModel(ctx, claudeConfig(p))
+	cfg := claudeConfig(p)
+	long := longCacheTTL(ctx)
+	if long {
+		cfg.AutoCacheControl = &claude.CacheControl{TTL: claude.CacheTTL1h}
+	}
+	m, err := claude.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &claudeModel{inner: m}, nil
+	return &claudeModel{inner: m, long: long}, nil
 }
 
 var claudeThinkingBudgets = map[string]int{"low": 2048, "medium": 8192, "high": 16384}

@@ -25,8 +25,14 @@ import (
 // on current models), and it keeps one block per message. A faithful replay
 // also conflicts with clearing old tool results, because the API rejects a
 // history whose earlier content changed once thinking blocks follow it.
+//
+// Long-lived mode (human-paced chat) writes the tools, system and
+// shared-context breakpoints with the 1-hour TTL and keeps the rolling tail at
+// 5 minutes. The API requires longer TTLs to precede shorter ones, which this
+// order satisfies.
 type claudeModel struct {
 	inner *claude.ChatModel
+	long  bool
 }
 
 // Mirrors the unexported key of the eino claude package; a test pins it.
@@ -66,8 +72,31 @@ func withTailBreakpoint(input []*schema.Message) []*schema.Message {
 	return out
 }
 
+// withLongBreakpoints gives every explicit breakpoint the 1-hour TTL; the
+// tail mark is added afterwards, at the default TTL.
+func withLongBreakpoints(input []*schema.Message) []*schema.Message {
+	var out []*schema.Message
+	for i, m := range input {
+		if m == nil || !hasBreakpoint(m) {
+			continue
+		}
+		if out == nil {
+			out = append([]*schema.Message(nil), input...)
+		}
+		out[i] = claude.SetMessageCacheControl(m, &claude.CacheControl{TTL: claude.CacheTTL1h})
+	}
+	if out == nil {
+		return input
+	}
+	return out
+}
+
 func (m *claudeModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	return m.inner.Stream(ctx, withTailBreakpoint(withValidToolArguments(input)), opts...)
+	input = withValidToolArguments(input)
+	if m.long {
+		input = withLongBreakpoints(input)
+	}
+	return m.inner.Stream(ctx, withTailBreakpoint(input), opts...)
 }
 
 // The client embeds tool-call arguments as raw JSON, so one truncated call in
@@ -131,7 +160,7 @@ func (m *claudeModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChat
 	if !ok {
 		return nil, fmt.Errorf("unexpected claude model type %T", inner)
 	}
-	return &claudeModel{inner: cm}, nil
+	return &claudeModel{inner: cm, long: m.long}, nil
 }
 
 func (m *claudeModel) GetType() string { return m.inner.GetType() }
