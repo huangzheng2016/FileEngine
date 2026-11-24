@@ -310,8 +310,12 @@ func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode strin
 		return skip(IssueSourceChanged, changed)
 	}
 	resume := false
-	if _, err := e.fs.Stat(ctx, dst); err == nil {
-		if !(f.FileType == "directory" && e.owned(dst)) {
+	_, dstExists, err := e.stat(ctx, dst)
+	if err != nil {
+		return fmt.Errorf("无法确认目标位置是否存在：%w", err)
+	}
+	if dstExists {
+		if !(f.FileType == "directory" && e.owned(f.ID, dst)) {
 			return skip(IssueTargetExists, "目标位置已有同名文件或目录")
 		}
 		resume = true // our own partially executed directory
@@ -349,10 +353,11 @@ func staleReason(f *db.FileEntry, st *remotefs.FileInfo) string {
 	return ""
 }
 
-// A directory a previous, interrupted run already started filling.
-func (e *Executor) owned(dst string) bool {
+// A directory this entry's own earlier, interrupted run created and started
+// filling; a directory made for another entry or kept from a revert is not.
+func (e *Executor) owned(entryID uint, dst string) bool {
 	op, err := e.repo.FindDoneExecOp(e.sessionID, dst)
-	return err == nil && op != nil
+	return err == nil && op != nil && op.Kind == db.ExecKindMkdir && op.EntryID == entryID
 }
 
 func (e *Executor) listConcurrent(ctx context.Context, dirs []string) map[string][]remotefs.FileInfo {

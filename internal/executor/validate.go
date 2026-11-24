@@ -139,7 +139,7 @@ func (e *Executor) checkFS(ctx context.Context, entries []db.FileEntry, res *Res
 			}
 		}
 		if keys, listed := byKey[parentOf(dst)]; listed && keys[db.CollisionKey(path.Base(dst))] {
-			if !(f.FileType == "directory" && e.owned(dst)) {
+			if !(f.FileType == "directory" && e.owned(f.ID, dst)) {
 				res.Skipped++
 				res.issue(f, IssueTargetExists, "目标位置已有同名文件或目录（不区分大小写）")
 				continue

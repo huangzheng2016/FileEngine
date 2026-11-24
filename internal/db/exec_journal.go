@@ -60,11 +60,14 @@ func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
 	})
 }
 
-func (r *Repository) SetExecOpDstStat(op *ExecOp, size int64, mtime time.Time) error {
-	op.DstSize, op.DstModTime = size, mtime
+// SetExecOpStateDst advances the state and records the destination stat in
+// one statement, so a crash never leaves a state without its stat.
+func (r *Repository) SetExecOpStateDst(op *ExecOp, state, errMsg string, size int64, mtime time.Time) error {
+	op.State, op.Error, op.DstSize, op.DstModTime = state, errMsg, size, mtime
 	return WithRetry(func() error {
 		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
-			Updates(map[string]any{"dst_size": size, "dst_mod_time": mtime}).Error
+			Updates(map[string]any{"state": state, "error": errMsg, "dst_size": size,
+				"dst_mod_time": mtime, "updated_at": time.Now()}).Error
 	})
 }
 

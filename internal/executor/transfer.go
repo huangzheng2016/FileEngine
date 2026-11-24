@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"sort"
@@ -29,16 +30,37 @@ func (e *Executor) setState(op *db.ExecOp, state, msg string) error {
 	return e.repo.SetExecOpState(op, state, msg)
 }
 
-func (e *Executor) exists(ctx context.Context, p string) (*remotefs.FileInfo, bool) {
+// failOp records a failure that is already being reported to the caller; a
+// lost journal write is logged because nothing else can act on it.
+func (e *Executor) failOp(op *db.ExecOp, msg string) {
+	if err := e.setState(op, db.ExecFailed, msg); err != nil {
+		log.Printf("executor: journal op %d failed state: %v", op.ID, err)
+	}
+}
+
+// stat separates "absent" from "could not tell": only a not-exist error is
+// absence, anything else must not be read as permission to act.
+func (e *Executor) stat(ctx context.Context, p string) (*remotefs.FileInfo, bool, error) {
 	st, err := e.fs.Stat(ctx, p)
-	return st, err == nil
+	switch {
+	case err == nil:
+		return st, true, nil
+	case remotefs.IsNotExist(err):
+		return nil, false, nil
+	default:
+		return nil, false, err
+	}
 }
 
 func (e *Executor) ensureDir(ctx context.Context, entryID uint, dir string) error {
 	if dir == "" || e.dirs[dir] {
 		return nil
 	}
-	if st, ok := e.exists(ctx, dir); ok {
+	st, ok, err := e.stat(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("无法确认目录「%s」是否存在：%w", dir, err)
+	}
+	if ok {
 		if !st.IsDir {
 			return skip(IssueTargetExists, "目标上级「"+dir+"」是文件")
 		}
@@ -53,7 +75,7 @@ func (e *Executor) ensureDir(ctx context.Context, entryID uint, dir string) erro
 		return err
 	}
 	if err := e.fs.MkdirAll(ctx, dir); err != nil {
-		e.setState(op, db.ExecFailed, err.Error())
+		e.failOp(op, err.Error())
 		return err
 	}
 	e.dirs[dir] = true
@@ -97,26 +119,63 @@ func (e *Executor) hash(ctx context.Context, p string) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
+// finishRename journals a rename that took effect. The op stays pending when
+// the destination cannot be read, which lets Recover settle it later.
+func (e *Executor) finishRename(ctx context.Context, op *db.ExecOp, st *remotefs.FileInfo) error {
+	ds, err := e.fs.Stat(ctx, op.Dst)
+	if err != nil {
+		return fmt.Errorf("重命名后无法读取目标：%w", err)
+	}
+	if !st.IsDir && ds.Size != st.Size {
+		e.failOp(op, "重命名后大小不一致")
+		return fmt.Errorf("重命名后目标大小 %d 与源 %d 不一致", ds.Size, st.Size)
+	}
+	return e.repo.SetExecOpStateDst(op, db.ExecDone, "", ds.Size, ds.ModTime)
+}
+
+// renameLanded answers whether a rename that reported an error actually took
+// effect (a lost reply): source gone and destination present.
+func (e *Executor) renameLanded(ctx context.Context, op *db.ExecOp) (bool, error) {
+	_, srcOK, err := e.stat(ctx, op.Src)
+	if err != nil {
+		return false, fmt.Errorf("无法确认重命名结果：%w", err)
+	}
+	_, dstOK, err := e.stat(ctx, op.Dst)
+	if err != nil {
+		return false, fmt.Errorf("无法确认重命名结果：%w", err)
+	}
+	return !srcOK && dstOK, nil
+}
+
 func (e *Executor) renameOnly(ctx context.Context, entryID uint, src, dst string, st *remotefs.FileInfo) error {
 	op, err := e.journal(entryID, db.ExecKindRename, src, dst, st.IsDir, st)
 	if err != nil {
 		return err
 	}
-	if err := e.fs.MoveFile(ctx, src, dst); err != nil {
-		e.setState(op, db.ExecFailed, err.Error())
-		if errors.Is(err, os.ErrExist) {
-			return skip(IssueTargetExists, "目标位置已有同名文件或目录")
-		}
-		return err
+	merr := e.fs.MoveFile(ctx, src, dst)
+	if merr == nil {
+		return e.finishRename(ctx, op, st)
 	}
-	if dst, ok := e.exists(ctx, dst); ok {
-		e.repo.SetExecOpDstStat(op, dst.Size, dst.ModTime)
+	if errors.Is(merr, os.ErrExist) {
+		e.failOp(op, merr.Error())
+		return skip(IssueTargetExists, "目标位置已有同名文件或目录")
 	}
-	return e.setState(op, db.ExecDone, "")
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	landed, lerr := e.renameLanded(ctx, op)
+	switch {
+	case lerr != nil:
+		return lerr
+	case landed:
+		return e.finishRename(ctx, op, st)
+	}
+	e.failOp(op, merr.Error())
+	return merr
 }
 
-// handled=false means the backend could not rename (e.g. cross-device) and
-// the caller must copy instead.
+// handled=false means this entry must be copied instead; only a cross-device
+// or unsupported rename also disables renaming for the rest of the run.
 func (e *Executor) tryRename(ctx context.Context, entryID uint, src, dst string, st *remotefs.FileInfo) (handled bool, err error) {
 	if e.renameBroken {
 		return false, nil
@@ -127,23 +186,26 @@ func (e *Executor) tryRename(ctx context.Context, entryID uint, src, dst string,
 	}
 	merr := e.fs.MoveFile(ctx, src, dst)
 	if merr == nil {
-		if ds, ok := e.exists(ctx, dst); ok {
-			if !st.IsDir && ds.Size != st.Size {
-				e.setState(op, db.ExecFailed, "重命名后大小不一致")
-				return true, fmt.Errorf("重命名后目标大小 %d 与源 %d 不一致", ds.Size, st.Size)
-			}
-			e.repo.SetExecOpDstStat(op, ds.Size, ds.ModTime)
-		}
-		return true, e.setState(op, db.ExecDone, "")
+		return true, e.finishRename(ctx, op, st)
 	}
-	e.setState(op, db.ExecFailed, merr.Error())
 	if errors.Is(merr, os.ErrExist) {
+		e.failOp(op, merr.Error())
 		return true, skip(IssueTargetExists, "目标位置已有同名文件或目录")
 	}
 	if ctx.Err() != nil {
 		return true, ctx.Err()
 	}
-	e.renameBroken = true
+	landed, lerr := e.renameLanded(ctx, op)
+	switch {
+	case lerr != nil:
+		return true, lerr
+	case landed:
+		return true, e.finishRename(ctx, op, st)
+	}
+	e.failOp(op, merr.Error())
+	if remotefs.IsCrossDevice(merr) {
+		e.renameBroken = true
+	}
 	return false, nil
 }
 
@@ -163,7 +225,7 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 		return err
 	}
 	if err := e.fs.CopyFile(ctx, src, dst); err != nil {
-		e.setState(op, db.ExecFailed, err.Error())
+		e.failOp(op, err.Error())
 		if errors.Is(err, os.ErrExist) {
 			return skip(IssueTargetExists, "目标位置已有同名文件")
 		}
@@ -175,45 +237,63 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 	return e.finishCopy(ctx, op)
 }
 
-// The copy is verified and stays journaled; only the source delete failed, so
-// a later Recover may retry it without blocking anything else.
-type deleteSourceError struct{ error }
+// The op is verified and stays journaled; a later Recover may retry the
+// source step without blocking anything else.
+type unfinishedError struct{ error }
 
-func (e *deleteSourceError) Unwrap() error { return e.error }
+func (e *unfinishedError) Unwrap() error { return e.error }
 
 func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
+	var ds *remotefs.FileInfo
 	if op.State == db.ExecCopied {
-		ds, err := e.verify(ctx, op.Src, op.Dst, op.Size)
+		var err error
+		ds, err = e.verify(ctx, op.Src, op.Dst, op.Size)
 		if err != nil {
-			e.fs.Delete(context.WithoutCancel(ctx), op.Dst)
-			e.setState(op, db.ExecFailed, err.Error())
+			if derr := e.fs.Delete(context.WithoutCancel(ctx), op.Dst); derr != nil {
+				err = fmt.Errorf("%w（清理目标副本失败：%v）", err, derr)
+			}
+			e.failOp(op, err.Error())
 			return err
 		}
-		e.repo.SetExecOpDstStat(op, ds.Size, ds.ModTime)
-		if err := e.setState(op, db.ExecVerified, ""); err != nil {
+		next := db.ExecVerified
+		if op.Kind == db.ExecKindCopy {
+			next = db.ExecDone
+		}
+		if err := e.repo.SetExecOpStateDst(op, next, "", ds.Size, ds.ModTime); err != nil {
 			return err
 		}
 	}
 	if op.Kind == db.ExecKindCopy {
-		return e.setState(op, db.ExecDone, "")
+		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if st, ok := e.exists(ctx, op.Src); ok {
+	st, ok, err := e.stat(ctx, op.Src)
+	if err != nil {
+		return &unfinishedError{fmt.Errorf("无法确认源文件状态：%w", err)}
+	}
+	if ok {
 		if st.Size != op.Size || (!op.ModTime.IsZero() && st.ModTime.Unix() != op.ModTime.Unix()) {
 			e.setState(op, db.ExecVerified, "源文件在复制后被修改，未删除源")
 			return skip(IssueSourceChanged, "源文件在复制后被修改，已保留两份")
 		}
-		ds, err := e.fs.Stat(ctx, op.Dst)
-		if err != nil || !dstUnchanged(ds, op) {
-			msg := "副本已缺失或被修改，未删除源"
-			e.setState(op, db.ExecFailed, msg)
-			return skip(IssueSourceChanged, msg)
+		if ds == nil {
+			// Resumed from the journal: the copy may have changed or vanished.
+			var dok bool
+			ds, dok, err = e.stat(ctx, op.Dst)
+			if err != nil {
+				return &unfinishedError{fmt.Errorf("无法确认副本状态：%w", err)}
+			}
+			if !dok || !dstUnchanged(ds, op) {
+				msg := "副本已缺失或被修改，未删除源"
+				e.failOp(op, msg)
+				return skip(IssueSourceChanged, msg)
+			}
 		}
 		if err := e.fs.Delete(ctx, op.Src); err != nil {
 			e.setState(op, db.ExecVerified, "删除源失败："+err.Error())
-			return &deleteSourceError{fmt.Errorf("副本已校验，但删除源失败：%w", err)}
+			return &unfinishedError{fmt.Errorf("副本已校验，但删除源失败：%w", err)}
 		}
 	}
 	return e.setState(op, db.ExecDone, "")
@@ -298,7 +378,11 @@ func (e *Executor) walk(ctx context.Context, entryID uint, src, dst, mode string
 }
 
 func (e *Executor) walkFile(ctx context.Context, entryID uint, s, d string, c *remotefs.FileInfo, mode string) error {
-	if _, ok := e.exists(ctx, d); ok {
+	_, ok, err := e.stat(ctx, d)
+	if err != nil {
+		return err
+	}
+	if ok {
 		if op, _ := e.repo.FindDoneExecOp(e.sessionID, d); op != nil && op.Src == s && op.Kind == db.ExecKindCopy {
 			return nil
 		}

@@ -35,28 +35,46 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 	const interrupted = "中断"
 	switch op.Kind {
 	case db.ExecKindRename:
-		_, srcOK := e.exists(ctx, op.Src)
-		_, dstOK := e.exists(ctx, op.Dst)
-		if !srcOK && dstOK {
-			if err := e.setState(op, db.ExecDone, ""); err != nil {
+		landed, err := e.renameLanded(ctx, op)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if landed {
+			ds, err := e.fs.Stat(ctx, op.Dst)
+			if err != nil {
+				return e.unsettled(ctx, op, err)
+			}
+			if err := e.repo.SetExecOpStateDst(op, db.ExecDone, "", ds.Size, ds.ModTime); err != nil {
 				return err
 			}
 			return e.markIfEntryOp(op, ModeMove)
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindMkdir:
-		if st, ok := e.exists(ctx, op.Dst); ok && st.IsDir {
+		st, ok, err := e.stat(ctx, op.Dst)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if ok && st.IsDir {
 			return e.setState(op, db.ExecDone, "")
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindRmdir:
-		if _, ok := e.exists(ctx, op.Src); !ok {
+		_, ok, err := e.stat(ctx, op.Src)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if !ok {
 			return e.setState(op, db.ExecDone, "")
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindCopy, db.ExecKindMove:
 		if op.State == db.ExecPending {
-			if _, ok := e.exists(ctx, op.Dst); !ok {
+			_, ok, err := e.stat(ctx, op.Dst)
+			if err != nil {
+				return e.unsettled(ctx, op, err)
+			}
+			if !ok {
 				return e.setState(op, db.ExecFailed, interrupted)
 			}
 			// The dst did not exist when the op was journaled, so it is ours.
@@ -66,11 +84,10 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 		}
 		if err := e.finishCopy(ctx, op); err != nil {
 			var se *skipError
-			var de *deleteSourceError
+			var de *unfinishedError
 			switch {
 			case errors.As(err, &de):
-				e.notes = append(e.notes, fmt.Sprintf("「%s」的副本已校验，但源文件仍无法删除：%v", op.Src, de.Unwrap()))
-				return nil
+				return e.unsettled(ctx, op, de.Unwrap())
 			case errors.As(err, &se) || op.State == db.ExecFailed:
 				return nil
 			}
@@ -83,6 +100,16 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 		return e.markIfEntryOp(op, mode)
 	}
 	return e.setState(op, db.ExecFailed, interrupted)
+}
+
+// unsettled leaves an op in its journaled state because the filesystem could
+// not be read; it is retried by the next Recover and never blocks other work.
+func (e *Executor) unsettled(ctx context.Context, op *db.ExecOp, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	e.notes = append(e.notes, fmt.Sprintf("「%s」的执行记录暂时无法确认，稍后重试：%v", op.Src+" → "+op.Dst, err))
+	return nil
 }
 
 func (e *Executor) markIfEntryOp(op *db.ExecOp, mode string) error {
@@ -189,7 +216,12 @@ func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, re
 			return err
 		}
 		op := &mkdirs[i]
-		if st, ok := e.exists(ctx, op.Dst); ok {
+		st, ok, err := e.stat(ctx, op.Dst)
+		if err != nil {
+			res.Notes = append(res.Notes, "无法读取目录「"+op.Dst+"」，已保留")
+			continue
+		}
+		if ok {
 			if !st.IsDir {
 				res.Notes = append(res.Notes, "「"+op.Dst+"」已不是目录，已保留")
 				continue
@@ -228,8 +260,14 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 		return e.setState(op, db.ExecReverted, "")
 	}
 
-	dst, dstOK := e.exists(ctx, op.Dst)
-	_, srcOK := e.exists(ctx, op.Src)
+	dst, dstOK, err := e.stat(ctx, op.Dst)
+	if err != nil {
+		return err
+	}
+	src, srcOK, err := e.stat(ctx, op.Src)
+	if err != nil {
+		return err
+	}
 	if !dstOK {
 		if srcOK {
 			return e.setState(op, db.ExecReverted, "")
@@ -239,13 +277,11 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 	if !dstUnchanged(dst, op) {
 		return skip(IssueSourceChanged, "目标在执行后被修改，未撤销")
 	}
-	if op.Kind == db.ExecKindCopy && srcOK {
-		if src, _ := e.exists(ctx, op.Src); src != nil && src.Size == op.Size {
-			if err := e.fs.Delete(ctx, op.Dst); err != nil {
-				return err
-			}
-			return e.setState(op, db.ExecReverted, "")
+	if op.Kind == db.ExecKindCopy && srcOK && src.Size == op.Size {
+		if err := e.fs.Delete(ctx, op.Dst); err != nil {
+			return err
 		}
+		return e.setState(op, db.ExecReverted, "")
 	}
 	if srcOK {
 		return skip(IssueTargetExists, "原位置已有同名文件，未撤销")
