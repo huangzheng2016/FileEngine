@@ -339,7 +339,7 @@ func (s *SFTPFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
+func (s *SFTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := s.resolve(src)
 	if err != nil {
 		return err
@@ -373,7 +373,11 @@ func (s *SFTPFS) CopyFile(_ context.Context, src, dst string) error {
 		}
 		return &OpError{Protocol: "sftp", Op: "create", Path: dst, Err: err}
 	}
-	n, err := io.Copy(dstFile, srcFile)
+	var n int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		n, err = io.Copy(dstFile, srcFile)
+	}
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
 	}

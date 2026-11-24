@@ -342,7 +342,11 @@ func (s *SMBFS) CopyFile(ctx context.Context, src, dst string) error {
 		}
 		return &OpError{Protocol: "smb", Op: "create", Path: dst, Err: err}
 	}
-	n, err := io.Copy(&touchWriter{w: dstFile, touch: touch}, srcFile)
+	var n int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		n, err = io.Copy(&touchWriter{w: dstFile, touch: touch}, srcFile)
+	}
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
 	}

@@ -24,6 +24,23 @@ import (
 
 var ErrIsDir = errors.New("source is a directory")
 
+type createNoticeKey struct{}
+
+// WithCreateNotice makes CopyFile call fn right after it created dst and
+// before any data is written. From then on dst provably belongs to the
+// caller, so a failure may remove it; fn failing aborts the copy and removes
+// the dst like any other failure.
+func WithCreateNotice(ctx context.Context, fn func() error) context.Context {
+	return context.WithValue(ctx, createNoticeKey{}, fn)
+}
+
+func noticeCreated(ctx context.Context) error {
+	if fn, ok := ctx.Value(createNoticeKey{}).(func() error); ok {
+		return fn()
+	}
+	return nil
+}
+
 func existErr(proto, op, p string) error {
 	return &OpError{Protocol: proto, Op: op, Path: p, Err: os.ErrExist}
 }

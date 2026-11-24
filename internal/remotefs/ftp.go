@@ -301,7 +301,7 @@ func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 // straight into STOR on the primary one — one control connection cannot
 // carry both transfers, and buffering the whole file in memory is not an
 // option for large media.
-func (f *FTPFS) CopyFile(_ context.Context, src, dst string) error {
+func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := f.resolve(src)
 	if err != nil {
 		return err
@@ -340,7 +340,11 @@ func (f *FTPFS) CopyFile(_ context.Context, src, dst string) error {
 		return &OpError{Protocol: "ftp", Op: "open", Path: src, Err: err}
 	}
 	cr := &countingReader{r: resp}
-	err = f.conn.Stor(dstFull, cr)
+	// FTP has no exclusive create; the check above is the best available
+	// proof that the STOR below creates the file.
+	if err = noticeCreated(ctx); err == nil {
+		err = f.conn.Stor(dstFull, cr)
+	}
 	if rerr := resp.Close(); err == nil {
 		err = rerr
 	}

@@ -204,7 +204,7 @@ func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
+func (l *LocalFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcPath, err := l.resolve(src)
 	if err != nil {
 		return err
@@ -231,7 +231,11 @@ func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return &OpError{Protocol: "local", Op: "create", Path: dst, Err: err}
 	}
-	n, err := io.Copy(dstFile, srcFile)
+	var n int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		n, err = io.Copy(dstFile, srcFile)
+	}
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
 	}

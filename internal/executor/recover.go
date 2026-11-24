@@ -77,9 +77,12 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 			if !ok {
 				return e.setState(op, db.ExecFailed, interrupted)
 			}
-			// The dst did not exist when the op was journaled, so it is ours.
-			if err := e.setState(op, db.ExecCopied, ""); err != nil {
-				return err
+			if !op.DstCreated {
+				// Nothing proves the file at dst came from this op.
+				msg := "目标位置已有无法确认来源的文件，未删除也未覆盖"
+				e.failOp(op, msg)
+				e.notes = append(e.notes, "「"+op.Dst+"」"+msg)
+				return nil
 			}
 		}
 		if err := e.finishCopy(ctx, op); err != nil {

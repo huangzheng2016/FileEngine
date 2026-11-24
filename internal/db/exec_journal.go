@@ -12,12 +12,10 @@ import (
 // side effect and advanced after each verified step, so a crash leaves enough
 // to finish or roll back the op (see executor.Recover).
 const (
-	ExecPending  = "pending"  // about to act; dst may hold a partial copy
-	ExecCopied   = "copied"   // dst written, not yet verified
+	ExecPending  = "pending"  // about to act; dst may hold a partial copy (see DstCreated)
 	ExecVerified = "verified" // dst verified; for moves the source is still there
 	ExecDone     = "done"
 	ExecFailed   = "failed"
-	ExecSkipped  = "skipped"
 	ExecReverted = "reverted"
 )
 
@@ -42,6 +40,10 @@ type ExecOp struct {
 	ModTime    time.Time `json:"mod_time"` // source mtime when the op started
 	DstSize    int64     `json:"dst_size"` // dst stat after verification (revert checks it is unchanged)
 	DstModTime time.Time `json:"dst_mod_time"`
+	// DstCreated is journaled once the backend created Dst for this op. Only
+	// then may recovery delete a half-written Dst; without it a file at Dst
+	// may belong to someone else.
+	DstCreated bool      `json:"dst_created"`
 	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2" json:"state"`
 	Error      string    `gorm:"type:text" json:"error"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -57,6 +59,14 @@ func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
 	return WithRetry(func() error {
 		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
 			Updates(map[string]any{"state": state, "error": errMsg, "updated_at": time.Now()}).Error
+	})
+}
+
+func (r *Repository) SetExecOpCreated(op *ExecOp) error {
+	op.DstCreated = true
+	return WithRetry(func() error {
+		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
+			Updates(map[string]any{"dst_created": true, "updated_at": time.Now()}).Error
 	})
 }
 
@@ -79,7 +89,7 @@ func (r *Repository) ListExecOps(runID uint) ([]ExecOp, error) {
 
 func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 	var ops []ExecOp
-	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecCopied, ExecVerified}).
+	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecVerified}).
 		Order("id ASC").Find(&ops).Error
 	return ops, err
 }

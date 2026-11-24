@@ -321,7 +321,7 @@ func TestJournalResumeAfterCrash(t *testing.T) {
 	e.write("x/a.txt", "AA")
 	sa, ma := st("a.txt")
 	e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMove,
-		Src: "a.txt", Dst: "x/a.txt", Size: sa, ModTime: ma, State: db.ExecPending})
+		Src: "a.txt", Dst: "x/a.txt", Size: sa, ModTime: ma, DstCreated: true, State: db.ExecPending})
 	// b: copy verified, crashed before deleting the source.
 	e.write("x/b.txt", "BBBB")
 	sb, mb := st("b.txt")

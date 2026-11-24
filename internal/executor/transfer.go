@@ -224,14 +224,21 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 	if err != nil {
 		return err
 	}
-	if err := e.fs.CopyFile(ctx, src, dst); err != nil {
+	created := remotefs.WithCreateNotice(ctx, func() error { return e.repo.SetExecOpCreated(op) })
+	if err := e.fs.CopyFile(created, src, dst); err != nil {
+		if op.DstCreated {
+			// The backend normally removed its partial file; if that did not
+			// happen the dst is still ours, so retry here, and failing that
+			// leave the op pending for Recover.
+			if derr := e.fs.Delete(context.WithoutCancel(ctx), dst); derr != nil && !remotefs.IsNotExist(derr) {
+				e.setState(op, db.ExecPending, "复制失败，未能清理不完整的目标："+derr.Error())
+				return err
+			}
+		}
 		e.failOp(op, err.Error())
 		if errors.Is(err, os.ErrExist) {
 			return skip(IssueTargetExists, "目标位置已有同名文件")
 		}
-		return err
-	}
-	if err := e.setState(op, db.ExecCopied, ""); err != nil {
 		return err
 	}
 	return e.finishCopy(ctx, op)
@@ -245,7 +252,7 @@ func (e *unfinishedError) Unwrap() error { return e.error }
 
 func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 	var ds *remotefs.FileInfo
-	if op.State == db.ExecCopied {
+	if op.State == db.ExecPending {
 		var err error
 		ds, err = e.verify(ctx, op.Src, op.Dst, op.Size)
 		if err != nil {

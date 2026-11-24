@@ -444,7 +444,7 @@ func (n *NFSFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
+func (n *NFSFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := n.resolve(src)
 	if err != nil {
 		return err
@@ -468,13 +468,18 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return &OpError{Protocol: "nfs", Op: "open", Path: src, Err: err}
 	}
+	defer srcFile.Close()
 	// GUARDED create: an existing dst fails with os.ErrExist instead of
 	// being written over without truncation.
 	dstFile, err := n.target.CreateGuarded(dstFull, 0644)
 	if err != nil {
 		return &OpError{Protocol: "nfs", Op: "create", Path: dst, Err: err}
 	}
-	written, err := io.Copy(dstFile, srcFile)
+	var written int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		written, err = io.Copy(dstFile, srcFile)
+	}
 	// Close issues COMMIT; its failure means the data may not be stable.
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
