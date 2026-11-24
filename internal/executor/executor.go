@@ -84,6 +84,7 @@ type Executor struct {
 	dirs         map[string]bool // directories known to exist in this run
 	renameBroken bool            // in-place rename failed once (cross-device); go straight to copy
 	lastEmit     time.Time
+	notes        []string // recovery findings; merged into the run result
 }
 
 func New(repo *db.Repository, fs remotefs.RemoteFS) *Executor {
@@ -253,6 +254,7 @@ func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) 
 	if err := e.Recover(ctx, run.SessionID); err != nil {
 		return res, fmt.Errorf("恢复中断的执行失败：%w", err)
 	}
+	res.Notes = append(res.Notes, e.notes...)
 
 	entries, err := e.plan(ctx, opts, res)
 	if err != nil {

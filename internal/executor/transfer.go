@@ -175,6 +175,12 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 	return e.finishCopy(ctx, op)
 }
 
+// The copy is verified and stays journaled; only the source delete failed, so
+// a later Recover may retry it without blocking anything else.
+type deleteSourceError struct{ error }
+
+func (e *deleteSourceError) Unwrap() error { return e.error }
+
 func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 	if op.State == db.ExecCopied {
 		ds, err := e.verify(ctx, op.Src, op.Dst, op.Size)
@@ -207,7 +213,7 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 		}
 		if err := e.fs.Delete(ctx, op.Src); err != nil {
 			e.setState(op, db.ExecVerified, "删除源失败："+err.Error())
-			return fmt.Errorf("副本已校验，但删除源失败：%w", err)
+			return &deleteSourceError{fmt.Errorf("副本已校验，但删除源失败：%w", err)}
 		}
 	}
 	return e.setState(op, db.ExecDone, "")

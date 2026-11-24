@@ -66,7 +66,12 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 		}
 		if err := e.finishCopy(ctx, op); err != nil {
 			var se *skipError
-			if errors.As(err, &se) || op.State == db.ExecFailed {
+			var de *deleteSourceError
+			switch {
+			case errors.As(err, &de):
+				e.notes = append(e.notes, fmt.Sprintf("「%s」的副本已校验，但源文件仍无法删除：%v", op.Src, de.Unwrap()))
+				return nil
+			case errors.As(err, &se) || op.State == db.ExecFailed:
 				return nil
 			}
 			return err
@@ -107,12 +112,23 @@ func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
 // Each destination must be unchanged since the run wrote it; anything else is
 // skipped and reported. Reverting is idempotent: ops already undone are
 // recognized and settled.
-func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*Result, error) {
+func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (res *Result, err error) {
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
-	res := &Result{}
+	res = &Result{}
 	if err := e.Recover(ctx, run.SessionID); err != nil {
 		return res, err
 	}
+	res.Notes = append(res.Notes, e.notes...)
+	touched := map[uint]bool{}
+	// Reverted ops never come back to a retry, so their entries are unmarked
+	// on every exit path, including a cancel.
+	defer func() {
+		for id := range touched {
+			if uerr := e.repo.UnmarkEntryExecuted(id); uerr != nil && err == nil {
+				err = uerr
+			}
+		}
+	}()
 	ops, err := e.repo.ListExecOps(target)
 	if err != nil {
 		return res, err
@@ -132,7 +148,6 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 	}
 	res.Total = len(todo)
 	e.emit(res, true)
-	touched := map[uint]bool{}
 	for i := range todo {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -154,11 +169,6 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 			res.Issues = append(res.Issues, Issue{EntryID: op.EntryID, OriginalPath: op.Src, NewPath: op.Dst, Code: IssueFailed, Detail: err.Error()})
 		}
 		e.emit(res, false)
-	}
-	for id := range touched {
-		if err := e.repo.UnmarkEntryExecuted(id); err != nil {
-			return res, err
-		}
 	}
 	return res, e.removeCreatedDirs(ctx, mkdirs, res)
 }
