@@ -30,11 +30,11 @@ const (
 type ExecOp struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	RunID      uint      `gorm:"index" json:"run_id"`
-	SessionID  uint      `gorm:"index:idx_execop_session_state,priority:1" json:"session_id"`
+	SessionID  uint      `gorm:"index:idx_execop_session_state,priority:1;index:idx_execop_session_dst,priority:1" json:"session_id"`
 	EntryID    uint      `gorm:"index" json:"entry_id"` // FileEntry whose decision produced the op (0 for none)
 	Kind       string    `gorm:"size:16" json:"kind"`
 	Src        string    `gorm:"size:1024" json:"src"`
-	Dst        string    `gorm:"size:1024" json:"dst"`
+	Dst        string    `gorm:"size:1024;index:idx_execop_session_dst,priority:2" json:"dst"`
 	IsDir      bool      `json:"is_dir"`
 	Size       int64     `json:"size"`     // source size when the op started
 	ModTime    time.Time `json:"mod_time"` // source mtime when the op started
@@ -44,7 +44,7 @@ type ExecOp struct {
 	// then may recovery delete a half-written Dst; without it a file at Dst
 	// may belong to someone else.
 	DstCreated bool      `json:"dst_created"`
-	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2" json:"state"`
+	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2;index:idx_execop_session_dst,priority:3" json:"state"`
 	Error      string    `gorm:"type:text" json:"error"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
