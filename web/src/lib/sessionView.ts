@@ -68,7 +68,7 @@ export function stageOf(s: Session, running: Pick<Run, 'phase'> | undefined): St
 // The four steps a task goes through, as the page's progress line shows them.
 export const FLOW_STEPS = [
   { key: 'scan', label: '扫描' },
-  { key: 'organize', label: 'AI 整理' },
+  { key: 'organize', label: '整理' },
   { key: 'confirm', label: '确认结果' },
   { key: 'execute', label: '执行' },
 ] as const

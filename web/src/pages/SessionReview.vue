@@ -15,7 +15,7 @@ import { parentOf } from '@/lib/paths'
 import { landing, shownPath } from '@/lib/toolView'
 import TargetDialog, { type TargetEntry } from './TargetDialog.vue'
 
-// The decisions the AI was unsure about. They are skipped by 执行 until confirmed
+// The decisions the assistant was unsure about. They are skipped by 执行 until confirmed
 // here, changed, or kept in place.
 const props = defineProps<{ sessionId: Id; rev: number }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -73,7 +73,6 @@ const menu = (f: FileEntry) => [
     <div class="card-head">
       <div>
         <h3>需要你确认 {{ fmtNumber(total) }} 项</h3>
-        <p class="card-desc">AI 对这些文件拿不准，确认之前执行会跳过它们</p>
       </div>
       <button v-if="rows.length" type="button" class="btn-sm" :disabled="busy" @click="confirmPage">
         <Icon name="check" :size="14" />{{ total > rows.length ? `确认这 ${fmtNumber(rows.length)} 项` : '全部确认' }}

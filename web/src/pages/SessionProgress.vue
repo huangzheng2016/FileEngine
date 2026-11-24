@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import Alert from '@/base/Alert.vue'
 import EmptyState from '@/base/EmptyState.vue'
 import Icon from '@/base/Icon.vue'
@@ -9,21 +9,18 @@ import StatusPill from '@/base/StatusPill.vue'
 import { fmtLabel, fmtNumber } from '@/base/format'
 import { RUN_PHASE, RUN_STATUS } from '@/base/labels'
 import { fmtDuration, fmtRelative, fmtTime } from '@/base/time'
-import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
-import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
-import { revertRun } from '@/api/sessions'
 import { hasId, type Id, type Run } from '@/api/types'
 import RunTranscript from '@/components/RunTranscript.vue'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
 import type { RunView, Timeline } from '@/lib/transcript'
+import { canRevert, useRevert } from '@/lib/useRevert'
 import { loadRunTimeline } from '@/lib/useSessionStream'
 
 const props = defineProps<{ sessionId: Id; runs: Run[]; runsError: string; timeline: Timeline }>()
-const emit = defineEmits<{ changed: [] }>()
-const confirm = useConfirm()
+const emit = defineEmits<{ changed: []; retry: [] }>()
 
 const { query, set } = useRouteQuery({ run: '' })
 const selectedId = computed(() => query.value.run || props.runs[0]?.id || '')
@@ -69,42 +66,19 @@ const duration = (r: Run) => {
   return start && end && end - start >= 1 ? fmtDuration(end - start) : ''
 }
 
-const reverting = ref(false)
-const canRevert = computed(() => {
-  const r = selected.value
-  return (
-    !!r && r.phase === 'executing' && (r.status === 'done' || r.status === 'partial') && !hasId(r.reverted_by_run_id)
-  )
+const { reverting, revert } = useRevert((runId) => {
+  emit('changed')
+  if (hasId(runId)) set({ run: runId })
 })
-function revertMessage(r: Run) {
-  const n = progress.value?.success ?? 0
-  const count = n ? ` ${fmtNumber(n)} 项` : '文件'
-  return r.exec_mode === 'copy'
-    ? `删除这次执行复制出的${count}？原文件不受影响。`
-    : `把这次执行移动的${count}放回原处？`
-}
-async function revert() {
-  const r = selected.value
-  if (!r || reverting.value) return
-  const ok = await confirm({ title: '撤销执行', message: revertMessage(r), confirmText: '撤销' })
-  if (!ok) return
-  reverting.value = true
-  try {
-    const runId = await revertRun(r.id)
-    toast.success('已开始撤销')
-    emit('changed')
-    if (runId) set({ run: runId })
-  } catch (e) {
-    toast.error('撤销失败', e)
-  } finally {
-    reverting.value = false
-  }
-}
+const revertable = computed(() => canRevert(selected.value))
 </script>
 
 <template>
   <div class="runs">
-    <p v-if="runsError" class="text-danger text-sm">加载运行记录失败：{{ runsError }}</p>
+    <Alert v-if="runsError" tone="danger" title="加载运行记录失败">
+      {{ runsError }}
+      <template #action><button type="button" class="btn-sm" @click="emit('retry')">重试</button></template>
+    </Alert>
     <EmptyState v-if="!runs.length && !runsError" icon="play" title="还没有运行过" />
     <div v-else class="runs-body">
       <div class="table-wrap">
@@ -121,10 +95,7 @@ async function revert() {
               @keydown.enter.self.prevent="set({ run: r.id })"
             >
               <td>
-                <span class="run-line">
-                  <span>{{ fmtLabel(RUN_PHASE, r.phase) }}</span>
-                  <StatusPill :value="r.status" :map="RUN_STATUS" />
-                </span>
+                <span>{{ runName(r) }}</span>
                 <span v-tip="fmtTime(r.started_at)" class="cell-sub">
                   {{ fmtRelative(r.started_at) }}<template v-if="duration(r)"> · {{ duration(r) }}</template>
                 </span>
@@ -137,11 +108,18 @@ async function revert() {
       <section v-if="selected" class="card run-card" aria-label="运行过程">
         <div class="card-head">
           <div>
-            <h3 v-tip="tokens ? `用量 ${fmtNumber(tokens)} token` : ''" class="truncate">{{ runName(selected) }}</h3>
+            <h3 class="truncate">{{ runName(selected) }}</h3>
+            <p v-if="tokens" class="card-desc tabular">用量 {{ fmtNumber(tokens) }} token</p>
           </div>
           <StatusPill :value="status" :map="RUN_STATUS" />
-          <button v-if="canRevert" type="button" class="btn-sm" :disabled="reverting" @click="revert">
-            <Icon name="rotate-ccw" :size="14" />撤销
+          <button
+            v-if="revertable"
+            type="button"
+            class="btn-sm"
+            :disabled="reverting"
+            @click="revert(selected, progress?.success)"
+          >
+            <Icon name="rotate-ccw" :size="14" />{{ reverting ? '撤销中' : '撤销' }}
           </button>
         </div>
         <ProgressBar
@@ -158,7 +136,10 @@ async function revert() {
         <Alert v-if="error && status !== 'running'" tone="danger">{{ error }}</Alert>
         <StreamMarkdown v-if="summary" :source="summary" />
         <Loading v-if="!view && history.loading.value && !moves(selected)" />
-        <p v-else-if="!view && history.error.value" class="text-danger">加载过程失败：{{ history.error.value }}</p>
+        <Alert v-else-if="!view && history.error.value" tone="danger" title="加载过程失败">
+          {{ history.error.value }}
+          <template #action><button type="button" class="btn-sm" @click="history.refresh">重试</button></template>
+        </Alert>
         <RunTranscript v-else-if="view && !moves(selected)" :run="view" />
       </section>
     </div>
@@ -177,12 +158,6 @@ async function revert() {
   grid-template-columns: 200px minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
-}
-.run-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
 }
 .run-card {
   min-width: 0;
