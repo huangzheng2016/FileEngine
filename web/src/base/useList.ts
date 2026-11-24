@@ -1,4 +1,4 @@
-import { computed, reactive, watch } from 'vue'
+import { computed, onScopeDispose, reactive, watch } from 'vue'
 import { useFetch } from './useFetch'
 import { useRouteQuery } from './useRouteQuery'
 
@@ -54,6 +54,8 @@ export function useList<T, F extends Filters>(
       else apply()
     },
   )
+  // A pending search would otherwise rewrite the query of the page the user navigated to.
+  onScopeDispose(() => clearTimeout(timer))
 
   const state = useFetch((signal) => fetcher(params.value, signal))
   watch(
