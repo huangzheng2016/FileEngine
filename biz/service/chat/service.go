@@ -9,8 +9,8 @@ import (
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 )
@@ -23,13 +23,12 @@ const (
 )
 
 type Service struct {
-	q      *query.Query
-	sa     *sessionagent.Factory
-	runner *runner.Service
+	q    *query.Query
+	runs *run.Service
 }
 
-func NewService(q *query.Query, sa *sessionagent.Factory, r *runner.Service) *Service {
-	return &Service{q: q, sa: sa, runner: r}
+func NewService(q *query.Query, runs *run.Service) *Service {
+	return &Service{q: q, runs: runs}
 }
 
 // Send starts a chat run and returns its id; the reply streams as events.
@@ -45,11 +44,11 @@ func (s *Service) Send(ctx context.Context, sessionID uint, content string, file
 	if len(fileIDs) > MaxFiles {
 		return 0, errs.BadRequest
 	}
-	session, err := s.sa.Session(ctx, sessionID)
+	session, err := s.runs.Session(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
-	a, err := s.sa.Agent(ctx, session)
+	a, err := s.runs.AgentFor(ctx, session)
 	if err != nil {
 		return 0, err
 	}
@@ -64,15 +63,15 @@ func (s *Service) Send(ctx context.Context, sessionID uint, content string, file
 			files = append(files, *r)
 		}
 	}
-	run, err := s.runner.Launch(sessionID, db.RunPhaseChat, title(content), func(ctx context.Context, run *model.AgentRun) runner.Outcome {
+	launched, err := s.runs.Launch(sessionID, db.RunPhaseChat, title(content), func(ctx context.Context, run *model.AgentRun) runner.Outcome {
 		logger := agent.NewLogger(sessionID, run.ID, 0)
 		answer, err := a.RunChat(ctx, logger, content, files)
 		return runner.Outcome{Summary: answer, Err: err, Tokens: logger.Tokens()}
 	})
 	if err != nil {
-		return 0, sessionagent.StartError(err)
+		return 0, err
 	}
-	return run.ID, nil
+	return launched.ID, nil
 }
 
 func title(content string) string {
@@ -85,7 +84,7 @@ func title(content string) string {
 
 // List is the conversation, oldest first; summary turns are internal.
 func (s *Service) List(ctx context.Context, sessionID uint) ([]*model.ChatTurn, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	t := s.q.ChatTurn

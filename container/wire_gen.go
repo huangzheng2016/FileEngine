@@ -23,7 +23,6 @@ import (
 	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
 	"FileEngine/biz/service/session"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 	"gorm.io/gorm"
@@ -49,14 +48,13 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		return nil, err
 	}
 	adminService := admin.NewService(gdb)
-	factory := sessionagent.NewFactory(query, repository)
-	fileService := file.NewService(query, repository, factory)
-	categoryService := category.NewService(query, repository)
-	planService := plan.NewService(query, repository, factory, runnerService)
-	ruleService := rule.NewService(repository, factory)
-	memoryService := memory.NewService(repository)
-	chatService := chat.NewService(query, factory, runnerService)
 	runService := run.NewService(query, repository, runnerService)
+	fileService := file.NewService(query, repository, runService)
+	categoryService := category.NewService(query, repository)
+	planService := plan.NewService(query, repository, runService)
+	ruleService := rule.NewService(repository, runService)
+	memoryService := memory.NewService(repository)
+	chatService := chat.NewService(query, runService)
 	sessionService := session.NewService(query, repository, runService)
 	executeService := execute.NewService(repository, runService)
 	eventService := event.NewService(repository, runService)

@@ -10,7 +10,7 @@ import (
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
-	"FileEngine/biz/service/sessionagent"
+	"FileEngine/biz/service/run"
 	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
@@ -26,11 +26,11 @@ var errNoFile = errs.NotFound("文件不存在")
 type Service struct {
 	q    *query.Query
 	repo *db.Repository
-	sa   *sessionagent.Factory
+	runs *run.Service
 }
 
-func NewService(q *query.Query, repo *db.Repository, sa *sessionagent.Factory) *Service {
-	return &Service{q: q, repo: repo, sa: sa}
+func NewService(q *query.Query, repo *db.Repository, runs *run.Service) *Service {
+	return &Service{q: q, repo: repo, runs: runs}
 }
 
 type ListParams struct {
@@ -50,7 +50,7 @@ type ListParams struct {
 }
 
 func (s *Service) List(ctx context.Context, p ListParams) ([]model.FileEntry, int64, error) {
-	if _, err := s.sa.Session(ctx, p.SessionID); err != nil {
+	if _, err := s.runs.Session(ctx, p.SessionID); err != nil {
 		return nil, 0, err
 	}
 	size := int(p.PageSize)
@@ -111,7 +111,7 @@ func (s *Service) Update(ctx context.Context, id uint, description, newPath *str
 // learnCorrection remembers where the user wants this kind of file, so the
 // next run classifies it that way.
 func (s *Service) learnCorrection(ctx context.Context, f *model.FileEntry, oldTarget, newTarget string) error {
-	session, err := s.sa.Session(ctx, f.ScanSessionID)
+	session, err := s.runs.Session(ctx, f.ScanSessionID)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (s *Service) learnCorrection(ctx context.Context, f *model.FileEntry, oldTa
 
 // Tree lists the directories directly under parent ("" = the scan root).
 func (s *Service) Tree(ctx context.Context, sessionID uint, parent string) ([]*model.FileEntry, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	f := s.q.FileEntry
@@ -153,11 +153,11 @@ func (s *Service) Open(ctx context.Context, id uint) (*Content, error) {
 	if err != nil {
 		return nil, errs.Invalid("文件路径非法")
 	}
-	session, err := s.sa.Session(ctx, file.ScanSessionID)
+	session, err := s.runs.Session(ctx, file.ScanSessionID)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := s.sa.FSConfig(ctx, session)
+	cfg, err := s.runs.ResolveFSConfig(ctx, session)
 	if err != nil {
 		return nil, err
 	}

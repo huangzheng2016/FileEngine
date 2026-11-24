@@ -19,7 +19,6 @@ import (
 	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
 	"FileEngine/biz/service/session"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 
@@ -40,7 +39,6 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		modelprovider.NewService,
 		settings.NewService,
 		admin.NewService,
-		sessionagent.NewFactory,
 		file.NewService,
 		category.NewService,
 		plan.NewService,
