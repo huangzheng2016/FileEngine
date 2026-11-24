@@ -37,7 +37,7 @@ func TestScanProgress_FinalState(t *testing.T) {
 	fs := &fakeFS{root: testTree()}
 	repo := setupFileTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	sc := New(fs, repo, "", nil)
@@ -100,7 +100,7 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 	}
 	repo := setupFileTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	sc := New(gfs, repo, "", nil)

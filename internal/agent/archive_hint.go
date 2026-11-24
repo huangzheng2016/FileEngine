@@ -100,22 +100,6 @@ func computeArchiveHint(ctx context.Context, fsys remotefs.RemoteFS, protocol, p
 // realistic batches.
 const harnessArchiveHintsPerPull = 20
 
-func fsProtocolLabel(fsys remotefs.RemoteFS) string {
-	switch fsys.(type) {
-	case *remotefs.NFSFS:
-		return "nfs"
-	case *remotefs.FTPFS:
-		return "ftp"
-	case *remotefs.SMBFS:
-		return "smb"
-	case *remotefs.SFTPFS:
-		return "sftp"
-	case *remotefs.LocalFS:
-		return "local"
-	}
-	return ""
-}
-
 func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS, files []model.FileEntry, cfg config.AgentConfig) map[uint]string {
 	if cfg.ArchivePromptDisabled {
 		return nil

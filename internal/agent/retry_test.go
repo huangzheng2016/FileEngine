@@ -15,15 +15,13 @@ import (
 )
 
 // Not parallel-safe: the retry knobs are package-level.
-func stubRetryEnv(t *testing.T, cfg config.AgentConfig) *[]time.Duration {
+func stubRetryEnv(t *testing.T) *[]time.Duration {
 	t.Helper()
-	oldCfg := config.Get()
 	oldSleep := retrySleep
 	oldRand := retryRandFloat64
 	oldStreak := rateLimitStreak.Load()
 
 	sleeps := &[]time.Duration{}
-	config.Update(&config.Config{Agent: cfg})
 	retrySleep = func(_ context.Context, d time.Duration) { *sleeps = append(*sleeps, d) }
 	retryRandFloat64 = func() float64 { return 0.5 }
 	rateLimitStreak.Store(0)
@@ -32,9 +30,6 @@ func stubRetryEnv(t *testing.T, cfg config.AgentConfig) *[]time.Duration {
 		retrySleep = oldSleep
 		retryRandFloat64 = oldRand
 		rateLimitStreak.Store(oldStreak)
-		if oldCfg != nil {
-			config.Update(oldCfg)
-		}
 	})
 	return sleeps
 }
@@ -64,7 +59,7 @@ func TestClassifyRunError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyRunError(tc.err); got != tc.want {
+			if got := classifyRunErrorWithStatus(tc.err, 0); got != tc.want {
 				t.Fatalf("classifyRunError(%v): got %s, want %s", tc.err, got, tc.want)
 			}
 		})
@@ -132,8 +127,8 @@ func TestMaxRetriesForClass(t *testing.T) {
 }
 
 func TestBackoffDelaySequence(t *testing.T) {
-	stubRetryEnv(t, config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60})
-	cfg := retryCfg()
+	stubRetryEnv(t)
+	cfg := &config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60}
 
 	// jitter 0.5 → delay = raw/2; raw doubles from base 2s up to the 60s cap.
 	want := []time.Duration{1, 2, 4, 8, 16, 30, 30}
@@ -157,8 +152,8 @@ func TestBackoffDelaySequence(t *testing.T) {
 }
 
 func TestBackoffDelayHonorsRetryAfter(t *testing.T) {
-	stubRetryEnv(t, config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60})
-	cfg := retryCfg()
+	stubRetryEnv(t)
+	cfg := &config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60}
 
 	// Retry-After replaces the computed wait: 7s + jittered base slot (1s).
 	if got := backoffDelay(errClassRateLimit, 1, 7*time.Second, cfg); got != 8*time.Second {
@@ -173,8 +168,8 @@ func TestBackoffDelayHonorsRetryAfter(t *testing.T) {
 }
 
 func TestBackoffDelayRateLimitStreakBoost(t *testing.T) {
-	stubRetryEnv(t, config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60})
-	cfg := retryCfg()
+	stubRetryEnv(t)
+	cfg := &config.AgentConfig{RetryBaseDelay: 2, RetryMaxDelay: 60}
 
 	// streak 0/1: no boost (attempt 1 raw = 2s, jitter 0.5 → 1s).
 	if got := backoffDelay(errClassRateLimit, 1, 0, cfg); got != time.Second {

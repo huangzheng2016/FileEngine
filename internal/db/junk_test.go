@@ -26,7 +26,7 @@ func TestMarkJunkEntries(t *testing.T) {
 		{ScanSessionID: 1, OriginalPath: "p/docs", Name: "docs", FileType: "directory"},
 	}
 	for i := range entries {
-		if err := r.CreateFile(&entries[i]); err != nil {
+		if err := r.DB().Create(&entries[i]).Error; err != nil {
 			t.Fatalf("seed %s: %v", entries[i].OriginalPath, err)
 		}
 	}

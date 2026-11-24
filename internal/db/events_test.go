@@ -40,9 +40,9 @@ func TestEmitPersistsAndBroadcastsInSeqOrder(t *testing.T) {
 	default:
 	}
 
-	rows, more, err := r.ListEvents(EventQuery{SessionID: 7})
-	if err != nil || more || len(rows) != 2 || rows[0].ID != a.ID || rows[1].ID != b.ID {
-		t.Fatalf("persisted rows = %+v more=%v err=%v", rows, more, err)
+	rows := eventsOf(t, r, 7)
+	if len(rows) != 2 || rows[0].ID != a.ID || rows[1].ID != b.ID {
+		t.Fatalf("persisted rows = %+v", rows)
 	}
 	var p ProgressData
 	if err := json.Unmarshal([]byte(rows[1].Data), &p); err != nil || p.Total != 3 {
@@ -61,10 +61,7 @@ func TestDeltaCoalescingAndOrdering(t *testing.T) {
 	Emit(sid, run, EvText, DeltaData{WorkerID: 1, MsgID: "m2", Delta: "other lane"})
 	Emit(sid, run, EvMessage, MessageData{WorkerID: 0, MsgID: "m1", Role: "assistant", Content: "Hello"})
 
-	rows, _, err := r.ListEvents(EventQuery{SessionID: sid})
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := eventsOf(t, r, sid)
 	var got []string
 	for _, ev := range rows {
 		var d DeltaData
@@ -85,7 +82,7 @@ func TestDeltaFlushByTimerAndSize(t *testing.T) {
 	Emit(12, 1, EvText, DeltaData{MsgID: "a", Delta: "tick"})
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		rows, _, _ := r.ListEvents(EventQuery{SessionID: 12})
+		rows := eventsOf(t, r, 12)
 		if len(rows) == 1 {
 			break
 		}
@@ -97,32 +94,9 @@ func TestDeltaFlushByTimerAndSize(t *testing.T) {
 
 	big := strings.Repeat("x", deltaFlushBytes)
 	Emit(13, 1, EvText, DeltaData{MsgID: "b", Delta: big})
-	rows, _, _ := r.ListEvents(EventQuery{SessionID: 13})
+	rows := eventsOf(t, r, 13)
 	if len(rows) != 1 {
 		t.Fatalf("a delta of %d bytes must flush immediately, got %d rows", len(big), len(rows))
-	}
-}
-
-func TestListEventsPaging(t *testing.T) {
-	r := setupScanProgressRepo(t)
-	for i := 0; i < 5; i++ {
-		Emit(20, uint(1+i%2), EvProgress, ProgressData{Total: i})
-	}
-	all, _, _ := r.ListEvents(EventQuery{SessionID: 20})
-	if len(all) != 5 {
-		t.Fatalf("got %d events", len(all))
-	}
-	page, more, _ := r.ListEvents(EventQuery{SessionID: 20, After: all[0].ID, Limit: 2})
-	if len(page) != 2 || !more || page[0].ID != all[1].ID {
-		t.Fatalf("after page = %+v more=%v", page, more)
-	}
-	back, more, _ := r.ListEvents(EventQuery{SessionID: 20, Before: all[4].ID, Limit: 2})
-	if len(back) != 2 || !more || back[0].ID != all[2].ID || back[1].ID != all[3].ID {
-		t.Fatalf("before page = %+v more=%v", back, more)
-	}
-	byRun, _, _ := r.ListEvents(EventQuery{SessionID: 20, RunID: 2})
-	if len(byRun) != 2 {
-		t.Fatalf("run filter returned %d", len(byRun))
 	}
 }
 
@@ -145,13 +119,15 @@ func TestRunLifecycle(t *testing.T) {
 	if err := r.FinishRun(next, RunDone, "", "", TokenCounts{Total: 1}); err != nil {
 		t.Fatal(err)
 	}
-	start, err := r.LatestRunStartSeq(30)
-	if err != nil {
-		t.Fatal(err)
+	all := eventsOf(t, r, 30)
+	var rows []model.SessionEvent
+	for _, ev := range all {
+		if ev.RunID == next.ID {
+			rows = append(rows, ev)
+		}
 	}
-	rows, _, _ := r.ListEvents(EventQuery{SessionID: 30, After: start})
-	if len(rows) == 0 || rows[0].RunID != next.ID || rows[0].Type != EvRunStatus {
-		t.Fatalf("latest run replay starts at %+v", rows)
+	if len(rows) == 0 || rows[0].Type != EvRunStatus {
+		t.Fatalf("latest run events start at %+v", rows)
 	}
 	last := rows[len(rows)-1]
 	if last.Type != EvRunDone {
@@ -168,8 +144,37 @@ func TestSweepStaleRuns(t *testing.T) {
 	if n, err := r.SweepStaleRuns(); err != nil || n != 1 {
 		t.Fatalf("sweep = %d, %v", n, err)
 	}
-	got, _ := r.GetRun(run.ID)
+	got := getRun(t, r, run.ID)
 	if got.Status != RunStopped || got.Error != RunInterruptedError || got.EndedAt == nil {
 		t.Fatalf("swept run = %+v", got)
+	}
+}
+
+func eventsOf(t *testing.T, r *Repository, sessionID uint) []model.SessionEvent {
+	t.Helper()
+	var rows []model.SessionEvent
+	if err := r.DB().Where("session_id = ?", sessionID).Order("id ASC").Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// One session's emit lane (a persist waiting out SQLITE_BUSY retries) must not
+// stall another session's events.
+func TestSessionsEmitIndependently(t *testing.T) {
+	setupScanProgressRepo(t)
+	slow := laneOf(501)
+	slow.mu.Lock()
+	defer slow.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		Emit(502, 0, EvProgress, ProgressData{Total: 1})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("an emit of another session waited for a busy lane")
 	}
 }

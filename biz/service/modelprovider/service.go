@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -32,10 +33,11 @@ var validProviders = map[string]bool{"openai": true, "claude": true, "ollama": t
 var reasoningEffortPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
 type Service struct {
-	q *query.Query
+	q  *query.Query
+	rq *dal.Reader
 }
 
-func NewService(q *query.Query) *Service { return &Service{q: q} }
+func NewService(q *query.Query, rq *dal.Reader) *Service { return &Service{q: q, rq: rq} }
 
 // SaveInput: nil optional fields keep the stored value on update and take the
 // default on create.
@@ -56,7 +58,7 @@ type SaveInput struct {
 }
 
 func (s *Service) List(ctx context.Context) ([]*model.ModelProvider, error) {
-	m := s.q.ModelProvider
+	m := s.rq.ModelProvider
 	return m.WithContext(ctx).Order(m.ID).Find()
 }
 

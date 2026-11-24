@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"strconv"
 	"strings"
 	"unicode"
@@ -42,14 +41,4 @@ func SanitizeUntrustedName(s string) string {
 		s = string(r[:maxLen]) + "…"
 	}
 	return s
-}
-
-func (tb *ToolBuilder) readFileUntrusted(ctx context.Context, input *ReadFileInput) (*ReadFileOutput, error) {
-	out, err := tb.readFile(ctx, input)
-	if err != nil || out == nil {
-		return out, err
-	}
-	wrapped := *out
-	wrapped.Content = WrapUntrusted(input.Path, out.Content)
-	return &wrapped, nil
 }

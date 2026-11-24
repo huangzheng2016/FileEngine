@@ -59,13 +59,6 @@ func TestPlanLifecycle(t *testing.T) {
 	if has, _ := r.HasPlan(1); !has {
 		t.Fatal("HasPlan after save")
 	}
-
-	if err := r.DeleteSessionBrainData(1); err != nil {
-		t.Fatal(err)
-	}
-	if p, _ := r.GetPlan(1); p.Version != 0 {
-		t.Fatalf("plan must be gone: %+v", p)
-	}
 }
 
 func TestMemoryUpsertValidateAndList(t *testing.T) {
@@ -191,14 +184,8 @@ func TestNotesSince(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0].ID != ids[1] || got[1].ID != ids[2] {
 		t.Fatalf("notes after cursor, oldest first, same session: %+v %v", got, err)
 	}
-	if err := r.DeleteSessionBrainData(5); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := r.NotesSince(5, 0, 0); len(got) != 0 {
-		t.Fatal("session notes must be deleted with the session")
-	}
 	if got, _ := r.NotesSince(6, 0, 0); len(got) != 1 {
-		t.Fatal("other session's notes must survive")
+		t.Fatal("other session's notes must stay out of this session's cursor")
 	}
 }
 
@@ -227,7 +214,7 @@ func seedEntry(t *testing.T, r *Repository, sid uint, p, typ string, size int64)
 		parent = p[:i]
 	}
 	f := &model.FileEntry{ScanSessionID: sid, OriginalPath: p, Name: p[strings.LastIndex(p, "/")+1:], FileType: typ, ParentPath: parent, Size: size, ModTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if err := r.CreateFile(f); err != nil {
+	if err := r.DB().Create(f).Error; err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -242,7 +229,7 @@ func TestSetTargetUniqueResolvesCollisions(t *testing.T) {
 
 	got := []string{}
 	for _, p := range []string{"a/x.jpg", "b/x.jpg", "c/x.jpg"} {
-		final, _, err := r.SetTargetUnique(1, p, "照片/x.jpg", "file")
+		final, _, err := setTargetUnique(r, 1, p, "照片/x.jpg", "file")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,13 +241,13 @@ func TestSetTargetUniqueResolvesCollisions(t *testing.T) {
 			t.Fatalf("collision naming: got %v want %v", got, want)
 		}
 	}
-	if final, _, _ := r.SetTargetUnique(1, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
+	if final, _, _ := setTargetUnique(r, 1, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
 		t.Fatalf("self re-target: %s", final)
 	}
-	if final, _, _ := r.SetTargetUnique(2, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
+	if final, _, _ := setTargetUnique(r, 2, "a/x.jpg", "/照片/x.jpg", "file"); final != "/照片/x.jpg" {
 		t.Fatalf("other session must not collide: %s", final)
 	}
-	if final, _, _ := r.SetTargetUnique(1, "a/x.jpg", "", "file"); final != "" {
+	if final, _, _ := setTargetUnique(r, 1, "a/x.jpg", "", "file"); final != "" {
 		t.Fatal("clear")
 	}
 	f, _ := r.GetFileByPath(1, "a/x.jpg")
@@ -274,10 +261,10 @@ func TestResetPlansUntagsDirectorySubtree(t *testing.T) {
 	d := seedEntry(t, r, 1, "proj", "directory", 0)
 	seedEntry(t, r, 1, "proj/main.go", "file", 1)
 	f := seedEntry(t, r, 1, "loose.txt", "file", 1)
-	if _, _, err := r.SetTargetUnique(1, "proj", "/代码/proj", "directory"); err != nil {
+	if _, _, err := setTargetUnique(r, 1, "proj", "/代码/proj", "directory"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.SetTargetUnique(1, "loose.txt", "/文档/loose.txt", "file"); err != nil {
+	if _, _, err := setTargetUnique(r, 1, "loose.txt", "/文档/loose.txt", "file"); err != nil {
 		t.Fatal(err)
 	}
 	n, err := r.ResetPlans(1, []uint{d.ID, 9999})
@@ -304,9 +291,9 @@ func TestSetTargetUniqueCaseAndNFCInsensitive(t *testing.T) {
 	seedEntry(t, r, 1, "a/1", "file", 1)
 	seedEntry(t, r, 1, "a/2", "file", 1)
 	seedEntry(t, r, 1, "a/3", "file", 1)
-	first, _, _ := r.SetTargetUnique(1, "a/1", "Docs/Café.txt", "file")
-	second, _, _ := r.SetTargetUnique(1, "a/2", "docs/café.TXT", "file")
-	third, _, _ := r.SetTargetUnique(1, "a/3", "DOCS/CAFÉ.txt", "file")
+	first, _, _ := setTargetUnique(r, 1, "a/1", "Docs/Café.txt", "file")
+	second, _, _ := setTargetUnique(r, 1, "a/2", "docs/café.TXT", "file")
+	third, _, _ := setTargetUnique(r, 1, "a/3", "DOCS/CAFÉ.txt", "file")
 	if first != "/Docs/Café.txt" || second == "/docs/café.TXT" {
 		t.Fatalf("NFD/case variant must be renamed: %q %q", first, second)
 	}

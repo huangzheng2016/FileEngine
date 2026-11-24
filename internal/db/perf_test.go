@@ -79,7 +79,7 @@ func TestPathQueriesUseIndexes(t *testing.T) {
 		rows = append(rows, model.FileEntry{ScanSessionID: 1 + uint(i%2), OriginalPath: p, ParentPath: dir, Name: p[len(dir)+1:],
 			FileType: "file", NewPath: np, NewPathKey: CollisionKey(np), Operation: "planned", Role: RoleFile})
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := r.db.Exec("ANALYZE").Error; err != nil {
@@ -134,7 +134,7 @@ func BenchmarkSubtreeUpdate(b *testing.B) {
 		dir := fmt.Sprintf("d%03d", i%500)
 		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("%s/f%05d", dir, i), ParentPath: dir, FileType: "file"})
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
@@ -148,7 +148,7 @@ func BenchmarkSubtreeUpdate(b *testing.B) {
 func TestRefreshSessionCountsWritesOnlyOnChange(t *testing.T) {
 	r := setupBrainRepo(t)
 	s := &model.ScanSession{Status: "scanned"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	seedEntry(t, r, s.ID, "a.txt", "file", 5)
@@ -186,7 +186,7 @@ func TestDecisionsRefreshCountsCoalesced(t *testing.T) {
 	defer func() { countsDelay = old }()
 	r := setupBrainRepo(t)
 	s := &model.ScanSession{Status: "scanned"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
@@ -214,13 +214,13 @@ func TestUpdateCategoryPathSwapsPrefixOnly(t *testing.T) {
 	r := setupBrainRepo(t)
 	fsA, fsB := &model.Filesystem{Name: "a"}, &model.Filesystem{Name: "b"}
 	for _, f := range []*model.Filesystem{fsA, fsB} {
-		if err := r.CreateFilesystem(f); err != nil {
+		if err := r.DB().Create(f).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	sA, sB := &model.ScanSession{FilesystemID: fsA.ID}, &model.ScanSession{FilesystemID: fsB.ID}
 	for _, s := range []*model.ScanSession{sA, sB} {
-		if err := r.CreateSession(s); err != nil {
+		if err := r.DB().Create(s).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -236,7 +236,7 @@ func TestUpdateCategoryPathSwapsPrefixOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	cat := &model.Category{FilesystemID: fsA.ID, Name: "照片", Path: "/Photo"}
-	if err := r.CreateCategory(cat); err != nil {
+	if err := r.DB().Create(cat).Error; err != nil {
 		t.Fatal(err)
 	}
 	cat.Path = "/图片"
@@ -297,7 +297,7 @@ func TestListFilesAfterKeyset(t *testing.T) {
 		name := fmt.Sprintf("n%03d", i%200) // duplicate names exercise the id tie-break
 		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("p/%d", i), ParentPath: "p", Name: name, FileType: typ})
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 	parent := "p"
@@ -343,7 +343,7 @@ func TestSampleFilesDistinctAndFiltered(t *testing.T) {
 		}
 		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("f%04d", i), Name: fmt.Sprintf("f%04d", i), FileType: typ})
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.SampleFiles(FileQuery{SessionID: 1, FileType: "file"}, 50)
@@ -376,7 +376,7 @@ func TestInsertBatchFitsSQLiteVariableLimit(t *testing.T) {
 	for i := range rows {
 		rows[i] = model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("x/%d", i), FileType: "file"}
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -384,16 +384,16 @@ func TestInsertBatchFitsSQLiteVariableLimit(t *testing.T) {
 func TestCategoryStatsGrouped(t *testing.T) {
 	r := setupBrainRepo(t)
 	fs := &model.Filesystem{Name: "fs"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatal(err)
 	}
 	s := &model.ScanSession{FilesystemID: fs.ID}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	// More categories than one UNION ALL chunk.
 	for i := 0; i < 250; i++ {
-		if err := r.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: fmt.Sprintf("c%03d", i), Path: fmt.Sprintf("/c%03d", i)}); err != nil {
+		if err := r.DB().Create(&model.Category{FilesystemID: fs.ID, Name: fmt.Sprintf("c%03d", i), Path: fmt.Sprintf("/c%03d", i)}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -415,7 +415,7 @@ func TestCategoryStatsGrouped(t *testing.T) {
 	if counts["/c007"] != 2 || counts["/c249"] != 2 || counts["/c070"] != 0 || counts["/c000"] != 0 {
 		t.Fatalf("counts: c007=%d c249=%d", counts["/c007"], counts["/c249"])
 	}
-	stats, err := r.GetSessionStats(s.ID, fs.ID)
+	stats, err := statsOf(t, r, s.ID, fs.ID)
 	if err != nil || len(stats) != 2 || stats[0].Path != "/c007" || stats[0].TotalSize != 30 || stats[1].TotalSize != 90 {
 		t.Fatalf("stats: %+v %v", stats, err)
 	}

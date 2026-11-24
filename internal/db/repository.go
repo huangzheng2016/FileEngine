@@ -24,12 +24,11 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithDB is a repository over another handle, for reads on the read pool.
+func (r *Repository) WithDB(db *gorm.DB) *Repository { return &Repository{db: db} }
+
 func (r *Repository) DB() *gorm.DB {
 	return r.db
-}
-
-func (r *Repository) CreateSession(s *model.ScanSession) error {
-	return r.db.Create(s).Error
 }
 
 func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
@@ -225,23 +224,6 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 		Planned:  int(counts.Planned),
 		Executed: int(counts.Executed),
 	}, err
-}
-
-func (r *Repository) CreateFile(f *model.FileEntry) error {
-	return r.db.Create(f).Error
-}
-
-func (r *Repository) CreateFiles(files []model.FileEntry) error {
-	if len(files) == 0 {
-		return nil
-	}
-	// One explicit transaction for the whole bulk load: bare CreateInBatches
-	// commits every batch, and on bind-mounted SQLite volumes (Docker on
-	// macOS) each commit's fsync costs ~100ms — hundreds of batches meant
-	// the DB tail of a scan dwarfed the traversal itself.
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		return tx.CreateInBatches(files, r.InsertBatchRows()).Error
-	})
 }
 
 func (r *Repository) GetFile(id uint) (*model.FileEntry, error) {
@@ -585,17 +567,6 @@ func targetCond(tx *gorm.DB, categoryPath string) (string, []any) {
 	return dal.AtOrUnderCond(tx, "new_path", dir)
 }
 
-func (r *Repository) GetPlannedFiles(sessionID uint) ([]model.FileEntry, error) {
-	var files []model.FileEntry
-	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ? AND needs_review = ?", sessionID, false, false).
-		Find(&files).Error
-	return files, err
-}
-
-func (r *Repository) CreateCategory(c *model.Category) error {
-	return r.db.Create(c).Error
-}
-
 func (r *Repository) CreateCategoryWithConflict(c *model.Category) (created bool, err error) {
 	err = r.db.Create(c).Error
 	if err != nil {
@@ -634,7 +605,7 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	if err != nil {
 		return nil, err
 	}
-	stats, err := r.categoryStats(sessionID, cats)
+	stats, err := r.CategoryStats(sessionID, cats)
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +616,8 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	return result, nil
 }
 
-type categoryStat struct {
+// CategoryStat is the file count and total size under the category at Idx.
+type CategoryStat struct {
 	Idx   int
 	Count int64
 	Size  int64
@@ -655,8 +627,8 @@ type categoryStat struct {
 const categoryStatsChunk = 200
 
 // Every UNION ALL arm is an index range on idx_session_newpath.
-func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]categoryStat, error) {
-	out := make([]categoryStat, len(cats))
+func (r *Repository) CategoryStats(sessionID uint, cats []model.Category) ([]CategoryStat, error) {
+	out := make([]CategoryStat, len(cats))
 	for start := 0; start < len(cats); start += categoryStatsChunk {
 		end := min(start+categoryStatsChunk, len(cats))
 		arms := make([]string, 0, end-start)
@@ -666,7 +638,7 @@ func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]cat
 			arms = append(arms, fmt.Sprintf("SELECT %d AS idx, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size FROM file_entries WHERE scan_session_id = ? AND %s", i, cond))
 			args = append(append(args, sessionID), cargs...)
 		}
-		var rows []categoryStat
+		var rows []CategoryStat
 		if err := r.db.Raw(strings.Join(arms, " UNION ALL "), args...).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -716,16 +688,6 @@ func (r *Repository) DeleteCategory(id uint) error {
 	return r.db.Delete(&model.Category{}, id).Error
 }
 
-func (r *Repository) CreateFilesystem(fs *model.Filesystem) error {
-	return r.db.Create(fs).Error
-}
-
-func (r *Repository) GetFilesystem(id uint) (*model.Filesystem, error) {
-	var fs model.Filesystem
-	err := r.db.First(&fs, id).Error
-	return &fs, err
-}
-
 func (r *Repository) GetModelProvider(id uint) (*model.ModelProvider, error) {
 	var m model.ModelProvider
 	err := r.db.First(&m, id).Error
@@ -743,30 +705,20 @@ func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	return *minBatch - 1
 }
 
-type CategoryDistribution struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	FileCount int64  `json:"file_count"`
-	TotalSize int64  `json:"total_size"`
+// CountUndecidedChildren counts the direct children of dir that still need a
+// decision (undecided or container).
+func (r *Repository) CountUndecidedChildren(sessionID uint, dir string) (int64, error) {
+	var n int64
+	err := r.db.Model(&model.FileEntry{}).
+		Where("scan_session_id = ? AND parent_path = ? AND role IN ?", sessionID, dir, []string{RoleUndecided, RoleContainer}).
+		Count(&n).Error
+	return n, err
 }
 
-func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]CategoryDistribution, error) {
-	cats, err := r.ListCategories(filesystemID)
-	if err != nil {
-		return nil, err
-	}
-	stats, err := r.categoryStats(sessionID, cats)
-	if err != nil {
-		return nil, err
-	}
-	var result []CategoryDistribution
-	for i, c := range cats {
-		if stats[i].Count > 0 {
-			result = append(result, CategoryDistribution{
-				Name: c.Name, Path: c.Path,
-				FileCount: stats[i].Count, TotalSize: stats[i].Size,
-			})
-		}
-	}
-	return result, nil
+// PlannedEntriesAt returns the planned entries (operation and target set) whose
+// original path is one of paths.
+func (r *Repository) PlannedEntriesAt(sessionID uint, paths []string) ([]model.FileEntry, error) {
+	var rows []model.FileEntry
+	err := r.db.Where("scan_session_id = ? AND original_path IN ? AND operation != '' AND new_path != ''", sessionID, paths).Find(&rows).Error
+	return rows, err
 }

@@ -53,7 +53,7 @@ func addFiles(t *testing.T, session uint, files ...model.FileEntry) {
 	for i := range files {
 		files[i].ScanSessionID = session
 	}
-	if err := container.Default.Repo.CreateFiles(files); err != nil {
+	if err := container.Default.Repo.DB().CreateInBatches(files, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 }

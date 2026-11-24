@@ -15,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/biz/dal/db/model"
+	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 )
@@ -85,7 +86,7 @@ func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *model.
 	return withSummaryModel(tracker.sibling(m)), nil
 }
 
-func buildADKAgent(ctx context.Context, chatModel einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int, opts ...agentOption) (*adk.ChatModelAgent, error) {
+func buildADKAgent(ctx context.Context, cfg config.AgentConfig, chatModel einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int, opts ...agentOption) (*adk.ChatModelAgent, error) {
 	o := agentOptions{reduction: interactiveReduction, summaryModel: chatModel}
 	for _, opt := range opts {
 		opt(&o)
@@ -124,7 +125,7 @@ func buildADKAgent(ctx context.Context, chatModel einomodel.ChatModel, tools []t
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, UnknownToolsHandler: unknownToolHandler},
 		},
 		MaxIterations:    maxIterations,
-		ModelRetryConfig: modelRetryConfig(),
+		ModelRetryConfig: modelRetryConfig(&cfg),
 		Handlers:         []adk.ChatModelAgentMiddleware{patchMw, reduceMw, summaryMw},
 	})
 	if err != nil {

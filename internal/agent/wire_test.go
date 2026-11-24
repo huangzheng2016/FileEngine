@@ -202,13 +202,7 @@ func wireAgent(t *testing.T, ws *wireServer, mutate func(*model.ScanSession)) (*
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{}) })
-	old := config.Get()
-	config.Update(&config.Config{Agent: config.AgentConfig{MaxStep: 20, ChatMaxStep: 20, MaxRetries: 1, Concurrency: 2}})
-	t.Cleanup(func() {
-		if old != nil {
-			config.Update(old)
-		}
-	})
+	a.cfg = testCfg(runCfg, func(c *config.AgentConfig) { c.Concurrency = 2 })
 	a.fsCfg = config.RemoteFSConfig{Protocol: "local", BasePath: root}
 	a.modelProvider = claudeProvider(ws.srv.URL)
 	a.session.AllowReadFile = true

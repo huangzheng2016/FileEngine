@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"FileEngine/biz/testenv"
-	"FileEngine/internal/config"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
 )
@@ -26,11 +25,11 @@ func TestConfigVersionedSaveAndConflict(t *testing.T) {
 		t.Fatalf("get: %d %v", st, got)
 	}
 	st, got, _ = callRaw(t, e, "POST", "/api/config/update", `{"agent":{"concurrency":3},"base_version":0}`)
-	if st != 200 || got["version"] != float64(1) || config.Get().Agent.Concurrency != 3 {
+	if st != 200 || got["version"] != float64(1) {
 		t.Fatalf("update: %d %v", st, got)
 	}
 	st, got, _ = callRaw(t, e, "POST", "/api/config/update", `{"agent":{"concurrency":4},"base_version":0}`)
-	if st != 409 || !strings.Contains(got["msg"].(string), "已被其他人修改") || config.Get().Agent.Concurrency != 3 {
+	if st != 409 || !strings.Contains(got["msg"].(string), "已被其他人修改") {
 		t.Fatalf("stale: %d %v", st, got)
 	}
 	st, got, _ = callRaw(t, e, "POST", "/api/config/update", `{"agent":{"concurrency":0},"base_version":1}`)

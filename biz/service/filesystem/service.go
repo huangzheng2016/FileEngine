@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -37,10 +38,11 @@ var basePathMissing = map[string]string{
 }
 
 type Service struct {
-	q *query.Query
+	q  *query.Query
+	rq *dal.Reader
 }
 
-func NewService(q *query.Query) *Service { return &Service{q: q} }
+func NewService(q *query.Query, rq *dal.Reader) *Service { return &Service{q: q, rq: rq} }
 
 // Conn is what a connection needs. Secrets and HostKey are pointers: nil keeps
 // the stored value, "" clears it.
@@ -65,7 +67,7 @@ type SaveInput struct {
 }
 
 func (s *Service) List(ctx context.Context) ([]*model.Filesystem, error) {
-	f := s.q.Filesystem
+	f := s.rq.Filesystem
 	return f.WithContext(ctx).Order(f.Name).Find()
 }
 

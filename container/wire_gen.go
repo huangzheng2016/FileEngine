@@ -7,6 +7,7 @@
 package container
 
 import (
+	"FileEngine/biz/dal/db"
 	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
 	"FileEngine/biz/service/category"
@@ -23,9 +24,8 @@ import (
 	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
 	"FileEngine/biz/service/session"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
-	"FileEngine/internal/db"
+	db2 "FileEngine/internal/db"
 	"gorm.io/gorm"
 )
 
@@ -33,33 +33,29 @@ import (
 
 // A new service: add its constructor here and a field to Container, then
 // run go generate ./container.
-func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
-	repository := db.NewRepository(gdb)
+func build(gdb *gorm.DB, rq *db.Reader, authOpts auth.Options) (*Container, error) {
+	repository := db2.NewRepository(gdb)
 	service, err := auth.NewService(authOpts)
 	if err != nil {
 		return nil, err
 	}
-	runnerService := runner.NewService(repository)
-	registry := eventfeed.NewRegistry()
 	query := newQuery(gdb)
-	filesystemService := filesystem.NewService(query)
-	modelproviderService := modelprovider.NewService(query)
-	settingsService, err := settings.NewService(query)
-	if err != nil {
-		return nil, err
-	}
+	runnerService := runner.NewService(repository, query)
+	registry := eventfeed.NewRegistry()
+	filesystemService := filesystem.NewService(query, rq)
+	modelproviderService := modelprovider.NewService(query, rq)
+	settingsService := settings.NewService(query)
 	adminService := admin.NewService(gdb)
-	factory := sessionagent.NewFactory(query, repository)
-	fileService := file.NewService(query, repository, factory)
+	runService := run.NewService(query, rq, repository, runnerService, settingsService)
+	fileService := file.NewService(query, rq, repository, runService)
 	categoryService := category.NewService(query, repository)
-	planService := plan.NewService(query, repository, factory, runnerService)
-	ruleService := rule.NewService(repository, factory)
+	planService := plan.NewService(query, rq, repository, runService)
+	ruleService := rule.NewService(repository, runService)
 	memoryService := memory.NewService(repository)
-	chatService := chat.NewService(query, factory, runnerService)
-	runService := run.NewService(query, repository, runnerService)
-	sessionService := session.NewService(query, repository, runService)
-	executeService := execute.NewService(repository, runService)
-	eventService := event.NewService(repository, runService)
+	chatService := chat.NewService(query, rq, runService)
+	sessionService := session.NewService(query, rq, repository, runService)
+	executeService := execute.NewService(repository, runService, runnerService)
+	eventService := event.NewService(rq, runService)
 	container := &Container{
 		DB:          gdb,
 		Repo:        repository,
@@ -71,6 +67,7 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		Settings:    settingsService,
 		Admin:       adminService,
 		Query:       query,
+		Read:        rq,
 		Files:       fileService,
 		Categories:  categoryService,
 		Plans:       planService,

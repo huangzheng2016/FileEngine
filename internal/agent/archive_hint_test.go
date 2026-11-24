@@ -7,8 +7,6 @@ import (
 	"compress/gzip"
 	"strings"
 	"testing"
-
-	"FileEngine/biz/dal/db/model"
 )
 
 func makeZip(t *testing.T, names []string) ([]byte, int64) {
@@ -93,13 +91,5 @@ func TestTarHint(t *testing.T) {
 	}
 	if !strings.Contains(hint, "site/index.html") {
 		t.Errorf("names missing:\n%s", hint)
-	}
-}
-
-func makeBatchEntries(t *testing.T) []model.FileEntry {
-	t.Helper()
-	return []model.FileEntry{
-		{ID: 1, ScanSessionID: 1, OriginalPath: "p/live-vision.zip", Name: "live-vision.zip", FileType: "file", Size: 1024},
-		{ID: 2, ScanSessionID: 1, OriginalPath: "p/readme.txt", Name: "readme.txt", FileType: "file", Size: 128},
 	}
 }

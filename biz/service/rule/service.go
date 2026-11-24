@@ -7,7 +7,7 @@ import (
 
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
-	"FileEngine/biz/service/sessionagent"
+	"FileEngine/biz/service/run"
 	"FileEngine/internal/db"
 )
 
@@ -15,11 +15,11 @@ var errNoRule = errs.NotFound("规则不存在")
 
 type Service struct {
 	repo *db.Repository
-	sa   *sessionagent.Factory
+	runs *run.Service
 }
 
-func NewService(repo *db.Repository, sa *sessionagent.Factory) *Service {
-	return &Service{repo: repo, sa: sa}
+func NewService(repo *db.Repository, runs *run.Service) *Service {
+	return &Service{repo: repo, runs: runs}
 }
 
 // Patch holds the fields of a create or update; nil keeps the current value
@@ -67,14 +67,14 @@ func (p *Patch) validSource() bool {
 }
 
 func (s *Service) List(ctx context.Context, sessionID uint) ([]model.PlanRule, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	return s.repo.ListRules(sessionID)
 }
 
 func (s *Service) Create(ctx context.Context, sessionID uint, p Patch) (*model.PlanRule, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	if !p.validSource() {
@@ -115,7 +115,7 @@ type Result struct {
 
 // Apply runs the rules over the session; with preview it only reports matches.
 func (s *Service) Apply(ctx context.Context, sessionID uint, preview bool) (*Result, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	stats, err := s.repo.ApplyRules(sessionID, 0, preview)

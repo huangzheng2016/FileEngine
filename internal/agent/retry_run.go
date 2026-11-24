@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/internal/config"
 	modelfactory "FileEngine/internal/model"
 )
 
@@ -19,46 +20,46 @@ import (
 
 // MaxRetries is the largest class budget so ADK never cuts a class short;
 // shouldRetryModelCall enforces each class's own budget.
-func modelRetryConfig() *adk.ModelRetryConfig {
-	cfg := retryCfg()
+func modelRetryConfig(cfg *config.AgentConfig) *adk.ModelRetryConfig {
 	return &adk.ModelRetryConfig{
 		MaxRetries:  max(maxRetriesForClass(errClassRateLimit, cfg), maxRetriesForClass(errClassServer, cfg)),
-		ShouldRetry: shouldRetryModelCall,
+		ShouldRetry: shouldRetryModelCall(cfg),
 	}
 }
 
 // The request's transport hints are consumed here so they never leak into
 // the classification of a later request.
-func shouldRetryModelCall(ctx context.Context, rc *adk.RetryContext) *adk.RetryDecision {
-	var statusHint int
-	var retryAfter time.Duration
-	if h := modelfactory.ResponseHintsFromContext(ctx); h != nil {
-		statusHint, retryAfter = h.StatusCode(), h.RetryAfter()
-		h.Record(0, 0)
+func shouldRetryModelCall(cfg *config.AgentConfig) func(ctx context.Context, rc *adk.RetryContext) *adk.RetryDecision {
+	return func(ctx context.Context, rc *adk.RetryContext) *adk.RetryDecision {
+		var statusHint int
+		var retryAfter time.Duration
+		if h := modelfactory.ResponseHintsFromContext(ctx); h != nil {
+			statusHint, retryAfter = h.StatusCode(), h.RetryAfter()
+			h.Record(0, 0)
+		}
+		if rc.Err == nil {
+			rateLimitStreak.Store(0)
+			return nil
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		class := classifyRunErrorWithStatus(rc.Err, statusHint)
+		if class == errClassRateLimit {
+			rateLimitStreak.Add(1)
+		}
+		budget := maxRetriesForClass(class, cfg)
+		if rc.RetryAttempt > budget {
+			log.Printf("model request failed (%s), no retries left (%d): %v", class, budget, rc.Err)
+			return nil
+		}
+		if retryAfter <= 0 {
+			retryAfter = retryAfterFromError(rc.Err)
+		}
+		delay := max(backoffDelay(class, rc.RetryAttempt, retryAfter, cfg), time.Millisecond)
+		log.Printf("model request retry %d/%d (%s) in %s: %v", rc.RetryAttempt, budget, class, delay.Round(time.Millisecond), rc.Err)
+		return &adk.RetryDecision{Retry: true, Backoff: delay}
 	}
-	if rc.Err == nil {
-		rateLimitStreak.Store(0)
-		return nil
-	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	class := classifyRunErrorWithStatus(rc.Err, statusHint)
-	if class == errClassRateLimit {
-		rateLimitStreak.Add(1)
-	}
-	cfg := retryCfg()
-	budget := maxRetriesForClass(class, cfg)
-	if rc.RetryAttempt > budget {
-		log.Printf("model request failed (%s), no retries left (%d): %v", class, budget, rc.Err)
-		return nil
-	}
-	if retryAfter <= 0 {
-		retryAfter = retryAfterFromError(rc.Err)
-	}
-	delay := max(backoffDelay(class, rc.RetryAttempt, retryAfter, cfg), time.Millisecond)
-	log.Printf("model request retry %d/%d (%s) in %s: %v", rc.RetryAttempt, budget, class, delay.Round(time.Millisecond), rc.Err)
-	return &adk.RetryDecision{Retry: true, Backoff: delay}
 }
 
 // respondedError marks a run that failed after the model had already
@@ -72,7 +73,7 @@ type runAttemptFunc func(ctx context.Context) (*schema.Message, error)
 
 // Only network failures before any model response replay the whole run;
 // everything else was already retried per request inside it.
-func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, label string) (*schema.Message, error) {
+func runWithRetry(ctx context.Context, cfg *config.AgentConfig, attempt runAttemptFunc, logger *Logger, label string) (*schema.Message, error) {
 	retries := 0
 	for {
 		attemptCtx, hints := modelfactory.WithResponseHints(ctx)
@@ -84,7 +85,6 @@ func runWithRetry(ctx context.Context, attempt runAttemptFunc, logger *Logger, l
 			return nil, ctx.Err()
 		}
 		class := classifyRunErrorWithStatus(err, hints.StatusCode())
-		cfg := retryCfg()
 		var responded *respondedError
 		if class != errClassNetwork || errors.As(err, &responded) || retries >= maxRetriesForClass(class, cfg) {
 			logger.LogMessage("system", fmt.Sprintf("运行失败（%s）：%v", class, err))

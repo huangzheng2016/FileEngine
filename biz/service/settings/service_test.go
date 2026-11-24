@@ -13,11 +13,7 @@ import (
 
 func newService(t *testing.T) *Service {
 	t.Helper()
-	s, err := NewService(dbtest.New(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return NewService(dbtest.New(t))
 }
 
 func setConcurrency(n int) func(*config.AgentConfig) {
@@ -35,14 +31,14 @@ func TestSaveVersionsAndConflict(t *testing.T) {
 	if err != nil || v1.Version != 1 {
 		t.Fatalf("save: %+v %v", v1, err)
 	}
-	if config.Get().Agent.Concurrency != 3 {
-		t.Fatal("a saved version must be live")
+	if got, _ := s.Current(ctx); got.Version != 1 || got.Agent.Concurrency != 3 {
+		t.Fatalf("saved version must be current: %+v", got)
 	}
 	if _, err := s.Save(ctx, 0, setConcurrency(4)); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale base: %v", err)
 	}
-	if config.Get().Agent.Concurrency != 3 {
-		t.Fatal("a rejected save must not change the live settings")
+	if got, _ := s.Current(ctx); got.Version != 1 || got.Agent.Concurrency != 3 {
+		t.Fatalf("a rejected save must not change the settings: %+v", got)
 	}
 	same, err := s.Save(ctx, 1, setConcurrency(3))
 	if err != nil || same.Version != 1 {

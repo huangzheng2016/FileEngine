@@ -19,7 +19,7 @@ func TestWireRevertedChangeIsRetractedNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	cat := &model.Category{FilesystemID: session.FilesystemID, Name: "临时", Path: "/临时"}
-	if err := repo.CreateCategory(cat); err != nil {
+	if err := repo.DB().Create(cat).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.RunChat(ctx, NewLogger(session.ID, 2, 0), "第二轮", nil); err != nil {

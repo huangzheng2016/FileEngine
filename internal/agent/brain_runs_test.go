@@ -65,8 +65,6 @@ func toolCall(id, name string, args any) schema.ToolCall {
 func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	old := config.Get()
-	config.Update(&config.Config{Agent: config.AgentConfig{MaxStep: 20, ChatMaxStep: 20, MaxRetries: 1}})
 	restore := SetModelFactory(func(context.Context, *model.ModelProvider) (einomodel.ChatModel, error) { return fm, nil })
 	fsRoot := t.TempDir()
 	if err := remotefs.SetLocalPolicy(remotefs.LocalPolicy{Roots: []string{fsRoot}}); err != nil {
@@ -75,16 +73,13 @@ func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.Sca
 	t.Cleanup(func() {
 		restore()
 		_ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{})
-		if old != nil {
-			config.Update(old)
-		}
 	})
 	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	provider := &model.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
-	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session)
+	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session, testCfg(runCfg))
 	return repo, a, session
 }
 
@@ -93,7 +88,7 @@ func seedEntry(t *testing.T, repo *db.Repository, e model.FileEntry) {
 	if e.Name == "" {
 		e.Name = e.OriginalPath[strings.LastIndex(e.OriginalPath, "/")+1:]
 	}
-	if err := repo.CreateFile(&e); err != nil {
+	if err := repo.DB().Create(&e).Error; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -160,7 +155,7 @@ func TestChatHistoryAppendOnly(t *testing.T) {
 	if int(n) != len(foldsAt) {
 		t.Fatalf("summary turns = %d, folds = %d", n, len(foldsAt))
 	}
-	listed, _ := repo.ListChatTurns(1)
+	listed := listChatTurns(t, repo, 1)
 	for _, tr := range listed {
 		if tr.Role == db.ChatRoleSummary {
 			t.Fatal("summary turns are never listed")
@@ -188,7 +183,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 		t.Fatalf("turn 2: %q %v", ans, err)
 	}
 
-	turns, _ := repo.ListChatTurns(session.ID)
+	turns := listChatTurns(t, repo, session.ID)
 	want := []string{"user:帮我整理照片", "assistant:你想按年还是按月？", "user:按年，以后都这样", "assistant:好的，已记住。"}
 	if len(turns) != len(want) {
 		t.Fatalf("turns: %+v", turns)
@@ -203,7 +198,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	}
 
 	in1 := fm.streamed[0]
-	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent) {
+	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(a.cfg) {
 		t.Fatal("system prompt first and static")
 	}
 	if !strings.HasPrefix(in1[1].Content, "# 会话共享上下文") || !strings.Contains(in1[1].Content, "照片按年份整理") {
@@ -232,7 +227,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 func TestComputeTreeOverview(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	s := &model.ScanSession{FilesystemID: 1, RootPath: "data"}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range []model.FileEntry{
@@ -291,7 +286,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 	}
 	in := fm.streamed[0]
 	user := in[len(in)-1].Content
-	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent) {
+	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(a.cfg) {
 		t.Fatalf("survey input: %q", user)
 	}
 
@@ -304,7 +299,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 func TestBuildReviewMaterial(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	s := &model.ScanSession{FilesystemID: 1, RootPath: "."}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	seedCategory(t, repo, 1, "照片", "/照片")
@@ -362,7 +357,7 @@ func TestRunReviewSummaryAndReflection(t *testing.T) {
 	if !strings.HasPrefix(sum, report) || !strings.Contains(sum, "记忆已更新：新增 1 条") {
 		t.Fatalf("summary: %q", sum)
 	}
-	if in := fm.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
+	if in := fm.streamed[0]; in[0].Content != reviewSystemPrompt(a.cfg) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
 		t.Fatal("review input: static prompt + material")
 	}
 	if len(fm.genned) != 1 || !strings.Contains(fm.genned[0][1].Content, "mix 是浏览器下载目录") {

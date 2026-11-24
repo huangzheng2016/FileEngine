@@ -10,11 +10,12 @@ import (
 	"fmt"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 )
@@ -35,22 +36,22 @@ var (
 )
 
 type Service struct {
-	q      *query.Query
-	repo   *db.Repository
-	sa     *sessionagent.Factory
-	runner *runner.Service
+	q    *query.Query
+	rq   *dal.Reader
+	repo *db.Repository
+	runs *run.Service
 }
 
-func NewService(q *query.Query, repo *db.Repository, sa *sessionagent.Factory, r *runner.Service) *Service {
-	return &Service{q: q, repo: repo, sa: sa, runner: r}
+func NewService(q *query.Query, rq *dal.Reader, repo *db.Repository, runs *run.Service) *Service {
+	return &Service{q: q, rq: rq, repo: repo, runs: runs}
 }
 
 // Get returns the session's plan; a session without one gets version 0.
 func (s *Service) Get(ctx context.Context, sessionID uint) (*model.SessionPlan, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.ReadSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	p := s.q.SessionPlan
+	p := s.rq.SessionPlan
 	rows, err := p.WithContext(ctx).Where(p.SessionID.Eq(sessionID)).Limit(1).Find()
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func (s *Service) Get(ctx context.Context, sessionID uint) (*model.SessionPlan, 
 
 // Update saves the editor's text; a save from a stale version is a conflict.
 func (s *Service) Update(ctx context.Context, sessionID uint, content string, version int) (*model.SessionPlan, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	plan, err := s.repo.SavePlan(sessionID, content, version, "")
@@ -78,7 +79,7 @@ func (s *Service) Update(ctx context.Context, sessionID uint, content string, ve
 }
 
 func (s *Service) Approve(ctx context.Context, sessionID uint) (*model.SessionPlan, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	plan, err := s.repo.ApprovePlan(sessionID)
@@ -97,26 +98,26 @@ func (s *Service) Draft(ctx context.Context, sessionID uint, instructions string
 	if len([]rune(instructions)) > maxInstructionRunes {
 		return 0, errs.Invalid("补充说明过长")
 	}
-	session, err := s.sa.Session(ctx, sessionID)
+	session, err := s.runs.Session(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
 	if session.Status == "scanning" {
 		return 0, errs.Conflict("整理任务还在扫描，扫描完成后再生成方案")
 	}
-	a, err := s.sa.Agent(ctx, session)
+	a, err := s.runs.AgentFor(ctx, session)
 	if err != nil {
 		return 0, err
 	}
-	run, err := s.runner.Launch(sessionID, db.RunPhaseSurvey, "生成方案", func(ctx context.Context, run *model.AgentRun) runner.Outcome {
+	launched, err := s.runs.Launch(sessionID, db.RunPhaseSurvey, "生成方案", func(ctx context.Context, run *model.AgentRun) runner.Outcome {
 		logger := agent.NewLogger(sessionID, run.ID, 0)
 		summary, err := a.RunSurvey(ctx, logger, instructions)
 		return runner.Outcome{Summary: summary, Err: err, Tokens: logger.Tokens()}
 	})
 	if err != nil {
-		return 0, sessionagent.StartError(err)
+		return 0, err
 	}
-	return run.ID, nil
+	return launched.ID, nil
 }
 
 type Op struct {
@@ -126,7 +127,7 @@ type Op struct {
 
 // Ops is the dry-run list of the decided, unexecuted entries.
 func (s *Service) Ops(ctx context.Context, sessionID uint) ([]Op, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	files, err := s.repo.ListPlannedEntries(sessionID)
@@ -171,7 +172,7 @@ func (s *Service) Reset(ctx context.Context, sessionID uint, ids []uint) (int64,
 	if len(ids) > maxResetIDs {
 		return 0, errs.BadRequest
 	}
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return 0, err
 	}
 	return s.repo.ResetPlans(sessionID, ids)
@@ -179,7 +180,7 @@ func (s *Service) Reset(ctx context.Context, sessionID uint, ids []uint) (int64,
 
 // Confirm accepts low-confidence decisions so they run with the plan.
 func (s *Service) Confirm(ctx context.Context, sessionID uint, ids []uint) (int64, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.Session(ctx, sessionID); err != nil {
 		return 0, err
 	}
 	return s.repo.ConfirmReview(sessionID, ids)
@@ -188,7 +189,7 @@ func (s *Service) Confirm(ctx context.Context, sessionID uint, ids []uint) (int6
 // Preview browses the virtual target tree (side "after") or the scanned tree
 // with a status per item (side "before").
 func (s *Service) Preview(ctx context.Context, sessionID uint, side, dir string, offset, limit int) (*db.PreviewPage, error) {
-	session, err := s.sa.Session(ctx, sessionID)
+	session, err := s.runs.Session(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/dbtest"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
@@ -19,7 +20,7 @@ func setup(t *testing.T) (*Service, *query.Query) {
 		t.Fatal(err)
 	}
 	q := dbtest.New(t)
-	return NewService(q), q
+	return NewService(q, &dal.Reader{Query: q}), q
 }
 
 func ptr(s string) *string { return &s }

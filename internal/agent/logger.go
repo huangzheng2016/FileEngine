@@ -33,20 +33,12 @@ func (l *Logger) ForWorker(workerID int) *Logger {
 	return &Logger{sessionID: l.sessionID, runID: l.runID, workerID: workerID, usage: l.usage}
 }
 
-func (l *Logger) SessionID() uint { return l.sessionID }
-func (l *Logger) RunID() uint     { return l.runID }
-func (l *Logger) WorkerID() int   { return l.workerID }
+func (l *Logger) RunID() uint { return l.runID }
 
 func (l *Logger) SetBatch(batch int) {
 	l.mu.Lock()
 	l.batch = batch
 	l.mu.Unlock()
-}
-
-func (l *Logger) GetBatch() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.batch
 }
 
 func (l *Logger) nextID(prefix string) string {

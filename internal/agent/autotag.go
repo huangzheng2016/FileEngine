@@ -31,6 +31,7 @@ type AutoTagAgent struct {
 	session       *model.ScanSession
 	sessionID     uint
 	logger        *Logger
+	cfg           config.AgentConfig
 
 	mu       sync.Mutex
 	failures []BatchFailure
@@ -40,8 +41,8 @@ type AutoTagAgent struct {
 	warm   *warmGate // worker 0's first response opens it
 }
 
-func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger) *AutoTagAgent {
-	return &AutoTagAgent{repo: repo, fsCfg: fsCfg, modelProvider: modelProvider, session: session, sessionID: sessionID, logger: logger}
+func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger, cfg config.AgentConfig) *AutoTagAgent {
+	return &AutoTagAgent{repo: repo, fsCfg: fsCfg, modelProvider: modelProvider, session: session, sessionID: sessionID, logger: logger, cfg: cfg}
 }
 
 func (a *AutoTagAgent) noteFailure(f BatchFailure) {
@@ -172,7 +173,7 @@ func (a *AutoTagAgent) sharedSnapshot() (*sharedSnapshot, error) {
 }
 
 func (a *AutoTagAgent) prepass() error {
-	if !config.Get().Agent.JunkFilterDisabled {
+	if !a.cfg.JunkFilterDisabled {
 		if n, err := a.repo.MarkJunkEntries(a.sessionID, junkFileNames, junkDirNames); err != nil {
 			log.Printf("junk filter: %v (continuing)", err)
 		} else if n > 0 {
@@ -201,7 +202,7 @@ func (a *AutoTagAgent) walk(ctx context.Context, newWorker func(workerID int) (*
 		q.stop()
 	}()
 
-	concurrency := max(config.Get().Agent.Concurrency, 1)
+	concurrency := max(a.cfg.Concurrency, 1)
 	var wg sync.WaitGroup
 	var warm *warmGate
 	for id := range concurrency {
@@ -394,10 +395,8 @@ func matchCategory(cats []model.Category, words []string) *model.Category {
 }
 
 func (a *AutoTagAgent) autoDecide(dir *model.FileEntry, sig DirSignals) (bool, error) {
-	var undecided int64
-	if err := a.repo.DB().Model(&model.FileEntry{}).
-		Where("scan_session_id = ? AND parent_path = ? AND role IN ?", a.sessionID, dir.OriginalPath, []string{db.RoleUndecided, db.RoleContainer}).
-		Count(&undecided).Error; err != nil {
+	undecided, err := a.repo.CountUndecidedChildren(a.sessionID, dir.OriginalPath)
+	if err != nil {
 		return false, err
 	}
 	if undecided == 0 {
@@ -458,7 +457,7 @@ func (a *AutoTagAgent) newWorker(ctx context.Context, id int, chatModel einomode
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect fs: %w", err)
 	}
-	cfg := config.Get().Agent
+	cfg := a.cfg
 	logger := a.logger.ForWorker(id)
 	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, cfg, a.session, a.modelProvider.VisionEnabled)
 	tb.RunID = logger.RunID()
@@ -474,7 +473,7 @@ func (a *AutoTagAgent) newWorker(ctx context.Context, id int, chatModel einomode
 		chatModel = &warmModel{inner: chatModel, gate: warm}
 	}
 	tracker := newTokenTrackingModel(chatModel)
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPromptForSession(cfg), cfg.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
+	agentInst, err := buildADKAgent(ctx, cfg, tracker, tools, systemPromptForSession(cfg), cfg.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
 	if err != nil {
 		fs.Close()
 		return nil, nil, fmt.Errorf("create agent: %w", err)
@@ -520,7 +519,7 @@ func (a *AutoTagAgent) unitMessages(ctx context.Context, w *tagWorker, u workUni
 		var hints map[uint]string
 		if w.fs != nil {
 			shown := u.files[:min(len(u.files), unitListingMax)]
-			hints = a.archiveHints(ctx, w.fs, shown, config.Get().Agent)
+			hints = a.archiveHints(ctx, w.fs, shown, a.cfg)
 		}
 		msg = buildGroupUnitPrompt(u.path, u.files, unitCtx, hints)
 	case unitVersions:
@@ -545,7 +544,7 @@ func (a *AutoTagAgent) runUnitLLM(ctx context.Context, w *tagWorker, u workUnit)
 		return err
 	}
 	w.logger.LogMessage("user", msgs[1].Content)
-	_, err = runADKWithRetry(ctx, w.agent, msgs, w.logger, fmt.Sprintf("worker %d %s", w.id, u.label()), w.tracker)
+	_, err = runADKWithRetry(ctx, a.cfg, w.agent, msgs, w.logger, fmt.Sprintf("worker %d %s", w.id, u.label()), w.tracker)
 	return err
 }
 

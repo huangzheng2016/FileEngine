@@ -195,7 +195,7 @@ type AgentRun struct {
 // ID is the stream sequence number used for SSE ids and Last-Event-ID resume.
 type SessionEvent struct {
 	ID        uint      `gorm:"primaryKey" json:"seq"`
-	SessionID uint      `gorm:"index:idx_event_session_run,priority:1" json:"session_id"`
+	SessionID uint      `gorm:"index:idx_event_session_run,priority:1;index:idx_event_session_seq" json:"session_id"`
 	RunID     uint      `gorm:"index:idx_event_session_run,priority:2" json:"run_id"`
 	Type      string    `gorm:"size:32" json:"type"`
 	Data      string    `gorm:"type:text" json:"data"`

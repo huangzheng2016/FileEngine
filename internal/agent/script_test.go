@@ -26,11 +26,11 @@ func scriptTestBuilder(t *testing.T, session *model.ScanSession) (*ToolBuilder, 
 	scriptSeedFile(t, repo, 1, "docs", "directory")
 	scriptSeedFile(t, repo, 1, "incoming", "directory")
 	cat := &model.Category{FilesystemID: 7, Name: "照片", Path: "/organized/photos", AgentEditable: true}
-	if err := repo.CreateCategory(cat); err != nil {
+	if err := repo.DB().Create(cat).Error; err != nil {
 		t.Fatalf("seed category: %v", err)
 	}
 	locked := &model.Category{FilesystemID: 7, Name: "锁定", Path: "/locked", AgentEditable: false}
-	if err := repo.CreateCategory(locked); err != nil {
+	if err := repo.DB().Create(locked).Error; err != nil {
 		t.Fatalf("seed locked category: %v", err)
 	}
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
@@ -52,7 +52,7 @@ func scriptSeedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fil
 		Name:          name,
 		FileType:      fileType,
 	}
-	if err := repo.CreateFile(f); err != nil {
+	if err := repo.DB().Create(f).Error; err != nil {
 		t.Fatalf("seed file %s: %v", path, err)
 	}
 }

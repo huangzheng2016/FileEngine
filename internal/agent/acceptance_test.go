@@ -242,7 +242,7 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 	))
 	_, a, session := wireChatAgent(t, ws)
 	repo := a.repo
-	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
+	if err := repo.DB().Create(&model.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	files, _, _ := repo.ListFiles(db.FileQuery{SessionID: session.ID})
@@ -251,7 +251,7 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Everything the snapshot holds changes between the turns.
-	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件", Description: "安装包"}); err != nil {
+	if err := repo.DB().Create(&model.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件", Description: "安装包"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertMemory(&model.MemoryItem{Scope: db.MemoryScopeGlobal, Kind: db.MemoryPreference, Key: "pref:x", Content: "新偏好丙", Source: db.MemorySourceUser}); err != nil {

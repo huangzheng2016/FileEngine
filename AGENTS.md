@@ -8,14 +8,20 @@ are the source of truth. How the system fits together: `docs/architecture.md`; s
 
 - `main.go`, `internal/app`: server entry and lifecycle. `cmd/fileengine-desktop`: Wails v3 desktop (in-process
   backend, no listener; the window talks to it through Wails bindings).
-- `idl`: Thrift IDL, the only route table (`/api/<feature>/<action>`). `biz`: Hertz backend: `model`, `router`
-  and `handler/api/*_service.go` stubs are hz output (bodies hand-written), `handler/resp`, `errs`, `mw`
-  (default-deny auth, limits), `service/<feature>` business logic. `container`: Wire-built services.
+- `idl`: Thrift IDL, the only route table (`/api/<feature>/<action>`). `biz`: Hertz backend: `model` and `router`
+  are hz output, `handler/api/*_service.go` are hand-written handlers (bind, one service call, convert, respond),
+  `handler/resp`, `errs`, `actor`, `mw` (default-deny auth, limits), `testenv`. `container`: Wire-built services.
+- `biz/service/<feature>`: `admin`, `auth`, `category`, `chat`, `event`, `eventfeed`, `execute`, `file`,
+  `filesystem`, `memory`, `modelprovider`, `plan`, `rule`, `run` (session lookup, agent construction, scan and
+  tagging launch), `runner` (run and scan lifecycle, cancel registry, shutdown), `session`, `settings` (versioned
+  runtime settings).
 - `internal/agent`: tagging pipeline, chat, survey, review, reflection, tools, Tengo scripts, prompts, memory.
 - `biz/dal/db`: database handle (`Init`, dialect setup, `Migrate`), dialect helpers (`SubtreeCond`, `AtOrUnderCond`,
   `CILikeCondition` ...), `Page`, `dbtest.New(t)`; `model` holds every GORM table struct (`model.All()`); `query` is
   gorm/gen output from `cmd/generate` (`task gen:db`), never hand-edited.
-- `internal/db`: repository, contract types (`contract.go`), decide, runs and the event bus over the `biz/dal/db` models.
+- `internal/db`: what `internal/agent`, `internal/executor` and `internal/scanner` call and the domain core: the
+  repository (their queries only), contract types (`contract.go`), `Decide`, run rows, the event bus (`Emit`), rules
+  engine, preview, exec journal, scan writes. Resource CRUD and read models live in `biz/service`, not here.
 - `internal/scanner`, `internal/executor`, `internal/remotefs`, `internal/model`, `internal/pathutil`,
   `internal/config`, `internal/logging`.
 - `web`: Vue 3 frontend on the danceinbox-style design system; `web/src/base` and `web/src/styles` are copied
@@ -34,6 +40,8 @@ the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebK
   activity is read from runs, never inferred from `ScanSession.Status`.
 - Comments are rare, English only, and explain a non-obvious why. No history notes, no restating code. UI copy
   and API error messages are Chinese, with full-width punctuation.
+- Runtime settings (`biz/service/settings`) are read once per run at launch and passed explicitly to the agent,
+  tools and scanner; there is no global agent config.
 - Model requests stay cache-affine: fixed ordered tools → static system prompt → byte-identical shared context
   → append-only history → per-unit data. Never put counts, timestamps or ids in the prefix.
 - Only `db.Emit` publishes events, never inside a DB transaction. Never put image data in events or logs.
@@ -44,7 +52,7 @@ the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebK
 - Echoed file names go through `SanitizeUntrustedName`; file contents reach the model inside `<data>` blocks;
   sensitive files are never read.
 - Writes are column-scoped; never `Save` a previously loaded `FileEntry`.
-- Database: path-prefix and subtree matches use `subtreeCond`/`atOrUnderCond` ranges, never `LIKE` (LIKE is
+- Database: path-prefix and subtree matches use `dal.SubtreeCond`/`dal.AtOrUnderCond` ranges, never `LIKE` (LIKE is
   only for user-facing substring search); every writer of `new_path` also writes `new_path_key`; read
   endpoints never recompute or write session counters; agent-iterated listings use keyset pagination
   (`ListFilesAfter`), not OFFSET + COUNT; new indexes must pass `TestMySQLIndexWidths`.

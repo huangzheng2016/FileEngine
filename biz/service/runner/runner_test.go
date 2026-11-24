@@ -24,13 +24,13 @@ func newService(t *testing.T) (*Service, *db.Repository) {
 			_ = sqlDB.Close()
 		}
 	})
-	return NewService(repo), repo
+	return NewService(repo, dal.Query()), repo
 }
 
 func newSession(t *testing.T, repo *db.Repository) uint {
 	t.Helper()
 	s := &model.ScanSession{Status: "scanned"}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	return s.ID
@@ -40,12 +40,12 @@ func waitStatus(t *testing.T, repo *db.Repository, runID uint, want string) *mod
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if r, err := repo.GetRun(runID); err == nil && r.Status == want {
+		if r, err := getRun(repo, runID); err == nil && r.Status == want {
 			return r
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	r, _ := repo.GetRun(runID)
+	r, _ := getRun(repo, runID)
 	t.Fatalf("run %d did not reach %q: %+v", runID, want, r)
 	return nil
 }
@@ -115,8 +115,9 @@ func TestStopWaitsForRunsTheRunnerDoesNotOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	db.RegisterRunCancel(run.ID, cancel)
+	untrack := s.Track(run.ID, cancel)
 	go func() {
+		defer untrack()
 		<-ctx.Done()
 		time.Sleep(100 * time.Millisecond) // finishing its current step
 		_ = repo.FinishRun(run, db.RunPartial, "执行结果", "", db.TokenCounts{})
@@ -133,7 +134,7 @@ func TestStopWaitsForRunsTheRunnerDoesNotOwn(t *testing.T) {
 func TestPanickingScanFailsTheSession(t *testing.T) {
 	s, repo := newService(t)
 	sess := &model.ScanSession{Status: "scanning"}
-	if err := repo.CreateSession(sess); err != nil {
+	if err := repo.DB().Create(sess).Error; err != nil {
 		t.Fatal(err)
 	}
 	s.StartScan(sess.ID, func(context.Context) { panic("scan boom") })
@@ -172,4 +173,9 @@ func TestScanRegistryCancelAndShutdown(t *testing.T) {
 	if !s.CancelScan(9) {
 		t.Fatal("a panicking scan must still detach")
 	}
+}
+
+func getRun(repo *db.Repository, id uint) (*model.AgentRun, error) {
+	var run model.AgentRun
+	return &run, repo.DB().First(&run, id).Error
 }

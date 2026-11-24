@@ -17,7 +17,7 @@ func seedRepo(t *testing.T, entries ...model.FileEntry) *Repository {
 	r := NewRepository(dal.DB())
 	for i := range entries {
 		entries[i].ScanSessionID = 1
-		if err := r.CreateFile(&entries[i]); err != nil {
+		if err := r.DB().Create(&entries[i]).Error; err != nil {
 			t.Fatal(err)
 		}
 	}

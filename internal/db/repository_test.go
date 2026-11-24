@@ -17,11 +17,11 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	r := NewRepository(dal.DB())
 
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
 	session := &model.ScanSession{FilesystemID: fs.ID, Status: "tagging"}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		{FilesystemID: fs.ID, Name: "空分类", Path: "/empty"},
 	} {
 		cat := c
-		if err := r.CreateCategory(&cat); err != nil {
+		if err := r.DB().Create(&cat).Error; err != nil {
 			t.Fatalf("create category %s: %v", c.Name, err)
 		}
 	}
@@ -44,7 +44,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	}
 	for _, f := range files {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		t.Fatalf("/empty: got count=%d present=%v, want 0 present", c, ok)
 	}
 
-	stats, err := r.GetSessionStats(session.ID, fs.ID)
+	stats, err := statsOf(t, r, session.ID, fs.ID)
 	if err != nil {
 		t.Fatalf("GetSessionStats: %v", err)
 	}
@@ -97,11 +97,11 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 	r := NewRepository(dal.DB())
 
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
 	session := &model.ScanSession{FilesystemID: fs.ID, Status: "scanning"}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestSampleFiles(t *testing.T) {
 		{ScanSessionID: 2, OriginalPath: "other/x.jpg", ParentPath: "other", Name: "x.jpg", FileType: "file"},
 	} {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -200,7 +200,7 @@ func TestCountUntaggedByType(t *testing.T) {
 	}
 	for _, f := range entries {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -232,7 +232,7 @@ func TestTaggedStatusByIDs(t *testing.T) {
 	tagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file", Tagged: true}
 	untagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"}
 	for _, f := range []*model.FileEntry{tagged, untagged} {
-		if err := r.CreateFile(f); err != nil {
+		if err := r.DB().Create(f).Error; err != nil {
 			t.Fatalf("create file: %v", err)
 		}
 	}
@@ -268,7 +268,7 @@ func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	}
 	for _, f := range entries {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -306,7 +306,7 @@ func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 		{ScanSessionID: 1, OriginalPath: "in/1000x.txt", Name: "1000x.txt", FileType: "file"},
 	} {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -326,4 +326,29 @@ func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 	if total != 1 || len(files) != 1 || files[0].Name != "100%.txt" {
 		t.Fatalf("literal %% search must match only 100%%.txt: got total=%d files=%v", total, files)
 	}
+}
+
+type statRow struct {
+	Path                 string
+	FileCount, TotalSize int64
+}
+
+// statsOf lists the categories that have files, like the session overview.
+func statsOf(t *testing.T, r *Repository, sessionID, filesystemID uint) ([]statRow, error) {
+	t.Helper()
+	cats, err := r.ListCategories(filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := r.CategoryStats(sessionID, cats)
+	if err != nil {
+		return nil, err
+	}
+	var out []statRow
+	for i, c := range cats {
+		if stats[i].Count > 0 {
+			out = append(out, statRow{Path: c.Path, FileCount: stats[i].Count, TotalSize: stats[i].Size})
+		}
+	}
+	return out, nil
 }

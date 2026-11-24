@@ -7,10 +7,11 @@ import (
 	"io"
 	"log/slog"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
-	"FileEngine/biz/service/sessionagent"
+	"FileEngine/biz/service/run"
 	"FileEngine/internal/agent"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
@@ -25,12 +26,15 @@ var errNoFile = errs.NotFound("文件不存在")
 
 type Service struct {
 	q    *query.Query
+	rq   *dal.Reader
 	repo *db.Repository
-	sa   *sessionagent.Factory
+	// reads is repo on the read pool: list endpoints never wait for the writer
+	reads *db.Repository
+	runs  *run.Service
 }
 
-func NewService(q *query.Query, repo *db.Repository, sa *sessionagent.Factory) *Service {
-	return &Service{q: q, repo: repo, sa: sa}
+func NewService(q *query.Query, rq *dal.Reader, repo *db.Repository, runs *run.Service) *Service {
+	return &Service{q: q, rq: rq, repo: repo, reads: repo.WithDB(rq.DB), runs: runs}
 }
 
 type ListParams struct {
@@ -50,14 +54,14 @@ type ListParams struct {
 }
 
 func (s *Service) List(ctx context.Context, p ListParams) ([]model.FileEntry, int64, error) {
-	if _, err := s.sa.Session(ctx, p.SessionID); err != nil {
+	if _, err := s.runs.ReadSession(ctx, p.SessionID); err != nil {
 		return nil, 0, err
 	}
 	size := int(p.PageSize)
 	if size > maxPageSize {
 		size = maxPageSize
 	}
-	return s.repo.ListFiles(db.FileQuery{
+	return s.reads.ListFiles(db.FileQuery{
 		SessionID: p.SessionID, ParentPath: p.ParentPath, FileType: p.FileType, Tagged: p.Tagged,
 		Categorized: p.Categorized, CategoryPath: p.CategoryPath, Search: p.Search,
 		NeedsReview: p.NeedsReview, Sensitive: p.Sensitive, Role: p.Role,
@@ -111,7 +115,7 @@ func (s *Service) Update(ctx context.Context, id uint, description, newPath *str
 // learnCorrection remembers where the user wants this kind of file, so the
 // next run classifies it that way.
 func (s *Service) learnCorrection(ctx context.Context, f *model.FileEntry, oldTarget, newTarget string) error {
-	session, err := s.sa.Session(ctx, f.ScanSessionID)
+	session, err := s.runs.Session(ctx, f.ScanSessionID)
 	if err != nil {
 		return err
 	}
@@ -128,10 +132,10 @@ func (s *Service) learnCorrection(ctx context.Context, f *model.FileEntry, oldTa
 
 // Tree lists the directories directly under parent ("" = the scan root).
 func (s *Service) Tree(ctx context.Context, sessionID uint, parent string) ([]*model.FileEntry, error) {
-	if _, err := s.sa.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.ReadSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	f := s.q.FileEntry
+	f := s.rq.FileEntry
 	return f.WithContext(ctx).
 		Where(f.ScanSessionID.Eq(sessionID), f.ParentPath.Eq(parent), f.FileType.Eq("directory")).
 		Order(f.Name, f.ID).Find()
@@ -153,11 +157,11 @@ func (s *Service) Open(ctx context.Context, id uint) (*Content, error) {
 	if err != nil {
 		return nil, errs.Invalid("文件路径非法")
 	}
-	session, err := s.sa.Session(ctx, file.ScanSessionID)
+	session, err := s.runs.Session(ctx, file.ScanSessionID)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := s.sa.FSConfig(ctx, session)
+	cfg, err := s.runs.ResolveFSConfig(ctx, session)
 	if err != nil {
 		return nil, err
 	}

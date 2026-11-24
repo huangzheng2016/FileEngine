@@ -70,9 +70,11 @@ type echoOutput struct {
 
 func newEchoAgent(t *testing.T, model einomodel.ChatModel, echo tool.BaseTool) *adk.ChatModelAgent {
 	t.Helper()
-	if config.Get() == nil {
-		config.Update(&config.Config{})
-	}
+	return newEchoAgentCfg(t, testCfg(), model, echo)
+}
+
+func newEchoAgentCfg(t *testing.T, cfg config.AgentConfig, model einomodel.ChatModel, echo tool.BaseTool) *adk.ChatModelAgent {
+	t.Helper()
 	if echo == nil {
 		var err error
 		echo, err = utils.InferTool("echo", "echo back the text", func(_ context.Context, in *echoInput) (*echoOutput, error) {
@@ -87,7 +89,7 @@ func newEchoAgent(t *testing.T, model einomodel.ChatModel, echo tool.BaseTool) *
 		Model:            model,
 		ToolsConfig:      adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{echo}}},
 		MaxIterations:    3,
-		ModelRetryConfig: modelRetryConfig(),
+		ModelRetryConfig: modelRetryConfig(&cfg),
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -209,7 +211,7 @@ func TestRunADKWithRetryCountsStreamingTokens(t *testing.T) {
 	setupToolTestRepo(t)
 	tracker := newTokenTrackingModel(&scriptedModel{})
 	logger := NewLogger(203, 1, 0)
-	if _, err := runADKWithRetry(context.Background(), newEchoAgent(t, tracker, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "test", tracker); err != nil {
+	if _, err := runADKWithRetry(context.Background(), testCfg(), newEchoAgent(t, tracker, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "test", tracker); err != nil {
 		t.Fatalf("runADKWithRetry: %v", err)
 	}
 	tok := logger.Tokens()

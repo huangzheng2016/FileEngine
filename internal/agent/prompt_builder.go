@@ -106,14 +106,6 @@ func renderRules(rules []model.PlanRule) string {
 	return sb.String() + "\n"
 }
 
-func BuildSharedContext(repo *db.Repository, session *model.ScanSession) (string, error) {
-	c, err := LoadSharedContext(repo, session)
-	if err != nil {
-		return "", err
-	}
-	return RenderSharedContext(c), nil
-}
-
 // SharedContextMessage is message 0 of every request: the cache breakpoint
 // that every later message extends.
 func SharedContextMessage(text string) *schema.Message {

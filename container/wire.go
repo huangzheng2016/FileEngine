@@ -3,6 +3,7 @@
 package container
 
 import (
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
 	"FileEngine/biz/service/category"
@@ -19,7 +20,6 @@ import (
 	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
 	"FileEngine/biz/service/session"
-	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 
@@ -29,7 +29,7 @@ import (
 
 // A new service: add its constructor here and a field to Container, then
 // run go generate ./container.
-func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
+func build(gdb *gorm.DB, rq *dal.Reader, authOpts auth.Options) (*Container, error) {
 	wire.Build(
 		db.NewRepository,
 		auth.NewService,
@@ -40,7 +40,6 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		modelprovider.NewService,
 		settings.NewService,
 		admin.NewService,
-		sessionagent.NewFactory,
 		file.NewService,
 		category.NewService,
 		plan.NewService,

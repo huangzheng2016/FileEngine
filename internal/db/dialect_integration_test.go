@@ -70,11 +70,11 @@ func TestSQLitePathSemantics(t *testing.T) {
 func checkPathSemantics(t *testing.T, r *Repository) {
 	t.Helper()
 	fs := &model.Filesystem{Name: "fs", Protocol: "local"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatal(err)
 	}
 	s := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	paths := []string{"Docs", "Docs/Report.PDF", "docs", "docs/notes.txt", "Docs0/x", "Docs.bak/y", "Docs-1/z",
@@ -115,10 +115,10 @@ func checkPathSemantics(t *testing.T, r *Repository) {
 	}
 
 	cat := &model.Category{FilesystemID: fs.ID, Name: "照片", Path: "/Photo"}
-	if err := r.CreateCategory(cat); err != nil {
+	if err := r.DB().Create(cat).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: "照片2", Path: "/Photos2"}); err != nil {
+	if err := r.DB().Create(&model.Category{FilesystemID: fs.ID, Name: "照片2", Path: "/Photos2"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	cat.Path = "/图片"

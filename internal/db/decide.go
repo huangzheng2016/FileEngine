@@ -308,18 +308,3 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 	})
 	return released, err
 }
-
-func (r *Repository) SetTargetUnique(sessionID uint, originalPath, newPath, fileType string) (string, int64, error) {
-	role := RoleFile
-	if fileType == "directory" {
-		role = RoleUnit
-	}
-	if newPath == "" {
-		role = RoleUndecided
-	}
-	res, err := r.Decide(sessionID, Decision{Path: originalPath, Role: role, NewPath: newPath, Override: true})
-	if err != nil {
-		return "", 0, err
-	}
-	return res.NewPath, res.OverriddenCount, nil
-}

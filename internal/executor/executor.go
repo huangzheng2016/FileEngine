@@ -114,8 +114,14 @@ func validTarget(p string) error {
 	return nil
 }
 
+// Tracker registers a run's cancel func so the owner of the process can stop
+// it; untrack is called once the run's goroutine has finished.
+type Tracker interface {
+	Track(runID uint, cancel context.CancelFunc) (untrack func())
+}
+
 // The run owns fs and closes it when it ends.
-func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options) (*model.AgentRun, error) {
+func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options, tr Tracker) (*model.AgentRun, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
@@ -131,8 +137,9 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	db.RegisterRunCancel(run.ID, cancel)
+	untrack := tr.Track(run.ID, cancel)
 	go func() {
+		defer untrack()
 		defer fs.Close()
 		defer cancel()
 		e := New(repo, fs)
@@ -144,9 +151,9 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 
 var ErrNotExecuting = errors.New("只能撤销执行")
 
-func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*model.AgentRun, error) {
-	var target model.AgentRun
-	if err := repo.DB().First(&target, runID).Error; err != nil {
+func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint, tr Tracker) (*model.AgentRun, error) {
+	target, err := repo.FindRun(runID)
+	if err != nil {
 		return nil, fmt.Errorf("读取运行 %d：%w", runID, err)
 	}
 	if target.Phase == db.RunPhaseRevert {
@@ -160,8 +167,9 @@ func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*model.
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	db.RegisterRunCancel(run.ID, cancel)
+	untrack := tr.Track(run.ID, cancel)
 	go func() {
+		defer untrack()
 		defer fs.Close()
 		defer cancel()
 		e := New(repo, fs)

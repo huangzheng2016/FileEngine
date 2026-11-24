@@ -10,8 +10,6 @@ import (
 
 	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
-
-	"gorm.io/gorm"
 )
 
 // Session event stream. Every event is persisted into session_events (the row
@@ -56,24 +54,44 @@ type pendingDelta struct {
 	order     uint64
 }
 
-var bus = struct {
-	// emitMu serializes persist+broadcast so subscribers observe events in
-	// strictly increasing seq order.
-	emitMu  sync.Mutex
+// sessionBus is one session's emit lane. Subscribers only need strictly
+// increasing seq per session, so sessions never wait for each other's
+// database writes.
+type sessionBus struct {
+	// mu serializes persist+broadcast of this session's events.
+	mu      sync.Mutex
 	pending map[deltaKey]*pendingDelta
-	memSeq  uint
 	deltaN  uint64
+}
+
+var bus = struct {
+	mu       sync.Mutex
+	sessions map[uint]*sessionBus
+	// memSeq numbers events when no database is open (unit tests).
+	memSeq atomic.Uint64
 
 	subMu sync.Mutex
 	subs  map[uint][]*Subscriber
 }{
-	pending: make(map[deltaKey]*pendingDelta),
-	subs:    make(map[uint][]*Subscriber),
+	sessions: make(map[uint]*sessionBus),
+	subs:     make(map[uint][]*Subscriber),
+}
+
+func laneOf(sessionID uint) *sessionBus {
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	l := bus.sessions[sessionID]
+	if l == nil {
+		l = &sessionBus{pending: make(map[deltaKey]*pendingDelta)}
+		bus.sessions[sessionID] = l
+	}
+	return l
 }
 
 func emitEvent(sessionID, runID uint, typ string, data any) {
-	bus.emitMu.Lock()
-	defer bus.emitMu.Unlock()
+	l := laneOf(sessionID)
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	if typ == EvText || typ == EvReasoning {
 		d, ok := asDelta(data)
@@ -81,28 +99,28 @@ func emitEvent(sessionID, runID uint, typ string, data any) {
 			return
 		}
 		key := deltaKey{runID: runID, workerID: d.WorkerID}
-		if p := bus.pending[key]; p != nil {
+		if p := l.pending[key]; p != nil {
 			if p.typ == typ && p.data.MsgID == d.MsgID {
 				p.data.Delta += d.Delta
 				if len(p.data.Delta) >= deltaFlushBytes {
-					flushLocked(key)
+					l.flushLocked(sessionID, key)
 				}
 				return
 			}
-			flushLocked(key)
+			l.flushLocked(sessionID, key)
 		}
 		d.RunID = runID
-		bus.deltaN++
-		p := &pendingDelta{sessionID: sessionID, typ: typ, data: d, order: bus.deltaN}
-		bus.pending[key] = p
-		p.timer = time.AfterFunc(deltaFlushInterval, func() { flushTimer(key, p) })
+		l.deltaN++
+		p := &pendingDelta{sessionID: sessionID, typ: typ, data: d, order: l.deltaN}
+		l.pending[key] = p
+		p.timer = time.AfterFunc(deltaFlushInterval, func() { flushTimer(sessionID, key, p) })
 		if len(d.Delta) >= deltaFlushBytes {
-			flushLocked(key)
+			l.flushLocked(sessionID, key)
 		}
 		return
 	}
 
-	flushRunLocked(runID)
+	l.flushRunLocked(sessionID, runID)
 	raw, err := json.Marshal(data)
 	if err != nil {
 		log.Printf("events: marshal %s: %v", typ, err)
@@ -123,21 +141,22 @@ func asDelta(data any) (DeltaData, bool) {
 	return DeltaData{}, false
 }
 
-func flushTimer(key deltaKey, p *pendingDelta) {
-	bus.emitMu.Lock()
-	defer bus.emitMu.Unlock()
-	if bus.pending[key] == p {
-		flushLocked(key)
+func flushTimer(sessionID uint, key deltaKey, p *pendingDelta) {
+	l := laneOf(sessionID)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.pending[key] == p {
+		l.flushLocked(sessionID, key)
 	}
 }
 
-// flushLocked persists the pending delta chunk of key. Caller holds emitMu.
-func flushLocked(key deltaKey) {
-	p := bus.pending[key]
+// flushLocked persists the pending delta chunk of key. Caller holds l.mu.
+func (l *sessionBus) flushLocked(sessionID uint, key deltaKey) {
+	p := l.pending[key]
 	if p == nil {
 		return
 	}
-	delete(bus.pending, key)
+	delete(l.pending, key)
 	p.timer.Stop()
 	if p.data.Delta == "" {
 		return
@@ -146,32 +165,42 @@ func flushLocked(key deltaKey) {
 	if err != nil {
 		return
 	}
-	persistAndBroadcastLocked(p.sessionID, key.runID, p.typ, string(raw))
+	persistAndBroadcastLocked(sessionID, key.runID, p.typ, string(raw))
 }
 
-// flushRunLocked persists the pending chunks of runID (all runs when 0) in
-// the order they were started. Caller holds emitMu.
-func flushRunLocked(runID uint) {
+// flushRunLocked persists the pending chunks of runID (all runs of the session
+// when 0) in the order they were started. Caller holds l.mu.
+func (l *sessionBus) flushRunLocked(sessionID, runID uint) {
 	var keys []deltaKey
-	for key := range bus.pending {
+	for key := range l.pending {
 		if runID == 0 || key.runID == runID {
 			keys = append(keys, key)
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool { return bus.pending[keys[i]].order < bus.pending[keys[j]].order })
+	sort.Slice(keys, func(i, j int) bool { return l.pending[keys[i]].order < l.pending[keys[j]].order })
 	for _, key := range keys {
-		flushLocked(key)
+		l.flushLocked(sessionID, key)
 	}
 }
 
+// FlushEvents persists every pending delta chunk of every session.
 func FlushEvents() {
-	bus.emitMu.Lock()
-	defer bus.emitMu.Unlock()
-	flushRunLocked(0)
+	bus.mu.Lock()
+	ids := make([]uint, 0, len(bus.sessions))
+	for id := range bus.sessions {
+		ids = append(ids, id)
+	}
+	bus.mu.Unlock()
+	for _, id := range ids {
+		l := laneOf(id)
+		l.mu.Lock()
+		l.flushRunLocked(id, 0)
+		l.mu.Unlock()
+	}
 }
 
 // Without a database (unit tests that never call Init) the seq comes from an
-// in-memory counter.
+// in-memory counter. The caller holds the session's lane lock.
 func persistAndBroadcastLocked(sessionID, runID uint, typ, data string) {
 	ev := model.SessionEvent{SessionID: sessionID, RunID: runID, Type: typ, Data: data, CreatedAt: time.Now()}
 	if g := dal.DB(); g != nil {
@@ -180,8 +209,7 @@ func persistAndBroadcastLocked(sessionID, runID uint, typ, data string) {
 			return
 		}
 	} else {
-		bus.memSeq++
-		ev.ID = bus.memSeq
+		ev.ID = uint(bus.memSeq.Add(1))
 	}
 	broadcast(ev)
 }
@@ -223,70 +251,4 @@ func Unsubscribe(s *Subscriber) {
 	if len(bus.subs[s.sessionID]) == 0 {
 		delete(bus.subs, s.sessionID)
 	}
-}
-
-type EventQuery struct {
-	SessionID uint
-	RunID     uint // 0 = all runs
-	After     uint // seq > After
-	Before    uint // seq < Before (0 = no bound)
-	Limit     int
-}
-
-// With only Before set it returns the newest events below Before, still in
-// ascending order.
-func (r *Repository) ListEvents(q EventQuery) ([]model.SessionEvent, bool, error) {
-	if q.Limit <= 0 || q.Limit > 1000 {
-		q.Limit = 500
-	}
-	tx := r.db.Model(&model.SessionEvent{}).Where("session_id = ?", q.SessionID)
-	if q.RunID > 0 {
-		tx = tx.Where("run_id = ?", q.RunID)
-	}
-	if q.After > 0 {
-		tx = tx.Where("id > ?", q.After)
-	}
-	if q.Before > 0 {
-		tx = tx.Where("id < ?", q.Before)
-	}
-	desc := q.Before > 0 && q.After == 0
-	order := "id ASC"
-	if desc {
-		order = "id DESC"
-	}
-	var rows []model.SessionEvent
-	if err := tx.Order(order).Limit(q.Limit + 1).Find(&rows).Error; err != nil {
-		return nil, false, err
-	}
-	more := len(rows) > q.Limit
-	if more {
-		rows = rows[:q.Limit]
-	}
-	if desc {
-		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
-			rows[i], rows[j] = rows[j], rows[i]
-		}
-	}
-	return rows, more, nil
-}
-
-// The default replay origin of the SSE stream.
-func (r *Repository) LatestRunStartSeq(sessionID uint) (uint, error) {
-	var run model.AgentRun
-	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").First(&run).Error
-	if err == gorm.ErrRecordNotFound {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	var first *uint
-	if err := r.db.Model(&model.SessionEvent{}).Where("session_id = ? AND run_id = ?", sessionID, run.ID).
-		Select("MIN(id)").Scan(&first).Error; err != nil {
-		return 0, err
-	}
-	if first == nil || *first == 0 {
-		return 0, nil
-	}
-	return *first - 1, nil
 }

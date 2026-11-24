@@ -69,10 +69,6 @@ func httpStatusFromError(err error) (int, bool) {
 	return 0, false
 }
 
-func classifyRunError(err error) errorClass {
-	return classifyRunErrorWithStatus(err, 0)
-}
-
 // statusHint is the least precise source and only used when err carries no
 // status. The caller checks the parent ctx first, so a context error here
 // means the per-attempt timeout, not a user stop.
@@ -172,14 +168,6 @@ var retryRandFloat64 = rand.Float64
 var rateLimitStreak atomic.Int64
 
 const rateLimitStreakBoostMax = 4
-
-func retryCfg() *config.AgentConfig {
-	cfg := config.Get()
-	if cfg == nil {
-		return &config.AgentConfig{}
-	}
-	return &cfg.Agent
-}
 
 func maxRetriesForClass(class errorClass, cfg *config.AgentConfig) int {
 	switch class {

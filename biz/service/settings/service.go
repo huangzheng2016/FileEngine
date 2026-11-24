@@ -2,8 +2,8 @@
 // document (config.AgentConfig, which includes the system prompt), saved as
 // numbered, append-only versions. A save names the version it was edited from;
 // if another version was saved since, it fails with a conflict instead of
-// overwriting it. Order of a save: validate, persist, then swap the in-process
-// snapshot, so a failed save never changes behaviour.
+// overwriting it. A run reads Current once at launch and passes it on, so a
+// save never changes a run in flight.
 package settings
 
 import (
@@ -43,21 +43,12 @@ type Version struct {
 
 type Service struct {
 	q *query.Query
-	// Serializes save + swap so the installed snapshot is always the newest
-	// saved one; the unique version index still guards other processes.
+	// Serializes saves in this process; the unique version index still guards
+	// other processes.
 	mu sync.Mutex
 }
 
-// NewService installs the current saved version for the agent packages.
-func NewService(q *query.Query) (*Service, error) {
-	s := &Service{q: q}
-	cur, err := s.Current(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	config.SetAgent(cur.Agent)
-	return s, nil
-}
+func NewService(q *query.Query) *Service { return &Service{q: q} }
 
 func (s *Service) Current(ctx context.Context) (Snapshot, error) {
 	v := s.q.SettingsVersion
@@ -105,7 +96,6 @@ func (s *Service) Save(ctx context.Context, base int64, change func(*config.Agen
 	} else if err != nil {
 		return Snapshot{}, err
 	}
-	config.SetAgent(next)
 	return Snapshot{Version: row.Version, Agent: next, SavedAt: row.CreatedAt}, nil
 }
 

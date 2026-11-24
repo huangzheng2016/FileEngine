@@ -1,9 +1,7 @@
 package db
 
 import (
-	"context"
 	"errors"
-	"sync"
 	"time"
 
 	dal "FileEngine/biz/dal/db"
@@ -21,14 +19,9 @@ var (
 )
 
 // A revert that was stopped or failed does not count, so the user can retry.
-var effectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
+var EffectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
 
 const RunInterruptedError = "服务重启，运行被中断"
-
-var runCancels = struct {
-	mu sync.Mutex
-	m  map[uint]context.CancelFunc
-}{m: make(map[uint]context.CancelFunc)}
 
 func (r *Repository) CreateRun(sessionID uint, phase, title string) (*model.AgentRun, error) {
 	run := &model.AgentRun{SessionID: sessionID, Phase: phase, Title: title}
@@ -57,7 +50,7 @@ func (r *Repository) InsertRun(run *model.AgentRun) error {
 				return ErrSessionBusy
 			}
 			if run.RevertsRunID != nil {
-				if err := tx.Model(&model.AgentRun{}).Where("reverts_run_id = ? AND status IN ?", *run.RevertsRunID, effectiveRevertStatuses).Count(&n).Error; err != nil {
+				if err := tx.Model(&model.AgentRun{}).Where("reverts_run_id = ? AND status IN ?", *run.RevertsRunID, EffectiveRevertStatuses).Count(&n).Error; err != nil {
 					return err
 				}
 				if n > 0 {
@@ -89,7 +82,6 @@ func (r *Repository) FinishRun(run *model.AgentRun, status, summary, errMsg stri
 		matched = res.RowsAffected
 		return res.Error
 	})
-	UnregisterRunCancel(run.ID)
 	if err != nil || matched == 0 {
 		return err
 	}
@@ -112,28 +104,6 @@ func (r *Repository) SetRunCounters(runID uint, total, success, failed, skipped 
 	})
 }
 
-func RegisterRunCancel(runID uint, cancel context.CancelFunc) {
-	runCancels.mu.Lock()
-	runCancels.m[runID] = cancel
-	runCancels.mu.Unlock()
-}
-
-func UnregisterRunCancel(runID uint) {
-	runCancels.mu.Lock()
-	delete(runCancels.m, runID)
-	runCancels.mu.Unlock()
-}
-
-func CancelRun(runID uint) bool {
-	runCancels.mu.Lock()
-	cancel, ok := runCancels.m[runID]
-	runCancels.mu.Unlock()
-	if ok {
-		cancel()
-	}
-	return ok
-}
-
 // The event is persisted (its row id is the stream seq) and then broadcast;
 // text/reasoning deltas are coalesced first.
 func Emit(sessionID, runID uint, typ string, data any) {
@@ -148,52 +118,6 @@ func (r *Repository) SweepStaleRuns() (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
-func (r *Repository) GetRun(id uint) (*model.AgentRun, error) {
-	var run model.AgentRun
-	if err := r.db.First(&run, id).Error; err != nil {
-		return &run, err
-	}
-	runs := []model.AgentRun{run}
-	err := r.fillRevertedBy(runs)
-	return &runs[0], err
-}
-
-func (r *Repository) ListRuns(sessionID uint) ([]model.AgentRun, error) {
-	var runs []model.AgentRun
-	if err := r.db.Where("session_id = ?", sessionID).Order("id DESC").Find(&runs).Error; err != nil {
-		return nil, err
-	}
-	return runs, r.fillRevertedBy(runs)
-}
-
-func (r *Repository) fillRevertedBy(runs []model.AgentRun) error {
-	var ids []uint
-	for _, run := range runs {
-		if run.Phase == RunPhaseExecuting {
-			ids = append(ids, run.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	var reverts []model.AgentRun
-	if err := r.db.Select("id", "reverts_run_id").
-		Where("reverts_run_id IN ? AND status IN ?", ids, effectiveRevertStatuses).
-		Order("id ASC").Find(&reverts).Error; err != nil {
-		return err
-	}
-	by := make(map[uint]uint, len(reverts))
-	for _, rv := range reverts {
-		by[*rv.RevertsRunID] = rv.ID
-	}
-	for i := range runs {
-		if id, ok := by[runs[i].ID]; ok {
-			runs[i].RevertedByRunID = &id
-		}
-	}
-	return nil
-}
-
 type RunRef struct {
 	ID     uint   `json:"id"`
 	Phase  string `json:"phase"`
@@ -204,4 +128,13 @@ func (r *Repository) RunningRuns(sessionID uint) ([]model.AgentRun, error) {
 	var runs []model.AgentRun
 	err := r.db.Where("session_id = ? AND status = ?", sessionID, RunRunning).Find(&runs).Error
 	return runs, err
+}
+
+// FindRun reads one run row.
+func (r *Repository) FindRun(id uint) (*model.AgentRun, error) {
+	var run model.AgentRun
+	if err := r.db.First(&run, id).Error; err != nil {
+		return nil, err
+	}
+	return &run, nil
 }

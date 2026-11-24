@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -36,12 +37,13 @@ var (
 
 type Service struct {
 	q    *query.Query
+	rq   *dal.Reader
 	repo *db.Repository
 	run  *run.Service
 }
 
-func NewService(q *query.Query, repo *db.Repository, r *run.Service) *Service {
-	return &Service{q: q, repo: repo, run: r}
+func NewService(q *query.Query, rq *dal.Reader, repo *db.Repository, r *run.Service) *Service {
+	return &Service{q: q, rq: rq, repo: repo, run: r}
 }
 
 // View is a session with the read models the API shows next to it.
@@ -167,7 +169,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*View, error) {
 		_ = s.repo.FailScan(sess.ID, err.Error())
 		return nil, err
 	}
-	return s.view(ctx, sess)
+	return s.view(ctx, s.q, sess)
 }
 
 func orTrue(p *bool) bool { return p == nil || *p }
@@ -309,7 +311,7 @@ func (s *Service) modelExists(ctx context.Context, id uint, optional bool) error
 // List returns the sessions of one storage (0 = every storage), newest first,
 // each with its latest run.
 func (s *Service) List(ctx context.Context, filesystemID uint) ([]*View, error) {
-	ss := s.q.ScanSession
+	ss := s.rq.ScanSession
 	do := ss.WithContext(ctx)
 	if filesystemID != 0 {
 		do = do.Where(ss.FilesystemID.Eq(filesystemID))
@@ -322,7 +324,7 @@ func (s *Service) List(ctx context.Context, filesystemID uint) ([]*View, error) 
 	for i, r := range rows {
 		ids[i] = r.ID
 	}
-	latest, err := s.latestRuns(ctx, ids)
+	latest, err := s.latestRuns(ctx, s.rq.Query, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -336,8 +338,8 @@ func (s *Service) List(ctx context.Context, filesystemID uint) ([]*View, error) 
 	return out, nil
 }
 
-func (s *Service) latestRuns(ctx context.Context, sessionIDs []uint) (map[uint]db.RunRef, error) {
-	ar := s.q.AgentRun
+func (s *Service) latestRuns(ctx context.Context, q *query.Query, sessionIDs []uint) (map[uint]db.RunRef, error) {
+	ar := q.AgentRun
 	out := make(map[uint]db.RunRef, len(sessionIDs))
 	for start := 0; start < len(sessionIDs); start += idChunk {
 		chunk := sessionIDs[start:min(start+idChunk, len(sessionIDs))]
@@ -360,8 +362,8 @@ func (s *Service) latestRuns(ctx context.Context, sessionIDs []uint) (map[uint]d
 	return out, nil
 }
 
-func (s *Service) tokens(ctx context.Context, sessionID uint) (db.TokenCounts, error) {
-	ar := s.q.AgentRun
+func (s *Service) tokens(ctx context.Context, q *query.Query, sessionID uint) (db.TokenCounts, error) {
+	ar := q.AgentRun
 	var t struct{ Prompt, Cached, CacheWrite, Completion, Total int }
 	err := ar.WithContext(ctx).Select(
 		ar.PromptTokens.Sum().As("prompt"), ar.CachedTokens.Sum().As("cached"),
@@ -375,8 +377,8 @@ func (s *Service) load(ctx context.Context, id uint) (*model.ScanSession, error)
 	return s.run.Session(ctx, id)
 }
 
-func (s *Service) view(ctx context.Context, sess *model.ScanSession) (*View, error) {
-	latest, err := s.latestRuns(ctx, []uint{sess.ID})
+func (s *Service) view(ctx context.Context, q *query.Query, sess *model.ScanSession) (*View, error) {
+	latest, err := s.latestRuns(ctx, q, []uint{sess.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -389,15 +391,15 @@ func (s *Service) view(ctx context.Context, sess *model.ScanSession) (*View, err
 
 // Get returns one session with its latest run and token totals.
 func (s *Service) Get(ctx context.Context, id uint) (*View, error) {
-	sess, err := s.load(ctx, id)
+	sess, err := s.run.ReadSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.view(ctx, sess)
+	v, err := s.view(ctx, s.rq.Query, sess)
 	if err != nil {
 		return nil, err
 	}
-	t, err := s.tokens(ctx, id)
+	t, err := s.tokens(ctx, s.rq.Query, id)
 	if err != nil {
 		return nil, err
 	}
@@ -559,13 +561,20 @@ func (s *Service) Rescan(ctx context.Context, id uint) (*View, error) {
 		return nil, err
 	}
 	db.Emit(id, 0, db.EvSessionUpdated, struct{}{})
-	return s.view(ctx, sess)
+	return s.view(ctx, s.q, sess)
+}
+
+// Distribution is how many files and bytes of a session are planned into one
+// category.
+type Distribution struct {
+	Name, Path           string
+	FileCount, TotalSize int64
 }
 
 // Stats is the category distribution and the totals shown on a session's
 // overview.
 type Stats struct {
-	Distribution []db.CategoryDistribution
+	Distribution []Distribution
 	TotalFiles   int
 	TaggedFiles  int
 	PlannedOps   int
@@ -573,15 +582,30 @@ type Stats struct {
 }
 
 func (s *Service) Stats(ctx context.Context, id uint) (*Stats, error) {
-	sess, err := s.load(ctx, id)
+	sess, err := s.run.ReadSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	dist, err := s.repo.GetSessionStats(id, sess.FilesystemID)
+	c := s.rq.Category
+	cats, err := c.WithContext(ctx).Where(c.FilesystemID.Eq(sess.FilesystemID)).Order(c.Name).Find()
 	if err != nil {
 		return nil, err
 	}
-	t, err := s.tokens(ctx, id)
+	catRows := make([]model.Category, len(cats))
+	for i, cat := range cats {
+		catRows[i] = *cat
+	}
+	counts, err := s.repo.CategoryStats(id, catRows)
+	if err != nil {
+		return nil, err
+	}
+	var dist []Distribution
+	for i, cat := range cats {
+		if counts[i].Count > 0 {
+			dist = append(dist, Distribution{Name: cat.Name, Path: cat.Path, FileCount: counts[i].Count, TotalSize: counts[i].Size})
+		}
+	}
+	t, err := s.tokens(ctx, s.rq.Query, id)
 	if err != nil {
 		return nil, err
 	}

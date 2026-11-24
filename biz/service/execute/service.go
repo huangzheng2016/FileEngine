@@ -9,6 +9,7 @@ import (
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
 	"FileEngine/biz/service/run"
+	"FileEngine/biz/service/runner"
 	"FileEngine/internal/db"
 	"FileEngine/internal/executor"
 
@@ -26,12 +27,13 @@ var (
 )
 
 type Service struct {
-	repo *db.Repository
-	run  *run.Service
+	repo   *db.Repository
+	run    *run.Service
+	runner *runner.Service
 }
 
-func NewService(repo *db.Repository, r *run.Service) *Service {
-	return &Service{repo: repo, run: r}
+func NewService(repo *db.Repository, r *run.Service, rn *runner.Service) *Service {
+	return &Service{repo: repo, run: r, runner: rn}
 }
 
 type Options struct {
@@ -65,7 +67,7 @@ func (s *Service) Start(ctx context.Context, sessionID uint, opts Options) (*mod
 	if err != nil {
 		return nil, err
 	}
-	r, err := executor.Start(s.repo, fs, sessionID, opts.executor())
+	r, err := executor.Start(s.repo, fs, sessionID, opts.executor(), s.runner)
 	if err != nil {
 		fs.Close()
 		return nil, run.StartError(err)
@@ -120,7 +122,7 @@ func (s *Service) Revert(ctx context.Context, runID uint) (*model.AgentRun, erro
 	if err != nil {
 		return nil, err
 	}
-	r, err := executor.StartRevert(s.repo, fs, runID)
+	r, err := executor.StartRevert(s.repo, fs, runID, s.runner)
 	if err != nil {
 		fs.Close()
 		if errors.Is(err, gorm.ErrRecordNotFound) {

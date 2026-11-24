@@ -20,11 +20,11 @@ import (
 var testRetryCfg = config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 4, RetryBaseDelay: 2, RetryMaxDelay: 60}
 
 func decide(ctx context.Context, attempt int, err error) *adk.RetryDecision {
-	return shouldRetryModelCall(ctx, &adk.RetryContext{RetryAttempt: attempt, Err: err})
+	return shouldRetryModelCall(&testRetryCfg)(ctx, &adk.RetryContext{RetryAttempt: attempt, Err: err})
 }
 
 func TestShouldRetryModelCallBudgets(t *testing.T) {
-	stubRetryEnv(t, testRetryCfg)
+	stubRetryEnv(t)
 	ctx := context.Background()
 	throttled := &einoopenai.APIError{HTTPStatusCode: 429, Message: "slow down"}
 	server := &einoopenai.APIError{HTTPStatusCode: 500, Message: "boom"}
@@ -43,7 +43,7 @@ func TestShouldRetryModelCallBudgets(t *testing.T) {
 	if got := rateLimitStreak.Load(); got != 3 {
 		t.Fatalf("streak = %d, want 3", got)
 	}
-	if d := shouldRetryModelCall(ctx, &adk.RetryContext{RetryAttempt: 1}); d != nil || rateLimitStreak.Load() != 0 {
+	if d := shouldRetryModelCall(&testRetryCfg)(ctx, &adk.RetryContext{RetryAttempt: 1}); d != nil || rateLimitStreak.Load() != 0 {
 		t.Fatalf("success: decision %+v streak %d", d, rateLimitStreak.Load())
 	}
 
@@ -73,7 +73,7 @@ func TestShouldRetryModelCallBudgets(t *testing.T) {
 }
 
 func TestShouldRetryModelCallRetryAfter(t *testing.T) {
-	stubRetryEnv(t, testRetryCfg)
+	stubRetryEnv(t)
 	msgHint := &einoopenai.APIError{HTTPStatusCode: 429, Message: "rate limit reached, please retry after 7 seconds"}
 	if d := decide(context.Background(), 1, msgHint); d == nil || d.Backoff != 8*time.Second {
 		t.Fatalf("message hint: %+v, want 7s + 1s jitter slot", d)
@@ -107,23 +107,23 @@ func (f *fakeAttempts) run(_ context.Context) (*schema.Message, error) {
 }
 
 func TestRunWithRetryOnlyReplaysEarlyNetworkFailures(t *testing.T) {
-	sleeps := stubRetryEnv(t, testRetryCfg)
+	sleeps := stubRetryEnv(t)
 	logger := NewLogger(900, 0, 1)
 	netErr := &url.Error{Op: "Post", URL: "http://x/v1", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
 
 	f := &fakeAttempts{errs: []error{netErr, netErr}}
-	if msg, err := runWithRetry(context.Background(), f.run, logger, "t"); err != nil || msg.Content != "ok" || f.calls != 3 || len(*sleeps) != 2 {
+	if msg, err := runWithRetry(context.Background(), &testRetryCfg, f.run, logger, "t"); err != nil || msg.Content != "ok" || f.calls != 3 || len(*sleeps) != 2 {
 		t.Fatalf("early network: err=%v calls=%d sleeps=%v", err, f.calls, *sleeps)
 	}
 
 	f = &fakeAttempts{errs: []error{netErr, netErr, netErr}}
-	if _, err := runWithRetry(context.Background(), f.run, logger, "t"); !errors.Is(err, netErr) || f.calls != 3 {
+	if _, err := runWithRetry(context.Background(), &testRetryCfg, f.run, logger, "t"); !errors.Is(err, netErr) || f.calls != 3 {
 		t.Fatalf("network budget: err=%v calls=%d", err, f.calls)
 	}
 
 	late := &respondedError{err: netErr}
 	f = &fakeAttempts{errs: []error{late}}
-	_, err := runWithRetry(context.Background(), f.run, logger, "t")
+	_, err := runWithRetry(context.Background(), &testRetryCfg, f.run, logger, "t")
 	var responded *respondedError
 	if f.calls != 1 || errors.As(err, &responded) || !errors.Is(err, netErr) {
 		t.Fatalf("network after a response must not replay: err=%v calls=%d", err, f.calls)
@@ -135,13 +135,13 @@ func TestRunWithRetryOnlyReplaysEarlyNetworkFailures(t *testing.T) {
 		&einoopenai.APIError{HTTPStatusCode: 400, Message: "bad"},
 	} {
 		f = &fakeAttempts{errs: []error{e}}
-		if _, err := runWithRetry(context.Background(), f.run, logger, "t"); err == nil || f.calls != 1 {
+		if _, err := runWithRetry(context.Background(), &testRetryCfg, f.run, logger, "t"); err == nil || f.calls != 1 {
 			t.Fatalf("%v must not replay the run: calls=%d", e, f.calls)
 		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = runWithRetry(ctx, func(context.Context) (*schema.Message, error) {
+	_, err = runWithRetry(ctx, &testRetryCfg, func(context.Context) (*schema.Message, error) {
 		cancel()
 		return nil, netErr
 	}, logger, "t")
@@ -171,12 +171,15 @@ func (m *flakyModel) BindTools([]*schema.ToolInfo) error { return nil }
 
 func TestModelRetryIsPerRequest(t *testing.T) {
 	setupToolTestRepo(t)
-	stubRetryEnv(t, config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 4, RetryBaseDelay: 1, RetryMaxDelay: 1})
+	stubRetryEnv(t)
+	cfg := testCfg(func(c *config.AgentConfig) {
+		c.MaxRetries, c.RateLimitMaxRetries, c.RetryBaseDelay, c.RetryMaxDelay = 2, 4, 1, 1
+	})
 	retryRandFloat64 = func() float64 { return 0 }
 
 	fm := &flakyModel{}
 	logger := NewLogger(204, 1, 0)
-	msg, err := runADKWithRetry(context.Background(), newEchoAgent(t, fm, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "t", newTokenTrackingModel(fm))
+	msg, err := runADKWithRetry(context.Background(), cfg, newEchoAgentCfg(t, cfg, fm, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "t", newTokenTrackingModel(fm))
 	if err != nil || msg == nil || msg.Content != "done" {
 		t.Fatalf("run: msg=%+v err=%v", msg, err)
 	}

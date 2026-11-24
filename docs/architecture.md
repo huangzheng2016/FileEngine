@@ -8,6 +8,29 @@ scan ──▶ (optional) plan draft ──▶ tagging ──▶ review ──�
            survey run              tagging run   review run   user          executing run
 ```
 
+## Code layout and request flow
+
+```
+idl/*.thrift ──hz──▶ biz/model, biz/router
+request ─▶ biz/mw (auth, limits) ─▶ biz/handler/api (bind, one call, convert, respond)
+        ─▶ biz/service/<feature> ─▶ biz/dal/db/query (gorm/gen, typed)  [+ internal/db for the domain core]
+```
+
+- Handlers hold no logic and no queries; failures are `biz/errs` values (Chinese messages) and answer the
+  `{code, msg}` envelope through `biz/handler/resp`.
+- A service takes the writer's `*query.Query`; list and get endpoints that need no read-your-writes inside the request
+  take `*dal.Reader` instead, which on SQLite is a separate `query_only` pool (WAL), elsewhere the same handle.
+  Dialect-dependent fragments (path ranges, case-insensitive search) come only from `biz/dal/db` helpers.
+- `biz/service/run` resolves a session's storage and model and builds its agent; `runner` owns every live run
+  (launch on a detached context, stop, shutdown drain, the cancel registry the executor also registers in).
+  `settings` serves the versioned runtime settings. `eventfeed` reads persisted events and follows the live
+  broadcast for SSE and the desktop.
+- `internal/db` is what the agent, executor and scanner call (their queries, `Decide`, run rows, `Emit`, rules,
+  preview, journal); new resource endpoints do not add to it. `container` wires the services with Wire
+  (`task gen:wire`); `internal/app` owns startup and shutdown order.
+- Generated and checked by `task gen:check`: `biz/model`, `biz/router`, `biz/dal/db/query`, `container/wire_gen.go`,
+  the desktop bindings. The frontend's `web/src/api/idl.gen.ts` comes from `npm run gen:idl`.
+
 ## Data
 
 | Thing | Lives in |
@@ -28,7 +51,7 @@ The scan root is the empty path `""`; stored paths are relative to the filesyste
 with `/`.
 
 Path columns compare as bytes on every database (SQLite BINARY, MySQL binary table collation, PostgreSQL
-`"C"`), so subtree matches are index ranges (`db.subtreeCond`: `>= dir/` and `< dir0`). `new_path_key`
+`"C"`), so subtree matches are index ranges (`dal.SubtreeCond`: `>= dir/` and `< dir0`). `new_path_key`
 (`CollisionKey(new_path)`) backs the indexed case/normalization-insensitive collision check. MySQL indexes use
 key prefixes to fit InnoDB's 3072-byte limit, so `original_path` uniqueness there covers its first 766
 characters. Session counters (`total_files`, `tagged_files`, `planned_ops`, `review_count`, `executed_ops`,
@@ -56,7 +79,9 @@ A `revert` run undoes one executing run and stores its id in `reverts_run_id`; t
 (`这次执行已撤销`).
 
 `db.Emit` is the only publisher. It persists the event, assigns `seq`, then broadcasts; text and reasoning
-deltas are coalesced (150 ms / 2 KB) and flushed before any other event of the same run.
+deltas are coalesced (150 ms / 2 KB) and flushed before any other event of the same run. Each session has its own
+emit lane, so one session's database write never delays another's; `seq` is the row id and rises per session.
+Replay reads `(session_id, id)` through `idx_event_session_seq`.
 
 `GET /api/event/stream?session_id=` serves SSE frames `id/event/data` (a `: ping` comment every 20 s so a dead
 client is noticed by a failed write). Resume with `Last-Event-ID` or `?after=`; without either the replay starts at
@@ -177,5 +202,6 @@ server to stop.
 dsn). It is decoded strictly (unknown keys fail), validated at startup, and a PostgreSQL or MySQL DSN is required,
 never guessed. Everything an operator edits while the app runs, including the agent limits and the system prompt, is
 one document stored as append-only `settings_versions` rows (`biz/service/settings`). A save names the version it was
-edited from (`base_version`); a newer saved version answers 409. A save validates, persists, and only then installs
-the new snapshot with `config.SetAgent`, which is what `internal/agent` reads per use. Unchanged saves write nothing.
+edited from (`base_version`); a newer saved version answers 409. A save validates and persists
+a new version. A run reads the current version once when it is launched (`settings.Current`) and hands that snapshot
+to the agent, its tools and the scanner, so a save never changes a run in flight. Unchanged saves write nothing.

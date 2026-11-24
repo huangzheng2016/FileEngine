@@ -3,17 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-
-	"gorm.io/gorm"
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/biz/dal/db/model"
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 	"FileEngine/internal/remotefs"
@@ -55,7 +51,7 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	defer fs.Close()
 
 	tracker := newTokenTrackingModel(chatModel)
-	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
+	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, a.cfg, a.session, a.modelProvider.VisionEnabled)
 	tb.RunID = logger.RunID()
 	tb.RunKind = spec.phase
 	tb.guard.note(categoryNames(spec.current))
@@ -67,7 +63,7 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	if err != nil {
 		return "", err
 	}
-	agentInst, err := buildADKAgent(ctx, tracker, tools, spec.instruction, spec.maxStep, a.modelProvider.EffectiveContextWindow(), summaryOpt)
+	agentInst, err := buildADKAgent(ctx, a.cfg, tracker, tools, spec.instruction, spec.maxStep, a.modelProvider.EffectiveContextWindow(), summaryOpt)
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
@@ -75,7 +71,7 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	// Shared notes are tagging-time working state: main-model runs get the
 	// long-term context only (notes stay reachable through recall).
 	msgs := append([]*schema.Message{SharedContextMessage(RenderSharedContext(spec.shared))}, spec.messages...)
-	result, err := runADKWithRetry(ctx, agentInst, msgs, logger, spec.label, tracker)
+	result, err := runADKWithRetry(ctx, a.cfg, agentInst, msgs, logger, spec.label, tracker)
 	if err != nil {
 		return "", err
 	}
@@ -137,8 +133,8 @@ func (a *Agent) sentMessages(turns []model.ChatTurn) (map[uint]string, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var rows []model.ChatTurn
-	if err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through IN ?", a.sessionID, chatRoleSent, ids).Find(&rows).Error; err != nil {
+	rows, err := a.repo.ChatTurnsCovering(a.sessionID, chatRoleSent, ids)
+	if err != nil {
 		return nil, err
 	}
 	for _, r := range rows {
@@ -155,15 +151,15 @@ func (a *Agent) chatEpochSnapshot(summary *model.ChatTurn) (SharedContext, error
 	if summary != nil {
 		epoch = summary.ID
 	}
-	var row model.ChatTurn
-	err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through = ?", a.sessionID, chatRoleSnapshot, epoch).Order("id DESC").Take(&row).Error
-	if err == nil {
+	row, err := a.repo.LatestChatTurnCovering(a.sessionID, chatRoleSnapshot, epoch)
+	if err != nil {
+		return SharedContext{}, err
+	}
+	if row != nil {
 		var c SharedContext
 		if json.Unmarshal([]byte(row.Content), &c) == nil {
 			return c, nil
 		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return SharedContext{}, err
 	}
 	c, err := LoadSharedContext(a.repo, a.session)
 	if err != nil {
@@ -316,8 +312,8 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 	}
 	msgs := chatHistoryMessages(summary, turns, sent)
 	msgs = append(msgs, &schema.Message{Role: schema.User, Content: sentText})
-	maxStep := config.Get().Agent.ChatMaxStep
-	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", phase: db.RunPhaseChat, maxStep: maxStep, instruction: chatSystemPrompt(config.Get().Agent), shared: base, current: cur.Categories, messages: msgs})
+	maxStep := a.cfg.ChatMaxStep
+	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", phase: db.RunPhaseChat, maxStep: maxStep, instruction: chatSystemPrompt(a.cfg), shared: base, current: cur.Categories, messages: msgs})
 	if err != nil {
 		return "", err
 	}

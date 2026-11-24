@@ -27,14 +27,14 @@ func seedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fileType 
 		Name:          filepath.Base(path),
 		FileType:      fileType,
 	}
-	if err := repo.CreateFile(f); err != nil {
+	if err := repo.DB().Create(f).Error; err != nil {
 		t.Fatalf("seed file %s: %v", path, err)
 	}
 }
 
 func seedCategory(t *testing.T, repo *db.Repository, filesystemID uint, name, path string) {
 	t.Helper()
-	if err := repo.CreateCategory(&model.Category{FilesystemID: filesystemID, Name: name, Path: path}); err != nil {
+	if err := repo.DB().Create(&model.Category{FilesystemID: filesystemID, Name: name, Path: path}).Error; err != nil {
 		t.Fatalf("seed category %s: %v", name, err)
 	}
 }

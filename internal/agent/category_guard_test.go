@@ -37,7 +37,7 @@ func primeGuard(t *testing.T, repo *db.Repository, tb *ToolBuilder) {
 
 func mustCreateCategory(t *testing.T, repo *db.Repository, fsID uint, name, path string) {
 	t.Helper()
-	if err := repo.CreateCategory(&model.Category{FilesystemID: fsID, Name: name, Path: path}); err != nil {
+	if err := repo.DB().Create(&model.Category{FilesystemID: fsID, Name: name, Path: path}).Error; err != nil {
 		t.Fatalf("seed category %s: %v", name, err)
 	}
 }
@@ -89,7 +89,7 @@ func TestCreateCategorySimilarityHardReject(t *testing.T) {
 
 	mustCreateCategory(t, repo, 7, "Photos", "/photos")
 	seedFile(t, repo, 1, "incoming/a.jpg", "file")
-	if _, _, err := repo.SetTargetUnique(1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
+	if _, _, err := setTargetUnique(repo, 1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	// Prime the version guard so only the similarity guard can fire.
@@ -132,7 +132,7 @@ func TestCreateCategorySimilaritySoftReference(t *testing.T) {
 	mustCreateCategory(t, repo, 7, "Photos", "/photos")
 	mustCreateCategory(t, repo, 7, "工作文档", "/docs/work")
 	seedFile(t, repo, 1, "incoming/a.jpg", "file")
-	if _, _, err := repo.SetTargetUnique(1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
+	if _, _, err := setTargetUnique(repo, 1, "incoming/a.jpg", "/photos/a.jpg", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	primeGuard(t, repo, tb)
@@ -193,7 +193,7 @@ func TestCategoryFingerprint(t *testing.T) {
 func TestUpdateCategoryClashIsRejection(t *testing.T) {
 	repo, tb := setupGuardTest(t)
 	for _, c := range []*model.Category{{FilesystemID: 7, Name: "照片", Path: "/照片", AgentEditable: true}, {FilesystemID: 7, Name: "相片", Path: "/相片", AgentEditable: true}} {
-		if err := repo.CreateCategory(c); err != nil {
+		if err := repo.DB().Create(c).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
