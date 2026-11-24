@@ -131,7 +131,13 @@ Every model request is built from most stable to most volatile, so provider pref
    then the task, listing, signals and notes from other workers. Chat stores the exact message it sent, so the
    next turn's request starts with this turn's messages
 
-Every tool answers `{success, error?, hint?, ...}`: bad arguments, rejections and disabled switches are results the model can act on; only database and IO failures stop a run. Text derived from files
+Claude gets four breakpoints: last tool, system, shared context, and the last message (moved every request).
+Chat runs mark the first three with a 1-hour TTL, because turns are human-paced; the tail stays at 5 minutes.
+Old tool results are cleared only in batches of at least 10k tokens, keeping the last three rounds.
+`run_script` builtins use the tool vocabulary (`decide`, `entry_info`, `apply_rules`, plus `category_target`).
+
+Every tool answers `{success, error?, hint?, ...}`: bad arguments, unknown tools, rejections and disabled
+switches are results the model can act on; only database and IO failures stop a run. Text derived from files
 (names, listings, signals, notes, script output) is sanitized and sits in `<data>` blocks; sensitive files are
 never read, including archive members.
 
