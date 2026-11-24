@@ -22,12 +22,12 @@ describe('run activity', () => {
         run_id: 1,
         worker_id: 0,
         call_id: 'c1',
-        name: 'set_targets',
+        name: 'decide',
         args: {
           items: [
-            { path: '下载/a.jpg', new_path: '/照片/a.jpg', reason: '照片', confidence: 0.9 },
-            { path: '下载/b.txt', new_path: '/文档/b.txt', reason: '拿不准', confidence: 0.4 },
-            { path: '下载/c.bin', new_path: '/坏/c.bin', reason: '' },
+            { path: '下载/a.jpg', action: 'move', new_path: '/照片/a.jpg', reason: '照片' },
+            { path: '下载/b.txt', action: 'move', new_path: '/文档/b.txt', reason: '拿不准' },
+            { path: '下载/c.bin', action: 'move', new_path: '/坏/c.bin', reason: 'x' },
           ],
         },
       }),
@@ -35,7 +35,7 @@ describe('run activity', () => {
         run_id: 1,
         worker_id: 0,
         call_id: 'c1',
-        name: 'set_targets',
+        name: 'decide',
         ok: false,
         output: { success: false, ok: 2, failed: [{ path: '下载/c.bin', error: '不在分类下' }] },
       }),
@@ -43,11 +43,11 @@ describe('run activity', () => {
         run_id: 1,
         worker_id: 1,
         call_id: 'c2',
-        name: 'decide_dirs',
+        name: 'decide',
         args: {
           items: [
-            { path: '我的项目', role: 'unit', new_path: '/项目/我的项目', reason: '代码项目' },
-            { path: '杂物', role: 'container', reason: '逐项' },
+            { path: '我的项目', action: 'unit', new_path: '/项目/我的项目', reason: '代码项目' },
+            { path: '杂物', action: 'container', reason: '逐项' },
           ],
         },
       }),
@@ -55,23 +55,23 @@ describe('run activity', () => {
         run_id: 1,
         worker_id: 1,
         call_id: 'c2',
-        name: 'decide_dirs',
+        name: 'decide',
         ok: true,
-        output: { success: true },
+        output: { success: true, ok: 2 },
       }),
       ev('pull_done', { run_id: 1, worker_id: 1, unit_id: 'u2', tagged: 1, failed: 0 }),
     ])
     const a = runActivity(t.runs[1])
     expect(a.current.map((u) => u.label)).toEqual(['下载'])
-    expect(a.decisions.map((d) => [d.path, d.target, d.review])).toEqual([
-      ['我的项目', '/项目/我的项目', false],
-      ['下载/a.jpg', '/照片/a.jpg', false],
-      ['下载/b.txt', '/文档/b.txt', true],
+    expect(a.decisions.map((d) => [d.path, d.target])).toEqual([
+      ['我的项目', '/项目/我的项目'],
+      ['下载/a.jpg', '/照片/a.jpg'],
+      ['下载/b.txt', '/文档/b.txt'],
     ])
   })
 
   it('ignores calls that failed as a whole or are still running', () => {
-    const base = { kind: 'tool', id: 'x', name: 'set_targets', args: { items: [{ path: 'a', new_path: '/b/a' }] } }
+    const base = { kind: 'tool', id: 'x', name: 'decide', args: { items: [{ path: 'a', new_path: '/b/a' }] } }
     expect(toolDecisions({ ...base, status: 'running' } as ToolItem)).toEqual([])
     expect(toolDecisions({ ...base, status: 'failed', error: '未完成' } as ToolItem)).toEqual([])
     expect(toolDecisions({ ...base, status: 'ok', output: { error: '会话不存在' } } as ToolItem)).toEqual([])

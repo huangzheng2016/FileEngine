@@ -177,3 +177,25 @@ export const TOOL_LABEL: Record<string, string> = {
   remember: '记住',
   recall: '查记忆',
 }
+
+export const AGENT_TOOL_LABEL: Record<string, string> = {
+  list_entries: '查看文件',
+  read_file: '读取文件',
+  view_image: '查看图片',
+  decide: '做出决定',
+  split_unit: '拆分整体',
+  describe: '写文件说明',
+  add_rule: '新建规则',
+  apply_rules: '应用规则',
+  run_script: '运行脚本',
+  create_category: '新建分类',
+  note: '记笔记',
+  recall: '查记忆',
+  update_category: '修改分类',
+  delete_category: '删除分类',
+  update_rule: '修改规则',
+  delete_rule: '删除规则',
+  read_plan: '读方案',
+  write_plan: '写方案',
+  remember: '记住',
+}

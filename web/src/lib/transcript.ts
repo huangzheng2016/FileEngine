@@ -17,6 +17,8 @@ export interface MessageItem {
 export interface ToolItem {
   kind: 'tool'
   id: string
+  // unique within the lane even when the provider repeats call ids
+  key: string
   name: string
   args: unknown
   status: 'running' | 'ok' | 'failed'
@@ -162,10 +164,20 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
     return m
   }
 
+  // Calls and results both attach to the newest still-running item with their id,
+  // so a repeated provider id never overwrites a finished call.
   function tool(l: Lane, id: string): ToolItem {
-    const i = findLast(l, 'tool', id)
+    let i = -1
+    for (let j = l.items.length - 1; j >= 0; j--) {
+      const it = l.items[j]
+      if (it.kind === 'tool' && it.id === id && it.status === 'running') {
+        i = j
+        break
+      }
+    }
     if (i < 0) {
-      const it: ToolItem = { kind: 'tool', id, name: '', args: {}, status: 'running' }
+      const seen = l.items.reduce((n, it) => (it.kind === 'tool' && it.id === id ? n + 1 : n), 0)
+      const it: ToolItem = { kind: 'tool', id, key: seen ? `${id}~${seen}` : id, name: '', args: {}, status: 'running' }
       owned.add(it)
       l.items.push(it)
       return it
@@ -290,9 +302,11 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
         const l = lane(run(runId), workerId)
         const it = tool(l, str(d.call_id))
         if (!it.name) it.name = str(d.name)
-        it.status = d.ok === false || d.error ? 'failed' : 'ok'
+        const out = d.output && typeof d.output === 'object' ? (d.output as Data) : {}
+        const failed = d.ok === false || !!d.error || out.success === false
+        it.status = failed ? 'failed' : 'ok'
         it.output = d.output
-        it.error = d.error ? str(d.error) : undefined
+        it.error = failed ? str(d.error) || str(out.error) || undefined : undefined
         it.durationMs = num(d.duration_ms)
         it.seq = ev.seq
         break
@@ -337,9 +351,28 @@ export type Block = StepGroup | AnswerBlock | PromptBlock | UnitBlock
 // own messages show as prompts; in agent runs the generated prompt is a raw step.
 export function laneBlocks(items: readonly Item[], showUserPrompts: boolean): Block[] {
   const out: Block[] = []
-  let stretch: (MessageItem | ToolItem)[] = []
+  build(items, 0, showUserPrompts, out, [], new Map())
+  return out
+}
 
-  const flush = () => {
+// `ends[j]` is the exclusive source index where the stretch of blocks[j] stops. A
+// stretch is closed by a unit, prompt or system item, so blocks that end before
+// the first changed item cannot change.
+function build(
+  items: readonly Item[],
+  from: number,
+  showUserPrompts: boolean,
+  out: Block[],
+  ends: number[],
+  copies: Map<string, MessageItem>,
+) {
+  let stretch: (MessageItem | ToolItem)[] = []
+  const push = (b: Block, end: number) => {
+    out.push(b)
+    ends.push(end)
+  }
+
+  const flush = (end: number) => {
     if (!stretch.length) return
     let answerAt = -1
     for (let i = stretch.length - 1; i >= 0; i--) {
@@ -350,47 +383,107 @@ export function laneBlocks(items: readonly Item[], showUserPrompts: boolean): Bl
         break
       }
     }
-    const steps = answerAt < 0 ? stretch : stretch.slice(0, answerAt)
     const answer = answerAt < 0 ? undefined : (stretch[answerAt] as MessageItem)
+    const folded: (MessageItem | ToolItem)[] = answerAt < 0 ? [...stretch] : stretch.slice(0, answerAt)
     // reasoning of the answer itself belongs to the folded steps
-    if (steps.length || answer?.reasoning) {
-      const items = answer?.reasoning ? [...steps, { ...answer, text: '' }] : steps
-      out.push({
-        kind: 'steps',
-        key: `s-${items[0].id}`,
-        items,
-        thoughts: items.filter((i) => i.kind === 'message' && (i.reasoning || (i.role === 'assistant' && i.text)))
-          .length,
-        tools: items.filter((i) => i.kind === 'tool').length,
-        failed: items.some(
-          (i) => (i.kind === 'tool' && i.status === 'failed') || (i.kind === 'message' && i.role === 'system'),
-        ),
-      })
+    if (answer?.reasoning) {
+      const prev = copies.get(answer.id)
+      const copy =
+        prev && prev.reasoning === answer.reasoning && prev.streaming === answer.streaming
+          ? prev
+          : { ...answer, text: '' }
+      copies.set(answer.id, copy)
+      folded.push(copy)
     }
-    if (answer) out.push({ kind: 'answer', key: `a-${answer.id}`, item: answer })
-    for (const it of stretch.slice(answerAt + 1)) {
-      if (answerAt >= 0) out.push({ kind: 'answer', key: `a-${it.id}`, item: it as MessageItem })
+    // after the answer: text still reads as an answer, bare reasoning folds into the steps
+    const trailing: MessageItem[] = []
+    if (answer) {
+      for (const it of stretch.slice(answerAt + 1) as MessageItem[]) {
+        if (it.text.trim()) trailing.push(it)
+        else if (it.reasoning) folded.push(it)
+      }
     }
+    if (folded.length) {
+      push(
+        {
+          kind: 'steps',
+          key: `s-${folded[0].id}`,
+          items: folded,
+          thoughts: folded.filter((i) => i.kind === 'message' && (i.reasoning || (i.role === 'assistant' && i.text)))
+            .length,
+          tools: folded.filter((i) => i.kind === 'tool').length,
+          failed: folded.some(
+            (i) => (i.kind === 'tool' && i.status === 'failed') || (i.kind === 'message' && i.role === 'system'),
+          ),
+        },
+        end,
+      )
+    }
+    if (answer) push({ kind: 'answer', key: `a-${answer.id}`, item: answer }, end)
+    for (const it of trailing) push({ kind: 'answer', key: `a-${it.id}`, item: it }, end)
     stretch = []
   }
 
-  for (const it of items) {
+  for (let i = from; i < items.length; i++) {
+    const it = items[i]
     if (it.kind === 'unit') {
-      flush()
-      out.push({ kind: 'unit', key: `u-${it.id}`, item: it })
+      flush(i)
+      push({ kind: 'unit', key: `u-${it.id}`, item: it }, i + 1)
     } else if (it.kind === 'message' && it.role === 'user' && showUserPrompts) {
-      flush()
-      out.push({ kind: 'prompt', key: `p-${it.id}`, item: it })
+      flush(i)
+      push({ kind: 'prompt', key: `p-${it.id}`, item: it }, i + 1)
     } else if (it.kind === 'message' && it.role === 'system') {
       // failures are never folded away
-      flush()
-      out.push({ kind: 'answer', key: `a-${it.id}`, item: it })
+      flush(i)
+      push({ kind: 'answer', key: `a-${it.id}`, item: it }, i + 1)
     } else {
       stretch.push(it)
     }
   }
-  flush()
-  return out
+  flush(items.length)
+}
+
+const sameBlock = (a: Block, b: Block): boolean => {
+  if (a.kind !== b.kind || a.key !== b.key) return false
+  if (a.kind === 'steps' && b.kind === 'steps') {
+    return a.items.length === b.items.length && a.items.every((it, i) => it === b.items[i])
+  }
+  return (a as { item: Item }).item === (b as { item: Item }).item
+}
+
+// laneBlocks for a lane that keeps growing: only the stretches from the first
+// changed item on are rebuilt, and blocks whose content is unchanged keep their
+// identity so the views rendering them skip the frame.
+export function createLaneBlocks(showUserPrompts: boolean) {
+  let prevItems: readonly Item[] = []
+  let blocks: Block[] = []
+  let ends: number[] = []
+  const copies = new Map<string, MessageItem>()
+
+  return (items: readonly Item[]): Block[] => {
+    if (items === prevItems) return blocks
+    let k = 0
+    const n = Math.min(items.length, prevItems.length)
+    while (k < n && items[k] === prevItems[k]) k++
+    if (k === items.length && k === prevItems.length) {
+      prevItems = items
+      return blocks
+    }
+    let keep = 0
+    while (keep < blocks.length && ends[keep] < k) keep++
+    const from = keep ? ends[keep - 1] : 0
+    const next = blocks.slice(0, keep)
+    const nextEnds = ends.slice(0, keep)
+    build(items, from, showUserPrompts, next, nextEnds, copies)
+    for (let j = keep; j < next.length; j++) {
+      const old = blocks[j]
+      if (old && sameBlock(old, next[j])) next[j] = old
+    }
+    prevItems = items
+    blocks = next
+    ends = nextEnds
+    return blocks
+  }
 }
 
 export function stepSummary(g: StepGroup): string {
