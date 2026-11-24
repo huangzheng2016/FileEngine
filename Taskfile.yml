@@ -93,13 +93,11 @@ tasks:
       - npm ci --loglevel=error --fund=false --audit=false
 
   web:check:
-    desc: Run the frontend's own lint/typecheck/test scripts when it defines them
+    desc: Frontend gate - prettier, eslint, lint-ui, vitest, vue-tsc
     dir: web
     deps: [web:install]
     cmds:
-      - npm run --if-present lint
-      - npm run --if-present typecheck
-      - npm run --if-present test
+      - npm run check
 
   web:build:
     desc: Build the frontend into web/dist (embedded by the Go binaries)

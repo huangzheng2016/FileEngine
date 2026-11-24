@@ -16,10 +16,9 @@ import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
 import { PAGE_SIZES, useList } from '@/base/useList'
 import { usePolling } from '@/base/usePolling'
-import { toSec } from '@/api/http'
 import { deleteSession, listSessions } from '@/api/sessions'
 import { listFilesystems, listModels } from '@/api/settings'
-import type { ScanSession } from '@/api/types'
+import { cmpId, type Id, type Session } from '@/api/types'
 import { listRunning, sessionPath, stageOf, type Stage } from '@/lib/sessionView'
 import ModelFormDialog from './ModelFormDialog.vue'
 import SessionCreateDialog from './SessionCreateDialog.vue'
@@ -30,7 +29,7 @@ const confirm = useConfirm()
 
 const storages = useFetch(listFilesystems, { immediate: true })
 const models = useFetch(listModels, { immediate: true })
-const storageName = (id: number) =>
+const storageName = (id: Id) =>
   storages.data.value ? (storages.data.value.find((f) => f.id === id)?.name ?? '已删除的存储') : ''
 const missing = computed(() => ({
   storage: storages.data.value?.length === 0,
@@ -47,7 +46,7 @@ async function afterSetup(kind: 'storage' | 'model') {
   else creating.value = true
 }
 
-const stage = (s: ScanSession) => stageOf(s, listRunning(s))
+const stage = (s: Session) => stageOf(s, listRunning(s))
 
 // The filter groups the stages a person acts on; running stages show only under 全部.
 const FILTER_STAGES: Record<string, readonly Stage[]> = {
@@ -68,7 +67,7 @@ const list = useList(
     const rows = all
       .filter((s) => !stages || stages.includes(stage(s)))
       .filter((s) => !q || `${s.scan_path} ${s.goal}`.toLowerCase().includes(q))
-      .sort((a, b) => b.id - a.id)
+      .sort((a, b) => cmpId(b.id, a.id))
     return { items: rows.slice((p.page - 1) * p.size, p.page * p.size), total: rows.length }
   },
   { q: '', status: '' },
@@ -86,9 +85,9 @@ usePolling(
 )
 
 const creating = ref(false)
-const open = (s: ScanSession) => void router.push(`/sessions/${s.id}`)
+const open = (s: Session) => void router.push(`/sessions/${s.id}`)
 
-async function remove(s: ScanSession) {
+async function remove(s: Session) {
   const ok = await confirm({
     message: `删除「${sessionPath(s)}」的整理任务？扫描结果和整理方案会一并删除，存储里的文件不受影响。`,
     confirmText: '删除',
@@ -104,7 +103,7 @@ async function remove(s: ScanSession) {
   }
 }
 
-const menuFor = (s: ScanSession) => [
+const menuFor = (s: Session) => [
   { label: '删除', icon: 'trash-2' as const, danger: true, onSelect: () => void remove(s) },
 ]
 </script>
@@ -156,8 +155,8 @@ const menuFor = (s: ScanSession) => [
             <td class="hide-sm">{{ storageName(s.filesystem_id) }}</td>
             <td><StatusPill :value="stage(s)" :map="SESSION_STAGE" /></td>
             <td class="num hide-sm">{{ fmtNumber(s.status === 'scanning' ? s.scanned_count : s.total_files) }}</td>
-            <td v-tip="fmtTime(toSec(s.updated_at))" class="tabular hide-sm">
-              {{ fmtRelative(toSec(s.updated_at)) }}
+            <td v-tip="fmtTime(s.updated_at)" class="tabular hide-sm">
+              {{ fmtRelative(s.updated_at) }}
             </td>
             <td class="row-actions" @click.stop>
               <span><ActionMenu :items="menuFor(s)" /></span>

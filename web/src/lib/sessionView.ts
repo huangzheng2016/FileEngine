@@ -1,12 +1,12 @@
-import type { AgentRun, ScanSession } from '@/api/types'
+import type { Run, Session } from '@/api/types'
 import { fmtNumber } from '@/base/format'
 
-export function sessionPath(s: Pick<ScanSession, 'scan_path'>): string {
+export function sessionPath(s: Pick<Session, 'scan_path'>): string {
   const p = s.scan_path.replace(/^\/+|\/+$/g, '')
   return p ? `/${p}` : '整个存储'
 }
 
-type Counts = Pick<ScanSession, 'planned_ops' | 'executed_ops' | 'review_count'>
+type Counts = Pick<Session, 'planned_ops' | 'executed_ops' | 'review_count'>
 
 // Moves the executor will carry out; entries awaiting review are skipped.
 export const executable = (s: Counts) => Math.max(0, s.planned_ops - s.executed_ops - (s.review_count ?? 0))
@@ -19,7 +19,7 @@ export interface NextAction {
 }
 
 // hasDraft: a plan draft exists that has not been approved yet.
-export function nextAction(s: ScanSession, running: Pick<AgentRun, 'phase'> | undefined, hasDraft = false): NextAction {
+export function nextAction(s: Session, running: Pick<Run, 'phase'> | undefined, hasDraft = false): NextAction {
   if (s.status === 'scanning') return { kind: 'none', label: '' }
   if (s.status === 'error' || s.status === 'interrupted') return { kind: 'rescan', label: '重新扫描' }
   if (running) return { kind: 'none', label: '' }
@@ -33,10 +33,10 @@ export function nextAction(s: ScanSession, running: Pick<AgentRun, 'phase'> | un
   return { kind: 'none', label: '' }
 }
 
-export const runningRun = (runs: readonly AgentRun[]) => runs.find((r) => r.status === 'running')
+export const runningRun = (runs: readonly Run[]) => runs.find((r) => r.status === 'running')
 
 // The running run of a list item, from its latest_run summary.
-export const listRunning = (s: ScanSession) => (s.latest_run?.status === 'running' ? s.latest_run : undefined)
+export const listRunning = (s: Session) => (s.latest_run?.status === 'running' ? s.latest_run : undefined)
 
 export type Stage =
   | 'scanning'
@@ -53,10 +53,10 @@ export type Stage =
   | 'done'
 
 // A chat turn does not move the task along; the page shows the stage under it.
-export const flowRun = <T extends Pick<AgentRun, 'phase'>>(running: T | undefined) =>
+export const flowRun = <T extends Pick<Run, 'phase'>>(running: T | undefined) =>
   running?.phase === 'chat' ? undefined : running
 
-export function stageOf(s: ScanSession, running: Pick<AgentRun, 'phase'> | undefined): Stage {
+export function stageOf(s: Session, running: Pick<Run, 'phase'> | undefined): Stage {
   if (s.status === 'scanning') return 'scanning'
   if (s.status === 'error') return 'scan_failed'
   if (s.status === 'interrupted') return 'scan_interrupted'

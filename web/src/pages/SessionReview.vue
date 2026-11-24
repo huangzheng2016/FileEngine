@@ -10,14 +10,14 @@ import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
 import { listFiles, updateFileTarget } from '@/api/files'
 import { confirmReview } from '@/api/sessions'
-import type { FileEntry } from '@/api/types'
+import type { FileEntry, Id } from '@/api/types'
 import { parentOf } from '@/lib/paths'
 import { landing, shownPath } from '@/lib/toolView'
 import TargetDialog, { type TargetEntry } from './TargetDialog.vue'
 
 // The decisions the AI was unsure about. They are skipped by 执行 until confirmed
 // here, changed, or kept in place.
-const props = defineProps<{ sessionId: number; rev: number }>()
+const props = defineProps<{ sessionId: Id; rev: number }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const SIZE = 20

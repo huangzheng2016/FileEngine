@@ -14,20 +14,19 @@ import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
-import { toSec } from '@/api/http'
 import { revertRun } from '@/api/sessions'
-import type { AgentRun } from '@/api/types'
+import { hasId, type Id, type Run } from '@/api/types'
 import RunTranscript from '@/components/RunTranscript.vue'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
 import type { RunView, Timeline } from '@/lib/transcript'
 import { loadRunTimeline } from '@/lib/useSessionStream'
 
-const props = defineProps<{ sessionId: number; runs: AgentRun[]; runsError: string; timeline: Timeline }>()
+const props = defineProps<{ sessionId: Id; runs: Run[]; runsError: string; timeline: Timeline }>()
 const emit = defineEmits<{ changed: [] }>()
 const confirm = useConfirm()
 
-const { query, set } = useRouteQuery({ run: 0 })
-const selectedId = computed(() => query.value.run || props.runs[0]?.id || 0)
+const { query, set } = useRouteQuery({ run: '' })
+const selectedId = computed(() => query.value.run || props.runs[0]?.id || '')
 const selected = computed(() => props.runs.find((r) => r.id === selectedId.value))
 
 const history = useFetch(async (signal) => {
@@ -45,8 +44,8 @@ watch(
 )
 const view = computed<RunView | undefined>(() => live.value ?? history.data.value ?? undefined)
 
-const moves = (r: AgentRun | undefined) => r?.phase === 'executing' || r?.phase === 'revert'
-const runName = (r: AgentRun) => (r.phase === 'chat' && r.title) || fmtLabel(RUN_PHASE, r.phase)
+const moves = (r: Run | undefined) => r?.phase === 'executing' || r?.phase === 'revert'
+const runName = (r: Run) => (r.phase === 'chat' && r.title) || fmtLabel(RUN_PHASE, r.phase)
 
 const status = computed(() => (live.value?.done || !live.value ? selected.value?.status : 'running'))
 // A run whose transcript ends in the assistant's answer already shows its summary there.
@@ -64,18 +63,20 @@ const progressValue = computed(() => {
 })
 const tokens = computed(() => view.value?.tokens?.total ?? selected.value?.total_tokens ?? 0)
 
-const duration = (r: AgentRun) => {
-  const start = toSec(r.started_at)
-  const end = toSec(r.ended_at)
+const duration = (r: Run) => {
+  const start = r.started_at
+  const end = r.ended_at
   return start && end && end - start >= 1 ? fmtDuration(end - start) : ''
 }
 
 const reverting = ref(false)
 const canRevert = computed(() => {
   const r = selected.value
-  return !!r && r.phase === 'executing' && (r.status === 'done' || r.status === 'partial') && !r.reverted_by_run_id
+  return (
+    !!r && r.phase === 'executing' && (r.status === 'done' || r.status === 'partial') && !hasId(r.reverted_by_run_id)
+  )
 })
-function revertMessage(r: AgentRun) {
+function revertMessage(r: Run) {
   const n = progress.value?.success ?? 0
   const count = n ? ` ${fmtNumber(n)} 项` : '文件'
   return r.exec_mode === 'copy'
@@ -124,8 +125,8 @@ async function revert() {
                   <span>{{ fmtLabel(RUN_PHASE, r.phase) }}</span>
                   <StatusPill :value="r.status" :map="RUN_STATUS" />
                 </span>
-                <span v-tip="fmtTime(toSec(r.started_at))" class="cell-sub">
-                  {{ fmtRelative(toSec(r.started_at)) }}<template v-if="duration(r)"> · {{ duration(r) }}</template>
+                <span v-tip="fmtTime(r.started_at)" class="cell-sub">
+                  {{ fmtRelative(r.started_at) }}<template v-if="duration(r)"> · {{ duration(r) }}</template>
                 </span>
               </td>
             </tr>

@@ -8,9 +8,9 @@ import { toast } from '@/base/toast'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
 import { createMemory, updateMemory } from '@/api/memory'
-import type { MemoryItem, MemoryKind, MemoryScope } from '@/api/types'
+import type { MemoryItem, MemoryKind, MemoryScope, Id } from '@/api/types'
 
-const props = defineProps<{ open: boolean; editing: MemoryItem | null; scope: MemoryScope; scopeId: number }>()
+const props = defineProps<{ open: boolean; editing: MemoryItem | null; scope: MemoryScope; scopeId: Id }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 
 const empty = () => ({ kind: 'preference' as MemoryKind, content: '', path: '' })

@@ -8,13 +8,13 @@ import { fmtBytes, fmtNumber } from '@/base/format'
 import { ENTRY_FLAG } from '@/base/labels'
 import { useFetch } from '@/base/useFetch'
 import { PREVIEW_LIMIT, previewTree } from '@/api/files'
-import type { PreviewItem } from '@/api/types'
+import { hasId, type Id, type PreviewItem } from '@/api/types'
 import { crumbs, sortItems } from '@/lib/paths'
 import { shownPath } from '@/lib/toolView'
 
 // settled: every planned move has been executed
 const props = defineProps<{
-  sessionId: number
+  sessionId: Id
   side: 'before' | 'after'
   path: string
   rev: number
@@ -108,7 +108,7 @@ function open(it: PreviewItem) {
               {{ it.is_dir ? countText(it.file_count) : fmtBytes(it.size) }}
             </td>
             <td v-if="side === 'after'" class="row-actions">
-              <span v-if="it.file_id">
+              <span v-if="hasId(it.file_id)">
                 <ActionMenu :items="menu(it)" />
               </span>
             </td>

@@ -9,10 +9,10 @@ import { toast } from '@/base/toast'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
 import { createRule, updateRule, type RuleInput } from '@/api/rules'
-import type { PlanRule } from '@/api/types'
+import type { PlanRule, Id } from '@/api/types'
 import { joinExts, regexError, splitExts, targetError } from '@/lib/rules'
 
-const props = defineProps<{ open: boolean; sessionId: number; editing: PlanRule | null; position: number }>()
+const props = defineProps<{ open: boolean; sessionId: Id; editing: PlanRule | null; position: number }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 
 const empty = () => ({

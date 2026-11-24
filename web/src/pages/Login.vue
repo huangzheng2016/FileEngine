@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { login } from '@/api/http'
+import { login } from '@/api/auth'
 import { app } from '@/base/app'
 import { errorMessage } from '@/base/errors'
 import { useFormValidation } from '@/base/useFormValidation'

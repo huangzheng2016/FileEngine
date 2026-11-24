@@ -1,41 +1,45 @@
-import { http } from './http'
-import type { PlanRule, RulePreview } from './types'
+import { get, list, post } from './http'
+import type { Id, PlanRule, RuleApplyStat } from './types'
 
 export type RuleInput = Pick<
   PlanRule,
   'name' | 'exts' | 'name_regex' | 'path_prefix' | 'file_type' | 'min_size' | 'max_size' | 'target' | 'role'
 > & { position?: number; source?: PlanRule['source'] }
 
-export async function listRules(sessionId: number, signal?: AbortSignal) {
-  const { data } = await http.get<{ items: PlanRule[] | null }>(`/sessions/${sessionId}/rules`, { signal })
-  return (data.items ?? []).slice().sort((a, b) => a.position - b.position)
+export async function listRules(sessionId: Id, signal?: AbortSignal) {
+  const r = await get<{ items: PlanRule[] | null }>('/api/rule/list', { session_id: sessionId }, signal)
+  return list(r.items)
+    .slice()
+    .sort((a, b) => a.position - b.position)
 }
 
-export async function createRule(sessionId: number, body: RuleInput) {
-  const { data } = await http.post<PlanRule>(`/sessions/${sessionId}/rules`, body)
-  return data
+export async function createRule(sessionId: Id, body: RuleInput) {
+  const r = await post<{ item: PlanRule }>('/api/rule/create', { ...body, session_id: sessionId })
+  return r.item
 }
 
-export async function updateRule(id: number, body: Partial<RuleInput>) {
-  const { data } = await http.put<PlanRule>(`/rules/${id}`, body)
-  return data
+export async function updateRule(id: Id, body: Partial<RuleInput>) {
+  const r = await post<{ item: PlanRule }>('/api/rule/update', { ...body, id })
+  return r.item
 }
 
-export async function deleteRule(id: number) {
-  await http.delete(`/rules/${id}`)
+export async function deleteRule(id: Id) {
+  await post<void>('/api/rule/delete', { id })
 }
 
-export async function previewRules(sessionId: number, signal?: AbortSignal) {
-  const { data } = await http.post<{ items: RulePreview[] | null }>(`/sessions/${sessionId}/rules/apply`, null, {
-    params: { preview: 1 },
+export async function previewRules(sessionId: Id, signal?: AbortSignal) {
+  const r = await post<{ items: RuleApplyStat[] | null }>(
+    '/api/rule/apply',
+    { session_id: sessionId, preview: true },
     signal,
-  })
-  return data.items ?? []
+  )
+  return list(r.items)
 }
 
-export async function applyRulesSummary(sessionId: number) {
-  const { data } = await http.post<{ items: RulePreview[] | null; applied: number; skipped: number }>(
-    `/sessions/${sessionId}/rules/apply`,
-  )
-  return { applied: data.applied ?? 0, skipped: data.skipped ?? 0 }
+export async function applyRulesSummary(sessionId: Id) {
+  const r = await post<{ applied: number; skipped: number }>('/api/rule/apply', {
+    session_id: sessionId,
+    preview: false,
+  })
+  return { applied: r.applied ?? 0, skipped: r.skipped ?? 0 }
 }

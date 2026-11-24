@@ -1,7 +1,7 @@
 // Pure, so the same reducer serves the live stream, history replays and tests.
 // A batch of events copies each touched object once, so a frame of deltas stays
 // cheap.
-import type { RunPhase, RunStatus, SessionEvent, TokenCounts } from '@/api/types'
+import { hasId, type Id, type RunPhase, type RunStatus, type SessionEvent, type TokenCounts } from '@/api/types'
 
 export interface MessageItem {
   kind: 'message'
@@ -54,7 +54,7 @@ export interface Progress {
 }
 
 export interface RunView {
-  runId: number
+  runId: Id
   phase: RunPhase | ''
   status: RunStatus
   title: string
@@ -69,14 +69,14 @@ export interface RunView {
 export interface Timeline {
   // highest applied sequence number; anything at or below it is a replay
   seq: number
-  runs: Record<number, RunView>
+  runs: Record<Id, RunView>
   // run ids in the order they first appeared
-  order: number[]
+  order: Id[]
 }
 
 export const emptyTimeline = (): Timeline => ({ seq: 0, runs: {}, order: [] })
 
-const emptyRun = (runId: number): RunView => ({
+const emptyRun = (runId: Id): RunView => ({
   runId,
   phase: '',
   status: 'running',
@@ -102,7 +102,7 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
   let next = t
   const draft = () => (next = own(next, (o) => ({ ...o, runs: { ...o.runs }, order: o.order })))
 
-  function run(runId: number): RunView {
+  function run(runId: Id): RunView {
     draft()
     const cur = next.runs[runId]
     if (!cur) {
@@ -178,15 +178,15 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
   for (const ev of events) {
     if (ev.seq && ev.seq <= next.seq) continue
     const d: Data = ev.data ?? {}
-    const runId = num(d.run_id)
+    const runId = ev.run_id
     if (ev.seq) {
       draft()
       next.seq = ev.seq
     }
-    if (!runId) continue
+    if (!hasId(runId)) continue
     const workerId = num(d.worker_id)
 
-    switch (ev.type) {
+    switch (ev.kind) {
       case 'run_status': {
         const r = run(runId)
         r.phase = (str(d.phase) as RunPhase) || r.phase
@@ -264,7 +264,7 @@ export function applyEvents(t: Timeline, events: readonly SessionEvent[]): Timel
       case 'reasoning': {
         const l = lane(run(runId), workerId)
         const m = message(l, str(d.msg_id), 'assistant')
-        if (ev.type === 'text') m.text += str(d.delta)
+        if (ev.kind === 'text') m.text += str(d.delta)
         else m.reasoning += str(d.delta)
         m.streaming = true
         break

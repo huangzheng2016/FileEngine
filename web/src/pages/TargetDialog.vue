@@ -5,9 +5,10 @@ import { toast } from '@/base/toast'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
 import { updateFileTarget } from '@/api/files'
+import type { Id } from '@/api/types'
 
 export interface TargetEntry {
-  id: number
+  id: Id
   original_path: string
   new_path: string
 }

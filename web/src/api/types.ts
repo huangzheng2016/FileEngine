@@ -1,80 +1,50 @@
-// Times are ISO strings on the wire; pages format them through toSec + time.ts.
+// Wire types come from the IDL (idl.gen.ts, generated). This file narrows the string fields that are enums
+// and names the types pages use. Ids are decimal strings and "0" means none; times are unix seconds and 0
+// means none (time.ts renders 0 as a dash).
+import type * as idl from './idl.gen'
+
+export type { Id } from './idl.gen'
+
+type Narrow<T, M> = Omit<T, keyof M> & M
+
+// "0" is an id that points at nothing; it is truthy, so test ids with hasId.
+export const NO_ID: idl.Id = '0'
+export const hasId = (id: idl.Id | null | undefined): id is idl.Id => !!id && id !== NO_ID
+
+// Orders ids numerically without parsing them: int64 ids may exceed Number.MAX_SAFE_INTEGER.
+export const cmpId = (a: idl.Id, b: idl.Id) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)
 
 export type SessionStatus = 'scanning' | 'scanned' | 'error' | 'interrupted'
-
-export interface ScanSession {
-  id: number
-  filesystem_id: number
-  scan_path: string
-  root_path: string
-  protocol: string
-  status: SessionStatus
-  goal: string
-  total_files: number
-  scanned_count: number
-  current_path: string
-  error_message: string
-  tagged_files: number
-  planned_ops: number
-  // planned, unexecuted entries waiting for confirmation (待确认); the executor skips them
-  review_count: number
-  executed_ops: number
-  total_size: number
-  prompt_tokens: number
-  cached_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  allow_read_file: boolean
-  allow_auto_category: boolean
-  allow_vision: boolean
-  allow_script: boolean
-  exclude_category_dirs: boolean
-  filter_mode: 'blacklist' | 'whitelist'
-  filter_dirs: string
-  // comma-separated extensions without dot; '' = all files
-  scope_exts: string
-  extract_metadata: boolean
-  detect_duplicates: boolean
-  model_provider_id: number
-  // 0 = same as model_provider_id
-  bulk_model_provider_id: number
-  created_at: string
-  updated_at: string
-  latest_run?: RunRef
-}
-
 export type RunPhase = 'survey' | 'tagging' | 'review' | 'chat' | 'executing' | 'revert'
 export type RunStatus = 'running' | 'done' | 'partial' | 'error' | 'stopped'
+export type ExecMode = 'copy' | 'move'
+export type FilterMode = 'blacklist' | 'whitelist'
+export type PlanStatus = 'draft' | 'approved'
+export type MemoryScope = 'session' | 'filesystem' | 'global'
+export type MemoryKind = 'preference' | 'convention' | 'correction' | 'fact' | 'note'
+export type MemorySource = 'user' | 'agent' | 'correction' | 'reflection'
+export type EntryRole = '' | 'unit' | 'container' | 'member' | 'file' | 'skip' | 'duplicate'
+export type FileType = 'file' | 'directory' | 'symlink'
+export type DateSource = '' | 'exif' | 'video' | 'filename' | 'mtime'
+export type Protocol = 'local' | 'sftp' | 'ftp' | 'smb' | 'nfs'
+export type ProviderKind = 'openai' | 'claude' | 'ollama'
+export type RuleRole = 'file' | 'unit'
+export type RuleSource = 'user' | 'agent' | 'preset'
+export type PreviewSide = 'after' | 'before'
+export type PreviewStatus = '' | 'moved' | 'kept' | 'partial'
+export type IssueCode =
+  | 'invalid_target'
+  | 'into_self'
+  | 'nested'
+  | 'collision'
+  | 'target_exists'
+  | 'source_changed'
+  | 'source_missing'
+  | 'failed'
+// journal state of the op that decided an entry; empty when it has none
+export type OpState = '' | 'pending' | 'verified' | 'done' | 'failed' | 'reverted'
 
-export interface RunRef {
-  id: number
-  phase: RunPhase
-  status: RunStatus
-}
-
-export interface AgentRun {
-  id: number
-  session_id: number
-  phase: RunPhase
-  status: RunStatus
-  title: string
-  // executing runs only
-  exec_mode?: 'copy' | 'move'
-  // revert runs only: the executing run they undo
-  reverts_run_id?: number
-  // executing runs that a running or finished (done/partial) revert undoes
-  reverted_by_run_id?: number
-  summary: string
-  error: string
-  prompt_tokens: number
-  cached_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  started_at: string
-  ended_at: string | null
-}
-
-export type SessionEventType =
+export type SessionEventKind =
   | 'run_status'
   | 'run_done'
   | 'pull_begin'
@@ -90,221 +60,64 @@ export type SessionEventType =
   // payload {}: stored session counters changed; refetch the session
   | 'session_updated'
 
-export interface AuthMe {
-  authenticated: boolean
-  desktop: boolean
-}
+export type RunRef = Narrow<idl.RunRef, { phase: RunPhase; status: RunStatus }>
+export type TokenCounts = idl.TokenCounts
 
+export type Session = Narrow<
+  idl.Session,
+  { status: SessionStatus; filter_mode: FilterMode; latest_run?: RunRef; tokens?: TokenCounts }
+>
+
+export type Run = Narrow<idl.Run, { phase: RunPhase; status: RunStatus; exec_mode: ExecMode | '' }>
+
+// The wire event (idl.SessionEvent) keeps `data` as JSON text; the client parses it once, in the adapter.
 export interface SessionEvent {
   seq: number
-  type: SessionEventType | (string & {})
+  run_id: idl.Id
+  kind: SessionEventKind | (string & {})
   data: Record<string, unknown>
-  created_at?: string
+  created_at: number
 }
 
-export interface TokenCounts {
-  prompt: number
-  cached: number
-  completion: number
-  total: number
-}
+export type SessionPlan = Narrow<idl.SessionPlan, { status: PlanStatus }>
 
-export type PlanStatus = 'draft' | 'approved'
+export type MemoryItem = Narrow<idl.MemoryItem, { scope: MemoryScope; kind: MemoryKind; source: MemorySource }>
 
-export interface SessionPlan {
-  session_id: number
-  version: number
-  status: PlanStatus
-  content: string
-  updated_at: string
-  approved_at: string | null
-}
+export type ChatTurn = Narrow<idl.ChatTurn, { role: 'user' | 'assistant' }>
 
-export type MemoryScope = 'session' | 'filesystem' | 'global'
-export type MemoryKind = 'preference' | 'convention' | 'correction' | 'fact' | 'note'
+export type FileEntry = Narrow<
+  idl.FileEntry,
+  {
+    role: EntryRole
+    file_type: FileType
+    date_source: DateSource
+    operation: '' | ExecMode
+    execute_mode: '' | ExecMode
+  }
+>
 
-export interface MemoryItem {
-  id: number
-  scope: MemoryScope
-  scope_id: number
-  kind: MemoryKind
-  key: string
-  content: string
-  path: string
-  source: 'user' | 'agent' | 'correction' | 'reflection'
-  pinned: boolean
-  hits: number
-  last_used_at: string | null
-  created_at: string
-  updated_at: string
-}
+export type TreeNode = idl.TreeNode
+export type Category = idl.Category
+export type CategoryTemplate = idl.CategoryTemplate
+export type Filesystem = Narrow<idl.Filesystem, { protocol: Protocol }>
+export type ModelProvider = Narrow<idl.ModelProvider, { provider: ProviderKind }>
 
-export interface ChatTurn {
-  id: number
-  run_id: number
-  role: 'user' | 'assistant'
-  content: string
-  created_at: string
-}
+export type PreviewItem = Narrow<idl.PreviewItem, { role: EntryRole; status: PreviewStatus }>
+export type Issue = Narrow<idl.Issue, { code: IssueCode }>
+export type ExecuteCheck = Narrow<idl.CheckExecuteResp, { issues: Issue[] }>
+export type PlanOp = Narrow<idl.PlanOp, { operation: ExecMode }>
+export type PlanRule = Narrow<
+  idl.PlanRule,
+  { file_type: '' | 'file' | 'directory'; role: RuleRole; source: RuleSource }
+>
+export type RuleApplyStat = idl.RuleApplyStat
+export type LocateItem = Narrow<idl.LocateItem, { execute_mode: '' | ExecMode; op_state: OpState }>
 
-export interface FileEntry {
-  id: number
-  scan_session_id: number
-  original_path: string
-  new_path: string
-  operation: string
-  executed: boolean
-  name: string
-  size: number
-  mod_time: string
-  file_type: 'file' | 'directory' | 'symlink'
-  role: EntryRole
-  reason: string
-  needs_review: boolean
-  // 0-1, how sure the agent was
-  confidence: number
-  sensitive: boolean
-  taken_at: string | null
-  camera: string
-  date_source: '' | 'exif' | 'filename' | 'mtime'
-  duplicate_of: number | null
-  subdir_count: number
-  description: string
-  tagged: boolean
-  parent_path: string
-  depth: number
-  child_count: number
-}
-
-export interface TreeNode {
-  id: number
-  label: string
-  original_path: string
-  file_type: string
-  child_count: number
-  tagged: boolean
-  is_leaf: boolean
-}
-
-export interface Category {
-  id: number
-  filesystem_id: number
-  name: string
-  path: string
-  structure: string
-  description: string
-  agent_created: boolean
-  agent_editable: boolean
-}
-
-export type Protocol = 'local' | 'sftp' | 'ftp' | 'smb' | 'nfs'
-
-export interface Filesystem {
-  id: number
-  name: string
-  description: string
-  protocol: Protocol
-  base_path: string
-  host: string
-  port: number
-  username: string
-  password_set: boolean
-  private_key_set: boolean
-  key_passphrase_set: boolean
-  host_key: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ModelProvider {
-  id: number
-  name: string
-  provider: 'openai' | 'claude' | 'ollama'
-  model: string
-  base_url: string
-  temperature: number
-  max_tokens: number
-  context_window: number
-  vision_enabled: boolean
-  thinking_enabled: boolean
-  reasoning_effort: string
-  api_key_set: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface PreviewItem {
-  name: string
-  path: string
-  is_dir: boolean
-  file_count: number
-  size: number
-  file_id?: number
-  original_path?: string
-  // before side only
-  status?: 'moved' | 'kept' | 'partial'
-  new_path?: string
-  moved_count?: number
-  role?: EntryRole
-  reason?: string
-  needs_review?: boolean
-  confidence?: number
-  sensitive?: boolean
-}
-
-export interface ValidationIssue {
-  entry_id: number
-  original_path: string
-  new_path: string
-  code: string
-  detail: string
-}
-
-export interface ExecuteCheck {
-  total: number
-  success: number
-  failed: number
-  skipped: number
-  issues: ValidationIssue[]
-  notes?: string[]
-}
-
-export type EntryRole = '' | 'unit' | 'container' | 'member' | 'file' | 'skip' | 'duplicate'
-
-export interface PlanRule {
-  id: number
-  session_id: number
-  position: number
-  name: string
-  exts: string
-  name_regex: string
-  path_prefix: string
-  file_type: '' | 'file' | 'directory'
-  min_size: number
-  max_size: number
-  target: string
-  role: 'file' | 'unit'
-  source: 'user' | 'agent' | 'preset'
-  matched: number
-  created_at: string
-  updated_at: string
-}
-
-export interface RulePreview {
-  rule_id: number
-  matched: number
-  // matched but not decided (bad target or rejected); 0 on preview unless the target cannot render
-  skipped: number
-  samples: { original_path: string; new_path: string }[]
-}
-
-export interface LocateResult {
-  entry_id: number
-  original_path: string
-  name: string
-  file_type: string
-  new_path: string
-  executed: boolean
-  executed_at: string | null
-  execute_mode: string
-}
+export type AgentConfig = idl.AgentConfig
+export type AgentConfigPatch = idl.AgentConfigPatch
+export type AppConfig = Narrow<idl.ConfigResp, { agent: AgentConfig }>
+export type PromptInfo = idl.PromptResp
+export type ProbeDir = idl.ProbeDir
+export type ProbeResult = idl.TestFilesystemResp
+export type SessionStats = idl.SessionStatsResp
+export type CategoryDistribution = idl.CategoryDistribution

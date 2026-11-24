@@ -17,13 +17,13 @@ import { importCategories } from '@/api/files'
 import { createRule } from '@/api/rules'
 import { createSession } from '@/api/sessions'
 import { listFilesystems, listModels, testFilesystem } from '@/api/settings'
-import type { Filesystem, ModelProvider, ScanSession } from '@/api/types'
+import { NO_ID, type Filesystem, type Id, type ModelProvider, type Session } from '@/api/types'
 import { SCOPE_OPTIONS, TASK_PRESETS, scopeExts, type ScopeKey, type TaskPreset } from '@/data/presets'
 import { joinExts, splitExts } from '@/lib/rules'
 import FolderPicker from './FolderPicker.vue'
 
 const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: []; created: [ScanSession] }>()
+const emit = defineEmits<{ close: []; created: [Session] }>()
 
 const empty = () => ({
   storage: null as ComboOption | null,
@@ -32,8 +32,8 @@ const empty = () => ({
   preset: '',
   scope: 'all' as ScopeKey,
   custom_exts: '',
-  model: 0,
-  bulk_model: 0,
+  model: NO_ID as Id,
+  bulk_model: NO_ID as Id,
   allow_read_file: true,
   allow_auto_category: true,
   allow_vision: false,
@@ -72,7 +72,7 @@ watch(
       const [fs, ms] = await Promise.all([listFilesystems(), listModels()])
       storages.value = fs
       models.value = ms
-      if (fs.length === 1) form.storage = { value: String(fs[0].id), label: fs[0].name }
+      if (fs.length === 1) form.storage = { value: fs[0].id, label: fs[0].name }
       if (ms.length) form.model = ms[0].id
       loaded.value = true
     } catch (e) {
@@ -83,10 +83,10 @@ watch(
 )
 
 const storageOptions = computed(() =>
-  storages.value.map((f) => ({ value: String(f.id), label: f.name, hint: f.host || f.base_path })),
+  storages.value.map((f) => ({ value: f.id, label: f.name, hint: f.host || f.base_path })),
 )
 const modelOptions = computed(() => models.value.map((m) => ({ value: m.id, label: m.name, hint: m.model })))
-const bulkOptions = computed(() => [{ value: 0, label: '同主模型' }, ...modelOptions.value])
+const bulkOptions = computed(() => [{ value: NO_ID, label: '同主模型' }, ...modelOptions.value])
 const chosenModel = computed(() => models.value.find((m) => m.id === form.model))
 
 const presetOptions = [{ value: '', label: '不用模板' }, ...TASK_PRESETS.map((p) => ({ value: p.id, label: p.name }))]
@@ -114,7 +114,7 @@ async function submit() {
   saving.value = true
   try {
     const exts = scopeExts({ key: form.scope, exts: splitExts(form.custom_exts) })
-    const fsId = Number(form.storage!.value)
+    const fsId = form.storage!.value
     const s = await createSession({
       filesystem_id: fsId,
       scan_path: form.scan_path.trim().replace(/^\/+|\/+$/g, ''),

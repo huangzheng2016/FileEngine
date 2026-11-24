@@ -11,15 +11,14 @@ import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
-import { toSec } from '@/api/http'
 import { deleteMemory, listMemory, updateMemory } from '@/api/memory'
-import type { MemoryItem, MemoryScope } from '@/api/types'
+import type { MemoryItem, MemoryScope, Id } from '@/api/types'
 import MemoryFormDialog from './MemoryFormDialog.vue'
 
 const props = withDefaults(
   defineProps<{
     scope: MemoryScope
-    scopeId: number
+    scopeId: Id
     rev?: number
     q?: string
     emptyText?: string
@@ -127,7 +126,7 @@ const menuFor = (m: MemoryItem) => [
           </td>
           <td><StatusPill :value="m.kind" :map="MEMORY_KIND" /></td>
           <td class="num">{{ m.hits ? `${fmtNumber(m.hits)} 次` : '—' }}</td>
-          <td v-tip="fmtTime(toSec(m.updated_at))">{{ fmtRelative(toSec(m.updated_at)) }}</td>
+          <td v-tip="fmtTime(m.updated_at)">{{ fmtRelative(m.updated_at) }}</td>
           <td v-if="editable" class="row-actions">
             <ActionMenu :items="menuFor(m)" />
           </td>

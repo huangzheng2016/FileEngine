@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { defineComponent, h } from 'vue'
-import type { FileEntry, SessionEvent } from '@/api/types'
+import type { SessionEvent } from '@/api/types'
+import { event, fileEntry } from './fixtures'
 import { FLOW_STEPS, flowStep } from '@/lib/sessionView'
 import { landing, runActivity, toolDecisions } from '@/lib/toolView'
 import { applyEvents, emptyTimeline, type ToolItem } from '@/lib/transcript'
 
 let seq = 0
-const ev = (type: string, data: Record<string, unknown>): SessionEvent => ({ seq: ++seq, type, data })
+const ev = (kind: string, data: Record<string, unknown>): SessionEvent => event(kind, data, ++seq)
 
 describe('run activity', () => {
   it('lists what a decision call wrote, minus rejected items, newest result first', () => {
@@ -93,15 +94,15 @@ describe('run activity', () => {
   })
 })
 
-const files: Partial<FileEntry>[] = [
-  {
-    id: 4,
+const files = [
+  fileEntry({
+    id: '4',
     name: '未命名.bin',
     original_path: '桌面杂物/未命名.bin',
     new_path: '/未分类/未命名.bin',
     reason: '无法从名字判断用途',
     file_type: 'file',
-  },
+  }),
 ]
 const confirmReview = vi.fn(async () => {})
 const updateFileTarget = vi.fn(async () => ({}))
@@ -123,7 +124,7 @@ describe('SessionReview', () => {
     })
     await router.push('/')
     const { default: SessionReview } = await import('@/pages/SessionReview.vue')
-    const w = mount(SessionReview, { props: { sessionId: 1, rev: 0 }, global: { plugins: [router] } })
+    const w = mount(SessionReview, { props: { sessionId: '7', rev: 0 }, global: { plugins: [router] } })
     await flushPromises()
     expect(w.text()).toContain('需要你确认 1 项')
     expect(w.text()).toContain('桌面杂物')
@@ -134,7 +135,7 @@ describe('SessionReview', () => {
       .find((b) => b.text() === '确认')!
       .trigger('click')
     await flushPromises()
-    expect(confirmReview).toHaveBeenCalledWith(1, [4])
+    expect(confirmReview).toHaveBeenCalledWith('7', ['4'])
     expect(w.emitted('changed')).toHaveLength(1)
     w.unmount()
   })

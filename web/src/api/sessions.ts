@@ -1,93 +1,86 @@
-import { http } from './http'
-import type { LocateResult, ScanSession, ExecuteCheck } from './types'
+import { get, list, post } from './http'
+import type * as idl from './idl.gen'
+import type { ExecMode, ExecuteCheck, FilterMode, Id, Issue, LocateItem, Session, SessionStats } from './types'
 
-export interface SessionOptions {
-  model_provider_id: number
-  allow_read_file: boolean
-  allow_auto_category: boolean
-  allow_vision: boolean
-  allow_script: boolean
-  exclude_category_dirs: boolean
-  filter_mode: 'blacklist' | 'whitelist'
-  filter_dirs: string
-  scope_exts: string
-  extract_metadata: boolean
-  detect_duplicates: boolean
-  bulk_model_provider_id: number
+// Absent fields take the defaults of a new task (see idl/api/session.thrift).
+export type SessionInput = Omit<idl.CreateSessionReq, 'filter_mode'> & { filter_mode?: FilterMode }
+export type SessionOptions = Partial<Omit<idl.UpdateSessionReq, 'id' | 'filter_mode'>> & { filter_mode?: FilterMode }
+
+export async function listSessions(signal?: AbortSignal, filesystemId?: Id) {
+  const r = await get<{ items: Session[] | null }>('/api/session/list', { filesystem_id: filesystemId }, signal)
+  return list(r.items)
 }
 
-export interface SessionInput extends SessionOptions {
-  filesystem_id: number
-  scan_path: string
-  goal: string
-  // start organizing as soon as the scan completes
-  auto_tag?: boolean
-}
-
-export async function listSessions(signal?: AbortSignal) {
-  const { data } = await http.get<ScanSession[]>('/sessions', { signal })
-  return data ?? []
-}
-
-export async function getSession(id: number, signal?: AbortSignal) {
-  const { data } = await http.get<ScanSession>(`/sessions/${id}`, { signal })
-  return data
+export async function getSession(id: Id, signal?: AbortSignal) {
+  const r = await get<{ item: Session }>('/api/session/get', { id }, signal)
+  return r.item
 }
 
 export async function createSession(body: SessionInput) {
-  const { data } = await http.post<ScanSession>('/sessions', body)
-  return data
+  const r = await post<{ item: Session }>('/api/session/create', body)
+  return r.item
 }
 
-export async function updateSession(id: number, body: Partial<SessionOptions & { goal: string }>) {
-  const { data } = await http.patch<ScanSession>(`/sessions/${id}`, body)
-  return data
+export async function updateSession(id: Id, body: SessionOptions) {
+  const r = await post<{ item: Session }>('/api/session/update', { ...body, id })
+  return r.item
 }
 
-export async function deleteSession(id: number) {
-  await http.delete(`/sessions/${id}`)
+export async function deleteSession(id: Id) {
+  await post<void>('/api/session/delete', { id })
 }
 
-export async function rescanSession(id: number) {
-  await http.post(`/sessions/${id}/rescan`)
+export async function rescanSession(id: Id) {
+  const r = await post<{ item: Session }>('/api/session/rescan', { id })
+  return r.item
 }
 
-export async function startTagging(id: number) {
-  const { data } = await http.post<{ run_id?: number }>(`/sessions/${id}/tag`)
-  return data.run_id ?? 0
+export function getSessionStats(id: Id, signal?: AbortSignal) {
+  return get<SessionStats>('/api/session/stats', { id }, signal)
 }
 
-export type ExecMode = 'copy' | 'move'
+export async function startTagging(sessionId: Id) {
+  const r = await post<{ run_id: Id }>('/api/run/tag', { session_id: sessionId })
+  return r.run_id
+}
 
 // sample: execute only that many planned entries first; 0 = all of them
-export async function startExecute(id: number, mode: ExecMode, sample: number) {
-  const { data } = await http.post<{ run_id?: number }>(`/sessions/${id}/execute`, {
+export async function startExecute(sessionId: Id, mode: ExecMode, sample: number, categoryPath = '') {
+  const r = await post<{ run_id: Id }>('/api/execute/start', {
+    session_id: sessionId,
     mode,
-    sample: sample || undefined,
+    sample,
+    category_path: categoryPath,
   })
-  return data.run_id ?? 0
+  return r.run_id
 }
 
-export async function revertRun(runId: number) {
-  const { data } = await http.post<{ run_id?: number }>(`/runs/${runId}/revert`)
-  return data.run_id ?? 0
+export async function revertRun(runId: Id) {
+  const r = await post<{ run_id: Id }>('/api/execute/revert', { run_id: runId })
+  return r.run_id
 }
 
-export async function locateFile(id: number, q: string, signal?: AbortSignal) {
-  const { data } = await http.get<{ items: LocateResult[] | null }>(`/sessions/${id}/locate`, { params: { q }, signal })
-  return data.items ?? []
-}
-
-export async function confirmReview(id: number, fileIds: number[]) {
-  await http.post(`/sessions/${id}/review/confirm`, { file_ids: fileIds })
-}
-
-export async function checkExecute(id: number, mode: ExecMode, sample: number, signal?: AbortSignal) {
-  const { data } = await http.get<ExecuteCheck>(`/sessions/${id}/execute/check`, {
-    params: { mode, sample: sample || undefined },
+export async function checkExecute(
+  sessionId: Id,
+  mode: ExecMode,
+  sample: number,
+  signal?: AbortSignal,
+  categoryPath = '',
+) {
+  const r = await get<Omit<ExecuteCheck, 'issues' | 'notes'> & { issues: Issue[] | null; notes: string[] | null }>(
+    '/api/execute/check',
+    { session_id: sessionId, mode, sample, category_path: categoryPath },
     signal,
-  })
-  return { ...data, issues: (data.issues ?? []).filter((i) => i.code !== 'nested') }
+  )
+  return { ...r, issues: list(r.issues).filter((i) => i.code !== 'nested'), notes: list(r.notes) }
 }
 
-export const plansExportUrl = (id: number) => `/sessions/${id}/plans/export`
+export async function locateFile(sessionId: Id, q: string, signal?: AbortSignal) {
+  const r = await get<{ items: LocateItem[] | null }>('/api/execute/locate', { session_id: sessionId, q }, signal)
+  return list(r.items)
+}
+
+export async function confirmReview(sessionId: Id, fileIds: Id[]) {
+  const r = await post<{ confirmed: number }>('/api/plan/confirm_review', { session_id: sessionId, file_ids: fileIds })
+  return r.confirmed
+}

@@ -9,9 +9,10 @@ import { MEMORY_SCOPE } from '@/base/labels'
 import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
 import { listFilesystems } from '@/api/settings'
+import { NO_ID } from '@/api/types'
 import MemoryTable from './MemoryTable.vue'
 
-const { query, set } = useRouteQuery({ scope: 'global', fs: 0, q: '' })
+const { query, set } = useRouteQuery({ scope: 'global', fs: '', q: '' })
 const storages = useFetch(listFilesystems, { immediate: true })
 const storageOptions = computed(() => (storages.data.value ?? []).map((f) => ({ value: f.id, label: f.name })))
 // An unknown or deleted storage id in the URL falls back to the first storage.
@@ -28,7 +29,7 @@ const SCOPES = labelOptions(MEMORY_SCOPE).filter((o) => o.value !== 'session') a
   label: string
 }[]
 const scope = computed(() => (query.value.scope === 'filesystem' ? 'filesystem' : 'global'))
-const scopeId = computed(() => (scope.value === 'filesystem' ? query.value.fs : 0))
+const scopeId = computed(() => (scope.value === 'filesystem' ? query.value.fs : NO_ID))
 const ready = computed(() => scope.value === 'global' || storageOptions.value.some((o) => o.value === scopeId.value))
 
 const search = ref(query.value.q)

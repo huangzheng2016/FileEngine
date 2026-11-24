@@ -16,9 +16,8 @@ import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
 import { useSelection } from '@/base/useSelection'
 import { listCategories, listFiles, resetPlans } from '@/api/files'
-import { toSec } from '@/api/http'
 import { locateFile } from '@/api/sessions'
-import type { FileEntry, LocateResult, ScanSession } from '@/api/types'
+import type { FileEntry, LocateItem, Session } from '@/api/types'
 import DirTree from '@/components/DirTree.vue'
 import { addChatFiles } from '@/lib/chatFiles'
 import { crumbs } from '@/lib/paths'
@@ -27,7 +26,7 @@ import CategoryDialog from './CategoryDialog.vue'
 import FilePreviewDialog from './FilePreviewDialog.vue'
 import TargetDialog from './TargetDialog.vue'
 
-const props = defineProps<{ session: ScanSession }>()
+const props = defineProps<{ session: Session }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const SIZE = 50
@@ -151,7 +150,7 @@ const menuFor = (f: FileEntry) => [
 
 const editing = ref<FileEntry | null>(null)
 
-const locate = reactive({ open: false, q: '', loading: false, done: false, items: [] as LocateResult[] })
+const locate = reactive({ open: false, q: '', loading: false, done: false, items: [] as LocateItem[] })
 async function runLocate() {
   const q = locate.q.trim()
   if (!q) return
@@ -256,7 +255,7 @@ function openLocate() {
                 </span>
                 <span v-if="detailLine(f)" class="cell-sub">{{ detailLine(f) }}</span>
                 <span v-if="showDate(f)" class="cell-sub">
-                  {{ fmtLabel(DATE_SOURCE, f.date_source || 'exif') }} {{ fmtDate(toSec(f.taken_at))
+                  {{ fmtLabel(DATE_SOURCE, f.date_source || 'exif') }} {{ fmtDate(f.taken_at)
                   }}<template v-if="f.camera"> · {{ f.camera }}</template>
                 </span>
               </td>
