@@ -37,11 +37,6 @@ const title = computed(() => (props.editing ? '编辑记忆' : '新建记忆'))
 // The kind only matters for what the assistant wrote; a user note is a preference.
 const showKind = computed(() => !!props.editing && props.editing.source !== 'user')
 
-// A user-written item gets a key from its content so a second identical note updates it.
-function keyOf(content: string, path: string) {
-  return path.trim() ? `path:${path.trim().replace(/^\/+/, '')}` : `user:${content.trim().slice(0, 48)}`
-}
-
 async function close() {
   if (await guard.confirmDiscard()) emit('close')
 }
@@ -51,9 +46,8 @@ async function submit() {
   saving.value = true
   try {
     const body = { kind: form.kind, content: form.content.trim(), path: form.path.trim().replace(/^\/+/, '') }
-    const key = keyOf(body.content, body.path)
-    if (props.editing) await updateMemory(props.editing.id, props.editing.source === 'user' ? { ...body, key } : body)
-    else await createMemory({ ...body, scope: props.scope, scope_id: props.scopeId, key, pinned: false })
+    if (props.editing) await updateMemory(props.editing.id, body)
+    else await createMemory({ ...body, scope: props.scope, scope_id: props.scopeId, pinned: false })
     toast.success(props.editing ? '已保存' : '已创建')
     guard.reset()
     emit('saved')

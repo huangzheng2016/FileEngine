@@ -7,13 +7,11 @@ import Loading from '@/base/Loading.vue'
 import { fmtBytes, fmtLabel, fmtNumber } from '@/base/format'
 import { EXEC_MODE } from '@/base/labels'
 import { toast } from '@/base/toast'
-import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
 import { updateFileTarget } from '@/api/files'
 import { hasId, type PreviewItem, type Run, type Session } from '@/api/types'
 import RunActivity from '@/components/RunActivity.vue'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
-import { loadRunProgress } from '@/lib/runProgress'
 import { executable, flowRun, runningRun, stageOf } from '@/lib/sessionView'
 import type { Timeline } from '@/lib/transcript'
 import { useRevert } from '@/lib/useRevert'
@@ -33,8 +31,7 @@ const liveRun = computed(() => (running.value ? props.timeline.runs[running.valu
 const pending = computed(() => executable(props.session))
 const waiting = computed(() => props.session.planned_ops - props.session.executed_ops)
 const undecided = computed(() => Math.max(0, props.session.total_files - props.session.tagged_files))
-// A scanned task carries a message only when folders were skipped.
-const scanWarning = computed(() => (props.session.status === 'scanned' ? props.session.error_message : ''))
+const scanWarning = computed(() => props.session.scan_warning)
 
 // The latest execution that still has an effect, with its final counters.
 const lastExec = computed(() => {
@@ -42,25 +39,14 @@ const lastExec = computed(() => {
   if (!r || r.phase !== 'executing' || r.status === 'running') return undefined
   return r.status === 'done' || r.status === 'partial' ? r : undefined
 })
-const finalCounts = useFetch((signal) => {
+const execCounts = computed(() => {
   const r = lastExec.value
-  return r ? loadRunProgress(props.session.id, r.id, signal) : Promise.resolve(undefined)
+  return r && { success: r.exec_success, failed: r.exec_failed, skipped: r.exec_skipped }
 })
-watch(
-  () => lastExec.value?.id,
-  (runId) => {
-    if (runId) void finalCounts.refresh()
-  },
-  { immediate: true },
-)
-const execCounts = computed(() => props.timeline.runs[lastExec.value?.id ?? '']?.progress ?? finalCounts.data.value)
-const unfinished = computed(() =>
-  execCounts.value ? execCounts.value.failed + execCounts.value.skipped > 0 : lastExec.value?.status === 'partial',
-)
+const unfinished = computed(() => (execCounts.value ? execCounts.value.failed + execCounts.value.skipped > 0 : false))
 const execTitle = computed(() => {
   const c = execCounts.value
   if (unfinished.value && c) return `有 ${fmtNumber(c.failed + c.skipped)} 项没有成功`
-  if (unfinished.value) return '有部分没有成功'
   return stage.value === 'done' ? '整理完成' : '已执行一部分'
 })
 const lastRevert = computed(() => {

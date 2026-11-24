@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
+import Pagination from '@/base/Pagination.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
 import { fmtBytes, fmtNumber } from '@/base/format'
 import { ENTRY_FLAG } from '@/base/labels'
 import { useFetch } from '@/base/useFetch'
-import { PREVIEW_LIMIT, previewTree } from '@/api/files'
+import { PAGE_SIZES } from '@/base/useList'
+import { previewTree } from '@/api/files'
 import { hasId, type Id, type PreviewItem } from '@/api/types'
 import { pathCrumbs } from '@/lib/paths'
 import { shownPath } from '@/lib/toolView'
@@ -23,12 +25,25 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ open: [path: string]; edit: [item: PreviewItem]; keep: [item: PreviewItem] }>()
 
-const list = useFetch((signal) => previewTree(props.sessionId, props.side, props.path, signal))
+// Local state: the two panes sit side by side and would share URL keys.
+const page = ref(1)
+const size = ref(PAGE_SIZES[0] as number)
+const list = useFetch((signal) =>
+  previewTree(props.sessionId, props.side, props.path, (page.value - 1) * size.value, size.value, signal),
+)
 watch(
-  () => [props.path, props.rev],
+  () => props.path,
+  () => (page.value = 1),
+)
+watch(
+  () => [props.path, props.rev, page.value, size.value],
   () => void list.refresh(),
   { immediate: true },
 )
+function setSize(n: number) {
+  size.value = n
+  page.value = 1
+}
 // the server lists folders first, then by name
 const items = computed(() => list.data.value?.items ?? [])
 const total = computed(() => list.data.value?.total ?? 0)
@@ -127,9 +142,7 @@ function open(it: PreviewItem) {
         </tbody>
       </table>
     </div>
-    <p v-if="total > items.length" class="text-muted text-sm tabular">
-      共 {{ fmtNumber(total) }} 项，已显示前 {{ fmtNumber(PREVIEW_LIMIT) }} 项
-    </p>
+    <Pagination :total="total" :page="page" :size="size" @update:page="page = $event" @update:size="setSize" />
   </section>
 </template>
 

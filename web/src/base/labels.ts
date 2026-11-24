@@ -174,3 +174,28 @@ export const TOOL_LABEL: Record<string, string> = {
   write_plan: '写方案',
   remember: '记住',
 }
+
+// JSON keys of the agent settings as the settings history reports them in `changed`.
+export const AGENT_SETTING_FIELDS: Record<string, string> = {
+  concurrency: '同时整理的文件夹数',
+  max_step: '单个文件夹最多步数',
+  chat_max_step: '助手每次回复最多步数',
+  max_retries: '失败重试',
+  rate_limit_max_retries: '限流重试',
+  retry_base_delay: '重试起始间隔',
+  retry_max_delay: '重试最长间隔',
+  agent_timeout: '单个文件夹时限',
+  max_file_read_size: '每次读取字数',
+  archive_entry_max_size: '压缩包内文件读取上限',
+  archive_prompt_disabled: '关闭压缩包提示',
+  archive_prompt_max_entries: '压缩包提示的条目数',
+  junk_filter_disabled: '关闭垃圾文件过滤',
+  vision_max_images_per_batch: '每次查看的图片数',
+  vision_image_max_px: '图片缩略边长',
+  vision_max_image_bytes: '可查看的图片大小上限',
+  script_max_size: '脚本大小上限',
+  script_timeout: '脚本运行时限',
+  script_max_result_size: '脚本输出大小上限',
+  category_policy: '分类规范',
+  system_prompt: '提示词',
+}

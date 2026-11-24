@@ -14,7 +14,6 @@ export interface MemoryInput {
   scope: MemoryScope
   scope_id: Id
   kind: MemoryKind
-  key: string
   content: string
   path: string
   pinned: boolean

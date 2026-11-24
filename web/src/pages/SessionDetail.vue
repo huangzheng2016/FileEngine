@@ -35,10 +35,13 @@ const TABS_ALL = [
 ] as const
 type TabKey = (typeof TABS_ALL)[number]['key']
 const tabs = computed(() => TABS_ALL.filter((t) => t.key !== 'chat' || !wide.value))
-const { query, set } = useRouteQuery({ tab: '', focus: '' })
+// The keys the tabs keep in the URL (files: dir, fq, cat, sort, page, size; overview: bp, ap, rp, focus; runs: run).
+// Switching tabs drops them, so a filter or page of one tab never leaks into another.
+const TAB_KEYS = { dir: '', fq: '', cat: '', sort: '', page: '', size: '', bp: '', ap: '', rp: '', run: '' }
+const { query, set } = useRouteQuery({ tab: '', focus: '', ...TAB_KEYS })
 const tab = computed<TabKey>({
   get: () => tabs.value.find((t) => t.key === query.value.tab)?.key ?? 'overview',
-  set: (t) => set({ tab: t === 'overview' ? '' : t }),
+  set: (t) => set({ ...TAB_KEYS, focus: '', tab: t === 'overview' ? '' : t }),
 })
 const showOverview = () => set({ tab: '', focus: '' })
 const openReview = () => set({ tab: '', focus: 'review' })
