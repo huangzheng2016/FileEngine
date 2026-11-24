@@ -22,6 +22,11 @@ func ValidateFSPath(p string) error {
 	if strings.ContainsRune(p, 0) {
 		return errors.New("路径不能包含 NUL 字符")
 	}
+	// SMB servers and Windows read "\" as a separator that the "/" split
+	// below cannot see.
+	if strings.ContainsRune(p, '\\') {
+		return errors.New("路径不能包含反斜杠")
+	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." {
 			return fmt.Errorf("路径「%s」不能包含 ..（会越出存储根目录）", p)

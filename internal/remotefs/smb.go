@@ -9,7 +9,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"FileEngine/internal/config"
 
@@ -39,15 +38,6 @@ func smbScanConns() int {
 		n = 32
 	}
 	return n
-}
-
-// smbStreamTimeout bounds an opened file's whole read stream. go-smb2 fixes
-// a file's request context at Open time, so per-Read re-arming is impossible
-// without forking the library; a generous multiple of the per-operation
-// budget keeps realistic reads unharmed while still surfacing a dead
-// connection in minutes instead of never.
-func smbStreamTimeout() time.Duration {
-	return 10 * opTimeout()
 }
 
 func dialSMB(cfg config.RemoteFSConfig) (*smb2.Session, net.Conn, error) {
@@ -151,6 +141,11 @@ func NewSMBFS(cfg config.RemoteFSConfig) (*SMBFS, error) {
 // The server already confines us to the share; this confines to the sub-path
 // inside it.
 func (s *SMBFS) resolve(p string) (string, error) {
+	// The server reads "\" as a separator, which the "/"-based confinement
+	// below cannot see, and ":" opens an NTFS alternate data stream.
+	if strings.ContainsAny(p, "\\:") {
+		return "", fmt.Errorf("path %q contains a character SMB would interpret", p)
+	}
 	var joined string
 	if path.IsAbs(p) {
 		joined = path.Clean(p)
@@ -248,25 +243,31 @@ func (s *SMBFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The opened file keeps this context for its whole lifetime (see
-	// smbStreamTimeout); cancel fires only when the returned closer runs.
-	streamCtx, cancel := context.WithTimeout(ctx, smbStreamTimeout())
+	// go-smb2 fixes an opened file's context for its lifetime, so the idle
+	// timeout slides with every successful read instead of capping the whole
+	// stream; cancel fires when the returned closer runs.
+	streamCtx, touch, cancel := slidingCtx(ctx, opTimeout())
 	f, err := s.share.WithContext(streamCtx).Open(fullPath)
 	if err != nil {
 		cancel()
 		return nil, &OpError{Protocol: "smb", Op: "open", Path: p, Err: err}
 	}
-	return &smbReadCloser{f: f, cancel: cancel, path: p}, nil
+	touch()
+	return &smbReadCloser{f: f, touch: touch, cancel: cancel, path: p}, nil
 }
 
 type smbReadCloser struct {
-	f      *smb2.File
+	f      io.ReadCloser
+	touch  func()
 	cancel context.CancelFunc
 	path   string
 }
 
 func (r *smbReadCloser) Read(p []byte) (int, error) {
 	n, err := r.f.Read(p)
+	if n > 0 {
+		r.touch()
+	}
 	if err != nil && err != io.EOF {
 		err = &OpError{Protocol: "smb", Op: "read", Path: r.path, Err: err}
 	}

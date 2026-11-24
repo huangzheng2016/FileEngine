@@ -234,10 +234,3 @@ func TestActivityConnDisarmedIdle(t *testing.T) {
 		t.Fatalf("Read after arm+disarm idle: got %v, want nil", err)
 	}
 }
-
-func TestSMBStreamTimeout(t *testing.T) {
-	t.Setenv("FE_REMOTEFS_TIMEOUT_SEC", "10")
-	if got := smbStreamTimeout(); got != 100*time.Second {
-		t.Fatalf("got %v, want 100s (10x op timeout)", got)
-	}
-}
