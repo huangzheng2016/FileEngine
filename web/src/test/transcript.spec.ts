@@ -46,14 +46,14 @@ describe('transcript reducer', () => {
   it('pairs tool results with calls by call_id across workers', () => {
     seq = 100
     const t = applyEvents(emptyTimeline(), [
-      ev('tool_call', { run_id: 3, worker_id: 2, call_id: 'c1', name: 'list_files', args: { path: 'a' } }),
-      ev('tool_call', { run_id: 3, worker_id: 1, call_id: 'c2', name: 'set_target', args: {} }),
-      ev('tool_result', { run_id: 3, worker_id: 1, call_id: 'c2', name: 'set_target', ok: false, error: '路径非法' }),
+      ev('tool_call', { run_id: 3, worker_id: 2, call_id: 'c1', name: 'list_entries', args: { path: 'a' } }),
+      ev('tool_call', { run_id: 3, worker_id: 1, call_id: 'c2', name: 'read_file', args: {} }),
+      ev('tool_result', { run_id: 3, worker_id: 1, call_id: 'c2', name: 'read_file', ok: false, error: '路径非法' }),
       ev('tool_result', {
         run_id: 3,
         worker_id: 2,
         call_id: 'c1',
-        name: 'list_files',
+        name: 'list_entries',
         ok: true,
         output: { files: [] },
         duration_ms: 12,
@@ -105,7 +105,7 @@ describe('lane blocks', () => {
       ev('message', { run_id: 6, msg_id: 'u', role: 'user', content: '把照片按年整理' }),
       ev('reasoning', { run_id: 6, msg_id: 'm1', delta: '想想' }),
       ev('text', { run_id: 6, msg_id: 'm1', delta: '我先看看目录' }),
-      ev('tool_call', { run_id: 6, call_id: 'a', name: 'list_files' }),
+      ev('tool_call', { run_id: 6, call_id: 'a', name: 'list_entries' }),
       ev('tool_result', { run_id: 6, call_id: 'a', ok: true }),
       ev('message', { run_id: 6, msg_id: 'm2', role: 'assistant', content: '已完成整理方案。' }),
     ])
@@ -118,7 +118,7 @@ describe('lane blocks', () => {
   it('marks a group with a failed tool so it opens itself', () => {
     seq = 500
     const t = applyEvents(emptyTimeline(), [
-      ev('tool_call', { run_id: 7, call_id: 'a', name: 'set_target' }),
+      ev('tool_call', { run_id: 7, call_id: 'a', name: 'read_file' }),
       ev('tool_result', { run_id: 7, call_id: 'a', ok: false, error: '冲突' }),
     ])
     const [g] = laneBlocks(t.runs[7].lanes[0].items, false) as StepGroup[]
