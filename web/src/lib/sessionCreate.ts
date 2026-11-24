@@ -14,7 +14,7 @@ export function createTask(
     auto_tag: startNow,
     ...(preset && {
       rules: preset.rules.map((r, position) => ({ ...r, position })),
-      categories: preset.categories.map((c) => ({ structure: '', description: '', ...c })),
+      categories: preset.categories.map((c) => ({ structure: '', ...c })),
     }),
   })
 }

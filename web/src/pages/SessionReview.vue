@@ -4,7 +4,7 @@ import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
 import Pagination from '@/base/Pagination.vue'
 import TableState from '@/base/TableState.vue'
-import { fmtNumber } from '@/base/format'
+import { fmtNumber, fmtRatio } from '@/base/format'
 import { toast } from '@/base/toast'
 import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
@@ -32,6 +32,7 @@ watch(
 )
 const rows = computed(() => list.data.value?.items ?? [])
 const total = computed(() => list.data.value?.total ?? 0)
+const threshold = computed(() => list.data.value?.review_confidence ?? 0)
 
 const busy = ref(false)
 async function run(action: () => Promise<unknown>, done: string, failed: string) {
@@ -73,6 +74,7 @@ const menu = (f: FileEntry) => [
     <div class="card-head">
       <div>
         <h3>需要你确认 {{ fmtNumber(total) }} 项</h3>
+        <p v-if="threshold" class="text-sm text-muted">助手把握低于 {{ fmtRatio(threshold) }} 的决定要先经过你确认</p>
       </div>
       <button v-if="rows.length" type="button" class="btn-sm" :disabled="busy" @click="confirmPage">
         <Icon name="check" :size="14" />{{ total > rows.length ? `确认这 ${fmtNumber(rows.length)} 项` : '全部确认' }}

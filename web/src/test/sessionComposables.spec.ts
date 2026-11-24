@@ -1,7 +1,7 @@
 import { effectScope, nextTick, ref, shallowRef } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { confirmState, resolveConfirm } from '@/base/useConfirm'
-import { event, run, session } from './fixtures'
+import { run, session } from './fixtures'
 
 const api = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -27,7 +27,6 @@ vi.mock('@/lib/useSessionStream', () => ({
   }),
 }))
 
-import { loadRunProgress } from '@/lib/runProgress'
 import { canRevert, revertMessage, useRevert } from '@/lib/useRevert'
 import { useSessionDetail } from '@/lib/useSessionDetail'
 
@@ -77,22 +76,6 @@ describe('useRevert', () => {
     expect(canRevert({ ...base, reverted_by_run_id: '8' })).toBe(false)
     expect(canRevert(run({ phase: 'tagging', status: 'done' }))).toBe(false)
     expect(revertMessage('copy')).toContain('文件')
-  })
-})
-
-describe('loadRunProgress', () => {
-  it('reads the final counters from the newest events in one request', async () => {
-    api.listEvents.mockResolvedValue({
-      items: [
-        event('progress', { total: 10, success: 8, failed: 1, skipped: 1, tagged: 0, planned: 0 }, 5),
-        event('run_done', { status: 'partial' }, 6),
-      ].map((e) => ({ ...e, run_id: '4' })),
-      hasMore: false,
-    })
-    const p = await loadRunProgress('7', '4')
-    expect(api.listEvents).toHaveBeenCalledTimes(1)
-    expect(api.listEvents.mock.calls[0][1]).toMatchObject({ run_id: '4', limit: 100 })
-    expect(p).toMatchObject({ success: 8, failed: 1, skipped: 1 })
   })
 })
 

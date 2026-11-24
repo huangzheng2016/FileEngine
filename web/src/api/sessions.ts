@@ -72,7 +72,7 @@ export async function checkExecute(
     { session_id: sessionId, mode, sample, category_path: categoryPath },
     signal,
   )
-  return { ...r, issues: list(r.issues).filter((i) => i.code !== 'nested'), notes: list(r.notes) }
+  return { ...r, issues: list(r.issues), notes: list(r.notes) }
 }
 
 export async function locateFile(sessionId: Id, q: string, signal?: AbortSignal) {
