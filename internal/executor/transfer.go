@@ -224,6 +224,14 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 	if err != nil {
 		return err
 	}
+	return e.copyJournaled(ctx, op)
+}
+
+// copyJournaled runs the copy of an already journaled copy/move op and
+// finishes it. The create notice journals ownership of dst before any data is
+// written.
+func (e *Executor) copyJournaled(ctx context.Context, op *db.ExecOp) error {
+	src, dst := op.Src, op.Dst
 	created := remotefs.WithCreateNotice(ctx, func() error { return e.repo.SetExecOpCreated(op) })
 	if err := e.fs.CopyFile(created, src, dst); err != nil {
 		if op.DstCreated {

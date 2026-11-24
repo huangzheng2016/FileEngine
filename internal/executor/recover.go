@@ -297,6 +297,8 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 	if !dstUnchanged(dst, op) {
 		return skip(IssueSourceChanged, "目标在执行后被修改，未撤销")
 	}
+	// Reverting a copy only deletes the (unchanged) copy; the source is
+	// matched by size alone because it is never touched either way.
 	if op.Kind == db.ExecKindCopy && srcOK && src.Size == op.Size {
 		if err := e.fs.Delete(ctx, op.Dst); err != nil {
 			return err
@@ -314,17 +316,13 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 		if op.IsDir || errors.Is(merr, os.ErrExist) {
 			return merr
 		}
-		if err := e.fs.CopyFile(ctx, op.Dst, op.Src); err != nil {
+		// Journaled as a move under the revert run, so a crash is recovered
+		// like a forward move.
+		back, err := e.journal(op.EntryID, db.ExecKindMove, op.Dst, op.Src, false, dst)
+		if err != nil {
 			return err
 		}
-		if _, err := e.verify(ctx, op.Dst, op.Src, dst.Size); err != nil {
-			e.fs.Delete(context.WithoutCancel(ctx), op.Src)
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := e.fs.Delete(ctx, op.Dst); err != nil {
+		if err := e.copyJournaled(ctx, back); err != nil {
 			return err
 		}
 	}
