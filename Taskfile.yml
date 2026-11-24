@@ -80,7 +80,9 @@ tasks:
   gen:check:
     desc: Fail when regenerating changes any generated file
     cmds:
-      - GOOS= GOARCH= go run ./scripts/gencheck -paths {{.GENERATED}} -- task gen
+      - GOOS= GOARCH= go run ./scripts/gencheck snapshot -paths {{.GENERATED}} -state {{.BIN_DIR}}/gencheck.state
+      - task: gen
+      - GOOS= GOARCH= go run ./scripts/gencheck verify -paths {{.GENERATED}} -state {{.BIN_DIR}}/gencheck.state
 
   web:install:
     desc: Install frontend dependencies from the lockfile

@@ -6,6 +6,7 @@
 #   go install github.com/cloudwego/thriftgo@v0.4.1
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export PATH="$(go env GOPATH)/bin:$PATH"
 hz update -idl idl/api.thrift -handler_dir biz/handler -model_dir biz/model
 # hz re-adds every model import to the handler files; drop the ones a handler
 # does not use, then format (the format gate covers biz/).
