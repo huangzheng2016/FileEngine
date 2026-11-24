@@ -23,12 +23,13 @@ defineEmits<{ open: [string] }>()
 
 const trail = computed(() => crumbs(props.protocol, props.path, props.top, props.roots))
 const up = computed(() => parentPath(props.protocol, props.path, props.top, props.roots))
+const upBlocked = computed(() => (props.loading ? '正在读取' : up.value === null ? '已在最上层' : ''))
 </script>
 
 <template>
   <div class="picker">
     <nav class="picker-head" aria-label="当前位置">
-      <button type="button" class="ghost btn-sm" :disabled="up === null || loading" @click="$emit('open', up!)">
+      <button v-tip="upBlocked" type="button" class="ghost btn-sm" :disabled="!!upBlocked" @click="$emit('open', up!)">
         <Icon name="arrow-up" :size="14" />上一级
       </button>
       <ol class="picker-trail">
@@ -54,16 +55,31 @@ const up = computed(() => parentPath(props.protocol, props.path, props.top, prop
         </li>
       </ol>
     </nav>
-    <div class="picker-list" :aria-busy="loading">
+    <div class="table-wrap picker-list" :aria-busy="loading">
       <Loading v-if="loading" />
-      <template v-else>
-        <button v-for="d in dirs" :key="d.path" type="button" class="picker-row" @click="$emit('open', d.path)">
-          <Icon name="folder" :size="16" class="text-muted" />
-          <span class="truncate mono row-name">{{ d.name }}</span>
-          <Icon name="chevron-right" :size="14" class="text-muted" />
-        </button>
-        <p v-if="!dirs.length" class="picker-empty text-muted text-sm">{{ emptyText ?? '这里没有子文件夹' }}</p>
-      </template>
+      <table v-else-if="dirs.length">
+        <tbody>
+          <tr
+            v-for="d in dirs"
+            :key="d.path"
+            class="clickable"
+            tabindex="0"
+            @click="$emit('open', d.path)"
+            @keydown.enter.self.prevent="$emit('open', d.path)"
+          >
+            <td>
+              <span class="folder">
+                <Icon name="folder" :size="16" class="text-muted" />
+                <span class="truncate mono">{{ d.name }}</span>
+              </span>
+            </td>
+            <td class="num"><Icon name="chevron-right" :size="14" class="text-muted" /></td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="picker-empty text-muted text-sm">
+        <slot name="empty">{{ emptyText ?? '这里没有子文件夹' }}</slot>
+      </p>
     </div>
   </div>
 </template>
@@ -72,17 +88,12 @@ const up = computed(() => parentPath(props.protocol, props.path, props.top, prop
 .picker {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+  gap: var(--space-2);
 }
 .picker-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  background: var(--surface-muted);
-  border-bottom: 1px solid var(--border);
   min-width: 0;
 }
 .picker-trail {
@@ -102,28 +113,13 @@ const up = computed(() => parentPath(props.protocol, props.path, props.top, prop
   min-width: 0;
 }
 .picker-list {
-  display: flex;
-  flex-direction: column;
   height: 260px;
-  overflow-y: auto;
 }
-.picker-row {
+.folder {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  height: auto;
-  min-height: 36px;
-  padding: var(--space-1) var(--space-3);
-  text-align: left;
-  justify-content: flex-start;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-}
-.picker-row:hover {
-  background: var(--surface-hover);
+  min-width: 0;
 }
 .crumb {
   display: block;
@@ -136,13 +132,9 @@ const up = computed(() => parentPath(props.protocol, props.path, props.top, prop
   padding: 0 var(--space-2);
   font-weight: 600;
 }
-.row-name {
-  max-width: none;
-  flex: 1;
-  min-width: 0;
-}
 .picker-empty {
-  margin: auto;
+  margin: 0;
   padding: var(--space-4);
+  text-align: center;
 }
 </style>

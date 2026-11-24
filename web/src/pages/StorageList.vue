@@ -31,7 +31,7 @@ const where = (f: Filesystem) =>
 async function remove(f: Filesystem) {
   if (
     !(await confirm({
-      message: `删除存储「${f.name}」？已有任务会无法继续。存储里的文件不受影响。`,
+      message: `删除存储「${f.name}」？已有任务会无法继续。`,
       confirmText: '删除',
       danger: true,
     }))
@@ -81,7 +81,12 @@ async function remove(f: Filesystem) {
               <span v-tip="where(f)" class="truncate">{{ where(f) || '—' }}</span>
             </td>
             <td class="row-actions">
-              <ActionMenu :items="[{ label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(f) }]" />
+              <ActionMenu
+                :items="[
+                  { label: '编辑', icon: 'pencil', onSelect: () => edit(f) },
+                  { label: '删除', icon: 'trash-2', danger: true, onSelect: () => void remove(f) },
+                ]"
+              />
             </td>
           </tr>
           <TableState
@@ -92,7 +97,7 @@ async function remove(f: Filesystem) {
             empty-text="暂无存储"
             @retry="list.refresh"
           >
-            <button type="button" class="primary" @click="edit(null)">新建存储</button>
+            <button type="button" @click="edit(null)">新建存储</button>
           </TableState>
         </tbody>
       </table>
