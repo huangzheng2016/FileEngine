@@ -380,10 +380,17 @@ func (a *Agent) RunSurvey(ctx context.Context, logger *Logger, instructions stri
 	}
 	sb.WriteString("按系统提示的步骤调研这棵目录树，建好分类，并用 write_plan 写出整理方案。")
 
+	shared, err := LoadSharedContext(a.repo, a.session)
+	if err != nil {
+		return "", err
+	}
 	res, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "survey",
+		phase:       db.RunPhaseSurvey,
 		maxStep:     config.Get().Agent.MaxStep,
-		instruction: surveySystemPrompt(config.Get().Agent, a.session),
+		instruction: surveySystemPrompt(config.Get().Agent),
+		shared:      shared,
+		current:     shared.Categories,
 		messages:    []*schema.Message{{Role: schema.User, Content: sb.String()}},
 	})
 	if err != nil {

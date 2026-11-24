@@ -85,13 +85,25 @@ func mustRunScript(t *testing.T, tb *ToolBuilder, src string) *RunScriptOutput {
 	return out
 }
 
+// unwrapData strips the <data> framing that run_script puts around output
+// and value.
+func unwrapData(s string) string {
+	if i := strings.Index(s, ">\n"); strings.HasPrefix(s, untrustedNotice) && i >= 0 {
+		s = s[i+2:]
+		s = strings.TrimSuffix(s, "\n</data>")
+		return s
+	}
+	s = strings.TrimPrefix(s, "<data>")
+	return strings.TrimSuffix(s, "</data>")
+}
+
 func resultValue(t *testing.T, out *RunScriptOutput) map[string]interface{} {
 	t.Helper()
 	if out.Value == "" {
-		t.Fatal("script did not set a result value")
+		t.Fatalf("script did not set a result value (error: %q)", out.Error)
 	}
 	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(out.Value), &m); err != nil {
+	if err := json.Unmarshal([]byte(unwrapData(out.Value)), &m); err != nil {
 		t.Fatalf("result value is not a JSON object: %v (%q)", err, out.Value)
 	}
 	return m
@@ -199,10 +211,10 @@ print("hello", "world")
 print(1 + 2)
 println("line")
 result = "done"`)
-	if out.Output != "hello world\n3\nline\n" {
+	if !strings.HasPrefix(out.Output, untrustedNotice) || unwrapData(out.Output) != "hello world\n3\nline\n" {
 		t.Fatalf("print capture: got %q", out.Output)
 	}
-	if out.Value != `"done"` {
+	if unwrapData(out.Value) != `"done"` {
 		t.Fatalf("result value: got %q", out.Value)
 	}
 	if out.Truncated {
@@ -210,7 +222,7 @@ result = "done"`)
 	}
 
 	out2 := mustRunScript(t, tb, `result = 41 + 1`)
-	if out2.Value != `42` {
+	if unwrapData(out2.Value) != `42` {
 		t.Fatalf("result assignment: got %q", out2.Value)
 	}
 	out3 := mustRunScript(t, tb, `print("no result here")`)
@@ -225,10 +237,10 @@ func TestScriptBuiltinArgumentValidation(t *testing.T) {
 		`query_files({parrent_path: "incoming"})`, // typo key
 		`query_files({tagged: "yes"})`,            // wrong type
 		`get_file_info()`,                         // missing arg
-		`set_target("a")`,                         // too few args
+		`set_target("a", "b")`,                    // the reason is required
 		`set_target("a", "b", "c", "d")`,          // too many
-		`set_target(1, "b")`,                      // wrong type
-		`rename_category("照片", "")`,               // empty new name
+		`set_target(1, "b", "c")`,                 // wrong type
+		`decide_dir("a", "skip", "")`,             // the reason is required
 	} {
 		out, err := runScript(t, tb, src)
 		if err != nil || out.Error == "" {
@@ -241,14 +253,15 @@ func TestScriptSetTargetBuiltin(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 
 	out := mustRunScript(t, tb, `
-ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg")
-bad := set_target("incoming/photo2.jpg", "/../escape")
-result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
+ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg", "照片")
+bad := set_target("incoming/photo2.jpg", "/../escape", "照片")
+noreason := set_target("incoming/photo2.jpg", "/organized/photos/photo2.jpg", "")
+result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad), noreason: is_error(noreason)}`)
 	v := resultValue(t, out)
-	if v["ok"] != "/organized/photos/photo1.jpg" || v["bad_is_error"] != true {
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["bad_is_error"] != true || v["noreason"] != true {
 		t.Fatalf("set_target outcomes: %+v", v)
 	}
-	if !strings.Contains(v["bad_msg"].(string), "invalid new_path") {
+	if !strings.Contains(v["bad_msg"].(string), "new_path 不合法") {
 		t.Fatalf("illegal-target message must name the validation failure: %+v", v)
 	}
 
@@ -261,7 +274,7 @@ result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 		t.Fatalf("illegal target must not be written: %+v", f2)
 	}
 
-	mustRunScript(t, tb, `set_target("incoming/photo1.jpg", "")`)
+	mustRunScript(t, tb, `set_target("incoming/photo1.jpg", "", "撤销")`)
 	f, _ = repo.GetFileByPath(1, "incoming/photo1.jpg")
 	if f.NewPath != "" || f.Operation != "" {
 		t.Fatalf("clear must empty the target: %+v", f)
@@ -271,9 +284,9 @@ result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad)}`)
 func TestScriptSetCategoryBuiltin(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
-ok := set_category("incoming/photo1.jpg", "照片")
-missing_cat := set_category("incoming/photo2.jpg", "不存在")
-missing_file := set_category("nope/x.jpg", "照片")
+ok := set_category("incoming/photo1.jpg", "照片", "照片归类")
+missing_cat := set_category("incoming/photo2.jpg", "不存在", "x")
+missing_file := set_category("nope/x.jpg", "照片", "x")
 result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_file)}`)
 	v := resultValue(t, out)
 	if v["ok"] != "/organized/photos/photo1.jpg" || v["cat_err"] != true || v["file_err"] != true {
@@ -282,25 +295,6 @@ result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_fil
 	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
 	if f.NewPath != "/organized/photos/photo1.jpg" {
 		t.Fatalf("set_category must target category path + file name: got %q", f.NewPath)
-	}
-}
-
-func TestScriptRenameCategoryBuiltin(t *testing.T) {
-	tb, repo := scriptTestBuilder(t, nil)
-	out := mustRunScript(t, tb, `
-ok := rename_category("照片", "相册")
-locked := rename_category("锁定", "新名字")
-missing := rename_category("不存在", "x")
-result = {ok: ok, locked_err: is_error(locked), missing_err: is_error(missing)}`)
-	v := resultValue(t, out)
-	if v["ok"] != true || v["locked_err"] != true || v["missing_err"] != true {
-		t.Fatalf("rename_category outcomes: %+v", v)
-	}
-	if _, err := repo.GetCategoryByName(7, "相册"); err != nil {
-		t.Fatalf("renamed category must exist: %v", err)
-	}
-	if _, err := repo.GetCategoryByName(7, "锁定"); err != nil {
-		t.Fatalf("user-managed category must not be renamed: %v", err)
 	}
 }
 
@@ -338,9 +332,13 @@ result = {a_ok: a.success, a_path: a.path, dup_err: is_error(dup), b_ok: b.succe
 
 func TestScriptCreateCategoryGatedBySession(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: false})
-	out, err := runScript(t, tb, `create_category("x", "/x", "d")`)
-	if err != nil || out.Error == "" {
-		t.Fatalf("create_category must be undefined when allow_auto_category is off (err=%v out=%+v)", err, out)
+	out := mustRunScript(t, tb, `
+get_categories()
+r := create_category("x", "/x", "d")
+result = {err: is_error(r), msg: string(r)}`)
+	v := resultValue(t, out)
+	if v["err"] != true || !strings.Contains(v["msg"].(string), "不能新建分类") {
+		t.Fatalf("create_category must be refused when allow_auto_category is off: %+v", v)
 	}
 }
 
@@ -348,7 +346,7 @@ func TestScriptSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptMaxSize = 16
 	out, err := runScript(t, tb, `result = "this script is definitely longer than sixteen bytes"`)
-	if err != nil || !strings.Contains(out.Error, "exceeds") {
+	if err != nil || !strings.Contains(out.Error, "超过") {
 		t.Fatalf("oversized script must be rejected: err=%v out=%+v", err, out)
 	}
 	if out, err := runScript(t, tb, "   \n  "); err != nil || out.Error == "" {
@@ -378,8 +376,8 @@ func TestScriptResultSizeGuard(t *testing.T) {
 	out := mustRunScript(t, tb, `
 for i:=0; i<1000; i++ { print("0123456789") }
 result = "ok"`)
-	if len(out.Output) > 64 || !out.Truncated {
-		t.Fatalf("print flood must be capped at 64 bytes: len=%d truncated=%v", len(out.Output), out.Truncated)
+	if body := unwrapData(out.Output); len(body) > 64 || !out.Truncated {
+		t.Fatalf("print flood must be capped at 64 bytes: len=%d truncated=%v", len(body), out.Truncated)
 	}
 }
 
@@ -387,8 +385,8 @@ func TestScriptValueSizeGuard(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	tb.cfg.ScriptMaxResultSize = 32
 	out := mustRunScript(t, tb, `result = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`)
-	if len(out.Value) > 32 || !out.Truncated {
-		t.Fatalf("oversized result must be truncated: len=%d truncated=%v", len(out.Value), out.Truncated)
+	if body := unwrapData(out.Value); len(body) > 32 || !out.Truncated {
+		t.Fatalf("oversized result must be truncated: len=%d truncated=%v", len(body), out.Truncated)
 	}
 }
 
@@ -457,37 +455,25 @@ func TestScriptNoUnexpectedGlobals(t *testing.T) {
 	}
 }
 
-func TestScriptToolRegistration(t *testing.T) {
-	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true})
-	tools, err := tb.BuildTools()
-	if err != nil {
-		t.Fatalf("BuildTools: %v", err)
-	}
-	if !hasToolNamed(tools, "run_script") {
-		t.Fatal("run_script must be registered when AllowScript is true")
-	}
-	instructTools, err := tb.BuildChatTools()
-	if err != nil {
-		t.Fatalf("BuildChatTools: %v", err)
-	}
-	if !hasToolNamed(instructTools, "run_script") {
-		t.Fatal("run_script must be registered for instruct when AllowScript is true")
-	}
-
-	tbOff, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: false})
-	toolsOff, err := tbOff.BuildTools()
-	if err != nil {
-		t.Fatalf("BuildTools: %v", err)
-	}
-	if hasToolNamed(toolsOff, "run_script") {
-		t.Fatal("run_script must not be registered when AllowScript is false")
-	}
-	instructOff, err := tbOff.BuildChatTools()
-	if err != nil {
-		t.Fatalf("BuildChatTools: %v", err)
-	}
-	if hasToolNamed(instructOff, "run_script") {
-		t.Fatal("run_script must not be registered for instruct when AllowScript is false")
+func TestScriptToolAlwaysRegisteredGatedByHandler(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: on})
+		for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
+			tools, err := tb.BuildToolset(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasToolNamed(tools, "run_script") {
+				t.Fatalf("run_script must always be registered (switch=%v)", on)
+			}
+		}
+		out := callTool(t, tb, ToolsetTagging, "run_script", map[string]string{"script": "result = 1"})
+		if okOf(out) == !on {
+			t.Fatalf("switch=%v: result %+v", on, out)
+		}
+		if !on && !strings.Contains(errText(out), "未开启脚本") {
+			t.Fatalf("disabled script must say why: %+v", out)
+		}
 	}
 }
 
@@ -517,7 +503,7 @@ func TestScriptBulkWorkflow(t *testing.T) {
 q := query_files({parent_path: "incoming", file_type: "file", limit: 100})
 moved := 0
 for f in q.files {
-	r := set_category(f.original_path, "照片")
+	r := set_category(f.original_path, "照片", "整批归类")
 	if !is_error(r) { moved += 1 }
 }
 print("classified", moved, "files")

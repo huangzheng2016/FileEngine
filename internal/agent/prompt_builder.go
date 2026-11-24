@@ -60,15 +60,11 @@ func RenderSharedContext(c SharedContext) string {
 	if g := strings.TrimSpace(c.Goal); g != "" {
 		sb.WriteString("## 用户目标\n\n" + g + "\n\n")
 	}
-	if c.Plan != nil && c.Plan.Version > 0 && strings.TrimSpace(c.Plan.Content) != "" {
-		status := "草稿，用户尚未确认"
-		if c.Plan.Status == db.PlanApproved {
-			status = "用户已确认"
-		}
-		sb.WriteString(fmt.Sprintf("## 整理方案（%s）\n\n", status))
+	if hasPlan(c) {
+		sb.WriteString(fmt.Sprintf("## 整理方案（%s）\n\n", planStatusLabel(c.Plan)))
 		content := strings.TrimSpace(c.Plan.Content)
 		if r := []rune(content); len(r) > planPromptMaxRunes {
-			content = string(r[:planPromptMaxRunes]) + "\n\n（方案过长已截断，用 read_plan 读取全文）"
+			content = string(r[:planPromptMaxRunes]) + "\n\n（方案过长，已截断）"
 		}
 		sb.WriteString(content + "\n\n")
 	}
@@ -87,47 +83,24 @@ func renderCategoryList(cats []db.Category) string {
 	if len(cats) == 0 {
 		return "## 分类\n\n（还没有分类）\n\n"
 	}
-	sorted := append([]db.Category(nil), cats...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	var sb strings.Builder
 	sb.WriteString("## 分类\n\n")
-	for _, c := range sorted {
-		sb.WriteString(fmt.Sprintf("- %s：%s", c.Name, db.NormalizeTargetPath(c.Path)))
-		if d := strings.TrimSpace(c.Description); d != "" {
-			sb.WriteString("；放什么：" + oneLine(d))
-		}
-		if st := strings.TrimSpace(c.Structure); st != "" {
-			sb.WriteString("；结构：" + oneLine(st))
-		}
-		sb.WriteString("\n")
+	for _, c := range sortedCategories(cats) {
+		sb.WriteString(categoryLine(c) + "\n")
 	}
 	return sb.String() + "\n"
 }
 
+// Rules are keyed by name and carry no ids or positions: inserting a rule
+// must not rewrite the lines after it.
 func renderRules(rules []db.PlanRule) string {
 	if len(rules) == 0 {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("## 规则（按顺序，先匹配者生效；已自动应用到未决定的条目）\n\n")
+	sb.WriteString("## 规则（按顺序，先匹配者生效）\n\n")
 	for _, r := range rules {
-		var conds []string
-		if r.Exts != "" {
-			conds = append(conds, "扩展名 "+r.Exts)
-		}
-		if r.NameRegex != "" {
-			conds = append(conds, "文件名 ~ "+r.NameRegex)
-		}
-		if r.PathPrefix != "" {
-			conds = append(conds, "位于 "+r.PathPrefix)
-		}
-		if r.FileType == "directory" {
-			conds = append(conds, "目录")
-		}
-		if len(conds) == 0 {
-			conds = append(conds, "全部")
-		}
-		sb.WriteString(fmt.Sprintf("%d. [#%d] %s：%s → %s\n", r.Position, r.ID, r.Name, strings.Join(conds, "，"), r.Target))
+		sb.WriteString(ruleLine(r) + "\n")
 	}
 	return sb.String() + "\n"
 }
@@ -140,6 +113,8 @@ func BuildSharedContext(repo *db.Repository, session *db.ScanSession) (string, e
 	return RenderSharedContext(c), nil
 }
 
+// SharedContextMessage is message 0 of every request: the cache breakpoint
+// that every later message extends.
 func SharedContextMessage(text string) *schema.Message {
 	return modelfactory.MarkCacheBreakpoint(schema.UserMessage("# 会话共享上下文\n\n" + text))
 }
@@ -238,10 +213,10 @@ func listingBlock(title string, rows []db.FileEntry, total int) string {
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## %s（%s）\n\n", title, listColumns))
-	sb.WriteString(WrapUntrusted(title, entryRows(shown)))
+	sb.WriteString(WrapUntrusted(title, entryRows(shown, false)))
 	sb.WriteString("\n")
 	if total > len(shown) {
-		sb.WriteString(fmt.Sprintf("（只列出前 %d 项，共 %d 项；其余用 list_files 翻页查看，或用规则批量处理）\n", len(shown), total))
+		sb.WriteString(fmt.Sprintf("（只列出前 %d 项，共 %d 项；其余用 list_entries 翻页查看，或用规则批量处理）\n", len(shown), total))
 	}
 	return sb.String()
 }
@@ -260,16 +235,16 @@ func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSigna
 	if d := strings.TrimSpace(dir.Description); d != "" {
 		sb.WriteString("描述：" + SanitizeUntrustedName(oneLine(d)) + "\n")
 	}
-	sb.WriteString("\n## 信号\n\n" + sig.Render() + "\n")
+	sb.WriteString("\n## 信号\n\n" + WrapUntrusted("目录信号", strings.TrimRight(sig.Render(), "\n")) + "\n")
 	sb.WriteString(listingBlock("内容", children, len(children)))
 	sb.WriteString("\n" + unitCtx)
 	sb.WriteString(`## 要做的事
 
-用 decide_dirs 决定这个目录：
-- 一个完整的整体（项目、软件、相册或活动、数据集、备份集）→ unit，new_path 写它移动后的完整路径
-- 只是分组或杂物目录 → container；子目录和散文件之后作为单独任务处理，现在不要处理它们
-- 不该整理 → skip
-信号里有项目标记时几乎一定是 unit。
+用 decide 决定这个目录（只这一条决定，写好就停）：
+- 一个完整的整体（项目、软件、相册或活动、数据集、备份集）→ action=unit，new_path 写它移动后的完整路径
+- 只是分组或杂物目录 → action=container；子目录和散文件之后作为单独任务处理，现在不要处理它们
+- 不该整理 → action=skip
+信号里有项目标记时几乎一定是 unit。看懂了目录用途时用 describe 给它写一句描述。
 `)
 	return sb.String()
 }
@@ -294,7 +269,7 @@ func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, h
 	sb.WriteString("\n" + unitCtx)
 	sb.WriteString(`## 要做的事
 
-为每个文件做决定：set_targets 批量设目标（每条带 reason，拿不准时 confidence 低于 0.6）；不该整理的用 decide_dirs 设 skip。同类文件约 20 个以上时先用规则批量处理，剩下的再逐个决定。
+为每个文件做决定：用 decide 一批写入（action=move，new_path 含文件名，每条带 reason，拿不准时 confidence 低于 0.6）；不该整理的 action=skip。同类文件约 20 个以上时先用规则批量处理（add_rule 带 path_prefix 限定到本目录，再 apply_rules），剩下的再逐个决定。
 `)
 	return sb.String()
 }
@@ -302,13 +277,14 @@ func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, h
 func buildVersionUnitPrompt(parent string, g VersionGroup, suggested string, unitCtx string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：归类一组版本\n\n")
-	sb.WriteString(fmt.Sprintf("目录：%s；「%s」的 %d 个版本：\n\n", displayPath(parent), SanitizeUntrustedName(g.Name), len(g.Members)))
+	sb.WriteString(fmt.Sprintf("目录：%s；%d 个版本：\n\n", displayPath(parent), len(g.Members)))
 	var rows []string
+	rows = append(rows, "软件\t"+SanitizeUntrustedName(g.Name))
 	for _, m := range g.Members {
-		rows = append(rows, fmt.Sprintf("%s\t版本 %s", m.Name, m.Version))
+		rows = append(rows, fmt.Sprintf("%s\t版本 %s\t%s", SanitizeUntrustedName(m.Name), SanitizeUntrustedName(m.Version), SanitizeUntrustedName(m.Path)))
 	}
-	sb.WriteString(WrapUntrusted("版本组", SanitizeUntrustedName(strings.Join(rows, " | "))) + "\n\n")
-	sb.WriteString("建议目标：" + SanitizeUntrustedName(suggested) + "/<版本>/<原名>（目录用 decide_dirs 设 unit，文件用 set_targets）\n\n")
+	sb.WriteString(WrapUntrusted("版本组", strings.Join(rows, "\n")) + "\n\n")
+	sb.WriteString("建议目标：" + SanitizeUntrustedName(suggested) + "/<版本>/<原名>（用 decide：目录 action=unit，文件 action=move）\n\n")
 	sb.WriteString(unitCtx)
 	sb.WriteString("## 要做的事\n\n一次决定完整组版本，各版本用同一种路径格式；明显不是同一软件的成员按普通文件单独决定。\n")
 	return sb.String()

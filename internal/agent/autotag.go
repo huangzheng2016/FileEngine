@@ -33,6 +33,10 @@ type AutoTagAgent struct {
 
 	mu       sync.Mutex
 	failures []BatchFailure
+
+	snapMu sync.Mutex
+	snap   *sharedSnapshot
+	warm   *warmGate // worker 0's first response opens it
 }
 
 func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *AutoTagAgent {
@@ -141,9 +145,28 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 	if err := a.prepass(); err != nil {
 		return err
 	}
+	if _, err := a.sharedSnapshot(); err != nil {
+		return err
+	}
+	a.warm = newWarmGate()
 	return a.walk(ctx, func(workerID int) (*tagWorker, func(), error) {
 		return a.newWorker(ctx, workerID, chatModel)
 	})
+}
+
+// sharedSnapshot renders the run's shared context on first use; Run calls it
+// before any worker starts.
+func (a *AutoTagAgent) sharedSnapshot() (*sharedSnapshot, error) {
+	a.snapMu.Lock()
+	defer a.snapMu.Unlock()
+	if a.snap == nil {
+		c, err := LoadSharedContext(a.repo, a.session)
+		if err != nil {
+			return nil, err
+		}
+		a.snap = newSharedSnapshot(c)
+	}
+	return a.snap, nil
 }
 
 func (a *AutoTagAgent) prepass() error {
@@ -178,16 +201,26 @@ func (a *AutoTagAgent) walk(ctx context.Context, newWorker func(workerID int) (*
 
 	concurrency := max(config.Get().Agent.Concurrency, 1)
 	var wg sync.WaitGroup
+	var warm *warmGate
 	for id := range concurrency {
+		if warm != nil && id > 0 {
+			warm.wait(ctx)
+		}
 		w, closeFn, err := newWorker(id)
 		if err != nil {
 			log.Printf("worker %d: %v", id, err)
 			continue
 		}
+		if id == 0 {
+			warm = w.warm
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer closeFn()
+			if w.warm != nil {
+				defer w.warm.open()
+			}
 			for {
 				u, ok := q.pop()
 				if !ok {
@@ -415,6 +448,7 @@ type tagWorker struct {
 	tracker *tokenTrackingModel
 	fs      remotefs.RemoteFS
 	run     unitRunner
+	warm    *warmGate // set on worker 0 only
 }
 
 func (a *AutoTagAgent) newWorker(ctx context.Context, id int, chatModel einomodel.ChatModel) (*tagWorker, func(), error) {
@@ -426,29 +460,42 @@ func (a *AutoTagAgent) newWorker(ctx context.Context, id int, chatModel einomode
 	logger := a.logger.ForWorker(id)
 	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, cfg, a.session, a.modelProvider.VisionEnabled)
 	tb.RunID = logger.RunID()
+	tb.RunKind = db.RunPhaseTagging
 	tools, err := tb.BuildTools()
 	if err != nil {
 		fs.Close()
 		return nil, nil, fmt.Errorf("build tools: %w", err)
 	}
+	var warm *warmGate
+	if id == 0 && a.warm != nil {
+		warm = a.warm
+		chatModel = &warmModel{inner: chatModel, gate: warm}
+	}
 	tracker := newTokenTrackingModel(chatModel)
-	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPromptForSession(cfg, a.session), cfg.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
+	agentInst, err := buildADKAgent(ctx, tracker, tools, systemPromptForSession(cfg), cfg.MaxStep, a.modelProvider.EffectiveContextWindow(), withWorkerReduction())
 	if err != nil {
 		fs.Close()
 		return nil, nil, fmt.Errorf("create agent: %w", err)
 	}
-	w := &tagWorker{id: id, logger: logger, tb: tb, agent: agentInst, tracker: tracker, fs: fs}
+	w := &tagWorker{id: id, logger: logger, tb: tb, agent: agentInst, tracker: tracker, fs: fs, warm: warm}
 	w.run = a.runUnitLLM
 	return w, func() { fs.Close() }, nil
 }
 
-// The shared-context message is byte-identical across the run's units, so it
-// is a cache breakpoint.
+// The first message is the run's shared-context snapshot, byte-identical for
+// every worker and unit (a cache breakpoint); changes since then lead the
+// unit message as a delta.
 func (a *AutoTagAgent) unitMessages(ctx context.Context, w *tagWorker, u workUnit) ([]*schema.Message, error) {
-	shared, err := a.sharedContextFor(w.tb)
+	snap, err := a.sharedSnapshot()
 	if err != nil {
 		return nil, err
 	}
+	shared, delta, cur, err := snap.view(func() (SharedContext, error) { return LoadSharedContext(a.repo, a.session) }, true)
+	if err != nil {
+		return nil, err
+	}
+	// The worker has now been told the current categories, delta included.
+	w.tb.guard.note(categoryNames(cur.Categories))
 	notes, err := w.tb.TakeNewNotes()
 	if err != nil {
 		return nil, err
@@ -477,20 +524,7 @@ func (a *AutoTagAgent) unitMessages(ctx context.Context, w *tagWorker, u workUni
 	case unitVersions:
 		msg = buildVersionUnitPrompt(u.path, u.versions, a.softwareTarget(u.versions.Name), unitCtx)
 	}
-	return []*schema.Message{SharedContextMessage(shared), schema.UserMessage(msg)}, nil
-}
-
-func (a *AutoTagAgent) sharedContextFor(tb *ToolBuilder) (string, error) {
-	c, err := LoadSharedContext(a.repo, a.session)
-	if err != nil {
-		return "", err
-	}
-	names := make([]string, len(c.Categories))
-	for i, cat := range c.Categories {
-		names[i] = cat.Name
-	}
-	tb.guard.note(names)
-	return RenderSharedContext(c), nil
+	return []*schema.Message{SharedContextMessage(shared), schema.UserMessage(delta + msg)}, nil
 }
 
 func (a *AutoTagAgent) softwareTarget(name string) string {

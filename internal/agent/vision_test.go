@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -83,7 +84,7 @@ func hasTool(names []string, name string) bool {
 	return false
 }
 
-func TestBuildToolsVisionGating(t *testing.T) {
+func TestViewImageGatedByHandlerNotPresence(t *testing.T) {
 	cases := []struct {
 		name        string
 		modelVision bool
@@ -100,20 +101,22 @@ func TestBuildToolsVisionGating(t *testing.T) {
 			session := &db.ScanSession{AllowVision: tc.allowVision}
 			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, tc.modelVision)
 
-			tools, err := tb.BuildTools()
-			if err != nil {
-				t.Fatalf("BuildTools: %v", err)
+			for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
+				tools, err := tb.BuildToolset(kind)
+				if err != nil {
+					t.Fatalf("BuildToolset: %v", err)
+				}
+				if !hasTool(toolNames(t, tools), "view_image") {
+					t.Fatal("view_image is always present; the handler gates it")
+				}
 			}
-			if got := hasTool(toolNames(t, tools), "view_image"); got != tc.wantTool {
-				t.Fatalf("BuildTools view_image present=%v, want %v", got, tc.wantTool)
+			_, err := tb.viewImage(context.Background(), &ViewImageInput{})
+			var rj *rejectError
+			if !errors.As(err, &rj) {
+				t.Fatalf("an empty call is always a rejection, got %v", err)
 			}
-
-			instructTools, err := tb.BuildChatTools()
-			if err != nil {
-				t.Fatalf("BuildChatTools: %v", err)
-			}
-			if got := hasTool(toolNames(t, instructTools), "view_image"); got != tc.wantTool {
-				t.Fatalf("BuildChatTools view_image present=%v, want %v", got, tc.wantTool)
+			if gated := strings.Contains(rj.msg, "未开启看图"); gated == tc.wantTool {
+				t.Fatalf("handler gate: %q, want gated=%v", rj.msg, !tc.wantTool)
 			}
 		})
 	}
@@ -199,7 +202,7 @@ func TestViewImageThumbnails(t *testing.T) {
 	}
 
 	notes := textParts(res)
-	if !strings.Contains(notes, "photo.jpg (1200x800 -> 256x171") {
+	if !strings.Contains(notes, "photo.jpg（1200x800 -> 256x171") {
 		t.Fatalf("missing dimension note for photo.jpg: %q", notes)
 	}
 	if strings.Contains(notes, *imgs[0].Image.Base64Data) {
@@ -227,7 +230,7 @@ func TestViewImageSkipsUnsupportedAndMissing(t *testing.T) {
 		t.Fatalf("expected no image parts, got %d", len(imageParts(res)))
 	}
 	notes := textParts(res)
-	for _, want := range []string{"phone.heic", "notes.txt", "gone.jpg", "skipped"} {
+	for _, want := range []string{"phone.heic", "notes.txt", "gone.jpg", "已跳过"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("notes missing %q: %q", want, notes)
 		}
@@ -242,8 +245,8 @@ func TestViewImageGuardrails(t *testing.T) {
 
 	tb := newVisionToolBuilder(t, dir, config.AgentConfig{VisionMaxImagesPerBatch: 2})
 	_, err := tb.viewImage(context.Background(), &ViewImageInput{Paths: []string{"a.jpg", "b.jpg", "c.jpg"}})
-	if err == nil || !strings.Contains(err.Error(), "too many") {
-		t.Fatalf("batch cap: got err=%v, want 'too many' error", err)
+	if err == nil || !strings.Contains(err.Error(), "一次最多") {
+		t.Fatalf("batch cap: got err=%v, want a rejection", err)
 	}
 	if _, err := tb.viewImage(context.Background(), &ViewImageInput{Paths: nil}); err == nil {
 		t.Fatal("empty paths: expected error")
@@ -261,7 +264,7 @@ func TestViewImageGuardrails(t *testing.T) {
 	if len(imageParts(res)) != 0 {
 		t.Fatalf("oversized file must be skipped, got %d image parts", len(imageParts(res)))
 	}
-	if notes := textParts(res); !strings.Contains(notes, "too large") {
+	if notes := textParts(res); !strings.Contains(notes, "文件过大") {
 		t.Fatalf("expected 'too large' note, got %q", notes)
 	}
 }
@@ -370,7 +373,7 @@ func TestViewImageRejectsPixelBomb(t *testing.T) {
 	if n := len(imageParts(res)); n != 0 {
 		t.Fatalf("bomb produced %d image parts, want 0", n)
 	}
-	if notes := textParts(res); !strings.Contains(notes, "dimensions too large") {
+	if notes := textParts(res); !strings.Contains(notes, "图片尺寸过大") {
 		t.Fatalf("expected 'dimensions too large' note, got %q", notes)
 	}
 }

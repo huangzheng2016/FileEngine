@@ -206,10 +206,10 @@ func TestReadFileDocUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readFile .doc must not error: %v", err)
 	}
-	if !strings.Contains(out.Content, ".doc") || !strings.Contains(out.Content, "not supported") && !strings.Contains(out.Content, "unsupported") {
+	if !strings.Contains(out.Content, ".doc") || !strings.Contains(out.Content, "不支持") {
 		t.Fatalf("unsupported note missing: %q", out.Content)
 	}
-	if strings.Contains(out.Content, "binary file") {
+	if strings.Contains(out.Content, "二进制文件") {
 		t.Fatalf(".doc must get the format note, not the generic binary note: %q", out.Content)
 	}
 }
@@ -234,7 +234,7 @@ func TestReadFileTextAndErrorPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readFile bin: %v", err)
 	}
-	if !strings.Contains(out.Content, "binary file") {
+	if !strings.Contains(out.Content, "二进制文件") {
 		t.Fatalf("binary note missing: %q", out.Content)
 	}
 
@@ -369,7 +369,7 @@ func TestReadFileZipEntryRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("oversized entry must not error: %v", err)
 	}
-	if !strings.Contains(out.Content, "too large") {
+	if !strings.Contains(out.Content, "条目过大") {
 		t.Fatalf("oversized entry refusal missing: %q", out.Content)
 	}
 
@@ -421,7 +421,7 @@ func TestReadFileZipOversizedListOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entry read on oversized archive must not error: %v", err)
 	}
-	if !strings.Contains(out.Content, "listing only") {
+	if !strings.Contains(out.Content, "只能看列表") {
 		t.Fatalf("list-only refusal missing: %q", out.Content)
 	}
 }
@@ -437,7 +437,7 @@ func TestReadFileUnsupportedArchiveFormats(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s must not error: %v", name, err)
 		}
-		if !strings.Contains(out.Content, "unsupported archive format") {
+		if !strings.Contains(out.Content, "不支持的压缩格式") {
 			t.Fatalf("%s: unsupported note missing: %q", name, out.Content)
 		}
 	}
@@ -553,7 +553,7 @@ func TestResolveArchiveReaderAtMatrix(t *testing.T) {
 			t.Fatalf("degrade: %v", err)
 		}
 		defer cleanup()
-		for _, want := range []string{"does not support random access", `"ftp"`, "Do not retry"} {
+		for _, want := range []string{"不支持随机读取", "ftp", "不要重试"} {
 			if !strings.Contains(notice, want) {
 				t.Fatalf("notice missing %q: %s", want, notice)
 			}
@@ -594,7 +594,7 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stream-only oversized must not error: %v", err)
 	}
-	for _, want := range []string{"does not support random access", `"ftp"`, "Do not retry"} {
+	for _, want := range []string{"不支持随机读取", "ftp", "不要重试"} {
 		if !strings.Contains(out.Content, want) {
 			t.Fatalf("degradation notice missing %q: %s", want, out.Content)
 		}

@@ -182,14 +182,14 @@ func (s DirSignals) Render() string {
 	if len(s.Markers) > 0 {
 		parts := make([]string, len(s.Markers))
 		for i, m := range s.Markers {
-			parts[i] = fmt.Sprintf("%s（%s）", m.Name, m.Label)
+			parts[i] = fmt.Sprintf("%s（%s）", SanitizeUntrustedName(m.Name), m.Label)
 		}
 		sb.WriteString("- 标记：" + strings.Join(parts, "、") + "\n")
 	}
 	if len(s.Exts) > 0 {
 		parts := make([]string, len(s.Exts))
 		for i, e := range s.Exts {
-			parts[i] = fmt.Sprintf("%s %d", e.Ext, e.Count)
+			parts[i] = fmt.Sprintf("%s %d", SanitizeUntrustedName(e.Ext), e.Count)
 		}
 		sb.WriteString("- 扩展名：" + strings.Join(parts, "，") + "\n")
 	}
@@ -213,9 +213,9 @@ type VersionGroup struct {
 func (v VersionGroup) Render() string {
 	parts := make([]string, len(v.Members))
 	for i, m := range v.Members {
-		parts[i] = m.Name
+		parts[i] = SanitizeUntrustedName(m.Name)
 	}
-	return fmt.Sprintf("「%s」%d 个版本：%s", v.Name, len(v.Members), strings.Join(parts, "、"))
+	return fmt.Sprintf("「%s」%d 个版本：%s", SanitizeUntrustedName(v.Name), len(v.Members), strings.Join(parts, "、"))
 }
 
 var (

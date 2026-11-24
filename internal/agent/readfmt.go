@@ -38,13 +38,13 @@ func documentExt(p string) string {
 func extractDocument(name string, data []byte, maxChars int) (*ReadFileOutput, error) {
 	ext := documentExt(name)
 	if ext == ".doc" {
-		return &ReadFileOutput{Content: "[unsupported format: .doc (legacy binary Word document) — convert to .docx or .pdf to read its text]"}, nil
+		return &ReadFileOutput{Content: "[不支持的格式：.doc（旧版 Word 二进制文档），无法提取文字]"}, nil
 	}
 	if ext == "" {
-		return nil, fmt.Errorf("not a document path: %q", name) // unreachable; callers gate on documentExt
+		return nil, fmt.Errorf("不是文档路径：%s", SanitizeUntrustedName(name)) // unreachable; callers gate on documentExt
 	}
 	if len(data) > maxDocumentReadBytes {
-		return &ReadFileOutput{Content: fmt.Sprintf("[document too large for text extraction: over the %d MB limit]", maxDocumentReadBytes/(1<<20))}, nil
+		return &ReadFileOutput{Content: fmt.Sprintf("[文档过大，无法提取文字：超过 %d MB 上限]", maxDocumentReadBytes/(1<<20))}, nil
 	}
 
 	var (
@@ -63,10 +63,10 @@ func extractDocument(name string, data []byte, maxChars int) (*ReadFileOutput, e
 		text, truncated, err = extractPptxText(data, maxChars)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("extract %s text: %w", ext, err)
+		return nil, fmt.Errorf("提取 %s 文字失败：%w", ext, err)
 	}
 	if strings.TrimSpace(text) == "" {
-		return &ReadFileOutput{Content: "[no extractable text — the document may be image-based or empty]", Truncated: truncated}, nil
+		return &ReadFileOutput{Content: "[没有可提取的文字：文档可能是扫描图片或为空]", Truncated: truncated}, nil
 	}
 	return &ReadFileOutput{Content: text, Truncated: truncated}, nil
 }
@@ -134,7 +134,7 @@ func openMember(zr *zip.Reader, name string) (io.ReadCloser, error) {
 			return f.Open()
 		}
 	}
-	return nil, fmt.Errorf("%s not found in document", name)
+	return nil, fmt.Errorf("文档里没有 %s", name)
 }
 
 // Ordered sheet1, sheet2, ..., sheet10 (length, then lexical).
@@ -216,7 +216,7 @@ func extractPptxText(data []byte, maxChars int) (string, bool, error) {
 	}
 	names := memberNames(zr, "ppt/slides/", ".xml")
 	if len(names) == 0 {
-		return "", false, fmt.Errorf("no slides found")
+		return "", false, fmt.Errorf("没有幻灯片")
 	}
 	b := &runeBudget{sb: &strings.Builder{}, max: maxChars}
 	for _, name := range names {
@@ -294,7 +294,7 @@ func extractXlsxText(data []byte, maxChars int) (string, bool, error) {
 	}
 	names := memberNames(zr, "xl/worksheets/", ".xml")
 	if len(names) == 0 {
-		return "", false, fmt.Errorf("no worksheets found")
+		return "", false, fmt.Errorf("没有工作表")
 	}
 	b := &runeBudget{sb: &strings.Builder{}, max: maxChars}
 	for _, name := range names {
@@ -464,14 +464,14 @@ func resolveArchiveReaderAt(rc io.ReadCloser, size int64, maxDownload int64, pro
 	tmp, err := os.CreateTemp("", "fileengine-zip-*")
 	if err != nil {
 		cleanup()
-		return nil, 0, "", nil, fmt.Errorf("create temp file: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("创建临时文件失败：%w", err)
 	}
 	n, err := io.Copy(tmp, io.LimitReader(rc, maxDownload+1))
 	rc.Close()
 	if err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return nil, 0, "", nil, fmt.Errorf("download archive: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("下载压缩包失败：%w", err)
 	}
 	if n > maxDownload {
 		tmp.Close()
@@ -483,7 +483,7 @@ func resolveArchiveReaderAt(rc io.ReadCloser, size int64, maxDownload int64, pro
 
 // The notice tells the agent not to retry.
 func archiveDegradeNotice(protocol string, size, maxDownload int64) string {
-	return fmt.Sprintf("[cannot read archive: filesystem backend %q does not support random access and the archive (%s) exceeds the %d MB temporary-download limit — listing and entry reads are both unavailable. Do not retry on this backend; copy the archive to an SMB/SFTP/local filesystem or extract it first]",
+	return fmt.Sprintf("[无法读取压缩包：%s 存储不支持随机读取，且压缩包（%s）超过 %d MB 临时下载上限，列表和条目都读不了。不要重试，按文件名判断]",
 		protocol, humanBytes(size), maxDownload/(1<<20))
 }
 
@@ -537,20 +537,20 @@ func readZipEntry(ra io.ReaderAt, size int64, entryName string, maxEntry int64) 
 			continue
 		}
 		if f.UncompressedSize64 > uint64(maxEntry) {
-			return &ReadFileOutput{Content: fmt.Sprintf("[archive entry too large to read inline: %s exceeds the %s limit — extract it first]", humanBytes(int64(f.UncompressedSize64)), humanBytes(maxEntry))}, nil
+			return &ReadFileOutput{Content: fmt.Sprintf("[压缩包条目过大，不能直接读取：%s，超过 %s 上限]", humanBytes(int64(f.UncompressedSize64)), humanBytes(maxEntry))}, nil
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("open entry: %w", err)
+			return nil, fmt.Errorf("打开条目失败：%w", err)
 		}
 		defer rc.Close()
 		data, err := io.ReadAll(io.LimitReader(rc, maxEntry+1))
 		if err != nil {
-			return nil, fmt.Errorf("read entry: %w", err)
+			return nil, fmt.Errorf("读取条目失败：%w", err)
 		}
 		return entryTextOutput(data, maxEntry), nil
 	}
-	return nil, fmt.Errorf("entry %q not found in archive", entryName)
+	return nil, fmt.Errorf("压缩包里没有条目：%s", SanitizeUntrustedName(entryName))
 }
 
 func entryTextOutput(data []byte, maxEntry int64) *ReadFileOutput {
@@ -559,7 +559,7 @@ func entryTextOutput(data []byte, maxEntry int64) *ReadFileOutput {
 		peek = peek[:1024]
 	}
 	if len(peek) > 0 && !isTextContent(string(peek)) {
-		return &ReadFileOutput{Content: "[binary archive entry - content not displayable]"}
+		return &ReadFileOutput{Content: "[二进制条目，无法显示文本]"}
 	}
 	truncated := int64(len(data)) > maxEntry
 	if truncated {
@@ -626,7 +626,7 @@ func readTarEntry(r io.Reader, gz bool, entryName string, maxEntry int64) (*Read
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			return nil, fmt.Errorf("entry %q not found in archive", entryName)
+			return nil, fmt.Errorf("压缩包里没有条目：%s", SanitizeUntrustedName(entryName))
 		}
 		if err != nil {
 			return nil, err
@@ -635,11 +635,11 @@ func readTarEntry(r io.Reader, gz bool, entryName string, maxEntry int64) (*Read
 			continue
 		}
 		if hdr.Size > maxEntry {
-			return &ReadFileOutput{Content: fmt.Sprintf("[archive entry too large to read inline: %s exceeds the %s limit — extract it first]", humanBytes(hdr.Size), humanBytes(maxEntry))}, nil
+			return &ReadFileOutput{Content: fmt.Sprintf("[压缩包条目过大，不能直接读取：%s，超过 %s 上限]", humanBytes(hdr.Size), humanBytes(maxEntry))}, nil
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxEntry+1))
 		if err != nil {
-			return nil, fmt.Errorf("read entry: %w", err)
+			return nil, fmt.Errorf("读取条目失败：%w", err)
 		}
 		return entryTextOutput(data, maxEntry), nil
 	}
@@ -651,7 +651,7 @@ func tarStream(r io.Reader, gz bool) (*tar.Reader, func() bool, error) {
 	if gz {
 		gzr, err := gzip.NewReader(cr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("open gzip stream: %w", err)
+			return nil, nil, fmt.Errorf("打开 gzip 流失败：%w", err)
 		}
 		tr = tar.NewReader(gzr)
 	} else {

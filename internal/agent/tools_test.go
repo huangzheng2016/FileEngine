@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -42,23 +41,19 @@ func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
 
-	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Bad", Path: "/../evil"}); err != nil || out.Success {
-		t.Fatalf("createCategory with escaping path: got %+v, %v — want non-fatal rejection", out, err)
+	if out := createCat(t, tb, "Bad", "/../evil"); okOf(out) {
+		t.Fatalf("create with escaping path: got %+v — want non-fatal rejection", out)
 	}
-	if out, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Empty", Path: ""}); err != nil || out.Success {
-		t.Fatalf("createCategory with empty path: got %+v, %v — want non-fatal rejection", out, err)
+	if out := createCat(t, tb, "Empty", ""); okOf(out) {
+		t.Fatalf("create with empty path: got %+v — want non-fatal rejection", out)
 	}
 	// The version guard only lets create_category run against a list the agent
-	// has just seen — prime it via list_categories.
-	if _, err := tb.listCategories(context.Background(), &ListCategoriesInput{}); err != nil {
-		t.Fatalf("listCategories: %v", err)
-	}
-	if _, err := tb.createCategory(context.Background(), &CreateCategoryInput{Name: "Good", Path: "/organized/good"}); err != nil {
-		t.Fatalf("createCategory valid: %v", err)
-	}
+	// has just seen.
+	primeGuard(t, repo, tb)
+	mustOK(t, createCat(t, tb, "Good", "/organized/good"))
 
-	if out, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/a/../../b"}); err != nil || out.Success {
-		t.Fatalf("updateCategory with escaping new_path: got %+v, %v — want non-fatal rejection", out, err)
+	if out := callTool(t, tb, ToolsetMain, "update_category", map[string]string{"name": "Good", "new_path": "/a/../../b"}); okOf(out) {
+		t.Fatalf("update with escaping new_path: got %+v — want non-fatal rejection", out)
 	}
 	cat, err := repo.GetCategoryByName(7, "Good")
 	if err != nil {
@@ -67,7 +62,5 @@ func TestCategoryPathValidation(t *testing.T) {
 	if cat.Path != "/organized/good" {
 		t.Fatalf("rejected update must not change path: got %q", cat.Path)
 	}
-	if _, err := tb.updateCategory(context.Background(), &UpdateCategoryInput{Name: "Good", NewPath: "/organized/better"}); err != nil {
-		t.Fatalf("updateCategory valid: %v", err)
-	}
+	mustOK(t, callTool(t, tb, ToolsetMain, "update_category", map[string]string{"name": "Good", "new_path": "/organized/better"}))
 }

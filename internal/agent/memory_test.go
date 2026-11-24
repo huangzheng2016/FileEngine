@@ -123,10 +123,14 @@ func TestMemoryTools(t *testing.T) {
 	ctx := context.Background()
 
 	out, err := tb.remember(ctx, &RememberInput{Scope: "filesystem", Kind: "convention", Key: "ext:.PSD", Content: "psd 放 /设计", Path: "/Design/"})
-	if err != nil || !out.Success || !out.Created {
+	if err != nil || !out.Success {
 		t.Fatalf("remember: %+v %v", out, err)
 	}
-	m, _ := repo.GetMemory(out.ID)
+	items, _ := repo.SearchMemory(db.MemorySearch{Query: "psd", Scopes: []db.MemoryScopeRef{{Scope: db.MemoryScopeFilesystem, ScopeID: 7}}})
+	if len(items) != 1 {
+		t.Fatalf("stored: %+v", items)
+	}
+	m, _ := repo.GetMemory(items[0].ID)
 	if m.ScopeID != 7 || m.Key != "ext:.psd" || m.Path != "Design" || m.Source != db.MemorySourceAgent {
 		t.Fatalf("stored: %+v", m)
 	}
@@ -149,9 +153,9 @@ func TestMemoryTools(t *testing.T) {
 	if err != nil || len(rec.Items) != 1 || rec.Items[0].Key != "ext:.psd" {
 		t.Fatalf("recall: %+v %v", rec, err)
 	}
-	m, _ = repo.GetMemory(out.ID)
-	if m.Hits != 1 {
-		t.Fatalf("recall must bump hits: %+v", m)
+	m, _ = repo.GetMemory(items[0].ID)
+	if m.Hits != 0 || m.LastUsedAt != nil {
+		t.Fatalf("recall must not record usage: %+v", m)
 	}
 	rec, _ = tb.recall(ctx, &RecallInput{PathPrefix: "Design/2023/logo"})
 	if len(rec.Items) != 1 {
@@ -175,8 +179,11 @@ func TestNotesAreSharedAcrossWorkers(t *testing.T) {
 	if out, err := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类", Path: "Projects/foo"}); err != nil || !out.Success {
 		t.Fatalf("note: %+v %v", out, err)
 	}
-	if out, _ := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类"}); out.Created {
-		t.Fatal("identical note must update, not duplicate")
+	if _, err := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类"}); err != nil {
+		t.Fatal(err)
+	}
+	if notes, _ := repo.NotesSince(1, 0, 10); len(notes) != 1 {
+		t.Fatalf("identical note must update, not duplicate: %d", len(notes))
 	}
 	if out, _ := a.note(ctx, &NoteInput{Content: "  "}); out.Success {
 		t.Fatal("empty note must be rejected")
@@ -206,9 +213,9 @@ func TestScriptSetCategoryKeepsStructure(t *testing.T) {
 	scriptSeedFile(t, repo, 1, "incoming/trip/day2/p.jpg", "file")
 
 	out := mustRunScript(t, tb, `
-a := set_category("incoming/trip/day1/p.jpg", "照片", "incoming")
-b := set_category("incoming/trip/day2/p.jpg", "照片", ".")
-c := set_category("incoming/photo1.jpg", "照片", "docs")
+a := set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片", "incoming")
+b := set_category("incoming/trip/day2/p.jpg", "照片", "旅行照片", ".")
+c := set_category("incoming/photo1.jpg", "照片", "旅行照片", "docs")
 result = {a: a, b: b, c_err: is_error(c)}`)
 	v := resultValue(t, out)
 	if v["a"] != "/organized/photos/trip/day1/p.jpg" || v["b"] != "/organized/photos/incoming/trip/day2/p.jpg" || v["c_err"] != true {
@@ -217,18 +224,18 @@ result = {a: a, b: b, c_err: is_error(c)}`)
 
 	tb.SetUnitRoot("/incoming/trip/")
 	out = mustRunScript(t, tb, `
-a := set_category("incoming/trip/day1/p.jpg", "照片")
-b := set_category("incoming/photo2.jpg", "照片")
+a := set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片")
+b := set_category("incoming/photo2.jpg", "照片", "旅行照片")
 result = {a: a, b: b}`)
 	v = resultValue(t, out)
 	if v["a"] != "/organized/photos/day1/p.jpg" || v["b"] != "/organized/photos/photo2.jpg" {
 		t.Fatalf("unit-root default: %+v", v)
 	}
-	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day2/p.jpg", "照片", "incoming/trip/day2")}`)
+	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day2/p.jpg", "照片", "旅行照片", "incoming/trip/day2")}`)
 	if v := resultValue(t, out); v["x"] != "/organized/photos/p.jpg" {
 		t.Fatalf("free name: %+v", v)
 	}
-	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day1/p.jpg", "照片", "incoming/trip/day1")}`)
+	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片", "incoming/trip/day1")}`)
 	if v := resultValue(t, out); v["x"] != "/organized/photos/p (2).jpg" {
 		t.Fatalf("collision in script: %+v", v)
 	}

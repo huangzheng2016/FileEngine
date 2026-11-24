@@ -109,7 +109,7 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 			continue
 		}
 		anyPlanned = true
-		sb.WriteString(fmt.Sprintf("### %s（%s，共 %d 项）\n\n", rc.cat.Name, rc.cat.Path, rc.count))
+		sb.WriteString(fmt.Sprintf("### %s（%s，共 %d 项）\n\n", SanitizeUntrustedName(rc.cat.Name), SanitizeUntrustedName(rc.cat.Path), rc.count))
 		writeSamples(&sb, rc.samples)
 	}
 	if !anyPlanned {
@@ -118,7 +118,7 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 	var empty []string
 	for _, rc := range rcs {
 		if rc.count == 0 {
-			empty = append(empty, fmt.Sprintf("%s（%s）", rc.cat.Name, rc.cat.Path))
+			empty = append(empty, fmt.Sprintf("%s（%s）", SanitizeUntrustedName(rc.cat.Name), SanitizeUntrustedName(rc.cat.Path)))
 		}
 	}
 	if len(empty) > 0 {
@@ -158,7 +158,7 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 		for j := i + 1; j < len(rcs); j++ {
 			a, b := rcs[i], rcs[j]
 			if categoryPathsOverlap(a.norm, b.norm) || normalizeCategoryName(a.cat.Name) == normalizeCategoryName(b.cat.Name) {
-				overlaps = append(overlaps, fmt.Sprintf("- %s（%s）与 %s（%s）", a.cat.Name, a.cat.Path, b.cat.Name, b.cat.Path))
+				overlaps = append(overlaps, fmt.Sprintf("- %s（%s）与 %s（%s）", SanitizeUntrustedName(a.cat.Name), SanitizeUntrustedName(a.cat.Path), SanitizeUntrustedName(b.cat.Name), SanitizeUntrustedName(b.cat.Path)))
 			}
 		}
 	}
@@ -170,15 +170,18 @@ func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *
 	return sb.String(), nil
 }
 
+// Sample lines carry file paths and agent-written reasons: data, not text to
+// follow.
 func writeSamples(sb *strings.Builder, samples []reviewSample) {
+	var lines strings.Builder
 	for _, s := range samples {
-		sb.WriteString(fmt.Sprintf("- %s → %s", SanitizeUntrustedName(s.from), SanitizeUntrustedName(s.to)))
+		lines.WriteString(fmt.Sprintf("- %s → %s", SanitizeUntrustedName(s.from), SanitizeUntrustedName(s.to)))
 		if r := strings.TrimSpace(s.reason); r != "" {
-			sb.WriteString("（" + SanitizeUntrustedName(oneLine(r)) + "）")
+			lines.WriteString("（" + SanitizeUntrustedName(oneLine(r)) + "）")
 		}
-		sb.WriteString("\n")
+		lines.WriteString("\n")
 	}
-	sb.WriteString("\n")
+	sb.WriteString(dataNote(strings.TrimRight(lines.String(), "\n")) + "\n\n")
 }
 
 func reviewFailureSection(repo *db.Repository, session *db.ScanSession, tagging *db.AgentRun) string {
@@ -221,10 +224,17 @@ func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *db.Agent
 	if err != nil {
 		return "", err
 	}
+	shared, err := LoadSharedContext(a.repo, a.session)
+	if err != nil {
+		return "", err
+	}
 	report, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "review",
+		phase:       db.RunPhaseReview,
 		maxStep:     config.Get().Agent.MaxStep,
-		instruction: reviewSystemPrompt(config.Get().Agent, a.session),
+		instruction: reviewSystemPrompt(config.Get().Agent),
+		shared:      shared,
+		current:     shared.Categories,
 		messages:    []*schema.Message{{Role: schema.User, Content: material + "请复核以上规划，修正明显的错误，最后输出复核报告。"}},
 	})
 	if err != nil {
