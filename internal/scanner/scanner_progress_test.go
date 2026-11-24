@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -136,28 +135,5 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 	release()
 	if err := <-done; err != nil {
 		t.Fatalf("Scan: %v", err)
-	}
-}
-
-func TestScanProgress_FailureKeepsPartialCount(t *testing.T) {
-	fs := &fakeFS{root: testTree(), failOn: "photos"}
-	repo := setupFileTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	if err := repo.CreateSession(session); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	sc := New(fs, repo, "", nil)
-	err := sc.Scan(context.Background(), session)
-	if err == nil || !strings.Contains(err.Error(), "simulated list failure") {
-		t.Fatalf("err = %v, want the list failure", err)
-	}
-	if session.ScannedCount == 0 {
-		t.Error("ScannedCount = 0, want the partial count collected before the failure")
-	}
-	if session.ScannedCount >= len(wantPaths()) {
-		t.Errorf("ScannedCount = %d, want less than the full %d (walk aborted)", session.ScannedCount, len(wantPaths()))
-	}
-	if session.Status == "scanned" {
-		t.Error("session must not be marked scanned after a listing failure")
 	}
 }

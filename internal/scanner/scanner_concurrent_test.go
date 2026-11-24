@@ -287,17 +287,78 @@ func TestScanConcurrent_DepthAndParent(t *testing.T) {
 	}
 }
 
-func TestScanConcurrent_ErrorAborts(t *testing.T) {
+func TestScanConcurrent_UnlistableDirIsSkippedNotFatal(t *testing.T) {
 	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: testTree(), failOn: "photos"}}
-	_, session, err := runScan(t, hfs, "", nil)
-	if err == nil {
-		t.Fatal("expected scan error when a directory cannot be listed")
+	paths, session, err := runScan(t, hfs, "", nil)
+	if err != nil {
+		t.Fatalf("a directory that cannot be listed must not abort the scan: %v", err)
 	}
-	if !strings.Contains(err.Error(), "simulated list failure") {
-		t.Errorf("error = %v, want the underlying list failure", err)
+	if session.Status != "scanned" {
+		t.Errorf("status = %s, want scanned", session.Status)
+	}
+	if !strings.Contains(session.ErrorMessage, "root/photos") {
+		t.Errorf("ErrorMessage = %q, want the skipped directory named", session.ErrorMessage)
+	}
+	want := []string{"root/.DS_Store", "root/docs", "root/docs/sub", "root/docs/sub/y.pdf", "root/docs/x.pdf", "root/photos", "root/root.txt"}
+	if strings.Join(paths, ",") != strings.Join(want, ",") {
+		t.Errorf("paths:\n got %v\nwant %v", paths, want)
+	}
+}
+
+func TestScanConcurrent_UnreadableRootAborts(t *testing.T) {
+	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: testTree(), failOn: "root"}}
+	_, session, err := runScan(t, hfs, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "simulated list failure") {
+		t.Fatalf("err = %v, want the root list failure", err)
 	}
 	if session.Status == "scanned" {
-		t.Error("session must not be marked scanned after a listing failure")
+		t.Error("session must not be marked scanned when the root cannot be listed")
+	}
+}
+
+// A rescan that could not read a directory must neither delete the rows
+// below it nor lose their decisions.
+func TestRescanKeepsRowsUnderUnlistableDir(t *testing.T) {
+	fs := &fakeFS{root: testTree()}
+	repo := setupTestDB(t)
+	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	if err := repo.CreateSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(fs, repo, "", nil).Scan(context.Background(), session); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	before, _, _ := repo.ListFiles(db.FileQuery{SessionID: 1, PageSize: 10000})
+	f, err := repo.GetFileByPath(1, "root/photos/raw/c.arw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DB().Model(&db.FileEntry{}).Where("id = ?", f.ID).Update("new_path", "/x/c.arw").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	fs.failOn = "photos"
+	session.Status = "scanning"
+	if err := New(fs, repo, "", nil).Scan(context.Background(), session); err != nil {
+		t.Fatalf("rescan: %v", err)
+	}
+	after, _, _ := repo.ListFiles(db.FileQuery{SessionID: 1, PageSize: 10000})
+	if len(after) != len(before) {
+		t.Fatalf("rescan changed the row count %d -> %d", len(before), len(after))
+	}
+	g, err := repo.GetFileByPath(1, "root/photos/raw/c.arw")
+	if err != nil || g.NewPath != "/x/c.arw" {
+		t.Fatalf("row below the unlistable directory lost: %+v %v", g, err)
+	}
+
+	// Once the directory is readable again, vanished rows are removed as usual.
+	fs.failOn = ""
+	fs.root.children[0].children = fs.root.children[0].children[:2] // drop @eaDir and raw
+	if err := New(fs, repo, "", nil).Scan(context.Background(), session); err != nil {
+		t.Fatalf("third scan: %v", err)
+	}
+	if _, err := repo.GetFileByPath(1, "root/photos/raw/c.arw"); err == nil {
+		t.Fatal("vanished row not removed after a completed walk")
 	}
 }
 
