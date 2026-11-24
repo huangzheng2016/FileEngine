@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
@@ -19,7 +20,7 @@ type ToolBuilder struct {
 	filesystemID       uint
 	logger             *Logger
 	cfg                config.AgentConfig
-	session            *db.ScanSession
+	session            *model.ScanSession
 	modelVisionEnabled bool
 	guard              categoryGuard
 
@@ -32,7 +33,7 @@ type ToolBuilder struct {
 	notes    notesCursor
 }
 
-func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *db.ScanSession, modelVisionEnabled bool) *ToolBuilder {
+func NewToolBuilder(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, filesystemID uint, logger *Logger, cfg config.AgentConfig, session *model.ScanSession, modelVisionEnabled bool) *ToolBuilder {
 	return &ToolBuilder{
 		repo:               repo,
 		fs:                 fs,

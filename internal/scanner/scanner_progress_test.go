@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 
@@ -26,7 +27,7 @@ func setupFileTestDB(t *testing.T) *db.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FileEntry{}, &model.ScanSession{}, &model.Category{}, &model.Filesystem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db.NewRepository(gdb)
@@ -35,7 +36,7 @@ func setupFileTestDB(t *testing.T) *db.Repository {
 func TestScanProgress_FinalState(t *testing.T) {
 	fs := &fakeFS{root: testTree()}
 	repo := setupFileTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	repo := setupFileTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 		t.Fatalf("scan finished without listing the gated directory: %v", err)
 	}
 
-	var row *db.ScanSession
+	var row *model.ScanSession
 	for {
 		var err error
 		row, err = repo.GetSession(1)

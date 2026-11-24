@@ -7,15 +7,17 @@ import (
 	"testing"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
 func setupBrainRepo(t testing.TB) *Repository {
 	t.Helper()
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "test.db")}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "test.db")}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	return NewRepository(DB)
+	return NewRepository(dal.DB())
 }
 
 func TestPlanLifecycle(t *testing.T) {
@@ -69,20 +71,20 @@ func TestPlanLifecycle(t *testing.T) {
 func TestMemoryUpsertValidateAndList(t *testing.T) {
 	r := setupBrainRepo(t)
 
-	m := &MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryConvention, Key: "  EXT:.PSD ", Content: "psd 放设计", Source: MemorySourceAgent, Pinned: true}
+	m := &model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryConvention, Key: "  EXT:.PSD ", Content: "psd 放设计", Source: MemorySourceAgent, Pinned: true}
 	created, err := r.UpsertMemory(m)
 	if err != nil || !created || m.ID == 0 || m.Key != "ext:.psd" {
 		t.Fatalf("create: %+v %v %v", m, created, err)
 	}
 	first := m.ID
 
-	m2 := &MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryCorrection, Key: "ext:.psd", Content: "psd 放 /设计/源文件", Path: "/Design/", Source: MemorySourceCorrection}
+	m2 := &model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryCorrection, Key: "ext:.psd", Content: "psd 放 /设计/源文件", Path: "/Design/", Source: MemorySourceCorrection}
 	created, err = r.UpsertMemory(m2)
 	if err != nil || created || m2.ID != first || !m2.Pinned || m2.Content != "psd 放 /设计/源文件" || m2.Path != "Design" {
 		t.Fatalf("update: %+v %v %v", m2, created, err)
 	}
 
-	for _, bad := range []*MemoryItem{
+	for _, bad := range []*model.MemoryItem{
 		{Scope: "team", ScopeID: 1, Kind: MemoryFact, Key: "k", Content: "c"},
 		{Scope: MemoryScopeGlobal, ScopeID: 3, Kind: MemoryFact, Key: "k", Content: "c"},
 		{Scope: MemoryScopeFilesystem, Kind: MemoryFact, Key: "k", Content: "c"},
@@ -97,11 +99,11 @@ func TestMemoryUpsertValidateAndList(t *testing.T) {
 		}
 	}
 
-	g := &MemoryItem{Scope: MemoryScopeGlobal, Kind: MemoryPreference, Key: "pref:lang", Content: "文件夹用中文名", Source: MemorySourceUser}
+	g := &model.MemoryItem{Scope: MemoryScopeGlobal, Kind: MemoryPreference, Key: "pref:lang", Content: "文件夹用中文名", Source: MemorySourceUser}
 	if _, err := r.UpsertMemory(g); err != nil {
 		t.Fatal(err)
 	}
-	other := &MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 9, Kind: MemoryFact, Key: "x", Content: "别的文件系统"}
+	other := &model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 9, Kind: MemoryFact, Key: "x", Content: "别的文件系统"}
 	if _, err := r.UpsertMemory(other); err != nil {
 		t.Fatal(err)
 	}
@@ -117,19 +119,19 @@ func TestMemoryUpsertValidateAndList(t *testing.T) {
 		t.Fatalf("list all: %d", len(all))
 	}
 
-	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryFact, Key: "other", Content: "c"}); err != nil {
+	if _, err := r.UpsertMemory(&model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 2, Kind: MemoryFact, Key: "other", Content: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.UpdateMemory(first, func(m *MemoryItem) { m.Key = "OTHER" })
+	_, err = r.UpdateMemory(first, func(m *model.MemoryItem) { m.Key = "OTHER" })
 	var v *MemoryValidationError
 	if !errors.As(err, &v) {
 		t.Fatalf("key clash must be a validation error: %v", err)
 	}
-	upd, err := r.UpdateMemory(first, func(m *MemoryItem) { m.Pinned = false; m.Content = "新内容" })
+	upd, err := r.UpdateMemory(first, func(m *model.MemoryItem) { m.Pinned = false; m.Content = "新内容" })
 	if err != nil || upd.Pinned || upd.Content != "新内容" {
 		t.Fatalf("update: %+v %v", upd, err)
 	}
-	if _, err := r.UpdateMemory(9999, func(m *MemoryItem) {}); !errors.Is(err, ErrMemoryNotFound) {
+	if _, err := r.UpdateMemory(9999, func(m *model.MemoryItem) {}); !errors.Is(err, ErrMemoryNotFound) {
 		t.Fatalf("update missing: %v", err)
 	}
 	if err := r.DeleteMemory(first); err != nil {
@@ -142,7 +144,7 @@ func TestMemoryUpsertValidateAndList(t *testing.T) {
 
 func TestMemorySearchEscapesAndBumps(t *testing.T) {
 	r := setupBrainRepo(t)
-	items := []*MemoryItem{
+	items := []*model.MemoryItem{
 		{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.PSD", Content: "设计源文件放 /设计"},
 		{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryFact, Key: "quota", Content: "占用 50% 空间"},
 		{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryFact, Key: "quota2", Content: "占用 500 空间"},
@@ -170,27 +172,19 @@ func TestMemorySearchEscapesAndBumps(t *testing.T) {
 	if got, _ := r.SearchMemory(MemorySearch{Query: "psd"}); len(got) != 0 {
 		t.Fatal("no scopes means no results")
 	}
-
-	if err := r.BumpMemoryHits([]uint{items[0].ID}); err != nil {
-		t.Fatal(err)
-	}
-	m, _ := r.GetMemory(items[0].ID)
-	if m.Hits != 1 || m.LastUsedAt == nil {
-		t.Fatalf("bump: %+v", m)
-	}
 }
 
 func TestNotesSince(t *testing.T) {
 	r := setupBrainRepo(t)
 	var ids []uint
 	for _, c := range []string{"a 是项目根", "b 用年份命名", "c 是照片"} {
-		m := &MemoryItem{Scope: MemoryScopeSession, ScopeID: 5, Kind: MemoryNote, Key: "note:" + c, Content: c}
+		m := &model.MemoryItem{Scope: MemoryScopeSession, ScopeID: 5, Kind: MemoryNote, Key: "note:" + c, Content: c}
 		if _, err := r.UpsertMemory(m); err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, m.ID)
 	}
-	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeSession, ScopeID: 6, Kind: MemoryNote, Key: "note:x", Content: "其他会话"}); err != nil {
+	if _, err := r.UpsertMemory(&model.MemoryItem{Scope: MemoryScopeSession, ScopeID: 6, Kind: MemoryNote, Key: "note:x", Content: "其他会话"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.NotesSince(5, ids[0], 0)
@@ -226,13 +220,13 @@ func TestCollisionName(t *testing.T) {
 	}
 }
 
-func seedEntry(t *testing.T, r *Repository, sid uint, p, typ string, size int64) *FileEntry {
+func seedEntry(t *testing.T, r *Repository, sid uint, p, typ string, size int64) *model.FileEntry {
 	t.Helper()
 	parent := ""
 	if i := strings.LastIndex(p, "/"); i >= 0 {
 		parent = p[:i]
 	}
-	f := &FileEntry{ScanSessionID: sid, OriginalPath: p, Name: p[strings.LastIndex(p, "/")+1:], FileType: typ, ParentPath: parent, Size: size, ModTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
+	f := &model.FileEntry{ScanSessionID: sid, OriginalPath: p, Name: p[strings.LastIndex(p, "/")+1:], FileType: typ, ParentPath: parent, Size: size, ModTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if err := r.CreateFile(f); err != nil {
 		t.Fatal(err)
 	}

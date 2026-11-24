@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
@@ -187,13 +188,13 @@ func toolResults(t *testing.T, r wireReq) []string {
 	return out
 }
 
-func claudeProvider(url string) *db.ModelProvider {
-	return &db.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "x", BaseURL: url, MaxTokens: 4096}
+func claudeProvider(url string) *model.ModelProvider {
+	return &model.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "x", BaseURL: url, MaxTokens: 4096}
 }
 
 // wireAgent is a tagging run over the pipeline fixture whose model is the
 // fake server, with a local filesystem root for read_file.
-func wireAgent(t *testing.T, ws *wireServer, mutate func(*db.ScanSession)) (*AutoTagAgent, *db.Repository, string) {
+func wireAgent(t *testing.T, ws *wireServer, mutate func(*model.ScanSession)) (*AutoTagAgent, *db.Repository, string) {
 	t.Helper()
 	a, repo := pipelineFixture(t, "照片按年份整理")
 	root := t.TempDir()

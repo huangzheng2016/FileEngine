@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"FileEngine/biz/dal/db/model"
 )
 
 // decisionFixture:
@@ -20,7 +22,7 @@ func decisionFixture(t *testing.T) *Repository {
 	return r
 }
 
-func entry(t *testing.T, r *Repository, p string) *FileEntry {
+func entry(t *testing.T, r *Repository, p string) *model.FileEntry {
 	t.Helper()
 	e, err := r.GetFileByPath(1, p)
 	if err != nil {
@@ -167,7 +169,7 @@ func TestDecideBatchReportsPerItem(t *testing.T) {
 
 func TestScopeAndSensitive(t *testing.T) {
 	r := setupBrainRepo(t)
-	s := &ScanSession{FilesystemID: 1, ScopeExts: "JPG, .png"}
+	s := &model.ScanSession{FilesystemID: 1, ScopeExts: "JPG, .png"}
 	if err := r.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +210,7 @@ func TestScopeAndSensitive(t *testing.T) {
 
 func TestRuleValidation(t *testing.T) {
 	r := setupBrainRepo(t)
-	for _, bad := range []PlanRule{
+	for _, bad := range []model.PlanRule{
 		{SessionID: 1, Target: "a/{name}"},
 		{SessionID: 1, Name: "x"},
 		{SessionID: 1, Name: "x", Target: "a/{nope}"},
@@ -222,15 +224,24 @@ func TestRuleValidation(t *testing.T) {
 			t.Fatalf("rule %+v must be rejected: %v", bad, err)
 		}
 	}
-	a := &PlanRule{SessionID: 1, Name: "a", Exts: " .JPG,png ", Target: "照片/{year}"}
+	a := &model.PlanRule{SessionID: 1, Name: "a", Exts: " .JPG,png ", Target: "照片/{year}"}
 	if err := r.CreateRule(a); err != nil || a.Position != 1 || a.Exts != "jpg,png" || a.Role != RoleFile {
 		t.Fatalf("create: %+v %v", a, err)
 	}
-	b := &PlanRule{SessionID: 1, Name: "b", Target: "其他", Role: RoleUnit}
+	b := &model.PlanRule{SessionID: 1, Name: "b", Target: "其他", Role: RoleUnit}
 	if err := r.CreateRule(b); err != nil || b.Position != 2 || b.FileType != "directory" {
 		t.Fatalf("append + unit implies directory: %+v %v", b, err)
 	}
-	if _, err := r.UpdateRule(a.ID, func(p *PlanRule) { p.Position = 5 }); err != nil {
+	if err := r.CreateRule(&model.PlanRule{SessionID: 1, Name: "a", Target: "x"}); !IsRejection(err) {
+		t.Fatalf("duplicate name in a session must be rejected: %v", err)
+	}
+	if err := r.CreateRule(&model.PlanRule{SessionID: 2, Name: "a", Target: "x"}); err != nil {
+		t.Fatalf("the same name in another session is fine: %v", err)
+	}
+	if _, err := r.UpdateRule(b.ID, func(p *model.PlanRule) { p.Name = "a" }); !IsRejection(err) {
+		t.Fatalf("rename onto an existing name must be rejected: %v", err)
+	}
+	if _, err := r.UpdateRule(a.ID, func(p *model.PlanRule) { p.Position = 5 }); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := r.ListRules(1)
@@ -245,7 +256,7 @@ func TestRuleValidation(t *testing.T) {
 func TestRenderRuleTarget(t *testing.T) {
 	mt := time.Date(2021, 3, 4, 0, 0, 0, 0, time.UTC)
 	taken := time.Date(2019, 11, 2, 0, 0, 0, 0, time.UTC)
-	e := &FileEntry{OriginalPath: "dcim/trip/IMG_1.JPG", Name: "IMG_1.JPG", ParentPath: "dcim/trip", ModTime: mt, TakenAt: &taken, Camera: "Canon/EOS"}
+	e := &model.FileEntry{OriginalPath: "dcim/trip/IMG_1.JPG", Name: "IMG_1.JPG", ParentPath: "dcim/trip", ModTime: mt, TakenAt: &taken, Camera: "Canon/EOS"}
 	cases := map[string]string{
 		"照片/{year}/{month}":                    "/照片/2019/11/IMG_1.JPG",
 		"照片/{taken_year}-{taken_month}/{name}": "/照片/2019-11/IMG_1.JPG",
@@ -254,14 +265,14 @@ func TestRenderRuleTarget(t *testing.T) {
 		"保留/{rel}":                             "/保留/trip/IMG_1.JPG",
 	}
 	for tpl, want := range cases {
-		rule := &PlanRule{Name: "x", Target: tpl, PathPrefix: "dcim"}
+		rule := &model.PlanRule{Name: "x", Target: tpl, PathPrefix: "dcim"}
 		got, err := RenderRuleTarget(rule, e)
 		if err != nil || got != want {
 			t.Fatalf("%s: got %q %v, want %q", tpl, got, err, want)
 		}
 	}
-	noTaken := &FileEntry{OriginalPath: "a.jpg", Name: "a.jpg", ModTime: mt}
-	if got, _ := RenderRuleTarget(&PlanRule{Target: "照片/{year}/{taken_year}/{camera}"}, noTaken); got != "/照片/2021/未知日期/未知相机/a.jpg" {
+	noTaken := &model.FileEntry{OriginalPath: "a.jpg", Name: "a.jpg", ModTime: mt}
+	if got, _ := RenderRuleTarget(&model.PlanRule{Target: "照片/{year}/{taken_year}/{camera}"}, noTaken); got != "/照片/2021/未知日期/未知相机/a.jpg" {
 		t.Fatalf("fallbacks: %s", got)
 	}
 }
@@ -270,14 +281,14 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 	r := setupBrainRepo(t)
 	mt := time.Date(2022, 7, 1, 0, 0, 0, 0, time.UTC)
 	for _, p := range []string{"a/x.jpg", "b/x.jpg", "c/y.jpg", "d/z.png", "e/doc.pdf"} {
-		f := &FileEntry{ScanSessionID: 1, OriginalPath: p, Name: p[2:], ParentPath: p[:1], FileType: "file", ModTime: mt}
+		f := &model.FileEntry{ScanSessionID: 1, OriginalPath: p, Name: p[2:], ParentPath: p[:1], FileType: "file", ModTime: mt}
 		if err := r.CreateFile(f); err != nil {
 			t.Fatal(err)
 		}
 	}
 	seedEntry(t, r, 1, "proj", "directory", 0)
 	seedEntry(t, r, 1, "proj/node.jpg", "file", 1)
-	rules := []*PlanRule{
+	rules := []*model.PlanRule{
 		{SessionID: 1, Name: "项目", NameRegex: "^proj$", Target: "代码", Role: RoleUnit},
 		{SessionID: 1, Name: "jpg", Exts: "jpg", Target: "照片/{year}"},
 		{SessionID: 1, Name: "图片兜底", Exts: "jpg,png", Target: "图片"},
@@ -338,7 +349,7 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 
 func TestClearPlannedByTargetPathUndecides(t *testing.T) {
 	r := decisionFixture(t)
-	if err := r.CreateSession(&ScanSession{ID: 1, FilesystemID: 7}); err != nil {
+	if err := r.CreateSession(&model.ScanSession{ID: 1, FilesystemID: 7}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleUnit, NewPath: "/代码/proj", Reason: "Go 项目", Confidence: 0.4}); err != nil {

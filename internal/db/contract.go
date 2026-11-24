@@ -1,7 +1,5 @@
 package db
 
-import "time"
-
 const (
 	RunPhaseSurvey    = "survey"
 	RunPhaseTagging   = "tagging"
@@ -19,51 +17,10 @@ const (
 	RunStopped = "stopped"
 )
 
-// Token totals of a session are the sum over its runs.
-type AgentRun struct {
-	ID               uint       `gorm:"primaryKey" json:"id"`
-	SessionID        uint       `gorm:"index:idx_run_session,priority:1" json:"session_id"`
-	Phase            string     `gorm:"size:16" json:"phase"`
-	Status           string     `gorm:"size:16;index" json:"status"`
-	Title            string     `gorm:"size:512" json:"title"`
-	ExecMode         string     `gorm:"size:16" json:"exec_mode,omitempty"`    // executing runs: copy / move
-	RevertsRunID     *uint      `gorm:"index" json:"reverts_run_id,omitempty"` // set on a revert run
-	RevertedByRunID  *uint      `gorm:"-" json:"reverted_by_run_id,omitempty"` // derived from the revert run's reverts_run_id
-	Summary          string     `gorm:"type:text" json:"summary"`
-	Error            string     `gorm:"type:text" json:"error"`
-	PromptTokens     int        `json:"prompt_tokens"`
-	CachedTokens     int        `json:"cached_tokens"`
-	CacheWriteTokens int        `json:"cache_write_tokens"`
-	CacheHitRate     float64    `gorm:"-" json:"cache_hit_rate"` // cached / prompt, computed
-	CompletionTokens int        `json:"completion_tokens"`
-	TotalTokens      int        `json:"total_tokens"`
-	StartedAt        time.Time  `gorm:"index:idx_run_session,priority:2" json:"started_at"`
-	EndedAt          *time.Time `json:"ended_at"`
-}
-
-// ID is the stream sequence number used for SSE ids and Last-Event-ID resume.
-type SessionEvent struct {
-	ID        uint      `gorm:"primaryKey" json:"seq"`
-	SessionID uint      `gorm:"index:idx_event_session_run,priority:1" json:"session_id"`
-	RunID     uint      `gorm:"index:idx_event_session_run,priority:2" json:"run_id"`
-	Type      string    `gorm:"size:32" json:"type"`
-	Data      string    `gorm:"type:text" json:"data"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 const (
 	PlanDraft    = "draft"
 	PlanApproved = "approved"
 )
-
-type SessionPlan struct {
-	SessionID  uint       `gorm:"primaryKey;autoIncrement:false" json:"session_id"`
-	Version    int        `json:"version"`
-	Status     string     `gorm:"size:16" json:"status"`
-	Content    string     `gorm:"type:text" json:"content"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	ApprovedAt *time.Time `json:"approved_at"`
-}
 
 const (
 	MemoryScopeSession    = "session"
@@ -86,24 +43,6 @@ const (
 	MemorySourceReflection = "reflection"
 )
 
-// Session-scoped items are working notes shared live by the session's
-// workers; filesystem and global items persist across sessions.
-type MemoryItem struct {
-	ID         uint       `gorm:"primaryKey" json:"id"`
-	Scope      string     `gorm:"size:16;index:idx_memory_scope,priority:1" json:"scope"`
-	ScopeID    uint       `gorm:"index:idx_memory_scope,priority:2" json:"scope_id"`
-	Kind       string     `gorm:"size:16" json:"kind"`
-	Key        string     `gorm:"size:512;index" json:"key"` // normalized subject (e.g. "ext:.psd"); one live item per (scope, scope_id, key)
-	Content    string     `gorm:"type:text" json:"content"`
-	Path       string     `gorm:"size:1024" json:"path"`
-	Source     string     `gorm:"size:16" json:"source"`
-	Pinned     bool       `json:"pinned"`
-	Hits       int        `json:"hits"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-}
-
 // A summary turn condenses every turn with ID <= CoversThrough; it is prompt
 // history only and never listed to the user.
 const (
@@ -111,16 +50,6 @@ const (
 	ChatRoleAssistant = "assistant"
 	ChatRoleSummary   = "summary"
 )
-
-type ChatTurn struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	SessionID     uint      `gorm:"index" json:"session_id"`
-	RunID         uint      `json:"run_id"`
-	Role          string    `gorm:"size:16" json:"role"` // user / assistant / summary
-	Content       string    `gorm:"type:text" json:"content"`
-	CoversThrough uint      `json:"-"` // summary turns only
-	CreatedAt     time.Time `json:"created_at"`
-}
 
 const (
 	EvRunStatus     = "run_status"
@@ -247,29 +176,7 @@ const (
 	RoleMember    = "member"    // inside a unit, follows it
 	RoleFile      = "file"      // loose file with its own decision
 	RoleSkip      = "skip"      // out of scope, junk or explicitly left in place
-	RoleDuplicate = "duplicate" // content duplicate of FileEntry.DuplicateOf (scanner); plan quarantines it, never deletes
+	RoleDuplicate = "duplicate" // content duplicate of model.FileEntry.DuplicateOf (scanner); plan quarantines it, never deletes
 )
 
-// Rules belong to the session plan and are re-applied after a rescan.
-type PlanRule struct {
-	ID        uint   `gorm:"primaryKey" json:"id"`
-	SessionID uint   `gorm:"index" json:"session_id"`
-	Position  int    `json:"position"` // lower runs first; first matching rule wins
-	Name      string `gorm:"size:256" json:"name"`
-	// Match conditions (all non-empty conditions must hold).
-	Exts       string `gorm:"size:1024" json:"exts"` // comma-separated, lower-case, without dot
-	NameRegex  string `gorm:"size:512" json:"name_regex"`
-	PathPrefix string `gorm:"size:1024" json:"path_prefix"`
-	FileType   string `gorm:"size:16" json:"file_type"` // file / directory / ""
-	MinSize    int64  `json:"min_size"`
-	MaxSize    int64  `json:"max_size"`
-	// Target template variables: {name}, {stem}, {ext}, {year}, {month}, {day}
-	// (modification time), {parent} (parent dir name), {rel} (path relative to
-	// path_prefix).
-	Target    string    `gorm:"size:1024" json:"target"`
-	Role      string    `gorm:"size:16" json:"role"`   // file or unit (directories)
-	Source    string    `gorm:"size:16" json:"source"` // user / agent / preset
-	Matched   int       `json:"matched"`               // entries decided by this rule in the last apply
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
+const JunkBatchIndex = -1

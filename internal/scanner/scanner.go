@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -86,7 +88,7 @@ func New(fs remotefs.RemoteFS, repo *db.Repository, filterMode string, filterDir
 // their decisions, changed ones are reset, new ones inserted and vanished
 // ones deleted. Post passes (media metadata, duplicates) follow the walk; the
 // session stays "scanning" until they finish.
-func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
+func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	session.Status = "scanning"
 	if err := s.repo.UpdateSession(session); err != nil {
 		return err
@@ -171,7 +173,7 @@ func (s *Scanner) startProgressReporter(sessionID uint) func() {
 			case <-stop:
 				return
 			case <-ticker.C:
-				if err := db.WithRetry(func() error {
+				if err := dal.WithRetry(func() error {
 					return s.repo.UpdateScanProgress(sessionID, int(s.progress.Entries()), s.progress.CurrentPath())
 				}); err != nil {
 					log.Printf("warn: scan progress update failed: %v", err)
@@ -185,7 +187,7 @@ func (s *Scanner) startProgressReporter(sessionID uint) func() {
 			close(stop)
 			wg.Wait()
 			s.progress.setPath("")
-			if err := db.WithRetry(func() error {
+			if err := dal.WithRetry(func() error {
 				return s.repo.UpdateScanProgress(sessionID, int(s.progress.Entries()), "")
 			}); err != nil {
 				log.Printf("warn: scan progress final update failed: %v", err)
@@ -225,8 +227,8 @@ func (s *Scanner) readConcurrency() int {
 type dirTask struct {
 	path   string
 	handle []byte
-	depth  int           // depth of the directory's children
-	row    *db.FileEntry // nil for the scan root (not an entry)
+	depth  int              // depth of the directory's children
+	row    *model.FileEntry // nil for the scan root (not an entry)
 }
 
 // dirQueue is an unbounded work queue for the walk. A bounded channel
@@ -360,7 +362,7 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, ind
 						atomic.AddInt64(&pruned, 1)
 						continue
 					}
-					fe := db.FileEntry{
+					fe := model.FileEntry{
 						ScanSessionID: sessionID,
 						OriginalPath:  entryPath,
 						Name:          entry.Name,

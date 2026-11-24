@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 )
@@ -72,7 +73,7 @@ func withSummaryModel(m einomodel.ChatModel) agentOption {
 	}
 }
 
-func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *db.ScanSession, main *db.ModelProvider, tracker *tokenTrackingModel) (agentOption, error) {
+func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *model.ScanSession, main *model.ModelProvider, tracker *tokenTrackingModel) (agentOption, error) {
 	bulk, err := modelfactory.ResolveBulkProvider(repo, session, main)
 	if err != nil || bulk == main {
 		return func(*agentOptions) {}, err
@@ -84,13 +85,13 @@ func bulkSummaryOption(ctx context.Context, repo *db.Repository, session *db.Sca
 	return withSummaryModel(tracker.sibling(m)), nil
 }
 
-func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int, opts ...agentOption) (*adk.ChatModelAgent, error) {
-	o := agentOptions{reduction: interactiveReduction, summaryModel: model}
+func buildADKAgent(ctx context.Context, chatModel einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations int, contextWindow int, opts ...agentOption) (*adk.ChatModelAgent, error) {
+	o := agentOptions{reduction: interactiveReduction, summaryModel: chatModel}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	if contextWindow <= 0 {
-		contextWindow = db.DefaultContextWindow
+		contextWindow = model.DefaultContextWindow
 	}
 
 	patchMw, err := patchtoolcalls.New(ctx, nil)
@@ -118,7 +119,7 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "fileengine-agent",
 		Instruction: instruction,
-		Model:       model,
+		Model:       chatModel,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, UnknownToolsHandler: unknownToolHandler},
 		},

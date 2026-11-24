@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 
@@ -120,7 +121,7 @@ func TestUnknownToolHandlerAnswersWithEnvelope(t *testing.T) {
 // its arguments are wrong.
 func TestEveryToolAnswersBadArgumentsWithEnvelope(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	session := &db.ScanSession{ID: 1, FilesystemID: 7, AllowReadFile: true, AllowAutoCategory: true, AllowScript: true, AllowVision: true}
+	session := &model.ScanSession{ID: 1, FilesystemID: 7, AllowReadFile: true, AllowAutoCategory: true, AllowScript: true, AllowVision: true}
 	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, session, true)
 	for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
 		for _, name := range ToolNames(kind) {

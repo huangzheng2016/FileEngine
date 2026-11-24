@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -73,8 +74,8 @@ type ApplyRulesOutput struct {
 	Rules []RuleStatView `json:"rules"`
 }
 
-func (in *AddRuleInput) toRule(sessionID uint) *db.PlanRule {
-	return &db.PlanRule{SessionID: sessionID, Name: in.Name, Exts: in.Exts, NameRegex: in.NameRegex, PathPrefix: in.PathPrefix,
+func (in *AddRuleInput) toRule(sessionID uint) *model.PlanRule {
+	return &model.PlanRule{SessionID: sessionID, Name: in.Name, Exts: in.Exts, NameRegex: in.NameRegex, PathPrefix: in.PathPrefix,
 		FileType: in.FileType, MinSize: in.MinSize, MaxSize: in.MaxSize, Target: in.Target, Role: in.Role, Position: in.Position,
 		Source: db.MemorySourceAgent}
 }
@@ -108,13 +109,13 @@ func (tb *ToolBuilder) checkRuleTarget(target string) (string, error) {
 }
 
 // ruleByName resolves a rule of this session; names are the model-facing key.
-func (tb *ToolBuilder) ruleByName(name string) (*db.PlanRule, error) {
+func (tb *ToolBuilder) ruleByName(name string) (*model.PlanRule, error) {
 	name = strings.TrimSpace(name)
 	rules, err := tb.repo.ListRules(tb.sessionID)
 	if err != nil {
 		return nil, err
 	}
-	var found *db.PlanRule
+	var found *model.PlanRule
 	for i := range rules {
 		if strings.TrimSpace(rules[i].Name) != name {
 			continue
@@ -187,7 +188,7 @@ func (tb *ToolBuilder) updateRule(ctx context.Context, in *UpdateRuleInput) (*Ru
 			return failed[RuleOutput](fmt.Sprintf("已有同名规则「%s」", SanitizeUntrustedName(newName))), nil
 		}
 	}
-	updated, err := tb.repo.UpdateRule(rule.ID, func(r *db.PlanRule) {
+	updated, err := tb.repo.UpdateRule(rule.ID, func(r *model.PlanRule) {
 		if in.NewName != "" {
 			r.Name = in.NewName
 		}

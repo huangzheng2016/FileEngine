@@ -3,7 +3,7 @@
 // verified; existing targets are never overwritten (conflicts are skipped and
 // reported); directories are moved by an atomic rename or file by file, and a
 // source directory is removed only once it is empty. Every step is journaled
-// as a db.ExecOp before it happens, which makes runs resumable after a crash
+// as a model.ExecOp before it happens, which makes runs resumable after a crash
 // and revertible afterwards.
 package executor
 
@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
 	"FileEngine/internal/remotefs"
@@ -63,7 +64,7 @@ type Result struct {
 	Notes   []string `json:"notes,omitempty"`
 }
 
-func (r *Result) issue(f *db.FileEntry, code, detail string) {
+func (r *Result) issue(f *model.FileEntry, code, detail string) {
 	r.Issues = append(r.Issues, Issue{EntryID: f.ID, OriginalPath: f.OriginalPath, NewPath: f.NewPath, Code: code, Detail: detail})
 }
 
@@ -80,7 +81,7 @@ type Executor struct {
 	ListConcurrency int
 
 	sessionID    uint
-	run          *db.AgentRun
+	run          *model.AgentRun
 	dirs         map[string]bool // directories known to exist in this run
 	renameBroken bool            // in-place rename failed once (cross-device); go straight to copy
 	lastEmit     time.Time
@@ -114,7 +115,7 @@ func validTarget(p string) error {
 }
 
 // The run owns fs and closes it when it ends.
-func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options) (*db.AgentRun, error) {
+func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Options) (*model.AgentRun, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
@@ -125,7 +126,7 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 	case opts.Sample > 0:
 		title += fmt.Sprintf("（前 %d 项）", opts.Sample)
 	}
-	run := &db.AgentRun{SessionID: sessionID, Phase: db.RunPhaseExecuting, Title: title, ExecMode: opts.Mode}
+	run := &model.AgentRun{SessionID: sessionID, Phase: db.RunPhaseExecuting, Title: title, ExecMode: opts.Mode}
 	if err := repo.InsertRun(run); err != nil {
 		return nil, err
 	}
@@ -143,8 +144,8 @@ func Start(repo *db.Repository, fs remotefs.RemoteFS, sessionID uint, opts Optio
 
 var ErrNotExecuting = errors.New("只能撤销执行")
 
-func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.AgentRun, error) {
-	var target db.AgentRun
+func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*model.AgentRun, error) {
+	var target model.AgentRun
 	if err := repo.DB().First(&target, runID).Error; err != nil {
 		return nil, fmt.Errorf("读取运行 %d：%w", runID, err)
 	}
@@ -154,7 +155,7 @@ func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.Age
 	if target.Phase != db.RunPhaseExecuting {
 		return nil, ErrNotExecuting
 	}
-	run := &db.AgentRun{SessionID: target.SessionID, Phase: db.RunPhaseRevert, Title: "撤销", RevertsRunID: &target.ID}
+	run := &model.AgentRun{SessionID: target.SessionID, Phase: db.RunPhaseRevert, Title: "撤销", RevertsRunID: &target.ID}
 	if err := repo.InsertRun(run); err != nil {
 		return nil, err
 	}
@@ -170,7 +171,7 @@ func StartRevert(repo *db.Repository, fs remotefs.RemoteFS, runID uint) (*db.Age
 	return run, nil
 }
 
-func (e *Executor) finish(run *db.AgentRun, res *Result, err error, verb string) {
+func (e *Executor) finish(run *model.AgentRun, res *Result, err error, verb string) {
 	if res == nil {
 		res = &Result{}
 	}
@@ -245,7 +246,7 @@ func Summary(verb string, res *Result) string {
 }
 
 // Canceling ctx stops before the next step; it never triggers a delete.
-func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) (*Result, error) {
+func (e *Executor) Execute(ctx context.Context, run *model.AgentRun, opts Options) (*Result, error) {
 	if opts.Mode != ModeCopy && opts.Mode != ModeMove {
 		return nil, fmt.Errorf("执行模式只能是 %s 或 %s", ModeCopy, ModeMove)
 	}
@@ -293,7 +294,7 @@ func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) 
 	return res, nil
 }
 
-func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode string) error {
+func (e *Executor) executeEntry(ctx context.Context, f *model.FileEntry, mode string) error {
 	// Re-validated right before the operation: rows may change after planning.
 	if err := validTarget(f.NewPath); err != nil {
 		return skip(IssueInvalidTarget, err.Error())
@@ -336,7 +337,7 @@ func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode strin
 	}
 }
 
-func staleReason(f *db.FileEntry, st *remotefs.FileInfo) string {
+func staleReason(f *model.FileEntry, st *remotefs.FileInfo) string {
 	isDir := f.FileType == "directory"
 	if st.IsDir != isDir {
 		return "源的类型已变化"

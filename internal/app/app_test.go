@@ -15,6 +15,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/handler/api"
 	"FileEngine/biz/mw"
 	"FileEngine/container"
@@ -225,7 +226,7 @@ func TestRequestGuards(t *testing.T) {
 
 func newSession(t *testing.T) uint {
 	t.Helper()
-	s := &db.ScanSession{Status: "scanned"}
+	s := &model.ScanSession{Status: "scanned"}
 	if err := container.Default.Repo.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}

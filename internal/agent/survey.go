@@ -10,6 +10,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -91,7 +92,7 @@ func fileExt(name string) string {
 	return ext
 }
 
-func ComputeTreeOverview(repo *db.Repository, session *db.ScanSession) (*TreeOverview, error) {
+func ComputeTreeOverview(repo *db.Repository, session *model.ScanSession) (*TreeOverview, error) {
 	ov := &TreeOverview{DepthFiles: map[int]int{}}
 	top := map[string]*overviewDir{}
 	exts := map[string]*overviewExt{}

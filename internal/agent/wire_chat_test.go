@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -10,7 +11,7 @@ import (
 
 // wireChatAgent is an Agent whose model is the fake server (the real model
 // factory), with one scanned file for the selection.
-func wireChatAgent(t *testing.T, ws *wireServer) (*db.Repository, *Agent, *db.ScanSession) {
+func wireChatAgent(t *testing.T, ws *wireServer) (*db.Repository, *Agent, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
 	old := config.Get()
@@ -25,11 +26,11 @@ func wireChatAgent(t *testing.T, ws *wireServer) (*db.Repository, *Agent, *db.Sc
 			config.Update(old)
 		}
 	})
-	session := &db.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理", AllowReadFile: true, AllowScript: true, AllowAutoCategory: true}
+	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理", AllowReadFile: true, AllowScript: true, AllowAutoCategory: true}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
-	seedEntry(t, repo, db.FileEntry{ScanSessionID: session.ID, OriginalPath: "a.jpg", FileType: "file", ParentPath: ".", Size: 2048})
+	seedEntry(t, repo, model.FileEntry{ScanSessionID: session.ID, OriginalPath: "a.jpg", FileType: "file", ParentPath: ".", Size: 2048})
 	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: root}, session.ID, claudeProvider(ws.srv.URL), session)
 	return repo, a, session
 }

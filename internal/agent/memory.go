@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -26,7 +27,7 @@ var memoryKindLabel = map[string]string{
 	db.MemoryNote:       "笔记",
 }
 
-func memoryItemPath(m db.MemoryItem) string {
+func memoryItemPath(m model.MemoryItem) string {
 	p := m.Path
 	if p == "" {
 		if rest, ok := strings.CutPrefix(m.Key, "path:"); ok {
@@ -36,7 +37,7 @@ func memoryItemPath(m db.MemoryItem) string {
 	return strings.ToLower(strings.Trim(p, "/"))
 }
 
-func memoryPathRelated(m db.MemoryItem, unitPaths []string) bool {
+func memoryPathRelated(m model.MemoryItem, unitPaths []string) bool {
 	ip := memoryItemPath(m)
 	if ip == "" || ip == "." {
 		return false
@@ -50,7 +51,7 @@ func memoryPathRelated(m db.MemoryItem, unitPaths []string) bool {
 	return false
 }
 
-func memoryRank(m db.MemoryItem) int {
+func memoryRank(m model.MemoryItem) int {
 	switch {
 	case m.Pinned:
 		return 0
@@ -65,7 +66,7 @@ func memoryRank(m db.MemoryItem) int {
 
 // memoryLess is the one order of memory in prompts: never by usage or
 // recency, so reading memory can never change prompt bytes.
-func memoryLess(a, b db.MemoryItem) bool {
+func memoryLess(a, b model.MemoryItem) bool {
 	if ra, rb := memoryRank(a), memoryRank(b); ra != rb {
 		return ra < rb
 	}
@@ -81,7 +82,7 @@ func memoryLess(a, b db.MemoryItem) bool {
 	return a.ID < b.ID
 }
 
-func memoryLine(m db.MemoryItem) string {
+func memoryLine(m model.MemoryItem) string {
 	label := memoryKindLabel[m.Kind]
 	if m.Scope == db.MemoryScopeGlobal {
 		label += "·通用"
@@ -98,14 +99,14 @@ func memoryLine(m db.MemoryItem) string {
 
 // Items about the unit's directory prefixes always come first (up to
 // memoryPathRelatedMax); the rest are added by rank while within budget.
-func BuildMemoryBlock(items []db.MemoryItem, unitPaths []string, budget int) string {
+func BuildMemoryBlock(items []model.MemoryItem, unitPaths []string, budget int) string {
 	if len(items) == 0 {
 		return ""
 	}
 	if budget <= 0 {
 		budget = memoryBlockTokenBudget
 	}
-	var related, general []db.MemoryItem
+	var related, general []model.MemoryItem
 	for _, m := range items {
 		if m.Scope == db.MemoryScopeSession {
 			continue
@@ -157,7 +158,7 @@ func BuildMemoryBlock(items []db.MemoryItem, unitPaths []string, budget int) str
 
 // Notes are written by agents from file contents, so the lines are untrusted
 // data.
-func BuildNotesBlock(notes []db.MemoryItem, maxItems int) string {
+func BuildNotesBlock(notes []model.MemoryItem, maxItems int) string {
 	if len(notes) == 0 {
 		return ""
 	}
@@ -191,7 +192,7 @@ func (tb *ToolBuilder) TakeNewNotes() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var others []db.MemoryItem
+	var others []model.MemoryItem
 	for _, n := range notes {
 		if n.ID > tb.notes.seen {
 			tb.notes.seen = n.ID
@@ -208,7 +209,7 @@ func (tb *ToolBuilder) SetUnitRoot(dir string) {
 	tb.unitRoot = strings.Trim(normalizePath(dir), "/")
 }
 
-func (tb *ToolBuilder) emitMemoryUpdated(m *db.MemoryItem) {
+func (tb *ToolBuilder) emitMemoryUpdated(m *model.MemoryItem) {
 	db.Emit(tb.sessionID, tb.RunID, db.EvMemoryUpdated, db.MemoryUpdatedData{RunID: tb.RunID, Scope: m.Scope, ID: m.ID})
 }
 
@@ -248,7 +249,7 @@ type NoteInput struct {
 }
 
 func (tb *ToolBuilder) remember(ctx context.Context, in *RememberInput) (*MemoryWriteOutput, error) {
-	m := &db.MemoryItem{Scope: in.Scope, Kind: in.Kind, Key: in.Key, Content: in.Content, Path: db.NormalizeMemoryPath(in.Path), Source: db.MemorySourceAgent}
+	m := &model.MemoryItem{Scope: in.Scope, Kind: in.Kind, Key: in.Key, Content: in.Content, Path: db.NormalizeMemoryPath(in.Path), Source: db.MemorySourceAgent}
 	switch in.Scope {
 	case db.MemoryScopeFilesystem:
 		m.ScopeID = tb.filesystemID
@@ -266,7 +267,7 @@ func (tb *ToolBuilder) remember(ctx context.Context, in *RememberInput) (*Memory
 func (tb *ToolBuilder) note(ctx context.Context, in *NoteInput) (*MemoryWriteOutput, error) {
 	content := strings.TrimSpace(in.Content)
 	sum := sha1.Sum([]byte(content))
-	m := &db.MemoryItem{
+	m := &model.MemoryItem{
 		Scope: db.MemoryScopeSession, ScopeID: tb.sessionID, Kind: db.MemoryNote,
 		Key: "note:" + hex.EncodeToString(sum[:])[:12], Content: content,
 		Path: db.NormalizeMemoryPath(in.Path), Source: db.MemorySourceAgent,
@@ -283,7 +284,7 @@ func (tb *ToolBuilder) note(ctx context.Context, in *NoteInput) (*MemoryWriteOut
 	return out, err
 }
 
-func (tb *ToolBuilder) writeMemory(m *db.MemoryItem) (bool, *MemoryWriteOutput, error) {
+func (tb *ToolBuilder) writeMemory(m *model.MemoryItem) (bool, *MemoryWriteOutput, error) {
 	m.Key = db.NormalizeMemoryKey(m.Key)
 	m.Content = strings.TrimSpace(m.Content)
 	if err := db.ValidateMemoryItem(m); err != nil {
@@ -355,7 +356,7 @@ type MemoryOp struct {
 type MemoryOpsResult struct {
 	Added, Updated, Deleted, Noop int
 	Rejected                      []string
-	Changed                       []db.MemoryItem
+	Changed                       []model.MemoryItem
 }
 
 // The user is the final curator: pinned items and items the user wrote are
@@ -363,7 +364,7 @@ type MemoryOpsResult struct {
 func ApplyMemoryOps(repo *db.Repository, filesystemID uint, ops []MemoryOp) (MemoryOpsResult, error) {
 	var res MemoryOpsResult
 	reject := func(i int, msg string) { res.Rejected = append(res.Rejected, fmt.Sprintf("#%d %s", i+1, msg)) }
-	loadOwned := func(i int, id uint) (*db.MemoryItem, bool, error) {
+	loadOwned := func(i int, id uint) (*model.MemoryItem, bool, error) {
 		m, err := repo.GetMemory(id)
 		if errors.Is(err, db.ErrMemoryNotFound) {
 			reject(i, fmt.Sprintf("记忆 %d 不存在", id))
@@ -388,7 +389,7 @@ func ApplyMemoryOps(repo *db.Repository, filesystemID uint, ops []MemoryOp) (Mem
 		case MemoryOpNoop:
 			res.Noop++
 		case MemoryOpAdd:
-			m := &db.MemoryItem{Scope: op.Scope, Kind: op.Kind, Key: op.Key, Content: op.Content, Path: db.NormalizeMemoryPath(op.Path), Source: db.MemorySourceReflection}
+			m := &model.MemoryItem{Scope: op.Scope, Kind: op.Kind, Key: op.Key, Content: op.Content, Path: db.NormalizeMemoryPath(op.Path), Source: db.MemorySourceReflection}
 			if m.Scope == "" {
 				m.Scope = db.MemoryScopeFilesystem
 			}
@@ -416,7 +417,7 @@ func ApplyMemoryOps(repo *db.Repository, filesystemID uint, ops []MemoryOp) (Mem
 			} else if !ok {
 				continue
 			}
-			updated, err := repo.UpdateMemory(op.ID, func(m *db.MemoryItem) {
+			updated, err := repo.UpdateMemory(op.ID, func(m *model.MemoryItem) {
 				if op.Kind != "" {
 					m.Kind = op.Kind
 				}
@@ -484,7 +485,7 @@ func correctionSourcePrefix(parent string) string {
 
 // Keyed by extension (or "dir") plus the source prefix, so the same kind of
 // file from the same area is classified the user's way next time.
-func CorrectionMemory(f db.FileEntry, oldTarget, newTarget string, filesystemID uint) *db.MemoryItem {
+func CorrectionMemory(f model.FileEntry, oldTarget, newTarget string, filesystemID uint) *model.MemoryItem {
 	newTarget = db.NormalizeTargetPath(newTarget)
 	oldTarget = db.NormalizeTargetPath(oldTarget)
 	if newTarget == "" || newTarget == oldTarget {
@@ -517,7 +518,7 @@ func CorrectionMemory(f db.FileEntry, oldTarget, newTarget string, filesystemID 
 	if r := []rune(content); len(r) > db.MemoryContentMaxRunes {
 		content = string(r[:db.MemoryContentMaxRunes])
 	}
-	return &db.MemoryItem{
+	return &model.MemoryItem{
 		Scope:   db.MemoryScopeFilesystem,
 		ScopeID: filesystemID,
 		Kind:    db.MemoryCorrection,

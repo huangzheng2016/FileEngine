@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
 )
@@ -109,7 +110,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 		return nil, rejectHint("用 decide 把条目归入上述现有分类；确需新分类时换用不同的名称和路径", "%s", strings.TrimSpace(sb.String()))
 	}
 
-	cat := &db.Category{
+	cat := &model.Category{
 		FilesystemID:  tb.filesystemID,
 		Name:          input.Name,
 		Path:          input.Path,

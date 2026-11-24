@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	event "FileEngine/biz/model/api/event"
-	"FileEngine/internal/db"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/network"
@@ -30,7 +30,7 @@ func newSSESink(c *app.RequestContext) *sseSink {
 	return &sseSink{w: w, stream: sse.NewStreamWithWriter(c, w)}
 }
 
-func (s *sseSink) Event(ev db.SessionEvent) error {
+func (s *sseSink) Event(ev model.SessionEvent) error {
 	return s.stream.Publish(&sse.Event{ID: strconv.FormatUint(uint64(ev.ID), 10), Event: ev.Type, Data: []byte(ev.Data)})
 }
 
@@ -43,7 +43,7 @@ func (s *sseSink) comment(text string) error {
 	return s.w.Flush()
 }
 
-func toSessionEvents(rows []db.SessionEvent) []*event.SessionEvent {
+func toSessionEvents(rows []model.SessionEvent) []*event.SessionEvent {
 	items := make([]*event.SessionEvent, len(rows))
 	for i, ev := range rows {
 		items[i] = &event.SessionEvent{Seq: int64(ev.ID), RunID: int64(ev.RunID), Kind: ev.Type, Data: ev.Data, CreatedAt: unix(ev.CreatedAt)}

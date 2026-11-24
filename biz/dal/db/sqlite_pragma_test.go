@@ -12,7 +12,7 @@ func TestSQLitePragmas(t *testing.T) {
 	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	sqlDB, err := DB.DB()
+	sqlDB, err := DB().DB()
 	if err != nil {
 		t.Fatal(err)
 	}

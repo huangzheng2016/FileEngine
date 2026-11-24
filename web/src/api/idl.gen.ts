@@ -533,9 +533,6 @@ export interface MemoryItem {
   // user | agent | correction | reflection
   source: string
   pinned: boolean
-  hits: number
-  // unix seconds; 0 = never used
-  last_used_at: number
   created_at: number
   updated_at: number
 }

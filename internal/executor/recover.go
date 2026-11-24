@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
@@ -48,7 +49,7 @@ func (e *Executor) reconcileFinished() error {
 	return nil
 }
 
-func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
+func (e *Executor) recoverOp(ctx context.Context, op *model.ExecOp) error {
 	const interrupted = "中断"
 	switch op.Kind {
 	case db.ExecKindRename:
@@ -124,7 +125,7 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 
 // unsettled leaves an op in its journaled state because the filesystem could
 // not be read; it is retried by the next Recover and never blocks other work.
-func (e *Executor) unsettled(ctx context.Context, op *db.ExecOp, err error) error {
+func (e *Executor) unsettled(ctx context.Context, op *model.ExecOp, err error) error {
 	if cerr := ctx.Err(); cerr != nil {
 		return cerr
 	}
@@ -132,7 +133,7 @@ func (e *Executor) unsettled(ctx context.Context, op *db.ExecOp, err error) erro
 	return nil
 }
 
-func (e *Executor) markIfEntryOp(op *db.ExecOp, mode string) error {
+func (e *Executor) markIfEntryOp(op *model.ExecOp, mode string) error {
 	if op.EntryID == 0 {
 		return nil
 	}
@@ -146,7 +147,7 @@ func (e *Executor) markIfEntryOp(op *db.ExecOp, mode string) error {
 	return nil
 }
 
-func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
+func dstUnchanged(st *remotefs.FileInfo, op *model.ExecOp) bool {
 	if op.IsDir {
 		return st.IsDir
 	}
@@ -159,7 +160,7 @@ func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
 // Each destination must be unchanged since the run wrote it; anything else is
 // skipped and reported. Reverting is idempotent: ops already undone are
 // recognized and settled.
-func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (res *Result, err error) {
+func (e *Executor) Revert(ctx context.Context, run *model.AgentRun, target uint) (res *Result, err error) {
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
 	res = &Result{}
 	if err := e.Recover(ctx, run.SessionID); err != nil {
@@ -180,7 +181,7 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (r
 	if err != nil {
 		return res, err
 	}
-	var todo, mkdirs []db.ExecOp
+	var todo, mkdirs []model.ExecOp
 	for i := len(ops) - 1; i >= 0; i-- {
 		switch {
 		case ops[i].State != db.ExecDone:
@@ -222,7 +223,7 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (r
 
 // A directory is removed only when a listing shows it empty; kept directories
 // are reported as notes.
-func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, res *Result) error {
+func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []model.ExecOp, res *Result) error {
 	sort.SliceStable(mkdirs, func(i, j int) bool {
 		di, dj := strings.Count(mkdirs[i].Dst, "/"), strings.Count(mkdirs[j].Dst, "/")
 		if di != dj {
@@ -271,7 +272,7 @@ func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, re
 	return nil
 }
 
-func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
+func (e *Executor) revertOp(ctx context.Context, op *model.ExecOp) error {
 	switch op.Kind {
 	case db.ExecKindRmdir:
 		if err := e.fs.MkdirAll(ctx, op.Src); err != nil {

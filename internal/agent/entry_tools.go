@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -93,12 +94,12 @@ func (tb *ToolBuilder) entriesByPaths(paths []string) (*ListEntriesOutput, error
 	if err != nil {
 		return nil, err
 	}
-	byPath := make(map[string]db.FileEntry, len(rows))
+	byPath := make(map[string]model.FileEntry, len(rows))
 	for _, r := range rows {
 		byPath[r.OriginalPath] = r
 	}
 	out := succeeded[ListEntriesOutput]()
-	var found []db.FileEntry
+	var found []model.FileEntry
 	seen := map[string]bool{}
 	for i, w := range want {
 		if seen[w] {
@@ -119,7 +120,7 @@ func (tb *ToolBuilder) entriesByPaths(paths []string) (*ListEntriesOutput, error
 }
 
 // File-derived text: names, targets and descriptions are sanitized.
-func entryRows(files []db.FileEntry, withPath bool) string {
+func entryRows(files []model.FileEntry, withPath bool) string {
 	var sb strings.Builder
 	for _, f := range files {
 		typ := "f"

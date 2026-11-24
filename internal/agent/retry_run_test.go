@@ -174,13 +174,13 @@ func TestModelRetryIsPerRequest(t *testing.T) {
 	stubRetryEnv(t, config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 4, RetryBaseDelay: 1, RetryMaxDelay: 1})
 	retryRandFloat64 = func() float64 { return 0 }
 
-	model := &flakyModel{}
+	fm := &flakyModel{}
 	logger := NewLogger(204, 1, 0)
-	msg, err := runADKWithRetry(context.Background(), newEchoAgent(t, model, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "t", newTokenTrackingModel(model))
+	msg, err := runADKWithRetry(context.Background(), newEchoAgent(t, fm, nil), []*schema.Message{{Role: schema.User, Content: "go"}}, logger, "t", newTokenTrackingModel(fm))
 	if err != nil || msg == nil || msg.Content != "done" {
 		t.Fatalf("run: msg=%+v err=%v", msg, err)
 	}
-	if model.requests != 3 || model.scripted.calls != 2 {
-		t.Fatalf("requests=%d answered=%d, want 3 requests (turn 2 retried once) and 2 answers", model.requests, model.scripted.calls)
+	if fm.requests != 3 || fm.scripted.calls != 2 {
+		t.Fatalf("requests=%d answered=%d, want 3 requests (turn 2 retried once) and 2 answers", fm.requests, fm.scripted.calls)
 	}
 }

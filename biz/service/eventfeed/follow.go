@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -15,7 +16,7 @@ const replayPageSize = 500
 
 // Sink receives events in strictly increasing seq order.
 type Sink interface {
-	Event(ev db.SessionEvent) error
+	Event(ev model.SessionEvent) error
 	// Ping is called every Query.Heartbeat so a transport can notice a dead peer
 	// by a failed write.
 	Ping() error
@@ -49,7 +50,7 @@ func Follow(ctx context.Context, repo *db.Repository, q Query, sink Sink) error 
 	defer db.Unsubscribe(sub)
 
 	last := q.After
-	send := func(ev db.SessionEvent) error {
+	send := func(ev model.SessionEvent) error {
 		if ev.ID <= last || (q.RunID > 0 && ev.RunID != q.RunID) {
 			return nil
 		}

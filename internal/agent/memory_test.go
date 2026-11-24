@@ -7,24 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
-func mem(id uint, scope, kind, content, path string, hits int, pinned bool) db.MemoryItem {
-	return db.MemoryItem{ID: id, Scope: scope, Kind: kind, Key: fmt.Sprintf("k%d", id), Content: content, Path: path,
-		Hits: hits, Pinned: pinned, UpdatedAt: time.Unix(int64(id), 0)}
+func mem(id uint, scope, kind, content, path string, pinned bool) model.MemoryItem {
+	return model.MemoryItem{ID: id, Scope: scope, Kind: kind, Key: fmt.Sprintf("k%d", id), Content: content, Path: path,
+		Pinned: pinned, UpdatedAt: time.Unix(int64(id), 0)}
 }
 
 func TestBuildMemoryBlockOrderAndBudget(t *testing.T) {
 	fs, gl := db.MemoryScopeFilesystem, db.MemoryScopeGlobal
-	items := []db.MemoryItem{
-		mem(1, fs, db.MemoryFact, "事实一条", "", 50, false),
-		mem(2, fs, db.MemoryCorrection, "psd 放设计", "", 1, false),
-		mem(3, gl, db.MemoryPreference, "文件夹用中文名", "", 0, false),
-		mem(4, fs, db.MemoryConvention, "置顶约定", "", 0, true),
-		mem(5, fs, db.MemoryCorrection, "Design 下的 psd 应放到 /设计", "Design", 0, false),
-		mem(6, db.MemoryScopeSession, db.MemoryNote, "会话笔记不进长期块", "", 0, false),
+	items := []model.MemoryItem{
+		mem(1, fs, db.MemoryFact, "事实一条", "", false),
+		mem(2, fs, db.MemoryCorrection, "psd 放设计", "", false),
+		mem(3, gl, db.MemoryPreference, "文件夹用中文名", "", false),
+		mem(4, fs, db.MemoryConvention, "置顶约定", "", true),
+		mem(5, fs, db.MemoryCorrection, "Design 下的 psd 应放到 /设计", "Design", false),
+		mem(6, db.MemoryScopeSession, db.MemoryNote, "会话笔记不进长期块", "", false),
 	}
 	out := BuildMemoryBlock(items, []string{"Design/2023/x"}, 0)
 	if !strings.HasPrefix(out, "## 记忆") {
@@ -46,11 +47,11 @@ func TestBuildMemoryBlockOrderAndBudget(t *testing.T) {
 		t.Fatalf("labels:\n%s", out)
 	}
 
-	var many []db.MemoryItem
+	var many []model.MemoryItem
 	for i := 1; i <= 200; i++ {
-		many = append(many, mem(uint(i), fs, db.MemoryConvention, strings.Repeat("约定内容", 10)+fmt.Sprint(i), "", 0, false))
+		many = append(many, mem(uint(i), fs, db.MemoryConvention, strings.Repeat("约定内容", 10)+fmt.Sprint(i), "", false))
 	}
-	many = append(many, mem(999, fs, db.MemoryCorrection, "相关纠正", "Photos", 0, false))
+	many = append(many, mem(999, fs, db.MemoryCorrection, "相关纠正", "Photos", false))
 	out = BuildMemoryBlock(many, []string{"photos/2020"}, 300)
 	if !strings.Contains(out, "相关纠正") {
 		t.Fatal("path-related item must be included regardless of the budget")
@@ -78,7 +79,7 @@ func TestBuildMemoryBlockOrderAndBudget(t *testing.T) {
 }
 
 func TestCorrectionMemory(t *testing.T) {
-	f := db.FileEntry{Name: "logo.PSD", FileType: "file", ParentPath: "Design/2023/brand"}
+	f := model.FileEntry{Name: "logo.PSD", FileType: "file", ParentPath: "Design/2023/brand"}
 	m := CorrectionMemory(f, "/图片/logo.PSD", "设计/源文件/logo.PSD", 3)
 	if m == nil {
 		t.Fatal("expected a correction")
@@ -100,11 +101,11 @@ func TestCorrectionMemory(t *testing.T) {
 	if CorrectionMemory(f, "/a/logo.PSD", "/a/logo-v2.PSD", 3) != nil {
 		t.Fatal("a rename in the same directory teaches nothing")
 	}
-	d := CorrectionMemory(db.FileEntry{Name: "proj", FileType: "directory", ParentPath: ""}, "", "/代码/proj", 3)
+	d := CorrectionMemory(model.FileEntry{Name: "proj", FileType: "directory", ParentPath: ""}, "", "/代码/proj", 3)
 	if d == nil || d.Key != "correction:dir@/" || strings.Contains(d.Content, "而不是") || !strings.Contains(d.Content, "目录") {
 		t.Fatalf("directory correction from root: %+v", d)
 	}
-	n := CorrectionMemory(db.FileEntry{Name: "Makefile", FileType: "file", ParentPath: "src"}, "", "/代码/Makefile", 3)
+	n := CorrectionMemory(model.FileEntry{Name: "Makefile", FileType: "file", ParentPath: "src"}, "", "/代码/Makefile", 3)
 	if n == nil || n.Key != "correction:noext@/src" {
 		t.Fatalf("no-extension correction: %+v", n)
 	}
@@ -113,7 +114,7 @@ func TestCorrectionMemory(t *testing.T) {
 func brainTestBuilder(t *testing.T) (*ToolBuilder, *db.Repository) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7, AllowScript: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{ID: 1, FilesystemID: 7, AllowScript: true}, false)
 	tb.RunID = 42
 	return tb, repo
 }
@@ -153,10 +154,6 @@ func TestMemoryTools(t *testing.T) {
 	if err != nil || len(rec.Items) != 1 || rec.Items[0].Key != "ext:.psd" {
 		t.Fatalf("recall: %+v %v", rec, err)
 	}
-	m, _ = repo.GetMemory(items[0].ID)
-	if m.Hits != 0 || m.LastUsedAt != nil {
-		t.Fatalf("recall must not record usage: %+v", m)
-	}
 	rec, _ = tb.recall(ctx, &RecallInput{PathPrefix: "Design/2023/logo"})
 	if len(rec.Items) != 1 {
 		t.Fatalf("path-prefix recall (item path is an ancestor): %+v", rec)
@@ -173,7 +170,7 @@ func TestMemoryTools(t *testing.T) {
 
 func TestNotesAreSharedAcrossWorkers(t *testing.T) {
 	a, repo := brainTestBuilder(t)
-	b := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 1), config.AgentConfig{}, &db.ScanSession{ID: 1, FilesystemID: 7}, false)
+	b := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 1), config.AgentConfig{}, &model.ScanSession{ID: 1, FilesystemID: 7}, false)
 	ctx := context.Background()
 
 	if out, err := a.note(ctx, &NoteInput{Content: "Projects/foo 是 Go 项目根目录，整体归类", Path: "Projects/foo"}); err != nil || !out.Success {
@@ -243,12 +240,12 @@ result = {a: a, b: b}`)
 
 func TestApplyMemoryOps(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	userItem := &db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryPreference, Key: "u", Content: "用户写的", Source: db.MemorySourceUser}
-	agentItem := &db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryFact, Key: "a", Content: "旧事实", Source: db.MemorySourceAgent}
-	dupItem := &db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryFact, Key: "dup", Content: "重复", Source: db.MemorySourceAgent}
-	foreign := &db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 8, Kind: db.MemoryFact, Key: "f", Content: "别的文件系统", Source: db.MemorySourceAgent}
-	note := &db.MemoryItem{Scope: db.MemoryScopeSession, ScopeID: 1, Kind: db.MemoryNote, Key: "n", Content: "笔记", Source: db.MemorySourceAgent}
-	for _, m := range []*db.MemoryItem{userItem, agentItem, dupItem, foreign, note} {
+	userItem := &model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryPreference, Key: "u", Content: "用户写的", Source: db.MemorySourceUser}
+	agentItem := &model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryFact, Key: "a", Content: "旧事实", Source: db.MemorySourceAgent}
+	dupItem := &model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryFact, Key: "dup", Content: "重复", Source: db.MemorySourceAgent}
+	foreign := &model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 8, Kind: db.MemoryFact, Key: "f", Content: "别的文件系统", Source: db.MemorySourceAgent}
+	note := &model.MemoryItem{Scope: db.MemoryScopeSession, ScopeID: 1, Kind: db.MemoryNote, Key: "n", Content: "笔记", Source: db.MemorySourceAgent}
+	for _, m := range []*model.MemoryItem{userItem, agentItem, dupItem, foreign, note} {
 		if _, err := repo.UpsertMemory(m); err != nil {
 			t.Fatal(err)
 		}

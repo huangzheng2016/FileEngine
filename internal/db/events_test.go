@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"FileEngine/biz/dal/db/model"
 )
 
-func recvEvent(t *testing.T, s *Subscriber) SessionEvent {
+func recvEvent(t *testing.T, s *Subscriber) model.SessionEvent {
 	t.Helper()
 	select {
 	case ev := <-s.C:
@@ -16,7 +18,7 @@ func recvEvent(t *testing.T, s *Subscriber) SessionEvent {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
 	}
-	return SessionEvent{}
+	return model.SessionEvent{}
 }
 
 func TestEmitPersistsAndBroadcastsInSeqOrder(t *testing.T) {

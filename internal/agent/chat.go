@@ -12,6 +12,7 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
@@ -20,7 +21,7 @@ import (
 
 var newChatModel = modelfactory.NewChatModelFromProvider
 
-func SetModelFactory(f func(context.Context, *db.ModelProvider) (einomodel.ChatModel, error)) (restore func()) {
+func SetModelFactory(f func(context.Context, *model.ModelProvider) (einomodel.ChatModel, error)) (restore func()) {
 	old := newChatModel
 	newChatModel = f
 	return func() { newChatModel = old }
@@ -35,7 +36,7 @@ type mainRunSpec struct {
 	shared SharedContext
 	// current is the categories the model has been told about (the snapshot
 	// plus any delta); it primes the create_category version guard.
-	current []db.Category
+	current []model.Category
 	// messages follow the shared-context message: history, then this run's
 	// own input last.
 	messages []*schema.Message
@@ -106,7 +107,7 @@ const (
 // The output for a history is a prefix of the output for that history plus
 // later turns, so provider prefix caches keep hitting. A user turn replays
 // the exact message that was sent for it, not the text the user typed.
-func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn, sent map[uint]string) []*schema.Message {
+func chatHistoryMessages(summary *model.ChatTurn, turns []model.ChatTurn, sent map[uint]string) []*schema.Message {
 	var msgs []*schema.Message
 	if summary != nil {
 		msgs = append(msgs, &schema.Message{Role: schema.User, Content: "## 之前对话的摘要\n\n" + summary.Content})
@@ -125,7 +126,7 @@ func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn, sent map[uin
 	return msgs
 }
 
-func (a *Agent) sentMessages(turns []db.ChatTurn) (map[uint]string, error) {
+func (a *Agent) sentMessages(turns []model.ChatTurn) (map[uint]string, error) {
 	var ids []uint
 	for _, t := range turns {
 		if t.Role == db.ChatRoleUser {
@@ -136,7 +137,7 @@ func (a *Agent) sentMessages(turns []db.ChatTurn) (map[uint]string, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var rows []db.ChatTurn
+	var rows []model.ChatTurn
 	if err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through IN ?", a.sessionID, chatRoleSent, ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -149,12 +150,12 @@ func (a *Agent) sentMessages(turns []db.ChatTurn) (map[uint]string, error) {
 // chatEpochSnapshot is the shared context the epoch opened with. It is stored
 // so every turn of the epoch renders byte-identical message 0, however much
 // the plan, categories or memory changed since.
-func (a *Agent) chatEpochSnapshot(summary *db.ChatTurn) (SharedContext, error) {
+func (a *Agent) chatEpochSnapshot(summary *model.ChatTurn) (SharedContext, error) {
 	var epoch uint
 	if summary != nil {
 		epoch = summary.ID
 	}
-	var row db.ChatTurn
+	var row model.ChatTurn
 	err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through = ?", a.sessionID, chatRoleSnapshot, epoch).Order("id DESC").Take(&row).Error
 	if err == nil {
 		var c SharedContext
@@ -180,13 +181,13 @@ func (a *Agent) chatEpochSnapshot(summary *db.ChatTurn) (SharedContext, error) {
 	if err != nil {
 		return c, err
 	}
-	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, Role: chatRoleSnapshot, Content: string(raw), CoversThrough: epoch}); err != nil {
+	if err := a.repo.AddChatTurn(&model.ChatTurn{SessionID: a.sessionID, Role: chatRoleSnapshot, Content: string(raw), CoversThrough: epoch}); err != nil {
 		return c, err
 	}
 	return c, nil
 }
 
-func turnsTokens(turns []db.ChatTurn) int64 {
+func turnsTokens(turns []model.ChatTurn) int64 {
 	var n int64
 	for _, t := range turns {
 		n += estimateTokens(t.Content)
@@ -194,11 +195,11 @@ func turnsTokens(turns []db.ChatTurn) int64 {
 	return n
 }
 
-type chatSummarizer func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error)
+type chatSummarizer func(ctx context.Context, prev string, turns []model.ChatTurn) (string, error)
 
 // Folding happens once past chatHistoryBudget, so later turns again share a
 // stable prefix.
-func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, runID uint, summary *db.ChatTurn, turns []db.ChatTurn, summarize chatSummarizer) (*db.ChatTurn, []db.ChatTurn, error) {
+func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, runID uint, summary *model.ChatTurn, turns []model.ChatTurn, summarize chatSummarizer) (*model.ChatTurn, []model.ChatTurn, error) {
 	if len(turns) <= chatKeepTurns || turnsTokens(turns) <= chatHistoryBudget {
 		return summary, turns, nil
 	}
@@ -211,7 +212,7 @@ func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, run
 	if err != nil {
 		return nil, nil, fmt.Errorf("summarize chat history: %w", err)
 	}
-	s := &db.ChatTurn{SessionID: sessionID, RunID: runID, Role: db.ChatRoleSummary, Content: strings.TrimSpace(text), CoversThrough: fold[len(fold)-1].ID}
+	s := &model.ChatTurn{SessionID: sessionID, RunID: runID, Role: db.ChatRoleSummary, Content: strings.TrimSpace(text), CoversThrough: fold[len(fold)-1].ID}
 	if err := repo.AddChatTurn(s); err != nil {
 		return nil, nil, err
 	}
@@ -219,7 +220,7 @@ func compactChatHistory(ctx context.Context, repo *db.Repository, sessionID, run
 }
 
 func modelChatSummarizer(m einomodel.BaseChatModel) chatSummarizer {
-	return func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error) {
+	return func(ctx context.Context, prev string, turns []model.ChatTurn) (string, error) {
 		var sb strings.Builder
 		if prev != "" {
 			sb.WriteString("## 已有摘要\n\n" + prev + "\n\n")
@@ -243,7 +244,7 @@ func modelChatSummarizer(m einomodel.BaseChatModel) chatSummarizer {
 	}
 }
 
-func renderSelectedFiles(files []db.FileEntry) string {
+func renderSelectedFiles(files []model.FileEntry) string {
 	if len(files) == 0 {
 		return ""
 	}
@@ -270,8 +271,8 @@ func renderSelectedFiles(files []db.FileEntry) string {
 	return sb.String() + "\n"
 }
 
-func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, files []db.FileEntry) (string, error) {
-	user := &db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: db.ChatRoleUser, Content: content}
+func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, files []model.FileEntry) (string, error) {
+	user := &model.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: db.ChatRoleUser, Content: content}
 	if err := a.repo.AddChatTurn(user); err != nil {
 		return "", err
 	}
@@ -310,7 +311,7 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 		}
 	}
 	sentText := delta + renderSelectedFiles(files) + content
-	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: chatRoleSent, Content: sentText, CoversThrough: user.ID}); err != nil {
+	if err := a.repo.AddChatTurn(&model.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: chatRoleSent, Content: sentText, CoversThrough: user.ID}); err != nil {
 		return "", err
 	}
 	msgs := chatHistoryMessages(summary, turns, sent)
@@ -323,14 +324,14 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 	if answer == "" {
 		answer = "（助手没有给出回复）"
 	}
-	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: db.ChatRoleAssistant, Content: answer}); err != nil {
+	if err := a.repo.AddChatTurn(&model.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: db.ChatRoleAssistant, Content: answer}); err != nil {
 		return "", err
 	}
 	return answer, nil
 }
 
 func (a *Agent) chatSummarizer(logger *Logger) chatSummarizer {
-	return func(ctx context.Context, prev string, turns []db.ChatTurn) (string, error) {
+	return func(ctx context.Context, prev string, turns []model.ChatTurn) (string, error) {
 		p, err := modelfactory.ResolveBulkProvider(a.repo, a.session, a.modelProvider)
 		if err != nil {
 			return "", err

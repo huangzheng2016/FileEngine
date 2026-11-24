@@ -11,6 +11,7 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -61,12 +62,12 @@ func toolCall(id, name string, args any) schema.ToolCall {
 	return schema.ToolCall{Index: &idx, ID: id, Type: "function", Function: schema.FunctionCall{Name: name, Arguments: string(b)}}
 }
 
-func brainAgent(t *testing.T, model *fakeModel) (*db.Repository, *Agent, *db.ScanSession) {
+func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
 	old := config.Get()
 	config.Update(&config.Config{Agent: config.AgentConfig{MaxStep: 20, ChatMaxStep: 20, MaxRetries: 1}})
-	restore := SetModelFactory(func(context.Context, *db.ModelProvider) (einomodel.ChatModel, error) { return model, nil })
+	restore := SetModelFactory(func(context.Context, *model.ModelProvider) (einomodel.ChatModel, error) { return fm, nil })
 	fsRoot := t.TempDir()
 	if err := remotefs.SetLocalPolicy(remotefs.LocalPolicy{Roots: []string{fsRoot}}); err != nil {
 		t.Fatal(err)
@@ -78,16 +79,16 @@ func brainAgent(t *testing.T, model *fakeModel) (*db.Repository, *Agent, *db.Sca
 			config.Update(old)
 		}
 	})
-	session := &db.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理"}
+	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
-	provider := &db.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
+	provider := &model.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
 	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session)
 	return repo, a, session
 }
 
-func seedEntry(t *testing.T, repo *db.Repository, e db.FileEntry) {
+func seedEntry(t *testing.T, repo *db.Repository, e model.FileEntry) {
 	t.Helper()
 	if e.Name == "" {
 		e.Name = e.OriginalPath[strings.LastIndex(e.OriginalPath, "/")+1:]
@@ -97,7 +98,7 @@ func seedEntry(t *testing.T, repo *db.Repository, e db.FileEntry) {
 	}
 }
 
-func historyBytes(t *testing.T, summary *db.ChatTurn, turns []db.ChatTurn) string {
+func historyBytes(t *testing.T, summary *model.ChatTurn, turns []model.ChatTurn) string {
 	t.Helper()
 	b, err := json.Marshal(chatHistoryMessages(summary, turns, nil))
 	if err != nil {
@@ -109,12 +110,12 @@ func historyBytes(t *testing.T, summary *db.ChatTurn, turns []db.ChatTurn) strin
 func TestChatHistoryAppendOnly(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	folds := 0
-	summarize := func(_ context.Context, prev string, turns []db.ChatTurn) (string, error) {
+	summarize := func(_ context.Context, prev string, turns []model.ChatTurn) (string, error) {
 		folds++
 		return fmt.Sprintf("摘要%d（%d 轮，之前：%s）", folds, len(turns), prev), nil
 	}
 	add := func(role, content string) {
-		if err := repo.AddChatTurn(&db.ChatTurn{SessionID: 1, Role: role, Content: content}); err != nil {
+		if err := repo.AddChatTurn(&model.ChatTurn{SessionID: 1, Role: role, Content: content}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -155,7 +156,7 @@ func TestChatHistoryAppendOnly(t *testing.T) {
 		t.Fatalf("folds must not happen on consecutive turns: %v", foldsAt)
 	}
 	var n int64
-	repo.DB().Model(&db.ChatTurn{}).Where("role = ?", db.ChatRoleSummary).Count(&n)
+	repo.DB().Model(&model.ChatTurn{}).Where("role = ?", db.ChatRoleSummary).Count(&n)
 	if int(n) != len(foldsAt) {
 		t.Fatalf("summary turns = %d, folds = %d", n, len(foldsAt))
 	}
@@ -168,13 +169,13 @@ func TestChatHistoryAppendOnly(t *testing.T) {
 }
 
 func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
-	model := &fakeModel{steps: []fakeStep{
+	fm := &fakeModel{steps: []fakeStep{
 		{text: "你想按年还是按月？"},
 		{calls: []schema.ToolCall{toolCall("c1", "remember", map[string]string{"scope": "global", "kind": "preference", "key": "pref:photo-by-year", "content": "照片按年份放"})}},
 		{text: "好的，已记住。"},
 	}}
-	repo, a, session := brainAgent(t, model)
-	seedEntry(t, repo, db.FileEntry{ScanSessionID: session.ID, OriginalPath: "a.jpg", FileType: "file", ParentPath: ".", Size: 2048})
+	repo, a, session := brainAgent(t, fm)
+	seedEntry(t, repo, model.FileEntry{ScanSessionID: session.ID, OriginalPath: "a.jpg", FileType: "file", ParentPath: ".", Size: 2048})
 	files, _, _ := repo.ListFiles(db.FileQuery{SessionID: session.ID})
 
 	ctx := context.Background()
@@ -201,7 +202,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 		t.Fatal("turns carry their run id")
 	}
 
-	in1 := model.streamed[0]
+	in1 := fm.streamed[0]
 	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent) {
 		t.Fatal("system prompt first and static")
 	}
@@ -212,7 +213,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	if !strings.Contains(last.Content, "a.jpg") || !strings.HasSuffix(last.Content, "帮我整理照片") {
 		t.Fatalf("selected files then the message last: %q", last.Content)
 	}
-	in2 := model.streamed[1]
+	in2 := fm.streamed[1]
 	if in2[1].Content != in1[1].Content {
 		t.Fatal("shared context must be byte-identical across turns")
 	}
@@ -230,11 +231,11 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 
 func TestComputeTreeOverview(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	s := &db.ScanSession{FilesystemID: 1, RootPath: "data"}
+	s := &model.ScanSession{FilesystemID: 1, RootPath: "data"}
 	if err := repo.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range []db.FileEntry{
+	for _, e := range []model.FileEntry{
 		{OriginalPath: "data/Photos", FileType: "directory"},
 		{OriginalPath: "data/Photos/2020", FileType: "directory"},
 		{OriginalPath: "data/Photos/2020/a.JPG", FileType: "file", Size: 1000},
@@ -274,12 +275,12 @@ func TestComputeTreeOverview(t *testing.T) {
 }
 
 func TestRunSurveyWritesPlan(t *testing.T) {
-	model := &fakeModel{steps: []fakeStep{
+	fm := &fakeModel{steps: []fakeStep{
 		{calls: []schema.ToolCall{toolCall("c1", "write_plan", map[string]string{"content": "## 目标理解\n照片按年"})}},
 		{text: "方案已写好"},
 	}}
-	repo, a, session := brainAgent(t, model)
-	seedEntry(t, repo, db.FileEntry{ScanSessionID: session.ID, OriginalPath: "Photos/a.jpg", FileType: "file"})
+	repo, a, session := brainAgent(t, fm)
+	seedEntry(t, repo, model.FileEntry{ScanSessionID: session.ID, OriginalPath: "Photos/a.jpg", FileType: "file"})
 	sum, err := a.RunSurvey(context.Background(), NewLogger(session.ID, 3, 0), "按年")
 	if err != nil || sum != "方案已写好" {
 		t.Fatalf("survey: %q %v", sum, err)
@@ -288,13 +289,13 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 	if plan.Version != 1 || plan.Status != db.PlanDraft {
 		t.Fatalf("plan: %+v", plan)
 	}
-	in := model.streamed[0]
+	in := fm.streamed[0]
 	user := in[len(in)-1].Content
 	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent) {
 		t.Fatalf("survey input: %q", user)
 	}
 
-	model.steps = []fakeStep{{text: "我看完了"}}
+	fm.steps = []fakeStep{{text: "我看完了"}}
 	if _, err := a.RunSurvey(context.Background(), NewLogger(session.ID, 4, 0), ""); err != errNoPlanWritten {
 		t.Fatalf("no plan written: %v", err)
 	}
@@ -302,7 +303,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 
 func TestBuildReviewMaterial(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	s := &db.ScanSession{FilesystemID: 1, RootPath: "."}
+	s := &model.ScanSession{FilesystemID: 1, RootPath: "."}
 	if err := repo.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +311,7 @@ func TestBuildReviewMaterial(t *testing.T) {
 	seedCategory(t, repo, 1, "图片", "/照片/图片")
 	seedCategory(t, repo, 1, "文档", "/文档")
 	seedCategory(t, repo, 1, "空分类", "/空")
-	for _, e := range []db.FileEntry{
+	for _, e := range []model.FileEntry{
 		{OriginalPath: "mix/a.jpg", NewPath: "/照片/a.jpg", Reason: "照片"},
 		{OriginalPath: "mix/b.png", NewPath: "/照片/图片/b.png"},
 		{OriginalPath: "mix/c.pdf", NewPath: "/文档/c.pdf"},
@@ -320,7 +321,7 @@ func TestBuildReviewMaterial(t *testing.T) {
 		e.ScanSessionID, e.FileType, e.ParentPath = s.ID, "file", "mix"
 		seedEntry(t, repo, e)
 	}
-	tagging := &db.AgentRun{Summary: "# 报告\n\n## 分类统计\n- x\n\n## 失败批次（1）\n\n- 批次 3（mix）: boom\n"}
+	tagging := &model.AgentRun{Summary: "# 报告\n\n## 分类统计\n- x\n\n## 失败批次（1）\n\n- 批次 3（mix）: boom\n"}
 	out, err := BuildReviewMaterial(repo, s, tagging)
 	if err != nil {
 		t.Fatal(err)
@@ -345,27 +346,27 @@ func TestBuildReviewMaterial(t *testing.T) {
 
 func TestRunReviewSummaryAndReflection(t *testing.T) {
 	report := "## 做了什么\n修正 1 项\n\n## 不确定的地方\n无\n\n## 需要你确认的问题\n无"
-	model := &fakeModel{
+	fm := &fakeModel{
 		steps: []fakeStep{{text: report}},
 		gens:  []string{"```json\n{\"ops\":[{\"op\":\"ADD\",\"kind\":\"convention\",\"key\":\"path:mix\",\"content\":\"mix 是下载目录\"},{\"op\":\"NOOP\"}]}\n```"},
 	}
-	repo, a, session := brainAgent(t, model)
-	seedEntry(t, repo, db.FileEntry{ScanSessionID: session.ID, OriginalPath: "mix/a.jpg", FileType: "file", NewPath: "/照片/a.jpg"})
-	if _, err := repo.UpsertMemory(&db.MemoryItem{Scope: db.MemoryScopeSession, ScopeID: session.ID, Kind: db.MemoryNote, Key: "note:1", Content: "mix 是浏览器下载目录", Source: db.MemorySourceAgent}); err != nil {
+	repo, a, session := brainAgent(t, fm)
+	seedEntry(t, repo, model.FileEntry{ScanSessionID: session.ID, OriginalPath: "mix/a.jpg", FileType: "file", NewPath: "/照片/a.jpg"})
+	if _, err := repo.UpsertMemory(&model.MemoryItem{Scope: db.MemoryScopeSession, ScopeID: session.ID, Kind: db.MemoryNote, Key: "note:1", Content: "mix 是浏览器下载目录", Source: db.MemorySourceAgent}); err != nil {
 		t.Fatal(err)
 	}
-	sum, err := a.RunReview(context.Background(), NewLogger(session.ID, 9, 0), &db.AgentRun{ID: 5})
+	sum, err := a.RunReview(context.Background(), NewLogger(session.ID, 9, 0), &model.AgentRun{ID: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(sum, report) || !strings.Contains(sum, "记忆已更新：新增 1 条") {
 		t.Fatalf("summary: %q", sum)
 	}
-	if in := model.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
+	if in := fm.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
 		t.Fatal("review input: static prompt + material")
 	}
-	if len(model.genned) != 1 || !strings.Contains(model.genned[0][1].Content, "mix 是浏览器下载目录") {
-		t.Fatalf("reflection sees session notes: %+v", model.genned)
+	if len(fm.genned) != 1 || !strings.Contains(fm.genned[0][1].Content, "mix 是浏览器下载目录") {
+		t.Fatalf("reflection sees session notes: %+v", fm.genned)
 	}
 	mem, _ := repo.ListLongTermMemory(1)
 	if len(mem) != 1 || mem[0].Key != "path:mix" || mem[0].Source != db.MemorySourceReflection {
@@ -374,10 +375,10 @@ func TestRunReviewSummaryAndReflection(t *testing.T) {
 }
 
 func TestReflectionSkippedWithoutMaterial(t *testing.T) {
-	model := &fakeModel{}
-	_, a, session := brainAgent(t, model)
-	res, err := a.Reflect(context.Background(), NewLogger(session.ID, 1, 0), &db.AgentRun{Summary: "# 报告\n"})
-	if err != nil || res.Added+res.Updated+res.Deleted != 0 || len(model.genned) != 0 {
+	fm := &fakeModel{}
+	_, a, session := brainAgent(t, fm)
+	res, err := a.Reflect(context.Background(), NewLogger(session.ID, 1, 0), &model.AgentRun{Summary: "# 报告\n"})
+	if err != nil || res.Added+res.Updated+res.Deleted != 0 || len(fm.genned) != 0 {
 		t.Fatalf("nothing to reflect on must skip the model call: %+v %v", res, err)
 	}
 }

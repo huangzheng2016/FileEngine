@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
@@ -20,10 +22,10 @@ import (
 
 func resetSchema(t *testing.T) {
 	t.Helper()
-	if err := DB.Migrator().DropTable(allModels...); err != nil {
+	if err := dal.DB().Migrator().DropTable(model.All()...); err != nil {
 		t.Fatalf("drop tables: %v", err)
 	}
-	if err := migrate(DB); err != nil {
+	if err := dal.Migrate(dal.DB()); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }
@@ -34,31 +36,31 @@ func TestMySQLDialectSemantics(t *testing.T) {
 		t.Skip("FILEENGINE_TEST_MYSQL_DSN not set — skipping MySQL integration test")
 	}
 	cfg := config.DatabaseConfig{Driver: "mysql", DSN: dsn}
-	if err := Init(cfg); err != nil {
+	if err := Open(cfg); err != nil {
 		t.Fatalf("init mysql: %v", err)
 	}
 	resetSchema(t)
-	if err := Init(cfg); err != nil {
+	if err := Open(cfg); err != nil {
 		t.Fatalf("re-init mysql: %v", err)
 	}
-	checkPathSemantics(t, NewRepository(DB))
+	checkPathSemantics(t, NewRepository(dal.DB()))
 }
 
 func TestPostgresPathSemantics(t *testing.T) {
 	cfg := config.DatabaseConfig{Driver: "postgres", DSN: postgresTestDSN(t)}
-	if err := Init(cfg); err != nil {
+	if err := Open(cfg); err != nil {
 		t.Fatalf("init postgres: %v", err)
 	}
 	resetSchema(t)
-	if err := Init(cfg); err != nil {
+	if err := Open(cfg); err != nil {
 		t.Fatalf("re-init postgres: %v", err)
 	}
 	var coll string
-	if err := DB.Raw(`SELECT collation_name FROM information_schema.columns
+	if err := dal.DB().Raw(`SELECT collation_name FROM information_schema.columns
 		WHERE table_schema = current_schema() AND table_name = 'file_entries' AND column_name = 'original_path'`).Scan(&coll).Error; err != nil || coll != "C" {
 		t.Fatalf("original_path collation: %q %v", coll, err)
 	}
-	checkPathSemantics(t, NewRepository(DB))
+	checkPathSemantics(t, NewRepository(dal.DB()))
 }
 
 func TestSQLitePathSemantics(t *testing.T) {
@@ -67,11 +69,11 @@ func TestSQLitePathSemantics(t *testing.T) {
 
 func checkPathSemantics(t *testing.T, r *Repository) {
 	t.Helper()
-	fs := &Filesystem{Name: "fs", Protocol: "local"}
+	fs := &model.Filesystem{Name: "fs", Protocol: "local"}
 	if err := r.CreateFilesystem(fs); err != nil {
 		t.Fatal(err)
 	}
-	s := &ScanSession{FilesystemID: fs.ID, Status: "scanned"}
+	s := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := r.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +114,11 @@ func checkPathSemantics(t *testing.T, r *Repository) {
 		t.Fatal(err)
 	}
 
-	cat := &Category{FilesystemID: fs.ID, Name: "照片", Path: "/Photo"}
+	cat := &model.Category{FilesystemID: fs.ID, Name: "照片", Path: "/Photo"}
 	if err := r.CreateCategory(cat); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CreateCategory(&Category{FilesystemID: fs.ID, Name: "照片2", Path: "/Photos2"}); err != nil {
+	if err := r.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: "照片2", Path: "/Photos2"}); err != nil {
 		t.Fatal(err)
 	}
 	cat.Path = "/图片"

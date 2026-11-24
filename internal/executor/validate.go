@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
@@ -21,7 +22,7 @@ func (e *Executor) Validate(ctx context.Context, sessionID uint, opts Options) (
 	return res, nil
 }
 
-func (e *Executor) plan(ctx context.Context, opts Options, res *Result) ([]db.FileEntry, error) {
+func (e *Executor) plan(ctx context.Context, opts Options, res *Result) ([]model.FileEntry, error) {
 	all, err := e.repo.ListPlannedEntries(e.sessionID)
 	if err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func (e *Executor) plan(ctx context.Context, opts Options, res *Result) ([]db.Fi
 	}
 
 	scope := cleanPath(opts.CategoryPath)
-	var ok []db.FileEntry
+	var ok []model.FileEntry
 	for i := range all {
 		f := &all[i]
 		dst := cleanPath(f.NewPath)
@@ -71,7 +72,7 @@ func (e *Executor) plan(ctx context.Context, opts Options, res *Result) ([]db.Fi
 	return ok, ctx.Err()
 }
 
-func staticIssue(f *db.FileEntry, decided map[string]bool, firstByKey map[string]uint) (string, string) {
+func staticIssue(f *model.FileEntry, decided map[string]bool, firstByKey map[string]uint) (string, string) {
 	if err := validTarget(f.NewPath); err != nil {
 		return IssueInvalidTarget, err.Error()
 	}
@@ -94,7 +95,7 @@ func staticIssue(f *db.FileEntry, decided map[string]bool, firstByKey map[string
 	return "", ""
 }
 
-func (e *Executor) checkFS(ctx context.Context, entries []db.FileEntry, res *Result) []db.FileEntry {
+func (e *Executor) checkFS(ctx context.Context, entries []model.FileEntry, res *Result) []model.FileEntry {
 	if len(entries) == 0 {
 		return entries
 	}
@@ -121,7 +122,7 @@ func (e *Executor) checkFS(ctx context.Context, entries []db.FileEntry, res *Res
 		byName[d], byKey[d] = names, keys
 	}
 
-	var out []db.FileEntry
+	var out []model.FileEntry
 	for i := range entries {
 		f := &entries[i]
 		src, dst := cleanPath(f.OriginalPath), cleanPath(f.NewPath)

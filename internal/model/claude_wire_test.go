@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"FileEngine/internal/db"
+	"FileEngine/biz/dal/db/model"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	claude "github.com/cloudwego/eino-ext/components/model/claude"
@@ -74,7 +74,7 @@ func apiError(w http.ResponseWriter, status int, typ string, header map[string]s
 	fmt.Fprintf(w, `{"type":"error","error":{"type":%q,"message":"x"}}`, typ)
 }
 
-func newTestClaude(t *testing.T, f *fakeAnthropic, p db.ModelProvider) *claudeModel {
+func newTestClaude(t *testing.T, f *fakeAnthropic, p model.ModelProvider) *claudeModel {
 	p.Provider, p.APIKey, p.BaseURL = "claude", "k", f.URL
 	if p.Model == "" {
 		p.Model = "claude-opus-5-5"
@@ -99,7 +99,7 @@ func TestClaudeBreakpointKeyMatchesEino(t *testing.T) {
 
 func TestClaudeGenerateStreamsWithoutMaxTokens(t *testing.T) {
 	f := newFakeAnthropic(t, func(_ int, w http.ResponseWriter) { sseText(w, "hello world") })
-	m := newTestClaude(t, f, db.ModelProvider{})
+	m := newTestClaude(t, f, model.ModelProvider{})
 	msg, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestClaudeDefaultMaxTokens(t *testing.T) {
 // (explicit) and the last message.
 func TestClaudeFourBreakpoints(t *testing.T) {
 	f := newFakeAnthropic(t, func(_ int, w http.ResponseWriter) { sseText(w, "ok") })
-	m := newTestClaude(t, f, db.ModelProvider{ThinkingEnabled: true, ReasoningEffort: "high"})
+	m := newTestClaude(t, f, model.ModelProvider{ThinkingEnabled: true, ReasoningEffort: "high"})
 	if err := m.BindTools([]*schema.ToolInfo{{Name: "t1", Desc: "d"}, {Name: "t2", Desc: "d"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestTailBreakpointNeverExceedsLimit(t *testing.T) {
 // that appends to the history keeps the earlier messages byte for byte.
 func TestClaudeThinkingConstantAndPrefixStable(t *testing.T) {
 	f := newFakeAnthropic(t, func(_ int, w http.ResponseWriter) { sseText(w, "ok") })
-	m := newTestClaude(t, f, db.ModelProvider{ThinkingEnabled: true, ReasoningEffort: "medium"})
+	m := newTestClaude(t, f, model.ModelProvider{ThinkingEnabled: true, ReasoningEffort: "medium"})
 	m.BindTools([]*schema.ToolInfo{{Name: "t1", Desc: "d"}})
 	asst, tool := toolRound()
 	base := []*schema.Message{schema.SystemMessage("SYS"), MarkCacheBreakpoint(schema.UserMessage("SHARED")), schema.UserMessage("UNIT")}
@@ -247,11 +247,11 @@ func TestClaudeThinkingConstantAndPrefixStable(t *testing.T) {
 }
 
 func TestClaudeEffortIndependentOfThinkingToggle(t *testing.T) {
-	cfg := claudeConfig(&db.ModelProvider{Model: "claude-opus-5-5", ReasoningEffort: "low"})
+	cfg := claudeConfig(&model.ModelProvider{Model: "claude-opus-5-5", ReasoningEffort: "low"})
 	if cfg.ThinkingConfig != nil || cfg.AdditionalRequestFields["output_config"].(map[string]any)["effort"] != "low" {
 		t.Fatalf("%+v", cfg)
 	}
-	if legacy := claudeConfig(&db.ModelProvider{Model: "claude-sonnet-4-5", ReasoningEffort: "low"}); legacy.AdditionalRequestFields != nil {
+	if legacy := claudeConfig(&model.ModelProvider{Model: "claude-sonnet-4-5", ReasoningEffort: "low"}); legacy.AdditionalRequestFields != nil {
 		t.Fatal("effort must not be sent to models that lack it")
 	}
 }
@@ -278,7 +278,7 @@ func TestClaudeSDKDoesNotRetry(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeAnthropic(t, c.handler)
-			m := newTestClaude(t, f, db.ModelProvider{})
+			m := newTestClaude(t, f, model.ModelProvider{})
 			ctx, hints := WithResponseHints(context.Background())
 			_, err := m.Generate(ctx, []*schema.Message{schema.UserMessage("hi")})
 			var ae *anthropic.Error
@@ -312,7 +312,7 @@ func TestClaudeConnectionErrorIsNotRetriedBySDK(t *testing.T) {
 		conn.Close()
 	}))
 	defer srv.Close()
-	m, err := NewChatModelFromProvider(context.Background(), &db.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: srv.URL})
+	m, err := NewChatModelFromProvider(context.Background(), &model.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestOpenAIPromptCacheKey(t *testing.T) {
 	defer srv.Close()
 
 	for _, provider := range []string{"openai", "ollama"} {
-		p := &db.ModelProvider{Provider: provider, Model: "m", APIKey: "k", BaseURL: srv.URL + "/v1"}
+		p := &model.ModelProvider{Provider: provider, Model: "m", APIKey: "k", BaseURL: srv.URL + "/v1"}
 		m, err := NewChatModelFromProvider(context.Background(), p)
 		if err != nil {
 			t.Fatal(err)

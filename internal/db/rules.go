@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
@@ -21,7 +24,7 @@ var ruleVars = map[string]bool{
 	"parent": true, "rel": true, "taken_year": true, "taken_month": true, "camera": true,
 }
 
-func NormalizeRule(rule *PlanRule) error {
+func NormalizeRule(rule *model.PlanRule) error {
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.Target = strings.TrimSpace(rule.Target)
 	rule.PathPrefix = strings.Trim(strings.TrimSpace(rule.PathPrefix), "/")
@@ -69,14 +72,14 @@ func NormalizeRule(rule *PlanRule) error {
 	return nil
 }
 
-func (r *Repository) ListRules(sessionID uint) ([]PlanRule, error) {
-	var rules []PlanRule
+func (r *Repository) ListRules(sessionID uint) ([]model.PlanRule, error) {
+	var rules []model.PlanRule
 	err := r.db.Where("session_id = ?", sessionID).Order("position, id").Find(&rules).Error
 	return rules, err
 }
 
-func (r *Repository) GetRule(id uint) (*PlanRule, error) {
-	var rule PlanRule
+func (r *Repository) GetRule(id uint) (*model.PlanRule, error) {
+	var rule model.PlanRule
 	if err := r.db.Take(&rule, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrRuleNotFound
@@ -86,16 +89,16 @@ func (r *Repository) GetRule(id uint) (*PlanRule, error) {
 	return &rule, nil
 }
 
-func (r *Repository) CreateRule(rule *PlanRule) error {
+func (r *Repository) CreateRule(rule *model.PlanRule) error {
 	if err := NormalizeRule(rule); err != nil {
 		return err
 	}
 	rule.ID, rule.Matched = 0, 0
-	return WithRetry(func() error {
+	return duplicateRuleName(rule, dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			if rule.Position <= 0 {
 				var maxPos *int
-				if err := tx.Model(&PlanRule{}).Where("session_id = ?", rule.SessionID).Select("MAX(position)").Scan(&maxPos).Error; err != nil {
+				if err := tx.Model(&model.PlanRule{}).Where("session_id = ?", rule.SessionID).Select("MAX(position)").Scan(&maxPos).Error; err != nil {
 					return err
 				}
 				rule.Position = 1
@@ -105,10 +108,18 @@ func (r *Repository) CreateRule(rule *PlanRule) error {
 			}
 			return tx.Create(rule).Error
 		})
-	})
+	}))
 }
 
-func (r *Repository) UpdateRule(id uint, apply func(*PlanRule)) (*PlanRule, error) {
+// The unique (session_id, name) index is the backstop for concurrent creators.
+func duplicateRuleName(rule *model.PlanRule, err error) error {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return reject("已有同名规则「%s」", rule.Name)
+	}
+	return err
+}
+
+func (r *Repository) UpdateRule(id uint, apply func(*model.PlanRule)) (*model.PlanRule, error) {
 	rule, err := r.GetRule(id)
 	if err != nil {
 		return nil, err
@@ -119,18 +130,18 @@ func (r *Repository) UpdateRule(id uint, apply func(*PlanRule)) (*PlanRule, erro
 		return nil, err
 	}
 	rule.UpdatedAt = time.Now()
-	if err := r.db.Model(&PlanRule{}).Where("id = ?", id).Updates(map[string]any{
+	if err := r.db.Model(&model.PlanRule{}).Where("id = ?", id).Updates(map[string]any{
 		"position": rule.Position, "name": rule.Name, "exts": rule.Exts, "name_regex": rule.NameRegex,
 		"path_prefix": rule.PathPrefix, "file_type": rule.FileType, "min_size": rule.MinSize, "max_size": rule.MaxSize,
 		"target": rule.Target, "role": rule.Role, "updated_at": rule.UpdatedAt,
 	}).Error; err != nil {
-		return nil, err
+		return nil, duplicateRuleName(rule, err)
 	}
 	return rule, nil
 }
 
 func (r *Repository) DeleteRule(id uint) error {
-	res := r.db.Delete(&PlanRule{}, id)
+	res := r.db.Delete(&model.PlanRule{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -141,13 +152,13 @@ func (r *Repository) DeleteRule(id uint) error {
 }
 
 type ruleMatcher struct {
-	rule  *PlanRule
+	rule  *model.PlanRule
 	exts  map[string]bool
 	re    *regexp.Regexp
 	named bool // target references the entry's own name
 }
 
-func compileRule(rule *PlanRule) (*ruleMatcher, error) {
+func compileRule(rule *model.PlanRule) (*ruleMatcher, error) {
 	if err := NormalizeRule(rule); err != nil {
 		return nil, err
 	}
@@ -159,7 +170,7 @@ func compileRule(rule *PlanRule) (*ruleMatcher, error) {
 	return m, nil
 }
 
-func (m *ruleMatcher) match(e *FileEntry) bool {
+func (m *ruleMatcher) match(e *model.FileEntry) bool {
 	r := m.rule
 	if r.FileType != "" && e.FileType != r.FileType {
 		return false
@@ -195,7 +206,7 @@ func pathSafe(s, fallback string) string {
 
 // A template that never names the entry ({name} {stem} {rel}) is a
 // directory: the entry's name is appended.
-func RenderRuleTarget(rule *PlanRule, e *FileEntry) (string, error) {
+func RenderRuleTarget(rule *model.PlanRule, e *model.FileEntry) (string, error) {
 	when := e.ModTime
 	if e.TakenAt != nil {
 		when = *e.TakenAt
@@ -247,17 +258,17 @@ type RuleApplyStat struct {
 	Samples []RuleSample `json:"samples,omitempty"`
 }
 
-func (r *Repository) ruleCandidates(sessionID uint, rule *PlanRule, fn func([]FileEntry) error) error {
+func (r *Repository) ruleCandidates(sessionID uint, rule *model.PlanRule, fn func([]model.FileEntry) error) error {
 	var after uint
 	for {
-		q := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND role = ? AND id > ?", sessionID, RoleUndecided, after)
+		q := r.db.Model(&model.FileEntry{}).Where("scan_session_id = ? AND role = ? AND id > ?", sessionID, RoleUndecided, after)
 		if rule.FileType != "" {
 			q = q.Where("file_type = ?", rule.FileType)
 		} else {
 			q = q.Where("file_type <> 'symlink'")
 		}
 		if rule.PathPrefix != "" {
-			cond, args := subtreeCond(q, "original_path", rule.PathPrefix)
+			cond, args := dal.SubtreeCond(q, "original_path", rule.PathPrefix)
 			q = q.Where(cond, args...)
 		}
 		if rule.MinSize > 0 {
@@ -270,12 +281,12 @@ func (r *Repository) ruleCandidates(sessionID uint, rule *PlanRule, fn func([]Fi
 			var conds []string
 			var args []any
 			for _, e := range strings.Split(rule.Exts, ",") {
-				conds = append(conds, ciLikeCondition(q, "name"))
-				args = append(args, "%."+likeLiteral(e))
+				conds = append(conds, dal.CILikeCondition(q, "name"))
+				args = append(args, "%."+dal.LikeLiteral(e))
 			}
 			q = q.Where("("+strings.Join(conds, " OR ")+")", args...)
 		}
-		var rows []FileEntry
+		var rows []model.FileEntry
 		if err := q.Order("id").Limit(5000).Find(&rows).Error; err != nil {
 			return err
 		}
@@ -310,7 +321,7 @@ func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]Ru
 		}
 		stat := RuleApplyStat{RuleID: rule.ID, Name: rule.Name}
 		var decisions []Decision
-		err = r.ruleCandidates(sessionID, rule, func(rows []FileEntry) error {
+		err = r.ruleCandidates(sessionID, rule, func(rows []model.FileEntry) error {
 			for j := range rows {
 				e := &rows[j]
 				if claimed[e.ID] || !m.match(e) {
@@ -356,7 +367,7 @@ func (r *Repository) ApplyRules(sessionID uint, ruleID uint, preview bool) ([]Ru
 					}
 				}
 			}
-			if err := r.db.Model(&PlanRule{}).Where("id = ?", rule.ID).Update("matched", stat.Matched).Error; err != nil {
+			if err := r.db.Model(&model.PlanRule{}).Where("id = ?", rule.ID).Update("matched", stat.Matched).Error; err != nil {
 				return nil, err
 			}
 		}

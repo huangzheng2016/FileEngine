@@ -3,6 +3,8 @@ package db
 import (
 	"testing"
 	"time"
+
+	"FileEngine/biz/dal/db/model"
 )
 
 func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
@@ -11,11 +13,11 @@ func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
 	countsDelay = 10 * time.Millisecond
 	defer func() { countsDelay = old }()
 
-	sess := &ScanSession{Status: "scanned"}
+	sess := &model.ScanSession{Status: "scanned"}
 	if err := r.CreateSession(sess); err != nil {
 		t.Fatal(err)
 	}
-	files := []FileEntry{
+	files := []model.FileEntry{
 		{ScanSessionID: sess.ID, OriginalPath: "a", Name: "a", FileType: "file", Operation: "planned", NewPath: "/x/a", NeedsReview: true},
 		{ScanSessionID: sess.ID, OriginalPath: "b", Name: "b", FileType: "file", Operation: "planned", NewPath: "/x/b", NeedsReview: true},
 		{ScanSessionID: sess.ID, OriginalPath: "c", Name: "c", FileType: "file", Operation: "planned", NewPath: "/x/c"},
@@ -57,7 +59,7 @@ drain:
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	var a FileEntry
+	var a model.FileEntry
 	if err := r.DB().Where("scan_session_id = ? AND original_path = ?", sess.ID, "a").First(&a).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +76,7 @@ drain:
 
 func TestLatestRuns(t *testing.T) {
 	r := setupScanProgressRepo(t)
-	a, b := &ScanSession{}, &ScanSession{}
+	a, b := &model.ScanSession{}, &model.ScanSession{}
 	if err := r.CreateSession(a); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -11,7 +12,7 @@ import (
 func setupGuardTest(t *testing.T) (*db.Repository, *ToolBuilder) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{AllowAutoCategory: true}, false)
 	return repo, tb
 }
 
@@ -36,7 +37,7 @@ func primeGuard(t *testing.T, repo *db.Repository, tb *ToolBuilder) {
 
 func mustCreateCategory(t *testing.T, repo *db.Repository, fsID uint, name, path string) {
 	t.Helper()
-	if err := repo.CreateCategory(&db.Category{FilesystemID: fsID, Name: name, Path: path}); err != nil {
+	if err := repo.CreateCategory(&model.Category{FilesystemID: fsID, Name: name, Path: path}); err != nil {
 		t.Fatalf("seed category %s: %v", name, err)
 	}
 }
@@ -72,7 +73,7 @@ func TestCreateCategoryVersionGuard(t *testing.T) {
 
 func TestCreateCategoryRespectsSwitch(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: false}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{AllowAutoCategory: false}, false)
 	primeGuard(t, repo, tb)
 	out := createCat(t, tb, "音乐", "/music")
 	if okOf(out) || !strings.Contains(errText(out), "不能新建分类") {
@@ -191,7 +192,7 @@ func TestCategoryFingerprint(t *testing.T) {
 
 func TestUpdateCategoryClashIsRejection(t *testing.T) {
 	repo, tb := setupGuardTest(t)
-	for _, c := range []*db.Category{{FilesystemID: 7, Name: "照片", Path: "/照片", AgentEditable: true}, {FilesystemID: 7, Name: "相片", Path: "/相片", AgentEditable: true}} {
+	for _, c := range []*model.Category{{FilesystemID: 7, Name: "照片", Path: "/照片", AgentEditable: true}, {FilesystemID: 7, Name: "相片", Path: "/相片", AgentEditable: true}} {
 		if err := repo.CreateCategory(c); err != nil {
 			t.Fatal(err)
 		}

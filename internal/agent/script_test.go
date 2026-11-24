@@ -7,28 +7,29 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 
 	"github.com/cloudwego/eino/components/tool"
 )
 
-func scriptTestBuilder(t *testing.T, session *db.ScanSession) (*ToolBuilder, *db.Repository) {
+func scriptTestBuilder(t *testing.T, session *model.ScanSession) (*ToolBuilder, *db.Repository) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
 	if session == nil {
-		session = &db.ScanSession{AllowScript: true}
+		session = &model.ScanSession{AllowScript: true}
 	}
 	scriptSeedFile(t, repo, 1, "incoming/photo1.jpg", "file")
 	scriptSeedFile(t, repo, 1, "incoming/photo2.jpg", "file")
 	scriptSeedFile(t, repo, 1, "docs/report.pdf", "file")
 	scriptSeedFile(t, repo, 1, "docs", "directory")
 	scriptSeedFile(t, repo, 1, "incoming", "directory")
-	cat := &db.Category{FilesystemID: 7, Name: "照片", Path: "/organized/photos", AgentEditable: true}
+	cat := &model.Category{FilesystemID: 7, Name: "照片", Path: "/organized/photos", AgentEditable: true}
 	if err := repo.CreateCategory(cat); err != nil {
 		t.Fatalf("seed category: %v", err)
 	}
-	locked := &db.Category{FilesystemID: 7, Name: "锁定", Path: "/locked", AgentEditable: false}
+	locked := &model.Category{FilesystemID: 7, Name: "锁定", Path: "/locked", AgentEditable: false}
 	if err := repo.CreateCategory(locked); err != nil {
 		t.Fatalf("seed locked category: %v", err)
 	}
@@ -44,7 +45,7 @@ func scriptSeedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fil
 		name = path[idx+1:]
 		parent = path[:idx]
 	}
-	f := &db.FileEntry{
+	f := &model.FileEntry{
 		ScanSessionID: sessionID,
 		OriginalPath:  path,
 		ParentPath:    parent,
@@ -299,7 +300,7 @@ result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_fil
 }
 
 func TestScriptCreateCategoryBuiltinGuard(t *testing.T) {
-	tb, repo := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: true})
+	tb, repo := scriptTestBuilder(t, &model.ScanSession{AllowScript: true, AllowAutoCategory: true})
 
 	out := mustRunScript(t, tb, `
 r := create_category("软件", "/organized/software", "apps")
@@ -331,7 +332,7 @@ result = {a_ok: a.success, a_path: a.path, dup_err: is_error(dup), b_ok: b.succe
 }
 
 func TestScriptCreateCategoryGatedBySession(t *testing.T) {
-	tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: true, AllowAutoCategory: false})
+	tb, _ := scriptTestBuilder(t, &model.ScanSession{AllowScript: true, AllowAutoCategory: false})
 	out := mustRunScript(t, tb, `
 get_categories()
 r := create_category("x", "/x", "d")
@@ -457,7 +458,7 @@ func TestScriptNoUnexpectedGlobals(t *testing.T) {
 
 func TestScriptToolAlwaysRegisteredGatedByHandler(t *testing.T) {
 	for _, on := range []bool{true, false} {
-		tb, _ := scriptTestBuilder(t, &db.ScanSession{AllowScript: on})
+		tb, _ := scriptTestBuilder(t, &model.ScanSession{AllowScript: on})
 		for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
 			tools, err := tb.BuildToolset(kind)
 			if err != nil {

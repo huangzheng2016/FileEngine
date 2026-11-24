@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
 
@@ -41,7 +41,7 @@ func TestNFSBench(t *testing.T) {
 	t.Logf("backend concurrency: %d", fs.ListConcurrency())
 
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: root, Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: root, Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestNFSBench(t *testing.T) {
 	}
 
 	var n int64
-	if err := repo.DB().Model(&db.FileEntry{}).
+	if err := repo.DB().Model(&model.FileEntry{}).
 		Where("scan_session_id = ?", 1).Count(&n).Error; err != nil {
 		t.Fatalf("count: %v", err)
 	}

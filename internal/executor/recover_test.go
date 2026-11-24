@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -19,14 +20,14 @@ func (e *env) stat(p string) (int64, time.Time) {
 	return s.Size(), s.ModTime()
 }
 
-func (e *env) journalOp(kind, src, dst, state string, entryID uint, withDstStat bool) (*db.AgentRun, *db.ExecOp) {
+func (e *env) journalOp(kind, src, dst, state string, entryID uint, withDstStat bool) (*model.AgentRun, *model.ExecOp) {
 	e.t.Helper()
 	run, err := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "crashed")
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	sa, ma := e.stat(src)
-	op := &db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: entryID, Kind: kind,
+	op := &model.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: entryID, Kind: kind,
 		Src: src, Dst: dst, Size: sa, ModTime: ma, State: state}
 	if withDstStat {
 		op.DstSize = sa

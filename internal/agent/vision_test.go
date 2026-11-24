@@ -21,6 +21,7 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -98,7 +99,7 @@ func TestViewImageGatedByHandlerNotPresence(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			session := &db.ScanSession{AllowVision: tc.allowVision}
+			session := &model.ScanSession{AllowVision: tc.allowVision}
 			tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, tc.modelVision)
 
 			for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
@@ -149,7 +150,7 @@ func newVisionToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *Too
 	if err != nil {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
-	return NewToolBuilder(nil, fs, 1, 1, NewLogger(1, 0, 0), cfg, &db.ScanSession{AllowVision: true}, true)
+	return NewToolBuilder(nil, fs, 1, 1, NewLogger(1, 0, 0), cfg, &model.ScanSession{AllowVision: true}, true)
 }
 
 func TestViewImageThumbnails(t *testing.T) {

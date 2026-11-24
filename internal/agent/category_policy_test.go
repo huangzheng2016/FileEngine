@@ -7,8 +7,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 )
 
 const testCategoryPolicy = "分类创建规范：\n- 测试规范原文，逐字注入"
@@ -65,7 +65,7 @@ func TestMainRunPromptsCarryPolicyOnce(t *testing.T) {
 }
 
 func TestToolDescriptionsOmitPolicy(t *testing.T) {
-	session := &db.ScanSession{AllowAutoCategory: true, AllowScript: true}
+	session := &model.ScanSession{AllowAutoCategory: true, AllowScript: true}
 	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
 	for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
 		tools, err := tb.BuildToolset(kind)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -58,7 +59,7 @@ func TestRecoverRemovesPartialFileOfInterruptedRevertCopy(t *testing.T) {
 	e.write("a.txt", "AA")
 	run, _ := e.repo.CreateRun(e.sid, db.RunPhaseRevert, "crashed revert")
 	st, mt := e.stat("x/a.txt")
-	if err := e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMove,
+	if err := e.repo.CreateExecOp(&model.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMove,
 		Src: "x/a.txt", Dst: "a.txt", Size: st, ModTime: mt, DstCreated: true, State: db.ExecPending}); err != nil {
 		t.Fatal(err)
 	}

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
 
@@ -85,7 +85,7 @@ func newReadFileToolBuilder(t *testing.T, dir string, cfg config.AgentConfig) *T
 	if err != nil {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
-	return NewToolBuilder(nil, fs, 1, 1, NewLogger(1, 0, 0), cfg, &db.ScanSession{AllowReadFile: true}, false)
+	return NewToolBuilder(nil, fs, 1, 1, NewLogger(1, 0, 0), cfg, &model.ScanSession{AllowReadFile: true}, false)
 }
 
 func writeTestFile(t *testing.T, dir, name string, data []byte) {
@@ -572,7 +572,7 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 		t.Fatalf("NewLocalFS: %v", err)
 	}
 
-	tbNFS := NewToolBuilder(nil, seekOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "nfs"}, false)
+	tbNFS := NewToolBuilder(nil, seekOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{AllowReadFile: true, Protocol: "nfs"}, false)
 	out, err := tbNFS.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
 		t.Fatalf("seek-only listing: %v", err)
@@ -581,7 +581,7 @@ func TestReadFileZipBackendPaths(t *testing.T) {
 		t.Fatalf("seek-only listing wrong:\n%s", out.Content)
 	}
 
-	tbFTP := NewToolBuilder(nil, streamOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowReadFile: true, Protocol: "ftp"}, false)
+	tbFTP := NewToolBuilder(nil, streamOnlyFS{base}, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{AllowReadFile: true, Protocol: "ftp"}, false)
 	out, err = tbFTP.readFile(context.Background(), &ReadFileInput{Path: "ok.zip"})
 	if err != nil {
 		t.Fatalf("stream-only small listing: %v", err)

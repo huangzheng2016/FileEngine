@@ -3,20 +3,21 @@ package agent
 import (
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
 func TestChatEpochSnapshotIsStoredAndRolledByTheSummary(t *testing.T) {
-	model := &fakeModel{}
-	repo, a, session := brainAgent(t, model)
-	if err := repo.CreateCategory(&db.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
+	fm := &fakeModel{}
+	repo, a, session := brainAgent(t, fm)
+	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := a.chatEpochSnapshot(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.CreateCategory(&db.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件"}); err != nil {
+	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件"}); err != nil {
 		t.Fatal(err)
 	}
 	again, err := a.chatEpochSnapshot(nil)
@@ -27,7 +28,7 @@ func TestChatEpochSnapshotIsStoredAndRolledByTheSummary(t *testing.T) {
 		t.Fatal("within an epoch the stored snapshot is returned, not a fresh render")
 	}
 	// A fold opens a new epoch from the state at that moment.
-	summary := &db.ChatTurn{SessionID: session.ID, Role: db.ChatRoleSummary, Content: "摘要"}
+	summary := &model.ChatTurn{SessionID: session.ID, Role: db.ChatRoleSummary, Content: "摘要"}
 	if err := repo.AddChatTurn(summary); err != nil {
 		t.Fatal(err)
 	}

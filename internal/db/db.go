@@ -1,94 +1,20 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
-	"time"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/internal/config"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
-var DB *gorm.DB
-
-// nil on MySQL/PostgreSQL, whose single pool already serves concurrent
-// readers.
-var readDB *gorm.DB
-
-// WAL lets readers run alongside the single writer connection.
-const readPoolSize = 4
-
-// On SQLite a separate query_only pool, so long reads never queue behind the
-// single writer connection.
-func ReadDB() *gorm.DB {
-	if readDB != nil {
-		return readDB
+// Open initializes the database and sweeps what a previous process lifetime
+// left live: scans and runs still marked running.
+func Open(cfg config.DatabaseConfig) error {
+	if err := dal.Init(cfg); err != nil {
+		return err
 	}
-	return DB
-}
-
-func Init(cfg config.DatabaseConfig) error {
-	var dialector gorm.Dialector
-	switch cfg.Driver {
-	case "sqlite":
-		dialector = sqlite.Open(sqliteDSN(cfg.DSN))
-	case "mysql":
-		dialector = newMySQLDialector(cfg.DSN)
-	case "postgres":
-		dialector = postgres.Open(cfg.DSN)
-	default:
-		return fmt.Errorf("unsupported database driver: %s", cfg.Driver)
-	}
-
-	var err error
-	DB, err = gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to connect database: %w", err)
-	}
-
-	if cfg.Driver == "sqlite" {
-		sqlDB, err := DB.DB()
-		if err != nil {
-			return fmt.Errorf("failed to get underlying sql.DB: %w", err)
-		}
-		// SQLite allows one writer at a time; a single connection avoids lock
-		// contention.
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
-		sqlDB.SetConnMaxLifetime(0)
-
-		pragmas := []string{
-			"PRAGMA temp_store=MEMORY",
-			"PRAGMA mmap_size=268435456",
-		}
-		for _, p := range pragmas {
-			if _, err := sqlDB.Exec(p); err != nil {
-				return fmt.Errorf("failed to set %s: %w", p, err)
-			}
-		}
-	}
-
-	if err := migrate(DB); err != nil {
-		return fmt.Errorf("failed to migrate database: %w", err)
-	}
-
-	readDB = nil
-	if cfg.Driver == "sqlite" {
-		// Opened after AutoMigrate: the file exists in WAL mode by now.
-		if readDB, err = openSQLiteReadPool(cfg.DSN); err != nil {
-			return err
-		}
-	}
-	// Zombie sweeps: scans and runs still marked live belong to a previous
-	// process lifetime.
-	repo := NewRepository(DB)
+	repo := NewRepository(dal.DB())
 	if n, err := repo.MarkInterruptedScans(); err != nil {
 		return fmt.Errorf("failed to mark interrupted scans: %w", err)
 	} else if n > 0 {
@@ -99,85 +25,5 @@ func Init(cfg config.DatabaseConfig) error {
 	} else if n > 0 {
 		log.Printf("db init: marked %d stale running run(s) as stopped", n)
 	}
-
 	return nil
-}
-
-// busy_timeout runs first so the remaining pragmas already wait on a locked
-// database; _txlock=immediate makes BEGIN take the write lock up front.
-func sqliteDSN(path string) string {
-	return path + "?_pragma=busy_timeout(30000)" +
-		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=cache_size(-65536)" +
-		"&_pragma=foreign_keys(1)" +
-		"&_txlock=immediate"
-}
-
-// WAL is a persistent property of the file, so readers need no journal_mode
-// pragma.
-func openSQLiteReadPool(path string) (*gorm.DB, error) {
-	dsn := path + "?_pragma=busy_timeout(30000)" +
-		"&_pragma=cache_size(-65536)" +
-		"&_pragma=query_only(1)"
-	rdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite read pool: %w", err)
-	}
-	sqlDB, err := rdb.DB()
-	if err != nil {
-		return nil, fmt.Errorf("sqlite read pool: %w", err)
-	}
-	sqlDB.SetMaxOpenConns(readPoolSize)
-	sqlDB.SetMaxIdleConns(readPoolSize)
-	sqlDB.SetConnMaxLifetime(0)
-	return rdb, nil
-}
-
-func GetDB() *gorm.DB {
-	return DB
-}
-
-func WithRetry(fn func() error) error {
-	maxRetries := 5
-	for i := 0; i < maxRetries; i++ {
-		err := fn()
-		if err == nil {
-			return nil
-		}
-		if isSQLiteLocked(err) && i < maxRetries-1 {
-			wait := time.Duration(100*(i+1)) * time.Millisecond
-			log.Printf("sqlite locked, retrying in %v (attempt %d/%d)", wait, i+1, maxRetries)
-			time.Sleep(wait)
-			continue
-		}
-		return err
-	}
-	return nil
-}
-
-func isSQLiteLocked(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return msg == "database is locked" ||
-		msg == string(sql.ErrConnDone.Error()) ||
-		contains(msg, "database is locked") ||
-		contains(msg, "SQLITE_BUSY")
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

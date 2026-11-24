@@ -4,17 +4,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
 func TestUpdateDescriptionColumnScoped(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	fe := &FileEntry{ScanSessionID: 1, OriginalPath: "cam/dir", Name: "dir", FileType: "directory"}
+	fe := &model.FileEntry{ScanSessionID: 1, OriginalPath: "cam/dir", Name: "dir", FileType: "directory"}
 	if err := r.CreateFile(fe); err != nil {
 		t.Fatalf("create file: %v", err)
 	}

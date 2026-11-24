@@ -4,24 +4,24 @@ import (
 	"strings"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 )
 
 func TestPruneEmptyAgentCategories(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	fs := &db.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
+	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
 	if err := repo.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
-	session := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
+	session := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
 	mk := func(name, path string, agentCreated bool) {
 		t.Helper()
-		if err := repo.CreateCategory(&db.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
+		if err := repo.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
 			t.Fatalf("seed category %s: %v", name, err)
 		}
 	}
@@ -35,7 +35,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 		t.Fatalf("set target: %v", err)
 	}
 
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(session.ID, 0, 0))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &model.ModelProvider{}, session, session.ID, NewLogger(session.ID, 0, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if len(pruned) != 1 || !strings.Contains(pruned[0], "监控录像") {
@@ -62,22 +62,22 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 
 func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	fs := &db.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
+	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
 	if err := repo.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
-	sessA := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
+	sessA := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(sessA); err != nil {
 		t.Fatalf("create session A: %v", err)
 	}
-	sessB := &db.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
+	sessB := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
 	if err := repo.CreateSession(sessB); err != nil {
 		t.Fatalf("create session B: %v", err)
 	}
 
 	mk := func(name, path string, agentCreated bool) {
 		t.Helper()
-		if err := repo.CreateCategory(&db.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
+		if err := repo.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
 			t.Fatalf("seed category %s: %v", name, err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 		t.Fatalf("set target: %v", err)
 	}
 
-	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, sessB, sessB.ID, NewLogger(sessB.ID, 0, 0))
+	o := NewOrchestratorAgent(repo, config.RemoteFSConfig{}, &model.ModelProvider{}, sessB, sessB.ID, NewLogger(sessB.ID, 0, 0))
 	pruned := o.pruneEmptyAgentCategories()
 
 	if _, err := repo.GetCategoryByName(fs.ID, "历史分类"); err != nil {

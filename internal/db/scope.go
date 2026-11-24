@@ -4,6 +4,9 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 )
 
 func FileExt(name string) string {
@@ -34,10 +37,10 @@ func IsSensitiveName(name string) bool {
 	return sensitiveNameRe.MatchString(path.Base(name))
 }
 
-func (r *Repository) scanFiles(sessionID uint, cond string, args []any, fn func([]FileEntry) error) error {
+func (r *Repository) scanFiles(sessionID uint, cond string, args []any, fn func([]model.FileEntry) error) error {
 	var after uint
 	for {
-		var rows []FileEntry
+		var rows []model.FileEntry
 		q := r.db.Select("id", "name", "original_path").Where("scan_session_id = ? AND file_type = 'file' AND id > ?", sessionID, after)
 		if cond != "" {
 			q = q.Where(cond, args...)
@@ -58,8 +61,8 @@ func (r *Repository) scanFiles(sessionID uint, cond string, args []any, fn func(
 func (r *Repository) updateIDs(ids []uint, fields map[string]any) error {
 	for start := 0; start < len(ids); start += 500 {
 		end := min(start+500, len(ids))
-		if err := WithRetry(func() error {
-			return r.db.Model(&FileEntry{}).Where("id IN ?", ids[start:end]).Updates(fields).Error
+		if err := dal.WithRetry(func() error {
+			return r.db.Model(&model.FileEntry{}).Where("id IN ?", ids[start:end]).Updates(fields).Error
 		}); err != nil {
 			return err
 		}
@@ -67,14 +70,14 @@ func (r *Repository) updateIDs(ids []uint, fields map[string]any) error {
 	return nil
 }
 
-func (r *Repository) ApplyScope(session *ScanSession) (int64, error) {
+func (r *Repository) ApplyScope(session *model.ScanSession) (int64, error) {
 	scope := ParseExts(session.ScopeExts)
 	if len(scope) == 0 {
 		return 0, nil
 	}
 	defer r.touchCounts(session.ID)
 	var ids []uint
-	err := r.scanFiles(session.ID, "role = ?", []any{RoleUndecided}, func(rows []FileEntry) error {
+	err := r.scanFiles(session.ID, "role = ?", []any{RoleUndecided}, func(rows []model.FileEntry) error {
 		for _, f := range rows {
 			if !scope[FileExt(f.Name)] {
 				ids = append(ids, f.ID)
@@ -90,7 +93,7 @@ func (r *Repository) ApplyScope(session *ScanSession) (int64, error) {
 
 func (r *Repository) MarkSensitive(sessionID uint) (int64, error) {
 	var ids []uint
-	err := r.scanFiles(sessionID, "sensitive = ?", []any{false}, func(rows []FileEntry) error {
+	err := r.scanFiles(sessionID, "sensitive = ?", []any{false}, func(rows []model.FileEntry) error {
 		for _, f := range rows {
 			if IsSensitiveName(f.Name) {
 				ids = append(ids, f.ID)

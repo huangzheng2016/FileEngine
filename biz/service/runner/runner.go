@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -51,7 +52,7 @@ func NewService(repo *db.Repository) *Service {
 
 // Launch records a run and executes work on a detached context. A panic in work
 // finishes the run as an error instead of taking the process down.
-func (s *Service) Launch(sessionID uint, phase, title string, work func(ctx context.Context, run *db.AgentRun) Outcome) (*db.AgentRun, error) {
+func (s *Service) Launch(sessionID uint, phase, title string, work func(ctx context.Context, run *model.AgentRun) Outcome) (*model.AgentRun, error) {
 	run, err := s.repo.CreateRun(sessionID, phase, title)
 	if err != nil {
 		return nil, err
@@ -92,7 +93,7 @@ func (s *Service) Launch(sessionID uint, phase, title string, work func(ctx cont
 	return run, nil
 }
 
-func safeWork(ctx context.Context, run *db.AgentRun, work func(context.Context, *db.AgentRun) Outcome) (out Outcome) {
+func safeWork(ctx context.Context, run *model.AgentRun, work func(context.Context, *model.AgentRun) Outcome) (out Outcome) {
 	defer func() {
 		if p := recover(); p != nil {
 			slog.Error("run panicked", "run", run.ID, "panic", p, "stack", string(debug.Stack()))
@@ -103,7 +104,7 @@ func safeWork(ctx context.Context, run *db.AgentRun, work func(context.Context, 
 }
 
 // Stop cancels a running run, waits for it to wind down and returns its final row.
-func (s *Service) Stop(runID uint) (*db.AgentRun, error) {
+func (s *Service) Stop(runID uint) (*model.AgentRun, error) {
 	run, err := s.repo.GetRun(runID)
 	if err != nil {
 		return nil, err

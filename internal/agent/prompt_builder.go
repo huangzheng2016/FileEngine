@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 
@@ -15,9 +16,9 @@ func buildCategorySummary(usages []db.CategoryUsage) string {
 	if len(usages) == 0 {
 		return ""
 	}
-	cats := make([]db.Category, len(usages))
+	cats := make([]model.Category, len(usages))
 	for i, u := range usages {
-		cats[i] = db.Category{Name: u.Name, Path: u.Path, Description: u.Description, Structure: u.Structure}
+		cats[i] = model.Category{Name: u.Name, Path: u.Path, Description: u.Description, Structure: u.Structure}
 	}
 	return renderCategoryList(cats)
 }
@@ -31,13 +32,13 @@ const planPromptMaxRunes = 8000
 // usage-based ordering or per-unit data.
 type SharedContext struct {
 	Goal       string
-	Plan       *db.SessionPlan // nil or Version 0 = no plan
-	Memory     []db.MemoryItem
-	Categories []db.Category
-	Rules      []db.PlanRule
+	Plan       *model.SessionPlan // nil or Version 0 = no plan
+	Memory     []model.MemoryItem
+	Categories []model.Category
+	Rules      []model.PlanRule
 }
 
-func LoadSharedContext(repo *db.Repository, session *db.ScanSession) (SharedContext, error) {
+func LoadSharedContext(repo *db.Repository, session *model.ScanSession) (SharedContext, error) {
 	c := SharedContext{Goal: session.Goal}
 	var err error
 	if c.Plan, err = repo.GetPlan(session.ID); err != nil {
@@ -79,7 +80,7 @@ func RenderSharedContext(c SharedContext) string {
 }
 
 // Never usage counts: they change every unit.
-func renderCategoryList(cats []db.Category) string {
+func renderCategoryList(cats []model.Category) string {
 	if len(cats) == 0 {
 		return "## 分类\n\n（还没有分类）\n\n"
 	}
@@ -93,7 +94,7 @@ func renderCategoryList(cats []db.Category) string {
 
 // Rules are keyed by name and carry no ids or positions: inserting a rule
 // must not rewrite the lines after it.
-func renderRules(rules []db.PlanRule) string {
+func renderRules(rules []model.PlanRule) string {
 	if len(rules) == 0 {
 		return ""
 	}
@@ -105,7 +106,7 @@ func renderRules(rules []db.PlanRule) string {
 	return sb.String() + "\n"
 }
 
-func BuildSharedContext(repo *db.Repository, session *db.ScanSession) (string, error) {
+func BuildSharedContext(repo *db.Repository, session *model.ScanSession) (string, error) {
 	c, err := LoadSharedContext(repo, session)
 	if err != nil {
 		return "", err
@@ -120,8 +121,8 @@ func SharedContextMessage(text string) *schema.Message {
 }
 
 type UnitContext struct {
-	ParentChain []db.FileEntry
-	Memory      []db.MemoryItem // only items about the unit's location are rendered
+	ParentChain []model.FileEntry
+	Memory      []model.MemoryItem // only items about the unit's location are rendered
 	UnitPaths   []string
 	Notes       string
 }
@@ -139,7 +140,7 @@ func sourceAncestors(p string) []string {
 	}
 }
 
-func LoadUnitContext(repo *db.Repository, session *db.ScanSession, unitPaths []string, notes string) (UnitContext, error) {
+func LoadUnitContext(repo *db.Repository, session *model.ScanSession, unitPaths []string, notes string) (UnitContext, error) {
 	u := UnitContext{UnitPaths: unitPaths, Notes: notes}
 	seen := map[string]bool{}
 	var ancestors []string
@@ -166,7 +167,7 @@ func RenderUnitContext(u UnitContext) string {
 	if chain := renderParentChain(u.ParentChain); chain != "" {
 		sb.WriteString(chain + "\n")
 	}
-	var related []db.MemoryItem
+	var related []model.MemoryItem
 	for _, m := range u.Memory {
 		if len(related) < memoryPathRelatedMax && memoryPathRelated(m, u.UnitPaths) {
 			related = append(related, m)
@@ -185,8 +186,8 @@ func RenderUnitContext(u UnitContext) string {
 	return sb.String()
 }
 
-func renderParentChain(entries []db.FileEntry) string {
-	var described []db.FileEntry
+func renderParentChain(entries []model.FileEntry) string {
+	var described []model.FileEntry
 	for _, e := range entries {
 		if strings.TrimSpace(e.Description) != "" {
 			described = append(described, e)
@@ -206,7 +207,7 @@ func renderParentChain(entries []db.FileEntry) string {
 
 const unitListingMax = 100
 
-func listingBlock(title string, rows []db.FileEntry, total int) string {
+func listingBlock(title string, rows []model.FileEntry, total int) string {
 	shown := rows
 	if len(shown) > unitListingMax {
 		shown = shown[:unitListingMax]
@@ -228,7 +229,7 @@ func displayPath(p string) string {
 	return SanitizeUntrustedName(p)
 }
 
-func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSignals, unitCtx string) string {
+func buildDirUnitPrompt(dir *model.FileEntry, children []model.FileEntry, sig DirSignals, unitCtx string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：决定一个目录\n\n")
 	sb.WriteString("路径：" + displayPath(dir.OriginalPath) + "\n")
@@ -249,7 +250,7 @@ func buildDirUnitPrompt(dir *db.FileEntry, children []db.FileEntry, sig DirSigna
 	return sb.String()
 }
 
-func buildGroupUnitPrompt(parent string, files []db.FileEntry, unitCtx string, hints map[uint]string) string {
+func buildGroupUnitPrompt(parent string, files []model.FileEntry, unitCtx string, hints map[uint]string) string {
 	var sb strings.Builder
 	sb.WriteString("# 当前任务：归类一个目录里的散文件\n\n")
 	sb.WriteString(fmt.Sprintf("目录：%s；待决定的文件：%d 个\n\n", displayPath(parent), len(files)))

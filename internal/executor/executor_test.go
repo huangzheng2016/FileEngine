@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 
@@ -68,11 +69,11 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.AgentRun{}, &db.ExecOp{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FileEntry{}, &model.ScanSession{}, &model.AgentRun{}, &model.ExecOp{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := db.NewRepository(gdb)
-	s := &db.ScanSession{Status: "scanned"}
+	s := &model.ScanSession{Status: "scanned"}
 	if err := repo.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func (e *env) exists(p string) bool {
 	return err == nil
 }
 
-func (e *env) entry(p, target string) *db.FileEntry {
+func (e *env) entry(p, target string) *model.FileEntry {
 	e.t.Helper()
 	st, err := os.Stat(filepath.Join(e.root, p))
 	if err != nil {
@@ -115,7 +116,7 @@ func (e *env) entry(p, target string) *db.FileEntry {
 	if st.IsDir() {
 		ft = "directory"
 	}
-	f := &db.FileEntry{ScanSessionID: e.sid, OriginalPath: p, Name: filepath.Base(p), FileType: ft,
+	f := &model.FileEntry{ScanSessionID: e.sid, OriginalPath: p, Name: filepath.Base(p), FileType: ft,
 		Size: st.Size(), ModTime: st.ModTime(), ParentPath: filepath.Dir(p)}
 	if target != "" {
 		f.NewPath, f.Operation = "/"+target, "planned"
@@ -320,12 +321,12 @@ func TestJournalResumeAfterCrash(t *testing.T) {
 	// a: crashed mid-copy, partial dst left behind.
 	e.write("x/a.txt", "AA")
 	sa, ma := st("a.txt")
-	e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMove,
+	e.repo.CreateExecOp(&model.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMove,
 		Src: "a.txt", Dst: "x/a.txt", Size: sa, ModTime: ma, DstCreated: true, State: db.ExecPending})
 	// b: copy verified, crashed before deleting the source.
 	e.write("x/b.txt", "BBBB")
 	sb, mb := st("b.txt")
-	e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fb.ID, Kind: db.ExecKindMove,
+	e.repo.CreateExecOp(&model.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fb.ID, Kind: db.ExecKindMove,
 		Src: "b.txt", Dst: "x/b.txt", Size: sb, ModTime: mb, DstSize: sb, State: db.ExecVerified})
 	e.repo.FinishRun(run, db.RunStopped, "", "", db.TokenCounts{})
 
@@ -361,7 +362,7 @@ func TestRevertRestores(t *testing.T) {
 	}
 	e.write("docs/new/b.txt", "edited")
 
-	var target db.AgentRun
+	var target model.AgentRun
 	e.repo.DB().Order("id DESC").First(&target)
 	rev, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
 	res, err := New(e.repo, e.fs).Revert(context.Background(), rev, target.ID)
@@ -390,7 +391,7 @@ func TestRevertCopyRun(t *testing.T) {
 	if _, err := e.run(context.Background(), Options{Mode: ModeCopy}); err != nil {
 		t.Fatal(err)
 	}
-	var target db.AgentRun
+	var target model.AgentRun
 	e.repo.DB().Order("id DESC").First(&target)
 	rev, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
 	if _, err := New(e.repo, e.fs).Revert(context.Background(), rev, target.ID); err != nil {
@@ -415,7 +416,7 @@ func TestRevertRemovesOnlyEmptyCreatedDirs(t *testing.T) {
 	}
 	e.write("k/user.txt", "mine")
 
-	var target db.AgentRun
+	var target model.AgentRun
 	e.repo.DB().Order("id DESC").First(&target)
 	rev, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "revert")
 	res, err := New(e.repo, e.fs).Revert(context.Background(), rev, target.ID)

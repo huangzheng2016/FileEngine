@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -27,7 +28,7 @@ const deltaIntro = "以下是共享上下文生成之后的全部变化，以这
 const deltaNone = deltaHeading + "\n\n" + deltaIntro + "\n\n无变化：之前列出的变化已不再有效，以共享上下文为准。\n\n"
 
 // planText is the plan as the snapshot renders and stores it.
-func planText(p *db.SessionPlan) string {
+func planText(p *model.SessionPlan) string {
 	content := strings.TrimSpace(p.Content)
 	if r := []rune(content); len(r) > planPromptMaxRunes {
 		content = string(r[:planPromptMaxRunes])
@@ -46,7 +47,7 @@ func newSharedSnapshot(c SharedContext) *sharedSnapshot {
 	return &sharedSnapshot{gen: 1, ctx: c, text: RenderSharedContext(c)}
 }
 
-func categoryNames(cats []db.Category) []string {
+func categoryNames(cats []model.Category) []string {
 	names := make([]string, len(cats))
 	for i, c := range cats {
 		names[i] = c.Name
@@ -54,7 +55,7 @@ func categoryNames(cats []db.Category) []string {
 	return names
 }
 
-func categoryLine(c db.Category) string {
+func categoryLine(c model.Category) string {
 	line := fmt.Sprintf("- %s：%s", SanitizeUntrustedName(c.Name), SanitizeUntrustedName(db.NormalizeTargetPath(c.Path)))
 	if d := strings.TrimSpace(c.Description); d != "" {
 		line += "；放什么：" + SanitizeUntrustedName(oneLine(d))
@@ -65,7 +66,7 @@ func categoryLine(c db.Category) string {
 	return line
 }
 
-func ruleLine(r db.PlanRule) string {
+func ruleLine(r model.PlanRule) string {
 	var conds []string
 	if r.Exts != "" {
 		conds = append(conds, "扩展名 "+SanitizeUntrustedName(r.Exts))
@@ -85,9 +86,9 @@ func ruleLine(r db.PlanRule) string {
 	return fmt.Sprintf("- %s：%s → %s", SanitizeUntrustedName(r.Name), strings.Join(conds, "，"), SanitizeUntrustedName(r.Target))
 }
 
-func memoryKey(m db.MemoryItem) string { return m.Scope + "\x00" + m.Key }
+func memoryKey(m model.MemoryItem) string { return m.Scope + "\x00" + m.Key }
 
-func planStatusLabel(p *db.SessionPlan) string {
+func planStatusLabel(p *model.SessionPlan) string {
 	if p.Status == db.PlanApproved {
 		return "用户已确认"
 	}
@@ -126,7 +127,7 @@ func RenderDelta(base, cur SharedContext, inlinePlan bool) string {
 		add("- 整理方案已清空")
 	}
 
-	baseCats := map[string]db.Category{}
+	baseCats := map[string]model.Category{}
 	for _, c := range base.Categories {
 		baseCats[c.Name] = c
 	}
@@ -174,11 +175,11 @@ func RenderDelta(base, cur SharedContext, inlinePlan bool) string {
 		add("- 规则 %s 已删除", SanitizeUntrustedName(n))
 	}
 
-	baseMem := map[string]db.MemoryItem{}
+	baseMem := map[string]model.MemoryItem{}
 	for _, m := range base.Memory {
 		baseMem[memoryKey(m)] = m
 	}
-	curMem := append([]db.MemoryItem(nil), cur.Memory...)
+	curMem := append([]model.MemoryItem(nil), cur.Memory...)
 	sort.SliceStable(curMem, func(i, j int) bool { return memoryLess(curMem[i], curMem[j]) })
 	seenMem := map[string]bool{}
 	for _, m := range curMem {
@@ -204,8 +205,8 @@ func RenderDelta(base, cur SharedContext, inlinePlan bool) string {
 	return deltaHeading + "\n\n" + deltaIntro + "\n\n" + strings.Join(lines, "\n") + "\n\n"
 }
 
-func sortedCategories(cats []db.Category) []db.Category {
-	out := append([]db.Category(nil), cats...)
+func sortedCategories(cats []model.Category) []model.Category {
+	out := append([]model.Category(nil), cats...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }

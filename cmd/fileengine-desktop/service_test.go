@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/container"
 	"FileEngine/internal/app"
 	"FileEngine/internal/db"
@@ -95,7 +96,7 @@ func TestCallRunsTheIDLRoutes(t *testing.T) {
 func TestSubscribeResumesAndEnds(t *testing.T) {
 	s, cap := newService(t)
 	repo := container.Default.Repo
-	sess := &db.ScanSession{Status: "scanned"}
+	sess := &model.ScanSession{Status: "scanned"}
 	if err := repo.CreateSession(sess); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestSubscribeRejectsBadInput(t *testing.T) {
 
 func TestShutdownEndsSubscriptions(t *testing.T) {
 	s, cap := newService(t)
-	sess := &db.ScanSession{Status: "scanned"}
+	sess := &model.ScanSession{Status: "scanned"}
 	if err := container.Default.Repo.CreateSession(sess); err != nil {
 		t.Fatal(err)
 	}

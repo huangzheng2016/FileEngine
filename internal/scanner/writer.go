@@ -3,6 +3,8 @@ package scanner
 import (
 	"sync/atomic"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -11,7 +13,7 @@ import (
 var commitRows = 20000
 
 type writeBatch struct {
-	inserts []db.FileEntry
+	inserts []model.FileEntry
 	updates []db.EntryUpdate
 }
 
@@ -28,7 +30,7 @@ type scanWriter struct {
 	commits int
 	failed  atomic.Bool
 
-	inserts []db.FileEntry
+	inserts []model.FileEntry
 	updates []db.EntryUpdate
 }
 
@@ -67,7 +69,7 @@ func (w *scanWriter) flush() {
 	if len(w.inserts) == 0 && len(w.updates) == 0 {
 		return
 	}
-	err := db.WithRetry(func() error { return w.repo.ApplyScanBatch(w.inserts, w.updates) })
+	err := dal.WithRetry(func() error { return w.repo.ApplyScanBatch(w.inserts, w.updates) })
 	if err != nil {
 		w.err = err
 		w.failed.Store(true)

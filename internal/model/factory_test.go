@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"FileEngine/internal/db"
+	"FileEngine/biz/dal/db/model"
 )
 
 func TestNewChatModelFromProvider_Construction(t *testing.T) {
 	ctx := context.Background()
-	cases := []db.ModelProvider{
+	cases := []model.ModelProvider{
 		{Provider: "openai", APIKey: "k", Model: "m", BaseURL: "http://x/v1"},
 		{Provider: "openai", APIKey: "k", Model: "m", BaseURL: "http://x/v1", ThinkingEnabled: true, ReasoningEffort: "low"},
 		{Provider: "ollama", APIKey: "k", Model: "m", ThinkingEnabled: true, ReasoningEffort: "high"},
@@ -21,13 +21,13 @@ func TestNewChatModelFromProvider_Construction(t *testing.T) {
 			t.Errorf("case %d (%s/%q): %v", i, cases[i].Provider, cases[i].ReasoningEffort, err)
 		}
 	}
-	if _, err := NewChatModelFromProvider(ctx, &db.ModelProvider{Provider: "bogus"}); err == nil {
+	if _, err := NewChatModelFromProvider(ctx, &model.ModelProvider{Provider: "bogus"}); err == nil {
 		t.Error("expected error for unsupported provider")
 	}
 }
 
 func TestOpenAIThinkingParams(t *testing.T) {
-	p := &db.ModelProvider{Model: "m", ReasoningEffort: "xhigh"}
+	p := &model.ModelProvider{Model: "m", ReasoningEffort: "xhigh"}
 	if got := openAIConfig(p, "").ReasoningEffort; got != "" {
 		t.Fatalf("thinking off must omit reasoning_effort, got %q", got)
 	}
@@ -42,7 +42,7 @@ func TestOpenAIThinkingParams(t *testing.T) {
 }
 
 func TestClaudeThinkingParams(t *testing.T) {
-	off := claudeConfig(&db.ModelProvider{Model: "claude-sonnet-4-5", MaxTokens: 8192, ReasoningEffort: "high", Temperature: 0.3})
+	off := claudeConfig(&model.ModelProvider{Model: "claude-sonnet-4-5", MaxTokens: 8192, ReasoningEffort: "high", Temperature: 0.3})
 	if off.ThinkingConfig != nil || off.Temperature == nil || off.MaxTokens != 8192 {
 		t.Fatalf("thinking off: thinking=%v temp=%v max=%d", off.ThinkingConfig, off.Temperature, off.MaxTokens)
 	}
@@ -63,7 +63,7 @@ func TestClaudeThinkingParams(t *testing.T) {
 		{"medium", 0, 8192, 32000}, // unset max_tokens: the model default
 	}
 	for _, c := range cases {
-		cfg := claudeConfig(&db.ModelProvider{Model: "claude-opus-4-1-20250805", MaxTokens: c.maxTokens, ThinkingEnabled: true, ReasoningEffort: c.effort})
+		cfg := claudeConfig(&model.ModelProvider{Model: "claude-opus-4-1-20250805", MaxTokens: c.maxTokens, ThinkingEnabled: true, ReasoningEffort: c.effort})
 		if cfg.ThinkingConfig == nil || cfg.ThinkingConfig.OfEnabled == nil {
 			t.Fatalf("%q: thinking not enabled", c.effort)
 		}
@@ -80,13 +80,13 @@ func TestClaudeThinkingParams(t *testing.T) {
 }
 
 func TestZeroTemperatureMeansModelDefault(t *testing.T) {
-	if cfg := openAIConfig(&db.ModelProvider{Model: "m"}, ""); cfg.Temperature != nil {
+	if cfg := openAIConfig(&model.ModelProvider{Model: "m"}, ""); cfg.Temperature != nil {
 		t.Fatalf("openai temperature 0 must not be sent: %v", *cfg.Temperature)
 	}
-	if cfg := claudeConfig(&db.ModelProvider{Model: "claude-3-7-sonnet-latest"}); cfg.Temperature != nil || cfg.MaxTokens != 64000 {
+	if cfg := claudeConfig(&model.ModelProvider{Model: "claude-3-7-sonnet-latest"}); cfg.Temperature != nil || cfg.MaxTokens != 64000 {
 		t.Fatalf("claude defaults: temperature=%v max_tokens=%d", cfg.Temperature, cfg.MaxTokens)
 	}
-	if cfg := openAIConfig(&db.ModelProvider{Model: "m", Temperature: 0.4}, ""); cfg.Temperature == nil || *cfg.Temperature != float32(0.4) {
+	if cfg := openAIConfig(&model.ModelProvider{Model: "m", Temperature: 0.4}, ""); cfg.Temperature == nil || *cfg.Temperature != float32(0.4) {
 		t.Fatal("non-zero temperature must be sent")
 	}
 }
@@ -103,7 +103,7 @@ func TestClaudeAdaptiveThinking(t *testing.T) {
 		}
 	}
 
-	cfg := claudeConfig(&db.ModelProvider{Model: "claude-opus-5-5", ThinkingEnabled: true, ReasoningEffort: "ultra", Temperature: 0.3})
+	cfg := claudeConfig(&model.ModelProvider{Model: "claude-opus-5-5", ThinkingEnabled: true, ReasoningEffort: "ultra", Temperature: 0.3})
 	if cfg.ThinkingConfig == nil || cfg.ThinkingConfig.OfAdaptive == nil || cfg.ThinkingConfig.OfEnabled != nil {
 		t.Fatalf("thinking: %+v", cfg.ThinkingConfig)
 	}
@@ -114,7 +114,7 @@ func TestClaudeAdaptiveThinking(t *testing.T) {
 		t.Fatalf("effort = %v", got)
 	}
 
-	plain := claudeConfig(&db.ModelProvider{Model: "claude-sonnet-5-5", ReasoningEffort: "fast", Temperature: 0.3, MaxTokens: 4096})
+	plain := claudeConfig(&model.ModelProvider{Model: "claude-sonnet-5-5", ReasoningEffort: "fast", Temperature: 0.3, MaxTokens: 4096})
 	if plain.ThinkingConfig != nil || plain.Temperature != nil || plain.AdditionalRequestFields != nil || plain.MaxTokens != 4096 {
 		t.Fatalf("thinking off: %+v", plain)
 	}

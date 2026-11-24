@@ -5,13 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
 func TestFindDoneExecOpUsesTargetPathIndex(t *testing.T) {
 	r := setupBrainRepo(t)
 	sql := r.db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var ops []ExecOp
+		var ops []model.ExecOp
 		return tx.Where("session_id = ? AND dst = ? AND state = ?", 1, "a/b", ExecDone).
 			Order("id DESC").Limit(1).Find(&ops)
 	})
@@ -33,7 +35,7 @@ func TestFindDoneExecOpUsesTargetPathIndex(t *testing.T) {
 
 func TestSetExecOpStateDstIsOneUpdate(t *testing.T) {
 	r := setupBrainRepo(t)
-	op := &ExecOp{RunID: 1, SessionID: 1, Kind: ExecKindMove, Src: "a", Dst: "b", State: ExecPending}
+	op := &model.ExecOp{RunID: 1, SessionID: 1, Kind: ExecKindMove, Src: "a", Dst: "b", State: ExecPending}
 	if err := r.CreateExecOp(op); err != nil {
 		t.Fatal(err)
 	}

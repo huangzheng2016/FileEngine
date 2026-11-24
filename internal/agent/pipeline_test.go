@@ -6,17 +6,18 @@ import (
 	"sync"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
-func entryNamed(name, typ string) db.FileEntry {
-	return db.FileEntry{OriginalPath: "d/" + name, Name: name, FileType: typ}
+func entryNamed(name, typ string) model.FileEntry {
+	return model.FileEntry{OriginalPath: "d/" + name, Name: name, FileType: typ}
 }
 
 func TestComputeSignals(t *testing.T) {
-	dir := &db.FileEntry{OriginalPath: "work/api", Name: "api", Depth: 2}
-	kids := []db.FileEntry{entryNamed("go.mod", "file"), entryNamed("main.go", "file"), entryNamed("util.go", "file"), entryNamed(".git", "directory"), entryNamed("README", "file")}
+	dir := &model.FileEntry{OriginalPath: "work/api", Name: "api", Depth: 2}
+	kids := []model.FileEntry{entryNamed("go.mod", "file"), entryNamed("main.go", "file"), entryNamed("util.go", "file"), entryNamed(".git", "directory"), entryNamed("README", "file")}
 	s := ComputeSignals(dir, kids, 40, 1<<20)
 	if m := s.strongMarker(); m == nil || m.Kind != markerCode {
 		t.Fatalf("go.mod is a strong code marker: %+v", s.Markers)
@@ -30,18 +31,18 @@ func TestComputeSignals(t *testing.T) {
 			t.Fatalf("render missing %q: %s", want, out)
 		}
 	}
-	app := ComputeSignals(&db.FileEntry{Name: "Sketch.app"}, nil, 0, 0)
+	app := ComputeSignals(&model.FileEntry{Name: "Sketch.app"}, nil, 0, 0)
 	if m := app.strongMarker(); m == nil || m.Kind != markerBundle {
 		t.Fatalf(".app bundle: %+v", app.Markers)
 	}
-	inst := ComputeSignals(&db.FileEntry{Name: "tool"}, []db.FileEntry{entryNamed("setup.exe", "file"), entryNamed("a.dll", "file")}, 0, 0)
+	inst := ComputeSignals(&model.FileEntry{Name: "tool"}, []model.FileEntry{entryNamed("setup.exe", "file"), entryNamed("a.dll", "file")}, 0, 0)
 	if len(inst.Markers) != 1 || inst.Markers[0].Kind != markerSoftware || inst.strongMarker() != nil {
 		t.Fatalf("installer is a weak marker: %+v", inst.Markers)
 	}
 }
 
 func TestDetectVersionGroups(t *testing.T) {
-	kids := []db.FileEntry{
+	kids := []model.FileEntry{
 		entryNamed("FooApp-1.2.3-x64.exe", "file"), entryNamed("FooApp_1.3.0_setup.exe", "file"), entryNamed("fooapp v2.0.zip", "file"),
 		entryNamed("Bar 2023", "directory"), entryNamed("Bar 2024", "directory"),
 		entryNamed("IMG_0001.jpg", "file"), entryNamed("IMG_0002.jpg", "file"),
@@ -59,7 +60,7 @@ func TestDetectVersionGroups(t *testing.T) {
 	}
 	decided := kids[0]
 	decided.Role = db.RoleFile
-	if g := DetectVersionGroups([]db.FileEntry{decided, kids[1]}); len(g) != 0 {
+	if g := DetectVersionGroups([]model.FileEntry{decided, kids[1]}); len(g) != 0 {
 		t.Fatal("decided entries never join a group")
 	}
 }
@@ -70,11 +71,11 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 	t.Helper()
 	config.Update(&config.Config{})
 	repo := setupToolTestRepo(t)
-	session := &db.ScanSession{FilesystemID: 7, Goal: goal, ScopeExts: "", AllowScript: true, AllowAutoCategory: true}
+	session := &model.ScanSession{FilesystemID: 7, Goal: goal, ScopeExts: "", AllowScript: true, AllowAutoCategory: true}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []db.Category{{FilesystemID: 7, Name: "代码", Path: "/代码"}, {FilesystemID: 7, Name: "文档", Path: "/文档"}, {FilesystemID: 7, Name: "软件", Path: "/软件"}} {
+	for _, c := range []model.Category{{FilesystemID: 7, Name: "代码", Path: "/代码"}, {FilesystemID: 7, Name: "文档", Path: "/文档"}, {FilesystemID: 7, Name: "软件", Path: "/软件"}} {
 		c := c
 		if err := repo.CreateCategory(&c); err != nil {
 			t.Fatal(err)
@@ -89,12 +90,12 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 		if i := strings.LastIndex(e.p, "/"); i >= 0 {
 			parent = e.p[:i]
 		}
-		f := &db.FileEntry{ScanSessionID: session.ID, OriginalPath: e.p, Name: e.p[strings.LastIndex(e.p, "/")+1:], FileType: e.typ, ParentPath: parent, Depth: strings.Count(e.p, "/")}
+		f := &model.FileEntry{ScanSessionID: session.ID, OriginalPath: e.p, Name: e.p[strings.LastIndex(e.p, "/")+1:], FileType: e.typ, ParentPath: parent, Depth: strings.Count(e.p, "/")}
 		if err := repo.CreateFile(f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	a := NewAutoTagAgent(repo, config.RemoteFSConfig{}, &db.ModelProvider{}, session, session.ID, NewLogger(session.ID, 1, 0))
+	a := NewAutoTagAgent(repo, config.RemoteFSConfig{}, &model.ModelProvider{}, session, session.ID, NewLogger(session.ID, 1, 0))
 	return a, repo
 }
 
@@ -233,7 +234,7 @@ func TestPipelineScopeSkipsOutOfScope(t *testing.T) {
 
 func TestUnitMessagesShareByteIdenticalContext(t *testing.T) {
 	a, repo := pipelineFixture(t, "照片按年份")
-	if err := repo.CreateRule(&db.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档"}); err != nil {
+	if err := repo.CreateRule(&model.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档"}); err != nil {
 		t.Fatal(err)
 	}
 	logger := a.logger.ForWorker(0)
@@ -266,7 +267,7 @@ func TestUnitMessagesShareByteIdenticalContext(t *testing.T) {
 }
 
 func TestToolOrderDeterministic(t *testing.T) {
-	session := &db.ScanSession{AllowReadFile: true, AllowAutoCategory: true, AllowScript: true}
+	session := &model.ScanSession{AllowReadFile: true, AllowAutoCategory: true, AllowScript: true}
 	names := func(kind ToolsetKind) []string {
 		tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{}, session, false)
 		tools, err := tb.BuildToolset(kind)
@@ -392,10 +393,10 @@ func TestSurveyNeverDecides(t *testing.T) {
 
 func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	if err := repo.CreateFile(&db.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}); err != nil {
+	if err := repo.CreateFile(&model.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}); err != nil {
 		t.Fatal(err)
 	}
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &db.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &model.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)
 	list := func(args map[string]any) map[string]any {
 		return callTool(t, tb, ToolsetTagging, "list_entries", args)
 	}
@@ -431,7 +432,7 @@ func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	if r := callTool(t, tb, ToolsetTagging, "read_file", map[string]string{"path": "../x"}); okOf(r) {
 		t.Fatalf("a bad path is a result, not a Go error: %+v", r)
 	}
-	off := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &db.ScanSession{ID: a.sessionID, AllowReadFile: false}, false)
+	off := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &model.ScanSession{ID: a.sessionID, AllowReadFile: false}, false)
 	if r := callTool(t, off, ToolsetTagging, "read_file", map[string]string{"path": "readme.txt"}); okOf(r) || !strings.Contains(errText(r), "未开启读取文件内容") {
 		t.Fatalf("switch off: %+v", r)
 	}
@@ -441,7 +442,7 @@ func TestScriptDecisionBuiltins(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
 	a.session.AllowScript = true
 	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
-	if err := repo.CreateRule(&db.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档/{parent}"}); err != nil {
+	if err := repo.CreateRule(&model.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档/{parent}"}); err != nil {
 		t.Fatal(err)
 	}
 	out := mustRunScript(t, tb, `

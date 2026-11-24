@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/pathutil"
 )
@@ -62,7 +63,7 @@ type SplitUnitOutput struct {
 
 // A target must lie under a category path unless the session has a plan.
 type targetChecker struct {
-	cats    []db.Category
+	cats    []model.Category
 	hasPlan bool
 }
 

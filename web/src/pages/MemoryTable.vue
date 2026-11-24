@@ -4,7 +4,7 @@ import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
-import { fmtLabel, fmtNumber } from '@/base/format'
+import { fmtLabel } from '@/base/format'
 import { MEMORY_KIND, MEMORY_SOURCE } from '@/base/labels'
 import { fmtRelative, fmtTime } from '@/base/time'
 import { toast } from '@/base/toast'
@@ -43,7 +43,7 @@ const rows = computed(() => {
   const q = props.q.trim().toLowerCase()
   return (list.data.value ?? [])
     .filter((m) => !q || `${m.content} ${m.path}`.toLowerCase().includes(q))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.hits - a.hits)
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned))
 })
 
 const formOpen = ref(false)
@@ -95,7 +95,6 @@ const menuFor = (m: MemoryItem) => [
       <colgroup>
         <col />
         <col class="w-kind" />
-        <col class="w-hits" />
         <col class="w-time" />
         <col v-if="editable" />
       </colgroup>
@@ -103,7 +102,6 @@ const menuFor = (m: MemoryItem) => [
         <tr>
           <th>内容</th>
           <th>类型</th>
-          <th class="num">用过</th>
           <th>更新时间</th>
           <th v-if="editable" class="col-actions">操作</th>
         </tr>
@@ -125,7 +123,6 @@ const menuFor = (m: MemoryItem) => [
             <span v-if="subOf(m)" class="cell-sub">{{ subOf(m) }}</span>
           </td>
           <td><StatusPill :value="m.kind" :map="MEMORY_KIND" /></td>
-          <td class="num">{{ m.hits ? `${fmtNumber(m.hits)} 次` : '—' }}</td>
           <td v-tip="fmtTime(m.updated_at)">{{ fmtRelative(m.updated_at) }}</td>
           <td v-if="editable" class="row-actions">
             <ActionMenu :items="menuFor(m)" />
@@ -160,9 +157,6 @@ const menuFor = (m: MemoryItem) => [
 }
 .w-kind {
   width: 88px;
-}
-.w-hits {
-  width: 72px;
 }
 .w-time {
   width: 112px;
