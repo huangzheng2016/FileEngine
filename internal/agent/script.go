@@ -110,6 +110,11 @@ func (tb *ToolBuilder) runScript(ctx context.Context, input *RunScriptInput) (*R
 		return fail("脚本 %d 字节，超过 %d 字节上限", len(input.Script), maxSize)
 	}
 
+	// Tengo races a canceled context against the VM, so a short script would
+	// still run.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	out, err := tb.executeScript(ctx, input.Script, timeout, maxResult)
 	if err != nil {
 		if ctx.Err() != nil {
