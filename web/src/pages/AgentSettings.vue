@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Agent settings: one document saved to the server config; every field is read per run.
 import { computed, reactive, ref } from 'vue'
+import ActionMenu from '@/base/ActionMenu.vue'
 import CodeEditor from '@/base/CodeEditor.vue'
 import EmptyState from '@/base/EmptyState.vue'
 import Loading from '@/base/Loading.vue'
-import Select from '@/base/Select.vue'
 import UnitInput from '@/base/UnitInput.vue'
 import { toast } from '@/base/toast'
+import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFetch } from '@/base/useFetch'
@@ -32,9 +33,9 @@ const defaultPolicy = ref('')
 const guard = useDirtyGuard(() => form, { route: true })
 
 const v = useFormValidation(() => ({
-  concurrency: form.concurrency < 1 || form.concurrency > 32 ? '并行数需在 1 到 32 之间' : '',
-  max_file_read_size: form.max_file_read_size < 1000 ? '读文件每页字数至少 1000' : '',
-  max_step: form.max_step < 1 ? '最多步数至少为 1' : '',
+  concurrency: form.concurrency < 1 || form.concurrency > 32 ? '同时整理的文件夹数需在 1 到 32 之间' : '',
+  max_file_read_size: form.max_file_read_size < 1000 ? '每次读取字数至少 1000' : '',
+  max_step: form.max_step < 1 ? '单个文件夹最多步数至少为 1' : '',
   max_retries: form.max_retries < 0 || form.max_retries > 10 ? '失败重试需在 0 到 10 次之间' : '',
 }))
 
@@ -97,7 +98,7 @@ function resetPrompt() {
   form.prompt = defaultPrompt.value
 }
 
-const PRESETS = categoryPresets.map((p) => ({ value: p.id, label: p.label }))
+const PRESETS = categoryPresets.map((p) => ({ label: p.label, onSelect: () => void fillPolicy(p.id) }))
 async function fillPolicy(id: string) {
   const p = categoryPresets.find((x) => x.id === id)
   if (!p) return
@@ -120,7 +121,7 @@ async function fillPolicy(id: string) {
       <div class="card-head"><h3>运行</h3></div>
       <div class="form-grid">
         <label class="field">
-          <span class="field-label">并行数</span>
+          <span class="field-label">同时整理的文件夹数</span>
           <input
             v-model.number="form.concurrency"
             type="number"
@@ -132,7 +133,7 @@ async function fillPolicy(id: string) {
           <span v-if="v.error('concurrency')" class="field-error">{{ v.error('concurrency') }}</span>
         </label>
         <label class="field">
-          <span class="field-label">每个任务单元最多步数</span>
+          <span class="field-label">单个文件夹最多步数</span>
           <input
             v-model.number="form.max_step"
             type="number"
@@ -155,12 +156,12 @@ async function fillPolicy(id: string) {
           <span v-if="v.error('max_retries')" class="field-error">{{ v.error('max_retries') }}</span>
         </label>
         <div class="field">
-          <span class="field-label">每个任务单元时限</span>
-          <UnitInput v-model="form.agent_timeout" kind="duration" name="agent_timeout" label="每个任务单元时限" />
+          <span class="field-label">单个文件夹时限</span>
+          <UnitInput v-model="form.agent_timeout" kind="duration" name="agent_timeout" label="单个文件夹时限" />
           <span class="field-hint">留空不限</span>
         </div>
         <label class="field">
-          <span class="field-label">读文件每页字数</span>
+          <span class="field-label">每次读取字数</span>
           <input
             v-model.number="form.max_file_read_size"
             type="number"
@@ -176,14 +177,7 @@ async function fillPolicy(id: string) {
     <section class="card">
       <div class="card-head">
         <h3>分类规范</h3>
-        <Select
-          model-value=""
-          :options="PRESETS"
-          label="用模板填写"
-          placeholder="用模板填写"
-          size="sm"
-          @update:model-value="fillPolicy"
-        />
+        <ActionMenu :items="PRESETS" label="用模板填写" />
         <button
           v-if="form.category_policy.trim() !== defaultPolicy.trim()"
           type="button"
@@ -212,14 +206,18 @@ async function fillPolicy(id: string) {
           {{ promptOpen ? '收起' : '编辑' }}
         </button>
       </div>
-      <p v-if="promptOpen" class="text-sm text-muted">分类规范会附在提示词之后，自定义提示词时同样生效。</p>
       <CodeEditor v-if="promptOpen" v-model="form.prompt" wrap autogrow name="prompt" />
     </section>
 
-    <div v-if="guard.dirty.value" class="save-bar">
+    <div class="save-bar">
       <span class="spacer" />
-      <button type="button" :disabled="saving" @click="revert">撤销修改</button>
-      <button type="submit" class="primary" :disabled="saving">
+      <button type="button" :disabled="saving || !guard.dirty.value" @click="revert">撤销修改</button>
+      <button
+        v-tip="guard.dirty.value ? '' : '没有修改'"
+        type="submit"
+        class="primary"
+        :disabled="saving || !guard.dirty.value"
+      >
         {{ saving ? '保存中' : '保存' }}
       </button>
     </div>

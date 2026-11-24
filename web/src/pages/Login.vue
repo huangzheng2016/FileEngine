@@ -48,7 +48,7 @@ async function submit() {
           :aria-invalid="!!v.error('token')"
         />
         <span v-if="v.error('token')" class="field-error">{{ v.error('token') }}</span>
-        <span v-else class="field-hint">见服务器配置文件中的 server.token</span>
+        <span v-else class="field-hint">令牌在服务器配置的 <code>server.token</code> 中</span>
       </label>
       <p v-if="failure" class="field-error" role="alert">{{ failure }}</p>
       <button type="submit" class="primary" :disabled="submitting">{{ submitting ? '登录中' : '登录' }}</button>
