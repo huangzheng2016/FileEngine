@@ -36,7 +36,11 @@ type DecideResult struct {
 
 // Tools report a Rejection as a success:false result instead of failing the
 // run.
-type Rejection struct{ Msg string }
+type Rejection struct {
+	Msg string
+	// Conflict marks a refusal because the value is already taken.
+	Conflict bool
+}
 
 func (e *Rejection) Error() string { return e.Msg }
 
@@ -126,6 +130,11 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	}
 	switch role {
 	case RoleUnit, RoleFile, RoleContainer, RoleSkip, RoleUndecided:
+	case RoleDuplicate:
+		// Only the scanner marks duplicates, and only entries nobody decided.
+		if isDir || e.Role != RoleUndecided {
+			return nil, reject("%s 不能标记为重复", p)
+		}
 	default:
 		return nil, reject("未知角色 %q（可用 unit / container / file / skip）", d.Role)
 	}
@@ -177,7 +186,7 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	res.NeedsReview = res.NewPath != "" && d.Confidence > 0 && d.Confidence < ReviewConfidence
 	if err := tx.Model(&model.FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
 		"role": role, "new_path": res.NewPath, "new_path_key": targetKey(res.NewPath), "operation": op, "reason": d.Reason,
-		"tagged": role != RoleUndecided, "needs_review": res.NeedsReview, "confidence": d.Confidence,
+		"tagged": role != RoleUndecided && role != RoleDuplicate, "needs_review": res.NeedsReview, "confidence": d.Confidence,
 	}).Error; err != nil {
 		return nil, err
 	}

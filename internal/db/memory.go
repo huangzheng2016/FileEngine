@@ -224,6 +224,17 @@ func (r *Repository) SearchMemory(q MemorySearch) ([]model.MemoryItem, error) {
 	return items, err
 }
 
+// UserMemoryKey is the key of a note written by a person: the folder it
+// concerns, else the start of its text, so saving the same note twice updates
+// one item.
+func UserMemoryKey(content, p string) string {
+	if p = NormalizeMemoryPath(p); p != "" {
+		return "path:" + p
+	}
+	r := []rune(strings.TrimSpace(content))
+	return "user:" + string(r[:min(len(r), 48)])
+}
+
 func (r *Repository) NotesSince(sessionID, afterID uint, limit int) ([]model.MemoryItem, error) {
 	if limit <= 0 {
 		limit = 50

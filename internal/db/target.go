@@ -95,10 +95,6 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 	return n, err
 }
 
-func (r *Repository) UpdateFileFields(id uint, fields map[string]any) error {
-	return r.db.Model(&model.FileEntry{}).Where("id = ?", id).Updates(fields).Error
-}
-
 func (r *Repository) ConfirmReview(sessionID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil

@@ -33,6 +33,7 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	defer cancel()
 	w := newWriter(s.repo, cancel)
 	groups := 0
+	var decisions []db.Decision
 	for _, size := range sizes {
 		if pass.Err() != nil {
 			break
@@ -42,7 +43,9 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 			w.close()
 			return err
 		}
-		groups += s.dedupeBucket(pass, rows, w)
+		n, ds := s.dedupeBucket(pass, rows, w)
+		groups += n
+		decisions = append(decisions, ds...)
 	}
 	if err := w.close(); err != nil {
 		return err
@@ -50,11 +53,17 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Decisions go through db.DecideBatch so the one-decision-per-path rules
+	// hold; a copy under a unit or skipped folder is refused and keeps only
+	// its duplicate_of link.
+	if _, err := s.repo.DecideBatch(sessionID, decisions); err != nil {
+		return err
+	}
 	log.Printf("scan session %d: %d duplicate groups across %d size buckets", sessionID, groups, len(sizes))
 	return nil
 }
 
-func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *scanWriter) int {
+func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *scanWriter) (int, []db.Decision) {
 	size := rows[0].Size
 	var need []int // indexes of rows without a stored full hash
 	for i, r := range rows {
@@ -98,6 +107,7 @@ func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *s
 		}
 	}
 	groups := 0
+	var decisions []db.Decision
 	for _, g := range byHash {
 		if len(g) < 2 {
 			continue
@@ -106,14 +116,14 @@ func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, w *s
 		sort.Slice(g, func(i, j int) bool { return originalFirst(g[i], g[j]) })
 		orig := g[0].ID
 		for _, d := range g[1:] {
-			cols := map[string]any{"duplicate_of": orig}
+			w.send(writeBatch{updates: []db.EntryUpdate{{ID: d.ID, Cols: map[string]any{"duplicate_of": orig}}}})
 			if d.Role == db.RoleUndecided {
-				cols["role"] = db.RoleDuplicate
+				decisions = append(decisions, db.Decision{Path: d.OriginalPath, Role: db.RoleDuplicate,
+					Reason: "内容与「" + g[0].OriginalPath + "」重复"})
 			}
-			w.send(writeBatch{updates: []db.EntryUpdate{{ID: d.ID, Cols: cols}}})
 		}
 	}
-	return groups
+	return groups, decisions
 }
 
 func originalFirst(a, b db.DupCandidate) bool {
