@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/mw"
 	"FileEngine/biz/service/auth"
 	"FileEngine/container"
@@ -84,14 +85,14 @@ func New(opts Options) (*App, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("local path policy: %w", err)
 	}
-	if err := db.Init(cfg.Database); err != nil {
+	if err := db.Open(cfg.Database); err != nil {
 		return nil, fmt.Errorf("initialize database: %w", err)
 	}
 	token, err := accessToken(opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := container.Init(db.GetDB(), auth.Options{Token: token, BindHost: cfg.Server.Host}); err != nil {
+	if err := container.Init(dal.DB(), auth.Options{Token: token, BindHost: cfg.Server.Host}); err != nil {
 		return nil, fmt.Errorf("build container: %w", err)
 	}
 	repo := container.Default.Repo

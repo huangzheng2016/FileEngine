@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -58,9 +59,9 @@ func TestFollowResumesWithoutGapsAndStopsAtShutdown(t *testing.T) {
 	sid := newSession(t)
 	db.Emit(sid, 1, db.EvProgress, db.ProgressData{RunID: 1, Phase: "tagging", Total: 1})
 
-	got := make(chan db.SessionEvent, 16)
+	got := make(chan model.SessionEvent, 16)
 	ended := make(chan error, 1)
-	if _, err := a.Follow(sid, 0, nil, func(ev db.SessionEvent) error { got <- ev; return nil }, func(err error) { ended <- err }); err != nil {
+	if _, err := a.Follow(sid, 0, nil, func(ev model.SessionEvent) error { got <- ev; return nil }, func(err error) { ended <- err }); err != nil {
 		t.Fatal(err)
 	}
 	db.Emit(sid, 1, db.EvSessionUpdated, struct{}{})
@@ -79,8 +80,8 @@ func TestFollowResumesWithoutGapsAndStopsAtShutdown(t *testing.T) {
 
 	// resume after the first: only the second arrives
 	after := seqs[0]
-	got2 := make(chan db.SessionEvent, 16)
-	if _, err := a.Follow(sid, 0, &after, func(ev db.SessionEvent) error { got2 <- ev; return nil }, func(error) {}); err != nil {
+	got2 := make(chan model.SessionEvent, 16)
+	if _, err := a.Follow(sid, 0, &after, func(ev model.SessionEvent) error { got2 <- ev; return nil }, func(error) {}); err != nil {
 		t.Fatal(err)
 	}
 	if ev := <-got2; ev.ID != seqs[1] {

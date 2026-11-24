@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
@@ -33,7 +36,7 @@ const (
 // overflows the bus drops the event and raises Lagged; the consumer then
 // re-reads the persisted rows after its last delivered seq.
 type Subscriber struct {
-	C         chan SessionEvent
+	C         chan model.SessionEvent
 	sessionID uint
 	lagged    atomic.Bool
 }
@@ -170,9 +173,9 @@ func FlushEvents() {
 // Without a database (unit tests that never call Init) the seq comes from an
 // in-memory counter.
 func persistAndBroadcastLocked(sessionID, runID uint, typ, data string) {
-	ev := SessionEvent{SessionID: sessionID, RunID: runID, Type: typ, Data: data, CreatedAt: time.Now()}
-	if DB != nil {
-		if err := WithRetry(func() error { return DB.Create(&ev).Error }); err != nil {
+	ev := model.SessionEvent{SessionID: sessionID, RunID: runID, Type: typ, Data: data, CreatedAt: time.Now()}
+	if g := dal.DB(); g != nil {
+		if err := dal.WithRetry(func() error { return g.Create(&ev).Error }); err != nil {
 			log.Printf("events: persist %s for session %d: %v", typ, sessionID, err)
 			return
 		}
@@ -183,7 +186,7 @@ func persistAndBroadcastLocked(sessionID, runID uint, typ, data string) {
 	broadcast(ev)
 }
 
-func broadcast(ev SessionEvent) {
+func broadcast(ev model.SessionEvent) {
 	bus.subMu.Lock()
 	subs := append([]*Subscriber(nil), bus.subs[ev.SessionID]...)
 	bus.subMu.Unlock()
@@ -198,7 +201,7 @@ func broadcast(ev SessionEvent) {
 
 // The channel is never closed by the bus.
 func Subscribe(sessionID uint) *Subscriber {
-	s := &Subscriber{C: make(chan SessionEvent, subscriberBuffer), sessionID: sessionID}
+	s := &Subscriber{C: make(chan model.SessionEvent, subscriberBuffer), sessionID: sessionID}
 	bus.subMu.Lock()
 	bus.subs[sessionID] = append(bus.subs[sessionID], s)
 	bus.subMu.Unlock()
@@ -232,11 +235,11 @@ type EventQuery struct {
 
 // With only Before set it returns the newest events below Before, still in
 // ascending order.
-func (r *Repository) ListEvents(q EventQuery) ([]SessionEvent, bool, error) {
+func (r *Repository) ListEvents(q EventQuery) ([]model.SessionEvent, bool, error) {
 	if q.Limit <= 0 || q.Limit > 1000 {
 		q.Limit = 500
 	}
-	tx := r.db.Model(&SessionEvent{}).Where("session_id = ?", q.SessionID)
+	tx := r.db.Model(&model.SessionEvent{}).Where("session_id = ?", q.SessionID)
 	if q.RunID > 0 {
 		tx = tx.Where("run_id = ?", q.RunID)
 	}
@@ -251,7 +254,7 @@ func (r *Repository) ListEvents(q EventQuery) ([]SessionEvent, bool, error) {
 	if desc {
 		order = "id DESC"
 	}
-	var rows []SessionEvent
+	var rows []model.SessionEvent
 	if err := tx.Order(order).Limit(q.Limit + 1).Find(&rows).Error; err != nil {
 		return nil, false, err
 	}
@@ -269,7 +272,7 @@ func (r *Repository) ListEvents(q EventQuery) ([]SessionEvent, bool, error) {
 
 // The default replay origin of the SSE stream.
 func (r *Repository) LatestRunStartSeq(sessionID uint) (uint, error) {
-	var run AgentRun
+	var run model.AgentRun
 	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").First(&run).Error
 	if err == gorm.ErrRecordNotFound {
 		return 0, nil
@@ -278,7 +281,7 @@ func (r *Repository) LatestRunStartSeq(sessionID uint) (uint, error) {
 		return 0, err
 	}
 	var first *uint
-	if err := r.db.Model(&SessionEvent{}).Where("session_id = ? AND run_id = ?", sessionID, run.ID).
+	if err := r.db.Model(&model.SessionEvent{}).Where("session_id = ? AND run_id = ?", sessionID, run.ID).
 		Select("MIN(id)").Scan(&first).Error; err != nil {
 		return 0, err
 	}

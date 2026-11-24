@@ -5,6 +5,9 @@ import (
 	"strings"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -27,68 +30,45 @@ const (
 	ExecKindRmdir  = "rmdir"  // source directory Src removed after it became empty
 )
 
-type ExecOp struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	RunID      uint      `gorm:"index" json:"run_id"`
-	SessionID  uint      `gorm:"index:idx_execop_session_state,priority:1;index:idx_execop_session_dst,priority:1" json:"session_id"`
-	EntryID    uint      `gorm:"index" json:"entry_id"` // FileEntry whose decision produced the op (0 for none)
-	Kind       string    `gorm:"size:16" json:"kind"`
-	Src        string    `gorm:"size:1024" json:"src"`
-	Dst        string    `gorm:"size:1024;index:idx_execop_session_dst,priority:2" json:"dst"`
-	IsDir      bool      `json:"is_dir"`
-	Size       int64     `json:"size"`     // source size when the op started
-	ModTime    time.Time `json:"mod_time"` // source mtime when the op started
-	DstSize    int64     `json:"dst_size"` // dst stat after verification (revert checks it is unchanged)
-	DstModTime time.Time `json:"dst_mod_time"`
-	// DstCreated is journaled once the backend created Dst for this op. Only
-	// then may recovery delete a half-written Dst; without it a file at Dst
-	// may belong to someone else.
-	DstCreated bool      `json:"dst_created"`
-	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2;index:idx_execop_session_dst,priority:3" json:"state"`
-	Error      string    `gorm:"type:text" json:"error"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+func (r *Repository) CreateExecOp(op *model.ExecOp) error {
+	return dal.WithRetry(func() error { return r.db.Create(op).Error })
 }
 
-func (r *Repository) CreateExecOp(op *ExecOp) error {
-	return WithRetry(func() error { return r.db.Create(op).Error })
-}
-
-func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
+func (r *Repository) SetExecOpState(op *model.ExecOp, state, errMsg string) error {
 	op.State, op.Error = state, errMsg
-	return WithRetry(func() error {
-		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ExecOp{}).Where("id = ?", op.ID).
 			Updates(map[string]any{"state": state, "error": errMsg, "updated_at": time.Now()}).Error
 	})
 }
 
-func (r *Repository) SetExecOpCreated(op *ExecOp) error {
+func (r *Repository) SetExecOpCreated(op *model.ExecOp) error {
 	op.DstCreated = true
-	return WithRetry(func() error {
-		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ExecOp{}).Where("id = ?", op.ID).
 			Updates(map[string]any{"dst_created": true, "updated_at": time.Now()}).Error
 	})
 }
 
 // SetExecOpStateDst advances the state and records the destination stat in
 // one statement, so a crash never leaves a state without its stat.
-func (r *Repository) SetExecOpStateDst(op *ExecOp, state, errMsg string, size int64, mtime time.Time) error {
+func (r *Repository) SetExecOpStateDst(op *model.ExecOp, state, errMsg string, size int64, mtime time.Time) error {
 	op.State, op.Error, op.DstSize, op.DstModTime = state, errMsg, size, mtime
-	return WithRetry(func() error {
-		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ExecOp{}).Where("id = ?", op.ID).
 			Updates(map[string]any{"state": state, "error": errMsg, "dst_size": size,
 				"dst_mod_time": mtime, "updated_at": time.Now()}).Error
 	})
 }
 
-func (r *Repository) ListExecOps(runID uint) ([]ExecOp, error) {
-	var ops []ExecOp
+func (r *Repository) ListExecOps(runID uint) ([]model.ExecOp, error) {
+	var ops []model.ExecOp
 	err := r.db.Where("run_id = ?", runID).Order("id ASC").Find(&ops).Error
 	return ops, err
 }
 
-func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
-	var ops []ExecOp
+func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]model.ExecOp, error) {
+	var ops []model.ExecOp
 	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecVerified}).
 		Order("id ASC").Find(&ops).Error
 	return ops, err
@@ -96,8 +76,8 @@ func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 
 // Finished single-step ops whose entry was never marked executed (a crash
 // between the op's done state and MarkEntryExecuted).
-func (r *Repository) ListDoneOpsOfPlannedEntries(sessionID uint) ([]ExecOp, error) {
-	var ops []ExecOp
+func (r *Repository) ListDoneOpsOfPlannedEntries(sessionID uint) ([]model.ExecOp, error) {
+	var ops []model.ExecOp
 	err := r.db.Joins("JOIN file_entries ON file_entries.id = exec_ops.entry_id").
 		Where("exec_ops.session_id = ? AND exec_ops.state = ? AND exec_ops.kind IN ? AND file_entries.executed = ?",
 			sessionID, ExecDone, []string{ExecKindRename, ExecKindCopy, ExecKindMove}, false).
@@ -107,8 +87,8 @@ func (r *Repository) ListDoneOpsOfPlannedEntries(sessionID uint) ([]ExecOp, erro
 
 // The executor uses it to tell its own earlier output from a foreign file
 // when resuming a partially executed directory.
-func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*ExecOp, error) {
-	var ops []ExecOp
+func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*model.ExecOp, error) {
+	var ops []model.ExecOp
 	err := r.db.Where("session_id = ? AND dst = ? AND state = ?", sessionID, dst, ExecDone).
 		Order("id DESC").Limit(1).Find(&ops).Error
 	if err != nil || len(ops) == 0 {
@@ -117,12 +97,12 @@ func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*ExecOp, error)
 	return &ops[0], nil
 }
 
-func (r *Repository) LatestExecOpByEntry(entryIDs []uint) (map[uint]ExecOp, error) {
-	out := map[uint]ExecOp{}
+func (r *Repository) LatestExecOpByEntry(entryIDs []uint) (map[uint]model.ExecOp, error) {
+	out := map[uint]model.ExecOp{}
 	if len(entryIDs) == 0 {
 		return out, nil
 	}
-	var ops []ExecOp
+	var ops []model.ExecOp
 	if err := r.db.Where("entry_id IN ?", entryIDs).Order("id ASC").Find(&ops).Error; err != nil {
 		return nil, err
 	}
@@ -134,40 +114,40 @@ func (r *Repository) LatestExecOpByEntry(entryIDs []uint) (map[uint]ExecOp, erro
 
 func (r *Repository) MarkEntryExecuted(id uint, mode string) error {
 	now := time.Now()
-	return WithRetry(func() error {
-		return r.db.Model(&FileEntry{}).Where("id = ?", id).
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.FileEntry{}).Where("id = ?", id).
 			Updates(map[string]any{"executed": true, "executed_at": &now, "execute_mode": mode}).Error
 	})
 }
 
 func (r *Repository) UnmarkEntryExecuted(id uint) error {
-	return WithRetry(func() error {
-		return r.db.Model(&FileEntry{}).Where("id = ?", id).
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.FileEntry{}).Where("id = ?", id).
 			Updates(map[string]any{"executed": false, "executed_at": nil, "execute_mode": ""}).Error
 	})
 }
 
-func (r *Repository) ListPlannedEntries(sessionID uint) ([]FileEntry, error) {
-	var files []FileEntry
+func (r *Repository) ListPlannedEntries(sessionID uint) ([]model.FileEntry, error) {
+	var files []model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND new_path != '' AND executed = ?", sessionID, false).
 		Order("original_path ASC, id ASC").Find(&files).Error
 	return files, err
 }
 
-func (r *Repository) ListDecidedEntries(sessionID uint) ([]FileEntry, error) {
-	var files []FileEntry
+func (r *Repository) ListDecidedEntries(sessionID uint) ([]model.FileEntry, error) {
+	var files []model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND new_path != ''", sessionID).
 		Order("original_path ASC, id ASC").Find(&files).Error
 	return files, err
 }
 
-func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]FileEntry, error) {
-	var files []FileEntry
+func (r *Repository) SearchEntries(sessionID uint, q string, limit int) ([]model.FileEntry, error) {
+	var files []model.FileEntry
 	q = strings.TrimPrefix(strings.TrimSpace(q), "/")
-	pattern := "%" + likeLiteral(q) + "%"
+	pattern := "%" + dal.LikeLiteral(q) + "%"
 	tx := r.db.Where("scan_session_id = ?", sessionID)
 	err := tx.Where(r.db.Where("original_path = ?", q).
-		Or(ciLikeCondition(r.db, "original_path"), pattern).
+		Or(dal.CILikeCondition(r.db, "original_path"), pattern).
 		Or(nameSearchCondition(r.db), pattern)).
 		Order("depth ASC, original_path ASC").Limit(limit).Find(&files).Error
 	return files, err

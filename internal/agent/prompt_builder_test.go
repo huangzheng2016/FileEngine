@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -34,14 +35,14 @@ func TestBuildCategorySummaryNameOrderNoCounts(t *testing.T) {
 	}
 }
 
-func seedSharedContext(t *testing.T) (*db.Repository, *db.ScanSession) {
+func seedSharedContext(t *testing.T) (*db.Repository, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	session := &db.ScanSession{FilesystemID: 7, Goal: "照片按年份整理，项目保持完整"}
+	session := &model.ScanSession{FilesystemID: 7, Goal: "照片按年份整理，项目保持完整"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []db.Category{
+	for _, c := range []model.Category{
 		{FilesystemID: 7, Name: "照片", Path: "/照片", Description: "所有照片\n和视频", Structure: "{年}/{原文件夹名}"},
 		{FilesystemID: 7, Name: "代码", Path: "/代码"},
 	} {
@@ -53,13 +54,13 @@ func seedSharedContext(t *testing.T) (*db.Repository, *db.ScanSession) {
 	if _, err := repo.SavePlan(session.ID, "# 方案\n照片按年", 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.CreateRule(&db.PlanRule{SessionID: session.ID, Name: "照片按年", Exts: "jpg", Target: "照片/{year}"}); err != nil {
+	if err := repo.CreateRule(&model.PlanRule{SessionID: session.ID, Name: "照片按年", Exts: "jpg", Target: "照片/{year}"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertMemory(&db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryCorrection, Key: "c", Content: "截图不算照片", Path: "Photos"}); err != nil {
+	if _, err := repo.UpsertMemory(&model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryCorrection, Key: "c", Content: "截图不算照片", Path: "Photos"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range []db.FileEntry{
+	for _, e := range []model.FileEntry{
 		{ScanSessionID: session.ID, OriginalPath: "Photos", Name: "Photos", FileType: "directory", Description: "手机相册导出"},
 		{ScanSessionID: session.ID, OriginalPath: "Photos/2023", Name: "2023", FileType: "directory", ParentPath: "Photos"},
 		{ScanSessionID: session.ID, OriginalPath: "Photos/2023/trip", Name: "trip", FileType: "directory", ParentPath: "Photos/2023", Description: "2023 旅行"},
@@ -93,8 +94,6 @@ func TestSharedContextSectionsAndStability(t *testing.T) {
 	if _, err := repo.ApplyRules(session.ID, 0, false); err != nil {
 		t.Fatal(err)
 	}
-	items, _ := repo.ListLongTermMemory(7)
-	_ = repo.BumpMemoryHits([]uint{items[0].ID})
 	again, _ := BuildSharedContext(repo, session)
 	if again != out {
 		t.Fatalf("shared context changed without a content edit:\n%s\n---\n%s", out, again)

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	dbmodel "FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -16,7 +17,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
+func NewChatModelFromProvider(ctx context.Context, p *dbmodel.ModelProvider) (model.ChatModel, error) {
 	switch p.Provider {
 	case "openai":
 		return newOpenAIModel(ctx, p, p.BaseURL)
@@ -40,7 +41,7 @@ func MarkCacheBreakpoint(msg *schema.Message) *schema.Message {
 	return claude.SetMessageBreakpoint(msg)
 }
 
-func ResolveBulkProvider(repo *db.Repository, session *db.ScanSession, main *db.ModelProvider) (*db.ModelProvider, error) {
+func ResolveBulkProvider(repo *db.Repository, session *dbmodel.ScanSession, main *dbmodel.ModelProvider) (*dbmodel.ModelProvider, error) {
 	if session == nil || session.BulkModelProviderID == 0 || session.BulkModelProviderID == main.ID {
 		return main, nil
 	}
@@ -51,11 +52,11 @@ func ResolveBulkProvider(repo *db.Repository, session *db.ScanSession, main *db.
 	return p, nil
 }
 
-func newOpenAIModel(ctx context.Context, p *db.ModelProvider, baseURL string) (model.ChatModel, error) {
+func newOpenAIModel(ctx context.Context, p *dbmodel.ModelProvider, baseURL string) (model.ChatModel, error) {
 	return openai.NewChatModel(ctx, openAIConfig(p, baseURL))
 }
 
-func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
+func openAIConfig(p *dbmodel.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	cfg := &openai.ChatModelConfig{
 		Model:  p.Model,
 		APIKey: p.APIKey,
@@ -80,7 +81,7 @@ func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	return cfg
 }
 
-func newClaudeModel(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
+func newClaudeModel(ctx context.Context, p *dbmodel.ModelProvider) (model.ChatModel, error) {
 	m, err := claude.NewChatModel(ctx, claudeConfig(p))
 	if err != nil {
 		return nil, err
@@ -134,7 +135,7 @@ func claudeDefaultMaxTokens(name string) int {
 
 // Thinking and effort come from the provider alone, so every request of a
 // run carries identical values.
-func claudeConfig(p *db.ModelProvider) *claude.Config {
+func claudeConfig(p *dbmodel.ModelProvider) *claude.Config {
 	cfg := &claude.Config{
 		APIKey:    p.APIKey,
 		Model:     p.Model,
@@ -197,7 +198,7 @@ func claudeEffort(effort string) string {
 }
 
 // 0 means the model's default, so nothing is sent.
-func temperature(p *db.ModelProvider) *float32 {
+func temperature(p *dbmodel.ModelProvider) *float32 {
 	if p.Temperature == 0 {
 		return nil
 	}

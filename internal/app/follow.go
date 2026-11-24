@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
 	"FileEngine/biz/service/eventfeed"
 	"FileEngine/container"
-	"FileEngine/internal/db"
 
 	"gorm.io/gorm"
 )
 
-type noPing struct{ send func(db.SessionEvent) error }
+type noPing struct {
+	send func(model.SessionEvent) error
+}
 
-func (n noPing) Event(ev db.SessionEvent) error { return n.send(ev) }
-func (noPing) Ping() error                      { return nil }
+func (n noPing) Event(ev model.SessionEvent) error { return n.send(ev) }
+func (noPing) Ping() error                         { return nil }
 
 // Follow streams a session's events to send in order and without gaps: the
 // history after `after` (nil = from the latest run's first event) and then the
@@ -23,7 +25,7 @@ func (noPing) Ping() error                      { return nil }
 // subscription is established. onEnd is called exactly once when following
 // stops: nil after stop or shutdown, an error when send or the database failed.
 // The follower is registered with the stream registry, so Shutdown cancels it.
-func (a *App) Follow(sessionID, runID uint, after *uint, send func(db.SessionEvent) error, onEnd func(error)) (stop func(), err error) {
+func (a *App) Follow(sessionID, runID uint, after *uint, send func(model.SessionEvent) error, onEnd func(error)) (stop func(), err error) {
 	c := container.Default
 	if _, err := c.Repo.GetSession(sessionID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

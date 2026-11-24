@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -83,7 +84,7 @@ func TestCancelledRevertUnmarksRevertedEntries(t *testing.T) {
 	if _, err := New(e.repo, e.fs).Revert(context.Background(), rv2, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []*db.FileEntry{fa, fb} {
+	for _, f := range []*model.FileEntry{fa, fb} {
 		if e.executed(f.ID) {
 			t.Fatalf("entry %s still executed after revert", f.OriginalPath)
 		}

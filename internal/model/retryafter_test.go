@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudwego/eino/schema"
+	"FileEngine/biz/dal/db/model"
 
-	"FileEngine/internal/db"
+	"github.com/cloudwego/eino/schema"
 )
 
 func TestParseRetryAfterHeader(t *testing.T) {
@@ -191,7 +191,7 @@ func TestOpenAIModelCapturesRetryAfterEndToEnd(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chatModel, err := NewChatModelFromProvider(context.Background(), &db.ModelProvider{Provider: "openai", APIKey: "fake-key", Model: "fake-model", BaseURL: server.URL, Temperature: 0.7})
+	chatModel, err := NewChatModelFromProvider(context.Background(), &model.ModelProvider{Provider: "openai", APIKey: "fake-key", Model: "fake-model", BaseURL: server.URL, Temperature: 0.7})
 	if err != nil {
 		t.Fatalf("NewChatModelFromProvider: %v", err)
 	}

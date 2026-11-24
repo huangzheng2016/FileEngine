@@ -3,6 +3,7 @@ package scanner
 import (
 	"sync/atomic"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -37,7 +38,7 @@ func (s *Scanner) loadIndex(sessionID uint) (scanIndex, error) {
 // Directory mtimes move with every child add/remove and their decision is
 // about the folder as a whole, so a changed directory only gets a count/mtime
 // refresh; a changed file is reset to undecided.
-func (idx scanIndex) emit(b *writeBatch, fe db.FileEntry) {
+func (idx scanIndex) emit(b *writeBatch, fe model.FileEntry) {
 	ex := idx[fe.OriginalPath]
 	if ex == nil {
 		b.inserts = append(b.inserts, fe)
@@ -58,7 +59,7 @@ func (idx scanIndex) emit(b *writeBatch, fe db.FileEntry) {
 	}
 }
 
-func resetCols(fe db.FileEntry) map[string]any {
+func resetCols(fe model.FileEntry) map[string]any {
 	return map[string]any{
 		"size": fe.Size, "mod_time": fe.ModTime, "permissions": fe.Permissions, "file_type": fe.FileType,
 		"child_count": fe.ChildCount, "subdir_count": fe.SubdirCount,

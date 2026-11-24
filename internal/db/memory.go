@@ -7,6 +7,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
@@ -45,7 +48,7 @@ func ValidMemoryKind(k string) bool {
 	return false
 }
 
-func ValidateMemoryItem(m *MemoryItem) error {
+func ValidateMemoryItem(m *model.MemoryItem) error {
 	if !ValidMemoryScope(m.Scope) {
 		return invalidMemory("scope 必须是 session / filesystem / global 之一")
 	}
@@ -70,8 +73,8 @@ func ValidateMemoryItem(m *MemoryItem) error {
 	return nil
 }
 
-// pinned only ever turns on; hits are kept.
-func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
+// pinned only ever turns on.
+func (r *Repository) UpsertMemory(m *model.MemoryItem) (bool, error) {
 	m.Key = NormalizeMemoryKey(m.Key)
 	m.Content = strings.TrimSpace(m.Content)
 	m.Path = NormalizeMemoryPath(m.Path)
@@ -79,10 +82,10 @@ func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
 		return false, err
 	}
 	created := false
-	err := WithRetry(func() error {
+	err := dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
-			var cur MemoryItem
-			err := tx.Where("scope = ? AND scope_id = ? AND "+quoteCol(tx, "key")+" = ?", m.Scope, m.ScopeID, m.Key).Take(&cur).Error
+			var cur model.MemoryItem
+			err := tx.Where("scope = ? AND scope_id = ? AND "+dal.QuoteCol(tx, "key")+" = ?", m.Scope, m.ScopeID, m.Key).Take(&cur).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				created = true
 				m.ID = 0
@@ -96,7 +99,7 @@ func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
 			if m.Pinned {
 				updates["pinned"] = true
 			}
-			if err := tx.Model(&MemoryItem{}).Where("id = ?", cur.ID).Updates(updates).Error; err != nil {
+			if err := tx.Model(&model.MemoryItem{}).Where("id = ?", cur.ID).Updates(updates).Error; err != nil {
 				return err
 			}
 			return tx.Take(m, cur.ID).Error
@@ -105,8 +108,8 @@ func (r *Repository) UpsertMemory(m *MemoryItem) (bool, error) {
 	return created, err
 }
 
-func (r *Repository) GetMemory(id uint) (*MemoryItem, error) {
-	var m MemoryItem
+func (r *Repository) GetMemory(id uint) (*model.MemoryItem, error) {
+	var m model.MemoryItem
 	err := r.db.Take(&m, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrMemoryNotFound
@@ -114,32 +117,32 @@ func (r *Repository) GetMemory(id uint) (*MemoryItem, error) {
 	return &m, err
 }
 
-const memoryOrder = "pinned DESC, hits DESC, updated_at DESC, id DESC"
+const memoryOrder = "pinned DESC, updated_at DESC, id DESC"
 
-func (r *Repository) ListMemory(scope string, scopeID *uint) ([]MemoryItem, error) {
-	tx := r.db.Model(&MemoryItem{})
+func (r *Repository) ListMemory(scope string, scopeID *uint) ([]model.MemoryItem, error) {
+	tx := r.db.Model(&model.MemoryItem{})
 	if scope != "" {
 		tx = tx.Where("scope = ?", scope)
 	}
 	if scopeID != nil {
 		tx = tx.Where("scope_id = ?", *scopeID)
 	}
-	var items []MemoryItem
+	var items []model.MemoryItem
 	err := tx.Order(memoryOrder).Find(&items).Error
 	return items, err
 }
 
-func (r *Repository) ListLongTermMemory(filesystemID uint) ([]MemoryItem, error) {
-	var items []MemoryItem
+func (r *Repository) ListLongTermMemory(filesystemID uint) ([]model.MemoryItem, error) {
+	var items []model.MemoryItem
 	err := r.db.Where("(scope = ? AND scope_id = 0) OR (scope = ? AND scope_id = ?)",
 		MemoryScopeGlobal, MemoryScopeFilesystem, filesystemID).
 		Order(memoryOrder).Find(&items).Error
 	return items, err
 }
 
-func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryItem, error) {
-	var out MemoryItem
-	err := WithRetry(func() error {
+func (r *Repository) UpdateMemory(id uint, apply func(m *model.MemoryItem)) (*model.MemoryItem, error) {
+	var out model.MemoryItem
+	err := dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Take(&out, id).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -155,7 +158,7 @@ func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryIt
 				return err
 			}
 			var clash int64
-			if err := tx.Model(&MemoryItem{}).Where("scope = ? AND scope_id = ? AND "+quoteCol(tx, "key")+" = ? AND id <> ?", out.Scope, out.ScopeID, out.Key, id).
+			if err := tx.Model(&model.MemoryItem{}).Where("scope = ? AND scope_id = ? AND "+dal.QuoteCol(tx, "key")+" = ? AND id <> ?", out.Scope, out.ScopeID, out.Key, id).
 				Count(&clash).Error; err != nil {
 				return err
 			}
@@ -163,7 +166,7 @@ func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryIt
 				return invalidMemory("同一范围内已存在相同 key 的记忆")
 			}
 			out.UpdatedAt = time.Now()
-			return tx.Model(&MemoryItem{}).Where("id = ?", id).Updates(map[string]any{
+			return tx.Model(&model.MemoryItem{}).Where("id = ?", id).Updates(map[string]any{
 				"scope": out.Scope, "scope_id": out.ScopeID, "kind": out.Kind, "key": out.Key,
 				"content": out.Content, "path": out.Path, "source": out.Source, "pinned": out.Pinned,
 				"updated_at": out.UpdatedAt,
@@ -177,7 +180,7 @@ func (r *Repository) UpdateMemory(id uint, apply func(m *MemoryItem)) (*MemoryIt
 }
 
 func (r *Repository) DeleteMemory(id uint) error {
-	res := r.db.Delete(&MemoryItem{}, id)
+	res := r.db.Delete(&model.MemoryItem{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -198,42 +201,34 @@ type MemorySearch struct {
 	Limit  int
 }
 
-func (r *Repository) SearchMemory(q MemorySearch) ([]MemoryItem, error) {
+func (r *Repository) SearchMemory(q MemorySearch) ([]model.MemoryItem, error) {
 	if len(q.Scopes) == 0 {
 		return nil, nil
 	}
-	tx := r.db.Model(&MemoryItem{})
+	tx := r.db.Model(&model.MemoryItem{})
 	scopeCond := r.db.Where("1 = 0")
 	for _, s := range q.Scopes {
 		scopeCond = scopeCond.Or("scope = ? AND scope_id = ?", s.Scope, s.ScopeID)
 	}
 	tx = tx.Where(scopeCond)
 	for _, term := range strings.Fields(q.Query) {
-		pat := "%" + likeLiteral(term) + "%"
-		tx = tx.Where("("+ciLikeCondition(tx, quoteCol(tx, "key"))+" OR "+ciLikeCondition(tx, "content")+")", pat, pat)
+		pat := "%" + dal.LikeLiteral(term) + "%"
+		tx = tx.Where("("+dal.CILikeCondition(tx, dal.QuoteCol(tx, "key"))+" OR "+dal.CILikeCondition(tx, "content")+")", pat, pat)
 	}
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	var items []MemoryItem
+	var items []model.MemoryItem
 	err := tx.Order(memoryOrder).Limit(limit).Find(&items).Error
 	return items, err
 }
 
-func (r *Repository) BumpMemoryHits(ids []uint) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return r.db.Model(&MemoryItem{}).Where("id IN ?", ids).
-		Updates(map[string]any{"hits": gorm.Expr("hits + 1"), "last_used_at": time.Now()}).Error
-}
-
-func (r *Repository) NotesSince(sessionID, afterID uint, limit int) ([]MemoryItem, error) {
+func (r *Repository) NotesSince(sessionID, afterID uint, limit int) ([]model.MemoryItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	var items []MemoryItem
+	var items []model.MemoryItem
 	err := r.db.Where("scope = ? AND scope_id = ? AND id > ?", MemoryScopeSession, sessionID, afterID).
 		Order("id ASC").Limit(limit).Find(&items).Error
 	return items, err

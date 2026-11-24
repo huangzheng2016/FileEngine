@@ -4,26 +4,28 @@ import (
 	"path/filepath"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
 func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	fs := &Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
+	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
 	if err := r.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
-	session := &ScanSession{FilesystemID: fs.ID, Status: "tagging"}
+	session := &model.ScanSession{FilesystemID: fs.ID, Status: "tagging"}
 	if err := r.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
-	for _, c := range []Category{
+	for _, c := range []model.Category{
 		{FilesystemID: fs.ID, Name: "照片", Path: "/photo"},
 		{FilesystemID: fs.ID, Name: "照片备份", Path: "/photos2"},
 		{FilesystemID: fs.ID, Name: "空分类", Path: "/empty"},
@@ -34,7 +36,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		}
 	}
 
-	files := []FileEntry{
+	files := []model.FileEntry{
 		{ScanSessionID: session.ID, OriginalPath: "in/a.jpg", Name: "a.jpg", FileType: "file", NewPath: "/photo/a.jpg", Operation: "planned"},
 		{ScanSessionID: session.ID, OriginalPath: "in/b.jpg", Name: "b.jpg", FileType: "file", NewPath: "/photo/sub/b.jpg", Operation: "planned"},
 		{ScanSessionID: session.ID, OriginalPath: "in/c.jpg", Name: "c.jpg", FileType: "file", NewPath: "/photos2/c.jpg", Operation: "planned"},
@@ -89,16 +91,16 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 // default applies.
 func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	fs := &Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
+	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
 	if err := r.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
-	session := &ScanSession{FilesystemID: fs.ID, Status: "scanning"}
+	session := &model.ScanSession{FilesystemID: fs.ID, Status: "scanning"}
 	if err := r.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -126,12 +128,12 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 
 func TestSampleFiles(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	for _, f := range []FileEntry{
+	for _, f := range []model.FileEntry{
 		{ScanSessionID: 1, OriginalPath: "in/a.jpg", ParentPath: "in", Name: "a.jpg", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/b.jpg", ParentPath: "in", Name: "b.jpg", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/c.jpg", ParentPath: "in", Name: "c.jpg", FileType: "file"},
@@ -183,12 +185,12 @@ func TestSampleFiles(t *testing.T) {
 
 func TestCountUntaggedByType(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	entries := []FileEntry{
+	entries := []model.FileEntry{
 		{ScanSessionID: 1, OriginalPath: "in/dir", Name: "dir", FileType: "directory"},
 		{ScanSessionID: 1, OriginalPath: "in/dir2", Name: "dir2", FileType: "directory", Tagged: true},
 		{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file"},
@@ -223,14 +225,14 @@ func TestCountUntaggedByType(t *testing.T) {
 
 func TestTaggedStatusByIDs(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	tagged := &FileEntry{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file", Tagged: true}
-	untagged := &FileEntry{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"}
-	for _, f := range []*FileEntry{tagged, untagged} {
+	tagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file", Tagged: true}
+	untagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"}
+	for _, f := range []*model.FileEntry{tagged, untagged} {
 		if err := r.CreateFile(f); err != nil {
 			t.Fatalf("create file: %v", err)
 		}
@@ -254,12 +256,12 @@ func TestTaggedStatusByIDs(t *testing.T) {
 
 func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	entries := []FileEntry{
+	entries := []model.FileEntry{
 		{ScanSessionID: 1, OriginalPath: "in/my_dir", Name: "my_dir", FileType: "directory"},
 		{ScanSessionID: 1, OriginalPath: "in/my_dir/a.txt", Name: "a.txt", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/myXdir", Name: "myXdir", FileType: "directory"},
@@ -294,12 +296,12 @@ func TestUnitMembersLiteralUnderscore(t *testing.T) {
 
 func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	for _, f := range []FileEntry{
+	for _, f := range []model.FileEntry{
 		{ScanSessionID: 1, OriginalPath: "in/Photo.JPG", Name: "Photo.JPG", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/100%.txt", Name: "100%.txt", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "in/1000x.txt", Name: "1000x.txt", FileType: "file"},

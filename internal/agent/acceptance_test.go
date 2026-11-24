@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -32,7 +33,7 @@ func calls(cs ...wireCall) func(wireReq) wireReply {
 func seedMemory(t *testing.T, repo *db.Repository, n int) {
 	t.Helper()
 	for i := range n {
-		m := &db.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryConvention,
+		m := &model.MemoryItem{Scope: db.MemoryScopeFilesystem, ScopeID: 7, Kind: db.MemoryConvention,
 			Key: "k" + string(rune('a'+i)), Content: "约定" + string(rune('甲'+i)), Source: db.MemorySourceUser}
 		if _, err := repo.UpsertMemory(m); err != nil {
 			t.Fatal(err)
@@ -138,12 +139,6 @@ func TestWireRecallDoesNotChangeSharedBytes(t *testing.T) {
 			t.Fatalf("unit %d: recall changed the shared bytes", i)
 		}
 	}
-	items, _ := repo.ListLongTermMemory(7)
-	for _, m := range items {
-		if m.Hits != 0 {
-			t.Fatalf("recall must not record usage: %+v", m)
-		}
-	}
 	// And at string level, for every pair of items.
 	session := a.session
 	before, _ := BuildSharedContext(repo, session)
@@ -160,14 +155,14 @@ func TestWireRecallDoesNotChangeSharedBytes(t *testing.T) {
 // 5. Toggling a session switch does not change the tools bytes.
 func TestWireToolsIdenticalAcrossSwitches(t *testing.T) {
 	var tools [][]byte
-	for _, flip := range []func(*db.ScanSession){
-		func(s *db.ScanSession) {
+	for _, flip := range []func(*model.ScanSession){
+		func(s *model.ScanSession) {
 			s.AllowReadFile, s.AllowScript, s.AllowAutoCategory, s.AllowVision = true, true, true, true
 		},
-		func(s *db.ScanSession) {
+		func(s *model.ScanSession) {
 			s.AllowReadFile, s.AllowScript, s.AllowAutoCategory, s.AllowVision = false, false, false, false
 		},
-		func(s *db.ScanSession) {
+		func(s *model.ScanSession) {
 			s.AllowReadFile, s.AllowScript, s.AllowAutoCategory, s.AllowVision = true, false, true, false
 		},
 	} {
@@ -247,7 +242,7 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 	))
 	_, a, session := wireChatAgent(t, ws)
 	repo := a.repo
-	if err := repo.CreateCategory(&db.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
+	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
 		t.Fatal(err)
 	}
 	files, _, _ := repo.ListFiles(db.FileQuery{SessionID: session.ID})
@@ -256,10 +251,10 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Everything the snapshot holds changes between the turns.
-	if err := repo.CreateCategory(&db.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件", Description: "安装包"}); err != nil {
+	if err := repo.CreateCategory(&model.Category{FilesystemID: session.FilesystemID, Name: "软件", Path: "/软件", Description: "安装包"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertMemory(&db.MemoryItem{Scope: db.MemoryScopeGlobal, Kind: db.MemoryPreference, Key: "pref:x", Content: "新偏好丙", Source: db.MemorySourceUser}); err != nil {
+	if _, err := repo.UpsertMemory(&model.MemoryItem{Scope: db.MemoryScopeGlobal, Kind: db.MemoryPreference, Key: "pref:x", Content: "新偏好丙", Source: db.MemorySourceUser}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.SavePlan(session.ID, "# 方案\n照片按年", 0, ""); err != nil {

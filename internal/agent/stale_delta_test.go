@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"FileEngine/internal/db"
+	"FileEngine/biz/dal/db/model"
 )
 
 // A change listed in one turn and reverted before the next must not stay the
@@ -18,7 +18,7 @@ func TestWireRevertedChangeIsRetractedNextTurn(t *testing.T) {
 	if _, err := a.RunChat(ctx, NewLogger(session.ID, 1, 0), "第一轮", nil); err != nil {
 		t.Fatal(err)
 	}
-	cat := &db.Category{FilesystemID: session.FilesystemID, Name: "临时", Path: "/临时"}
+	cat := &model.Category{FilesystemID: session.FilesystemID, Name: "临时", Path: "/临时"}
 	if err := repo.CreateCategory(cat); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestChatSnapshotRowStaysSmall(t *testing.T) {
 	if _, err := a.chatEpochSnapshot(nil); err != nil {
 		t.Fatal(err)
 	}
-	var row db.ChatTurn
+	var row model.ChatTurn
 	if err := repo.DB().Where("session_id = ? AND role = ?", session.ID, chatRoleSnapshot).Take(&row).Error; err != nil {
 		t.Fatal(err)
 	}

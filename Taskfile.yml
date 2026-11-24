@@ -60,6 +60,11 @@ tasks:
     cmds:
       - ./scripts/hz_update.sh
 
+  gen:db:
+    desc: Regenerate biz/dal/db/query from biz/dal/db/model
+    cmds:
+      - go run ./cmd/generate
+
   gen:wire:
     desc: Regenerate container/wire_gen.go
     cmds:
@@ -74,6 +79,7 @@ tasks:
     desc: Regenerate all generated code
     cmds:
       - task: gen:api
+      - task: gen:db
       - task: gen:wire
       - task: gen:bindings
 

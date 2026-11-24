@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"slices"
 
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 )
 
-var allModels = []any{&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
-	&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &PlanRule{}, &ExecOp{}}
-
-// Creates the schema plus what struct tags cannot express: binary path
+// Migrate creates the schema plus what struct tags cannot express: binary path
 // comparison on MySQL and PostgreSQL.
-func migrate(db *gorm.DB) error {
+func Migrate(db *gorm.DB) error {
 	tx := db
 	if db.Dialector.Name() == "mysql" {
 		opts, err := mysqlTableOptions(db)
@@ -23,7 +22,7 @@ func migrate(db *gorm.DB) error {
 		}
 		tx = db.Set("gorm:table_options", opts)
 	}
-	if err := tx.AutoMigrate(allModels...); err != nil {
+	if err := tx.AutoMigrate(model.All()...); err != nil {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {

@@ -10,6 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
@@ -25,36 +28,36 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
-func (r *Repository) CreateSession(s *ScanSession) error {
+func (r *Repository) CreateSession(s *model.ScanSession) error {
 	return r.db.Create(s).Error
 }
 
-func (r *Repository) GetSession(id uint) (*ScanSession, error) {
-	var s ScanSession
+func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
+	var s model.ScanSession
 	err := r.db.First(&s, id).Error
 	return &s, err
 }
 
-func (r *Repository) ListSessions() ([]ScanSession, error) {
-	var sessions []ScanSession
+func (r *Repository) ListSessions() ([]model.ScanSession, error) {
+	var sessions []model.ScanSession
 	err := r.db.Order("id DESC").Find(&sessions).Error
 	return sessions, err
 }
 
-func (r *Repository) ListSessionsByFilesystem(filesystemID uint) ([]ScanSession, error) {
-	var sessions []ScanSession
+func (r *Repository) ListSessionsByFilesystem(filesystemID uint) ([]model.ScanSession, error) {
+	var sessions []model.ScanSession
 	err := r.db.Where("filesystem_id = ?", filesystemID).Order("id DESC").Find(&sessions).Error
 	return sessions, err
 }
 
-func (r *Repository) UpdateSession(s *ScanSession) error {
+func (r *Repository) UpdateSession(s *model.ScanSession) error {
 	return r.db.Save(s).Error
 }
 
 // Column-scoped: the scanner calls this every few seconds, and a full-row
 // Save would race the API layer's own session writes.
 func (r *Repository) UpdateScanProgress(sessionID uint, scanned int, currentPath string) error {
-	return r.db.Model(&ScanSession{}).Where("id = ?", sessionID).
+	return r.db.Model(&model.ScanSession{}).Where("id = ?", sessionID).
 		Updates(map[string]interface{}{"scanned_count": scanned, "current_path": currentPath}).Error
 }
 
@@ -62,7 +65,7 @@ const ScanInterruptedMessage = "scan interrupted by server restart"
 
 // The walk lives in memory, so a scan whose process died can never finish.
 func (r *Repository) MarkInterruptedScans() (int64, error) {
-	res := r.db.Model(&ScanSession{}).Where("status = ?", "scanning").
+	res := r.db.Model(&model.ScanSession{}).Where("status = ?", "scanning").
 		Updates(map[string]interface{}{
 			"status":        "interrupted",
 			"error_message": ScanInterruptedMessage,
@@ -73,16 +76,16 @@ func (r *Repository) MarkInterruptedScans() (int64, error) {
 
 func (r *Repository) DeleteSession(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("scan_session_id = ?", id).Delete(&FileEntry{}).Error; err != nil {
+		if err := tx.Where("scan_session_id = ?", id).Delete(&model.FileEntry{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("session_id = ?", id).Delete(&SessionEvent{}).Error; err != nil {
+		if err := tx.Where("session_id = ?", id).Delete(&model.SessionEvent{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("session_id = ?", id).Delete(&AgentRun{}).Error; err != nil {
+		if err := tx.Where("session_id = ?", id).Delete(&model.AgentRun{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&ScanSession{}, id).Error
+		return tx.Delete(&model.ScanSession{}, id).Error
 	})
 }
 
@@ -99,7 +102,7 @@ func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
 		Executed int64
 		Size     int64
 	}
-	if err := reader.Model(&FileEntry{}).Where("scan_session_id = ?", id).
+	if err := reader.Model(&model.FileEntry{}).Where("scan_session_id = ?", id).
 		Select(`COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END), 0) AS tagged,
 			COALESCE(SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END), 0) AS planned,
@@ -112,7 +115,7 @@ func (r *Repository) refreshCounts(reader *gorm.DB, id uint) error {
 	// Column-scoped (never a Save of a loaded session, which would race the
 	// scan/run writers' status updates); the WHERE makes an unchanged row a
 	// no-op.
-	res := r.db.Model(&ScanSession{}).
+	res := r.db.Model(&model.ScanSession{}).
 		Where("id = ? AND (total_files <> ? OR tagged_files <> ? OR planned_ops <> ? OR review_count <> ? OR executed_ops <> ? OR total_size <> ?)",
 			id, c.Total, c.Tagged, c.Planned, c.Review, c.Executed, c.Size).
 		Updates(map[string]any{
@@ -149,7 +152,7 @@ func (r *Repository) touchCounts(sessionID uint) {
 	reader := r.Reader() // resolved here: the timer must not read the package globals
 	time.AfterFunc(countsDelay, func() {
 		countsPending.Delete(k)
-		if err := WithRetry(func() error { return r.refreshCounts(reader, sessionID) }); err != nil {
+		if err := dal.WithRetry(func() error { return r.refreshCounts(reader, sessionID) }); err != nil {
 			log.Printf("refresh counts of session %d: %v", sessionID, err)
 		}
 	})
@@ -171,7 +174,7 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 		Planned  int64
 		Executed int64
 	}
-	err := r.Reader().Model(&FileEntry{}).Where("scan_session_id = ?", id).
+	err := r.Reader().Model(&model.FileEntry{}).Where("scan_session_id = ?", id).
 		Select(`COUNT(*) AS total,
 			SUM(CASE WHEN tagged = ? THEN 1 ELSE 0 END) AS tagged,
 			SUM(CASE WHEN operation != '' THEN 1 ELSE 0 END) AS planned,
@@ -185,11 +188,11 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 	}, err
 }
 
-func (r *Repository) CreateFile(f *FileEntry) error {
+func (r *Repository) CreateFile(f *model.FileEntry) error {
 	return r.db.Create(f).Error
 }
 
-func (r *Repository) CreateFiles(files []FileEntry) error {
+func (r *Repository) CreateFiles(files []model.FileEntry) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -202,14 +205,14 @@ func (r *Repository) CreateFiles(files []FileEntry) error {
 	})
 }
 
-func (r *Repository) GetFile(id uint) (*FileEntry, error) {
-	var f FileEntry
+func (r *Repository) GetFile(id uint) (*model.FileEntry, error) {
+	var f model.FileEntry
 	err := r.db.First(&f, id).Error
 	return &f, err
 }
 
-func (r *Repository) GetFileByPath(sessionID uint, path string) (*FileEntry, error) {
-	var f FileEntry
+func (r *Repository) GetFileByPath(sessionID uint, path string) (*model.FileEntry, error) {
+	var f model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND original_path = ?", sessionID, path).First(&f).Error
 	return &f, err
 }
@@ -234,8 +237,8 @@ const fileOrder = "file_type ASC, name ASC, id ASC"
 
 // The REST listing, whose UI shows page numbers; iterating callers use
 // ListFilesAfter.
-func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
-	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
+func (r *Repository) ListFiles(q FileQuery) ([]model.FileEntry, int64, error) {
+	tx := applyFileFilters(r.db.Model(&model.FileEntry{}), q)
 
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
@@ -249,7 +252,7 @@ func (r *Repository) ListFiles(q FileQuery) ([]FileEntry, int64, error) {
 		q.PageSize = 50
 	}
 
-	var files []FileEntry
+	var files []model.FileEntry
 	offset := (q.Page - 1) * q.PageSize
 	err := tx.Order(fileOrder).Offset(offset).Limit(q.PageSize).Find(&files).Error
 	return files, total, err
@@ -259,13 +262,13 @@ var ErrBadCursor = errors.New("bad cursor")
 
 // For a directory listing idx_session_parent serves both the filter and the
 // order, so every page costs the same.
-func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]FileEntry, bool, error) {
+func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]model.FileEntry, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	tx := applyFileFilters(r.db.Model(&FileEntry{}), q)
+	tx := applyFileFilters(r.db.Model(&model.FileEntry{}), q)
 	if afterID > 0 {
-		var last []FileEntry
+		var last []model.FileEntry
 		if err := r.db.Select("id", "file_type", "name").Where("scan_session_id = ? AND id = ?", q.SessionID, afterID).Limit(1).Find(&last).Error; err != nil {
 			return nil, false, err
 		}
@@ -274,7 +277,7 @@ func (r *Repository) ListFilesAfter(q FileQuery, afterID uint, limit int) ([]Fil
 		}
 		tx = tx.Where("(file_type, name, id) > (?, ?, ?)", last[0].FileType, last[0].Name, last[0].ID)
 	}
-	var files []FileEntry
+	var files []model.FileEntry
 	if err := tx.Order(fileOrder).Limit(limit + 1).Find(&files).Error; err != nil {
 		return nil, false, err
 	}
@@ -318,7 +321,7 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 		tx = tx.Where("sensitive = ?", *q.Sensitive)
 	}
 	if q.Search != "" {
-		tx = tx.Where(nameSearchCondition(tx), "%"+likeLiteral(q.Search)+"%")
+		tx = tx.Where(nameSearchCondition(tx), "%"+dal.LikeLiteral(q.Search)+"%")
 	}
 	return tx
 }
@@ -326,11 +329,11 @@ func applyFileFilters(tx *gorm.DB, q FileQuery) *gorm.DB {
 // Probes random points of the matching id range (one indexed "id >= x LIMIT
 // 1" each) instead of loading every id; rows after id gaps are slightly
 // favored.
-func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
+func (r *Repository) SampleFiles(q FileQuery, n int) ([]model.FileEntry, error) {
 	if n <= 0 {
 		return nil, nil
 	}
-	base := func() *gorm.DB { return applyFileFilters(r.db.Model(&FileEntry{}), q) }
+	base := func() *gorm.DB { return applyFileFilters(r.db.Model(&model.FileEntry{}), q) }
 	var head []uint
 	if err := base().Order("id").Limit(n+1).Pluck("id", &head).Error; err != nil {
 		return nil, err
@@ -365,7 +368,7 @@ func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
 			}
 		}
 	}
-	var files []FileEntry
+	var files []model.FileEntry
 	if len(ids) == 0 {
 		return files, nil
 	}
@@ -373,14 +376,14 @@ func (r *Repository) SampleFiles(q FileQuery, n int) ([]FileEntry, error) {
 	return files, err
 }
 
-func (r *Repository) UpdateFile(f *FileEntry) error {
+func (r *Repository) UpdateFile(f *model.FileEntry) error {
 	return r.db.Save(f).Error
 }
 
 // eino executes parallel tool calls, so a full-row Save of a loaded struct
 // would clobber concurrent field writes.
 func (r *Repository) UpdateDescription(sessionID uint, path, description string) error {
-	return r.db.Model(&FileEntry{}).
+	return r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND original_path = ?", sessionID, path).
 		Update("description", description).Error
 }
@@ -390,7 +393,7 @@ func (r *Repository) TaggedStatusByIDs(ids []uint) (map[uint]bool, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	if err := r.db.Select("id", "tagged").Where("id IN ?", ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -414,7 +417,7 @@ func (b UntaggedBreakdown) Total() int64 {
 
 func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, error) {
 	var b UntaggedBreakdown
-	err := r.db.Model(&FileEntry{}).
+	err := r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND tagged = ?", sessionID, false).
 		Select(`SUM(CASE WHEN file_type = 'directory' THEN 1 ELSE 0 END) AS directories,
 			SUM(CASE WHEN file_type = 'file' THEN 1 ELSE 0 END) AS files,
@@ -426,21 +429,21 @@ func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, err
 func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []string) (int64, error) {
 	var total int64
 	err := r.db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&FileEntry{}).
-			Where("scan_session_id = ? AND role = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+likeEscapeClause+")", sessionID, RoleUndecided, fileNames).
+		res := tx.Model(&model.FileEntry{}).
+			Where("scan_session_id = ? AND role = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+dal.LikeEscapeClause+")", sessionID, RoleUndecided, fileNames).
 			Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾文件", "batch_index": JunkBatchIndex})
 		if res.Error != nil {
 			return res.Error
 		}
 		total += res.RowsAffected
 
-		var dirs []FileEntry
+		var dirs []model.FileEntry
 		if err := tx.Where("scan_session_id = ? AND role = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, RoleUndecided, dirNames).
 			Find(&dirs).Error; err != nil {
 			return err
 		}
 		for _, d := range dirs {
-			if err := tx.Model(&FileEntry{}).Where("id = ?", d.ID).
+			if err := tx.Model(&model.FileEntry{}).Where("id = ?", d.ID).
 				Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾目录", "batch_index": JunkBatchIndex}).Error; err != nil {
 				return err
 			}
@@ -461,18 +464,18 @@ func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []strin
 
 func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
 	var n int64
-	err := r.db.Model(&FileEntry{}).
+	err := r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND batch_index = ?", sessionID, JunkBatchIndex).
 		Count(&n).Error
 	return n, err
 }
 
-// Filesystem-wide: a category filled by an earlier session shows zero in the
+// model.Filesystem-wide: a category filled by an earlier session shows zero in the
 // current one yet is still in use.
 func (r *Repository) CountPlannedByTargetPath(filesystemID uint, categoryPath string) (int64, error) {
 	var n int64
 	cond, args := targetCond(r.db, categoryPath)
-	err := r.db.Model(&FileEntry{}).
+	err := r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id IN (SELECT id FROM scan_sessions WHERE filesystem_id = ?) AND operation != ''", filesystemID).
 		Where(cond, args...).
 		Count(&n).Error
@@ -489,10 +492,10 @@ func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath st
 			r.touchCounts(id)
 		}
 	}()
-	return WithRetry(func() error {
+	return dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			cond, args := targetCond(tx, categoryPath)
-			var units []FileEntry
+			var units []model.FileEntry
 			if err := tx.Select("scan_session_id", "original_path").
 				Where("scan_session_id IN ? AND role = ?", sessions, RoleUnit).Where(cond, args...).
 				Find(&units).Error; err != nil {
@@ -503,7 +506,7 @@ func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath st
 					return err
 				}
 			}
-			return tx.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+			return tx.Model(&model.FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
 				Updates(undecidedFields()).Error
 		})
 	})
@@ -511,7 +514,7 @@ func (r *Repository) ClearPlannedByTargetPath(filesystemID uint, categoryPath st
 
 func (r *Repository) filesystemSessionIDs(filesystemID uint) ([]uint, error) {
 	var ids []uint
-	err := r.db.Model(&ScanSession{}).Where("filesystem_id = ?", filesystemID).Pluck("id", &ids).Error
+	err := r.db.Model(&model.ScanSession{}).Where("filesystem_id = ?", filesystemID).Pluck("id", &ids).Error
 	return ids, err
 }
 
@@ -523,31 +526,31 @@ func categoryDir(p string) string {
 func targetCond(tx *gorm.DB, categoryPath string) (string, []any) {
 	dir := categoryDir(categoryPath)
 	if dir == "" {
-		return subtreeCond(tx, "new_path", "")
+		return dal.SubtreeCond(tx, "new_path", "")
 	}
-	return atOrUnderCond(tx, "new_path", dir)
+	return dal.AtOrUnderCond(tx, "new_path", dir)
 }
 
-func (r *Repository) GetPlannedFiles(sessionID uint) ([]FileEntry, error) {
-	var files []FileEntry
+func (r *Repository) GetPlannedFiles(sessionID uint) ([]model.FileEntry, error) {
+	var files []model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ? AND needs_review = ?", sessionID, false, false).
 		Find(&files).Error
 	return files, err
 }
 
-func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]FileEntry, error) {
-	var files []FileEntry
+func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]model.FileEntry, error) {
+	var files []model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND parent_path = ? AND file_type = ?", sessionID, parentPath, "directory").
 		Order("name ASC").
 		Find(&files).Error
 	return files, err
 }
 
-func (r *Repository) CreateCategory(c *Category) error {
+func (r *Repository) CreateCategory(c *model.Category) error {
 	return r.db.Create(c).Error
 }
 
-func (r *Repository) CreateCategoryWithConflict(c *Category) (created bool, err error) {
+func (r *Repository) CreateCategoryWithConflict(c *model.Category) (created bool, err error) {
 	err = r.db.Create(c).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -558,20 +561,20 @@ func (r *Repository) CreateCategoryWithConflict(c *Category) (created bool, err 
 	return true, nil
 }
 
-func (r *Repository) GetCategory(id uint) (*Category, error) {
-	var c Category
+func (r *Repository) GetCategory(id uint) (*model.Category, error) {
+	var c model.Category
 	err := r.db.First(&c, id).Error
 	return &c, err
 }
 
-func (r *Repository) ListCategories(filesystemID uint) ([]Category, error) {
-	var cats []Category
+func (r *Repository) ListCategories(filesystemID uint) ([]model.Category, error) {
+	var cats []model.Category
 	err := r.db.Where("filesystem_id = ?", filesystemID).Order("name ASC").Find(&cats).Error
 	return cats, err
 }
 
-func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*Category, error) {
-	var cat Category
+func (r *Repository) GetCategoryByName(filesystemID uint, name string) (*model.Category, error) {
+	var cat model.Category
 	err := r.db.Where("filesystem_id = ? AND name = ?", filesystemID, name).First(&cat).Error
 	return &cat, err
 }
@@ -612,7 +615,7 @@ type categoryStat struct {
 const categoryStatsChunk = 200
 
 // Every UNION ALL arm is an index range on idx_session_newpath.
-func (r *Repository) categoryStats(sessionID uint, cats []Category) ([]categoryStat, error) {
+func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]categoryStat, error) {
 	out := make([]categoryStat, len(cats))
 	for start := 0; start < len(cats); start += categoryStatsChunk {
 		end := min(start+categoryStatsChunk, len(cats))
@@ -634,13 +637,13 @@ func (r *Repository) categoryStats(sessionID uint, cats []Category) ([]categoryS
 	return out, nil
 }
 
-func (r *Repository) UpdateCategory(c *Category) error {
+func (r *Repository) UpdateCategory(c *model.Category) error {
 	return r.db.Save(c).Error
 }
 
 // The prefix is swapped by position, so "/photo" -> "/pics" leaves
 // "/photos2" alone and a repeated substring deeper in the path is untouched.
-func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
+func (r *Repository) UpdateCategoryPath(c *model.Category, oldPath string) error {
 	if err := r.db.Save(c).Error; err != nil {
 		return err
 	}
@@ -652,83 +655,83 @@ func (r *Repository) UpdateCategoryPath(c *Category, oldPath string) error {
 	if err != nil || len(sessions) == 0 {
 		return err
 	}
-	cond, args := atOrUnderCond(r.db, "new_path", from)
-	return WithRetry(func() error {
-		return r.db.Model(&FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+	cond, args := dal.AtOrUnderCond(r.db, "new_path", from)
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
 			Updates(map[string]any{
-				"new_path":     gorm.Expr(concatExpr(r.db, "?", "substr(new_path, ?)"), to, utf8.RuneCountInString(from)+1),
-				"new_path_key": gorm.Expr(concatExpr(r.db, "?", "substr(new_path_key, ?)"), CollisionKey(to), utf8.RuneCountInString(CollisionKey(from))+1),
+				"new_path":     gorm.Expr(dal.ConcatExpr(r.db, "?", "substr(new_path, ?)"), to, utf8.RuneCountInString(from)+1),
+				"new_path_key": gorm.Expr(dal.ConcatExpr(r.db, "?", "substr(new_path_key, ?)"), CollisionKey(to), utf8.RuneCountInString(CollisionKey(from))+1),
 			}).Error
 	})
 }
 
 func (r *Repository) DeleteCategory(id uint) error {
-	return r.db.Delete(&Category{}, id).Error
+	return r.db.Delete(&model.Category{}, id).Error
 }
 
-func (r *Repository) CreateFilesystem(fs *Filesystem) error {
+func (r *Repository) CreateFilesystem(fs *model.Filesystem) error {
 	return r.db.Create(fs).Error
 }
 
-func (r *Repository) GetFilesystem(id uint) (*Filesystem, error) {
-	var fs Filesystem
+func (r *Repository) GetFilesystem(id uint) (*model.Filesystem, error) {
+	var fs model.Filesystem
 	err := r.db.First(&fs, id).Error
 	return &fs, err
 }
 
-func (r *Repository) ListFilesystems() ([]Filesystem, error) {
-	var fss []Filesystem
+func (r *Repository) ListFilesystems() ([]model.Filesystem, error) {
+	var fss []model.Filesystem
 	err := r.db.Order("name ASC").Find(&fss).Error
 	return fss, err
 }
 
-func (r *Repository) UpdateFilesystem(fs *Filesystem) error {
+func (r *Repository) UpdateFilesystem(fs *model.Filesystem) error {
 	return r.db.Save(fs).Error
 }
 
 func (r *Repository) CountSessionsUsingFilesystem(id uint) (int64, error) {
 	var n int64
-	err := r.db.Model(&ScanSession{}).Where("filesystem_id = ?", id).Count(&n).Error
+	err := r.db.Model(&model.ScanSession{}).Where("filesystem_id = ?", id).Count(&n).Error
 	return n, err
 }
 
 func (r *Repository) CountSessionsUsingModel(id uint) (int64, error) {
 	var n int64
-	err := r.db.Model(&ScanSession{}).Where("model_provider_id = ? OR bulk_model_provider_id = ?", id, id).Count(&n).Error
+	err := r.db.Model(&model.ScanSession{}).Where("model_provider_id = ? OR bulk_model_provider_id = ?", id, id).Count(&n).Error
 	return n, err
 }
 
 func (r *Repository) DeleteFilesystem(id uint) error {
-	return r.db.Delete(&Filesystem{}, id).Error
+	return r.db.Delete(&model.Filesystem{}, id).Error
 }
 
-func (r *Repository) CreateModelProvider(m *ModelProvider) error {
+func (r *Repository) CreateModelProvider(m *model.ModelProvider) error {
 	return r.db.Create(m).Error
 }
 
-func (r *Repository) GetModelProvider(id uint) (*ModelProvider, error) {
-	var m ModelProvider
+func (r *Repository) GetModelProvider(id uint) (*model.ModelProvider, error) {
+	var m model.ModelProvider
 	err := r.db.First(&m, id).Error
 	return &m, err
 }
 
-func (r *Repository) ListModelProviders() ([]ModelProvider, error) {
-	var providers []ModelProvider
+func (r *Repository) ListModelProviders() ([]model.ModelProvider, error) {
+	var providers []model.ModelProvider
 	err := r.db.Order("id ASC").Find(&providers).Error
 	return providers, err
 }
 
-func (r *Repository) UpdateModelProvider(m *ModelProvider) error {
+func (r *Repository) UpdateModelProvider(m *model.ModelProvider) error {
 	return r.db.Save(m).Error
 }
 
 func (r *Repository) DeleteModelProvider(id uint) error {
-	return r.db.Delete(&ModelProvider{}, id).Error
+	return r.db.Delete(&model.ModelProvider{}, id).Error
 }
 
 func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	var minBatch *int
-	r.db.Model(&FileEntry{}).
+	r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND batch_index < ?", sessionID, JunkBatchIndex).
 		Select("MIN(batch_index)").Scan(&minBatch)
 	if minBatch == nil {

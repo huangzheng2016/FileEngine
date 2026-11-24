@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"testing"
+
+	"FileEngine/biz/dal/db/model"
 )
 
 // previewFixture: a project directory moved whole, loose photos spread over
@@ -138,10 +140,10 @@ func checkPreviewBefore(t *testing.T, r *Repository) {
 
 func TestPreviewScales(t *testing.T) {
 	r := setupBrainRepo(t)
-	var rows []FileEntry
+	var rows []model.FileEntry
 	for i := 0; i < 5000; i++ {
 		p := fmt.Sprintf("in/d%03d/f%04d.txt", i%100, i)
-		rows = append(rows, FileEntry{ScanSessionID: 1, OriginalPath: p, Name: fmt.Sprintf("f%04d.txt", i), FileType: "file",
+		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: p, Name: fmt.Sprintf("f%04d.txt", i), FileType: "file",
 			ParentPath: fmt.Sprintf("in/d%03d", i%100), Size: 1, NewPath: fmt.Sprintf("/文档/%d/f%04d.txt", i%10, i), Operation: "planned"})
 	}
 	if err := r.CreateFiles(rows); err != nil {

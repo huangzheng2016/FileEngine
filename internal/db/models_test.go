@@ -1,11 +1,15 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"FileEngine/biz/dal/db/model"
+)
 
 func TestEffectiveContextWindow(t *testing.T) {
-	p := &ModelProvider{}
-	if got := p.EffectiveContextWindow(); got != DefaultContextWindow {
-		t.Fatalf("zero value: got %d, want %d", got, DefaultContextWindow)
+	p := &model.ModelProvider{}
+	if got := p.EffectiveContextWindow(); got != model.DefaultContextWindow {
+		t.Fatalf("zero value: got %d, want %d", got, model.DefaultContextWindow)
 	}
 	p.ContextWindow = 256_000
 	if got := p.EffectiveContextWindow(); got != 256_000 {

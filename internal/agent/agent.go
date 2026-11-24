@@ -3,24 +3,25 @@ package agent
 import (
 	"context"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
 type fileBatch struct {
-	files    []db.FileEntry
+	files    []model.FileEntry
 	batchIdx int32
 }
 
 type Agent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
-	modelProvider *db.ModelProvider
-	session       *db.ScanSession
+	modelProvider *model.ModelProvider
+	session       *model.ScanSession
 	sessionID     uint
 }
 
-func New(repo *db.Repository, fsCfg config.RemoteFSConfig, sessionID uint, modelProvider *db.ModelProvider, session *db.ScanSession) *Agent {
+func New(repo *db.Repository, fsCfg config.RemoteFSConfig, sessionID uint, modelProvider *model.ModelProvider, session *model.ScanSession) *Agent {
 	return &Agent{
 		repo:          repo,
 		fsCfg:         fsCfg,

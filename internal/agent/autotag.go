@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
@@ -26,8 +27,8 @@ type BatchFailure struct {
 type AutoTagAgent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
-	modelProvider *db.ModelProvider
-	session       *db.ScanSession
+	modelProvider *model.ModelProvider
+	session       *model.ScanSession
 	sessionID     uint
 	logger        *Logger
 
@@ -39,7 +40,7 @@ type AutoTagAgent struct {
 	warm   *warmGate // worker 0's first response opens it
 }
 
-func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *AutoTagAgent {
+func NewAutoTagAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger) *AutoTagAgent {
 	return &AutoTagAgent{repo: repo, fsCfg: fsCfg, modelProvider: modelProvider, session: session, sessionID: sessionID, logger: logger}
 }
 
@@ -64,7 +65,7 @@ const (
 type workUnit struct {
 	kind     string
 	path     string // directory (dir) or parent directory (group, versions)
-	files    []db.FileEntry
+	files    []model.FileEntry
 	versions VersionGroup
 }
 
@@ -254,7 +255,7 @@ func (a *AutoTagAgent) expandContainer(dir string) ([]workUnit, error) {
 			inGroup[m.Path] = true
 		}
 	}
-	var loose []db.FileEntry
+	var loose []model.FileEntry
 	for _, c := range children {
 		if inGroup[c.OriginalPath] {
 			continue
@@ -380,7 +381,7 @@ var (
 	bundleCategoryWords = []string{"软件", "应用", "程序", "app", "software"}
 )
 
-func matchCategory(cats []db.Category, words []string) *db.Category {
+func matchCategory(cats []model.Category, words []string) *model.Category {
 	for _, w := range words {
 		for i := range cats {
 			hay := strings.ToLower(cats[i].Name + " " + cats[i].Path + " " + cats[i].Description)
@@ -392,9 +393,9 @@ func matchCategory(cats []db.Category, words []string) *db.Category {
 	return nil
 }
 
-func (a *AutoTagAgent) autoDecide(dir *db.FileEntry, sig DirSignals) (bool, error) {
+func (a *AutoTagAgent) autoDecide(dir *model.FileEntry, sig DirSignals) (bool, error) {
 	var undecided int64
-	if err := a.repo.DB().Model(&db.FileEntry{}).
+	if err := a.repo.DB().Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND parent_path = ? AND role IN ?", a.sessionID, dir.OriginalPath, []string{db.RoleUndecided, db.RoleContainer}).
 		Count(&undecided).Error; err != nil {
 		return false, err

@@ -4,17 +4,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
 func TestMarkJunkEntries(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	entries := []FileEntry{
+	entries := []model.FileEntry{
 		{ScanSessionID: 1, OriginalPath: "p/.DS_Store", Name: ".DS_Store", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "p/._photo.jpg", Name: "._photo.jpg", FileType: "file"},
 		{ScanSessionID: 1, OriginalPath: "p/Thumbs.db", Name: "Thumbs.db", FileType: "file"},

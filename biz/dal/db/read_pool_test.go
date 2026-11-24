@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
@@ -12,28 +13,27 @@ func TestSQLiteReadPool(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	t.Cleanup(func() {
-		if s, err := DB.DB(); err == nil {
+		if s, err := DB().DB(); err == nil {
 			s.Close()
 		}
 		if s, err := readDB.DB(); err == nil {
 			s.Close()
 		}
 	})
-	if ReadDB() == DB {
+	if ReadDB() == DB() {
 		t.Fatal("ReadDB is the writer pool on SQLite")
 	}
-	repo := NewRepository(DB)
-	if repo.Reader() != ReadDB() {
-		t.Error("Repository.Reader does not use the read pool for the global DB")
+	if ReadQuery() == Query() {
+		t.Fatal("ReadQuery is the writer query on SQLite")
 	}
-	if err := repo.CreateSession(&ScanSession{RootPath: "x"}); err != nil {
+	if err := DB().Create(&model.ScanSession{RootPath: "x"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	var n int64
-	if err := ReadDB().Model(&ScanSession{}).Count(&n).Error; err != nil || n != 1 {
+	if err := ReadDB().Model(&model.ScanSession{}).Count(&n).Error; err != nil || n != 1 {
 		t.Fatalf("read pool sees %d sessions (err %v), want the committed row", n, err)
 	}
-	if err := ReadDB().Create(&ScanSession{RootPath: "y"}).Error; err == nil {
+	if err := ReadDB().Create(&model.ScanSession{RootPath: "y"}).Error; err == nil {
 		t.Error("read pool accepted a write")
 	}
 	var mode string

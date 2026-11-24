@@ -5,10 +5,13 @@ import (
 	"path"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
-// Every writer of FileEntry.NewPath goes through it so prefix queries see one
+// Every writer of model.FileEntry.NewPath goes through it so prefix queries see one
 // spelling.
 func NormalizeTargetPath(p string) string {
 	if p == "" {
@@ -45,7 +48,7 @@ func targetKey(newPath string) string {
 
 func targetTaken(tx *gorm.DB, sessionID uint, candidate, originalPath string) (bool, error) {
 	var ids []uint
-	err := tx.Model(&FileEntry{}).
+	err := tx.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND new_path_key = ? AND original_path <> ?", sessionID, CollisionKey(candidate), originalPath).
 		Limit(1).Pluck("id", &ids).Error
 	return len(ids) > 0, err
@@ -57,9 +60,9 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 	}
 	defer r.touchCounts(sessionID)
 	var n int64
-	err := WithRetry(func() error {
+	err := dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
-			var entries []FileEntry
+			var entries []model.FileEntry
 			if err := tx.Select("id", "original_path", "file_type").
 				Where("scan_session_id = ? AND id IN ?", sessionID, ids).Find(&entries).Error; err != nil {
 				return err
@@ -72,7 +75,7 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 			for i, e := range entries {
 				found[i] = e.ID
 			}
-			if err := tx.Model(&FileEntry{}).Where("id IN ?", found).
+			if err := tx.Model(&model.FileEntry{}).Where("id IN ?", found).
 				Updates(map[string]any{"role": RoleUndecided, "reason": "", "new_path": "", "new_path_key": "", "operation": "", "tagged": false, "needs_review": false, "confidence": 0}).Error; err != nil {
 				return err
 			}
@@ -93,14 +96,14 @@ func (r *Repository) ResetPlans(sessionID uint, ids []uint) (int64, error) {
 }
 
 func (r *Repository) UpdateFileFields(id uint, fields map[string]any) error {
-	return r.db.Model(&FileEntry{}).Where("id = ?", id).Updates(fields).Error
+	return r.db.Model(&model.FileEntry{}).Where("id = ?", id).Updates(fields).Error
 }
 
 func (r *Repository) ConfirmReview(sessionID uint, ids []uint) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	res := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND id IN ? AND needs_review = ?", sessionID, ids, true).
+	res := r.db.Model(&model.FileEntry{}).Where("scan_session_id = ? AND id IN ? AND needs_review = ?", sessionID, ids, true).
 		Update("needs_review", false)
 	if res.RowsAffected > 0 {
 		r.touchCounts(sessionID)

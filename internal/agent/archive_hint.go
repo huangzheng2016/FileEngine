@@ -11,8 +11,8 @@ import (
 	"io"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
 
@@ -116,7 +116,7 @@ func fsProtocolLabel(fsys remotefs.RemoteFS) string {
 	return ""
 }
 
-func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS, files []db.FileEntry, cfg config.AgentConfig) map[uint]string {
+func (a *AutoTagAgent) archiveHints(ctx context.Context, fsys remotefs.RemoteFS, files []model.FileEntry, cfg config.AgentConfig) map[uint]string {
 	if cfg.ArchivePromptDisabled {
 		return nil
 	}

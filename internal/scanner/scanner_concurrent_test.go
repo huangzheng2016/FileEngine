@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
@@ -151,10 +152,10 @@ func (f *fakeHandleFS) ListByHandle(ctx context.Context, p string, handle []byte
 	return entries, nil
 }
 
-func runScan(t *testing.T, fs remotefs.RemoteFS, filterMode string, filterDirs []string) ([]string, *db.ScanSession, error) {
+func runScan(t *testing.T, fs remotefs.RemoteFS, filterMode string, filterDirs []string) ([]string, *model.ScanSession, error) {
 	t.Helper()
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -258,7 +259,7 @@ func TestScanConcurrent_MatchesSerial(t *testing.T) {
 func TestScanConcurrent_DepthAndParent(t *testing.T) {
 	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: testTree()}}
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	repo.CreateSession(session)
 	sc := New(hfs, repo, "", nil)
 	if err := sc.Scan(context.Background(), session); err != nil {
@@ -321,7 +322,7 @@ func TestScanConcurrent_UnreadableRootAborts(t *testing.T) {
 func TestRescanKeepsRowsUnderUnlistableDir(t *testing.T) {
 	fs := &fakeFS{root: testTree()}
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +334,7 @@ func TestRescanKeepsRowsUnderUnlistableDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DB().Model(&db.FileEntry{}).Where("id = ?", f.ID).Update("new_path", "/x/c.arw").Error; err != nil {
+	if err := repo.DB().Model(&model.FileEntry{}).Where("id = ?", f.ID).Update("new_path", "/x/c.arw").Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -387,7 +388,7 @@ func TestScanConcurrent_WideTreeNoDeadlock(t *testing.T) {
 
 	done := make(chan error, 1)
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	repo.CreateSession(session)
 	sc := New(hfs, repo, "", nil)
 	go func() { done <- sc.Scan(context.Background(), session) }()
@@ -415,7 +416,7 @@ func TestScanConcurrent_CancelStops(t *testing.T) {
 	}
 	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: deep}}
 	repo := setupTestDB(t)
-	session := &db.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
 	repo.CreateSession(session)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -15,7 +16,7 @@ func TestDirIsNotMergedIntoDirMadeForAnotherEntry(t *testing.T) {
 	fa := e.entry("in/a.txt", "out/proj/a.txt")
 	run, _ := e.repo.CreateRun(e.sid, db.RunPhaseExecuting, "earlier")
 	// A mkdir journaled as part of another entry's move.
-	e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMkdir,
+	e.repo.CreateExecOp(&model.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fa.ID, Kind: db.ExecKindMkdir,
 		Dst: "out/proj", IsDir: true, State: db.ExecDone})
 	e.repo.FinishRun(run, db.RunDone, "", "", db.TokenCounts{})
 	fp := e.entry("proj", "out/proj")

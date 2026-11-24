@@ -7,6 +7,9 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 )
 
@@ -59,7 +62,7 @@ type dirStatsEntry struct {
 // One GROUP BY parent_path query, rolled up to the ancestors in Go.
 func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error) {
 	var stamp struct{ Cnt, MaxID int64 }
-	if err := r.db.Model(&FileEntry{}).Where("scan_session_id = ?", sessionID).
+	if err := r.db.Model(&model.FileEntry{}).Where("scan_session_id = ?", sessionID).
 		Select("COUNT(*) AS cnt, COALESCE(MAX(id), 0) AS max_id").Scan(&stamp).Error; err != nil {
 		return nil, err
 	}
@@ -75,7 +78,7 @@ func (r *Repository) sessionDirStats(sessionID uint) (map[string]dirStat, error)
 		Cnt        int64
 		Size       int64
 	}
-	if err := r.db.Model(&FileEntry{}).
+	if err := r.db.Model(&model.FileEntry{}).
 		Where("scan_session_id = ? AND file_type = 'file'", sessionID).
 		Select("parent_path, COUNT(*) AS cnt, COALESCE(SUM(size), 0) AS size").
 		Group("parent_path").Scan(&rows).Error; err != nil {
@@ -129,7 +132,7 @@ type segmentGroup struct {
 // 100k-entry session costs one grouped scan per listing.
 func (r *Repository) segmentQuery(sessionID uint, column, prefix string, extra string) *gorm.DB {
 	tx := r.db
-	instr := instrFunc(tx)
+	instr := dal.InstrFunc(tx)
 	start := utf8.RuneCountInString(prefix) + 1
 	rest := "substr(" + column + ", ?)"
 	seg := "CASE WHEN " + instr + "(" + rest + ", '/') > 0 THEN substr(" + rest + ", 1, " + instr + "(" + rest + ", '/') - 1) ELSE " + rest + " END"
@@ -137,7 +140,7 @@ func (r *Repository) segmentQuery(sessionID uint, column, prefix string, extra s
 	where := "scan_session_id = ? AND operation != ''" + extra
 	args := []any{start, start, start, start, start, sessionID}
 	if prefix != "" {
-		cond, cargs := subtreeCond(tx, column, strings.TrimSuffix(prefix, "/"))
+		cond, cargs := dal.SubtreeCond(tx, column, strings.TrimSuffix(prefix, "/"))
 		where += " AND " + cond
 		args = append(args, cargs...)
 	}
@@ -161,7 +164,7 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 	}
 
 	if anc := pathAncestors(dir); len(anc) > 0 {
-		var moved []FileEntry
+		var moved []model.FileEntry
 		if err := r.db.Where("scan_session_id = ? AND file_type = 'directory' AND operation != '' AND new_path IN ?", sessionID, anc).
 			Find(&moved).Error; err != nil {
 			return nil, err
@@ -196,9 +199,9 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 	for i, g := range groups {
 		segs[i] = g.Seg
 	}
-	var plannedDirs []FileEntry
+	var plannedDirs []model.FileEntry
 	if len(groups) > 0 {
-		under, underArgs := subtreeCond(r.db, "new_path", dir)
+		under, underArgs := dal.SubtreeCond(r.db, "new_path", dir)
 		if err := r.db.Select("id", "original_path", "new_path").
 			Where("scan_session_id = ? AND file_type = 'directory' AND operation != ''", sessionID).Where(under, underArgs...).
 			Find(&plannedDirs).Error; err != nil {
@@ -222,9 +225,9 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 			leafIDs = append(leafIDs, g.MinID)
 		}
 	}
-	leaves := map[uint]FileEntry{}
+	leaves := map[uint]model.FileEntry{}
 	if len(leafIDs) > 0 {
-		var rows []FileEntry
+		var rows []model.FileEntry
 		if err := r.db.Select("id", "original_path", "file_type", "size", "role", "reason", "needs_review", "confidence", "sensitive").Where("id IN ?", leafIDs).Find(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -251,12 +254,12 @@ func (r *Repository) PreviewAfter(sessionID uint, dir string, offset, limit int)
 }
 
 func (r *Repository) previewRealChildren(sessionID uint, orig, virtualDir string, stats map[string]dirStat, offset, limit int) (*PreviewPage, error) {
-	tx := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND parent_path = ?", sessionID, orig)
+	tx := r.db.Model(&model.FileEntry{}).Where("scan_session_id = ? AND parent_path = ?", sessionID, orig)
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	if err := tx.Order("file_type ASC, name ASC").Offset(offset).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -288,9 +291,9 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 	}
 
 	// An ancestor (or dir itself) moving as a whole moves every child.
-	var movedAnc *FileEntry
+	var movedAnc *model.FileEntry
 	if anc := pathAncestors(dir); len(anc) > 0 && dir != rootPath {
-		var rows []FileEntry
+		var rows []model.FileEntry
 		if err := r.db.Where("scan_session_id = ? AND operation != '' AND original_path IN ?", sessionID, anc).Find(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -318,12 +321,12 @@ func (r *Repository) PreviewBefore(sessionID uint, rootPath, dir string, offset,
 		}
 	}
 
-	tx := r.db.Model(&FileEntry{}).Where("scan_session_id = ? AND parent_path = ?", sessionID, dir)
+	tx := r.db.Model(&model.FileEntry{}).Where("scan_session_id = ? AND parent_path = ?", sessionID, dir)
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	if err := tx.Order("file_type ASC, name ASC").Offset(offset).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -364,11 +367,11 @@ func sortPreviewItems(items []PreviewItem) {
 	})
 }
 
-func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]FileEntry, error) {
+func (r *Repository) GetEntriesByPaths(sessionID uint, paths []string) ([]model.FileEntry, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	err := r.db.Where("scan_session_id = ? AND original_path IN ?", sessionID, paths).Find(&rows).Error
 	return rows, err
 }
@@ -382,16 +385,16 @@ func (r *Repository) DirStats(sessionID uint, dir string) (files, size int64, er
 	return s.files, s.size, nil
 }
 
-func (r *Repository) ListChildren(sessionID uint, parent string, limit int) ([]FileEntry, error) {
+func (r *Repository) ListChildren(sessionID uint, parent string, limit int) ([]model.FileEntry, error) {
 	q := r.db.Where("scan_session_id = ? AND parent_path = ?", sessionID, parent).Order("file_type ASC, name ASC")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	err := q.Find(&rows).Error
 	return rows, err
 }
 
-func (it *PreviewItem) withEntry(e *FileEntry) {
+func (it *PreviewItem) withEntry(e *model.FileEntry) {
 	it.Role, it.Reason, it.NeedsReview, it.Confidence, it.Sensitive = e.Role, e.Reason, e.NeedsReview, e.Confidence, e.Sensitive
 }

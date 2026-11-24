@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -348,7 +349,7 @@ func (f *scriptFilter) toFileQuery(sessionID uint) db.FileQuery {
 	return q
 }
 
-func fileToScriptMap(f db.FileEntry) map[string]interface{} {
+func fileToScriptMap(f model.FileEntry) map[string]interface{} {
 	m := map[string]interface{}{
 		"original_path": f.OriginalPath,
 		"name":          SanitizeUntrustedName(f.Name),
@@ -600,7 +601,7 @@ func (tb *ToolBuilder) scriptSetCategory(ctx context.Context) tengo.CallableFunc
 //   - otherwise the path below the current work unit's root (SetUnitRoot) when
 //     the file lies under it
 //   - otherwise just the file name (direct placement in the category)
-func categoryRelativePath(f db.FileEntry, relativeTo, unitRoot string) (string, error) {
+func categoryRelativePath(f model.FileEntry, relativeTo, unitRoot string) (string, error) {
 	if relativeTo != "" {
 		base := strings.Trim(normalizePath(relativeTo), "/")
 		if base == "" || base == "." {

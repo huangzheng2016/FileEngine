@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -28,7 +29,7 @@ type reviewSample struct {
 }
 
 type reviewCategory struct {
-	cat     db.Category
+	cat     model.Category
 	norm    string
 	count   int
 	samples []reviewSample
@@ -53,7 +54,7 @@ type splitDir struct {
 	cats  map[string]int
 }
 
-func BuildReviewMaterial(repo *db.Repository, session *db.ScanSession, tagging *db.AgentRun) (string, error) {
+func BuildReviewMaterial(repo *db.Repository, session *model.ScanSession, tagging *model.AgentRun) (string, error) {
 	cats, err := repo.ListCategories(session.FilesystemID)
 	if err != nil {
 		return "", err
@@ -184,7 +185,7 @@ func writeSamples(sb *strings.Builder, samples []reviewSample) {
 	sb.WriteString(dataNote(strings.TrimRight(lines.String(), "\n")) + "\n\n")
 }
 
-func reviewFailureSection(repo *db.Repository, session *db.ScanSession, tagging *db.AgentRun) string {
+func reviewFailureSection(repo *db.Repository, session *model.ScanSession, tagging *model.AgentRun) string {
 	var sb strings.Builder
 	if tagging != nil {
 		if tagging.Error != "" {
@@ -219,7 +220,7 @@ func failureSections(report string) string {
 }
 
 // Reflection problems never fail the review.
-func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *db.AgentRun) (string, error) {
+func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *model.AgentRun) (string, error) {
 	material, err := BuildReviewMaterial(a.repo, a.session, tagging)
 	if err != nil {
 		return "", err

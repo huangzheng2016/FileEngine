@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -74,7 +75,7 @@ type DirSignals struct {
 	Versions   []VersionGroup `json:"versions,omitempty"`
 }
 
-func ComputeSignals(dir *db.FileEntry, children []db.FileEntry, totalFiles, totalSize int64) DirSignals {
+func ComputeSignals(dir *model.FileEntry, children []model.FileEntry, totalFiles, totalSize int64) DirSignals {
 	s := DirSignals{TotalFiles: totalFiles, TotalSize: totalSize}
 	if dir != nil {
 		s.Depth = dir.Depth
@@ -142,8 +143,8 @@ func ComputeSignals(dir *db.FileEntry, children []db.FileEntry, totalFiles, tota
 	return s
 }
 
-func LoadDirSignals(repo *db.Repository, sessionID uint, dir string) (DirSignals, *db.FileEntry, []db.FileEntry, error) {
-	var entry *db.FileEntry
+func LoadDirSignals(repo *db.Repository, sessionID uint, dir string) (DirSignals, *model.FileEntry, []model.FileEntry, error) {
+	var entry *model.FileEntry
 	if dir != "" {
 		e, err := repo.GetFileByPath(sessionID, dir)
 		if err != nil {
@@ -228,7 +229,7 @@ var (
 	}
 )
 
-func versionKey(e db.FileEntry) (key, display, version string, ok bool) {
+func versionKey(e model.FileEntry) (key, display, version string, ok bool) {
 	stem := e.Name
 	if e.FileType != "directory" {
 		ext := db.FileExt(e.Name)
@@ -252,7 +253,7 @@ func versionKey(e db.FileEntry) (key, display, version string, ok bool) {
 
 // Only directories and software/archive files qualify, so numbered photos
 // never form a group.
-func DetectVersionGroups(entries []db.FileEntry) []VersionGroup {
+func DetectVersionGroups(entries []model.FileEntry) []VersionGroup {
 	type acc struct {
 		display string
 		members []VersionMember

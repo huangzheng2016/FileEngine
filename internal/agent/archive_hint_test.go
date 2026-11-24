@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"FileEngine/internal/db"
+	"FileEngine/biz/dal/db/model"
 )
 
 func makeZip(t *testing.T, names []string) ([]byte, int64) {
@@ -96,9 +96,9 @@ func TestTarHint(t *testing.T) {
 	}
 }
 
-func makeBatchEntries(t *testing.T) []db.FileEntry {
+func makeBatchEntries(t *testing.T) []model.FileEntry {
 	t.Helper()
-	return []db.FileEntry{
+	return []model.FileEntry{
 		{ID: 1, ScanSessionID: 1, OriginalPath: "p/live-vision.zip", Name: "live-vision.zip", FileType: "file", Size: 1024},
 		{ID: 2, ScanSessionID: 1, OriginalPath: "p/readme.txt", Name: "readme.txt", FileType: "file", Size: 128},
 	}

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -13,12 +15,12 @@ import (
 func newService(t *testing.T) (*Service, *db.Repository) {
 	t.Helper()
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "fe.db"))
-	if err := db.Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := db.Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatal(err)
 	}
-	repo := db.NewRepository(db.GetDB())
+	repo := db.NewRepository(dal.DB())
 	t.Cleanup(func() {
-		if sqlDB, err := db.GetDB().DB(); err == nil {
+		if sqlDB, err := dal.DB().DB(); err == nil {
 			_ = sqlDB.Close()
 		}
 	})
@@ -27,14 +29,14 @@ func newService(t *testing.T) (*Service, *db.Repository) {
 
 func newSession(t *testing.T, repo *db.Repository) uint {
 	t.Helper()
-	s := &db.ScanSession{Status: "scanned"}
+	s := &model.ScanSession{Status: "scanned"}
 	if err := repo.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
 	return s.ID
 }
 
-func waitStatus(t *testing.T, repo *db.Repository, runID uint, want string) *db.AgentRun {
+func waitStatus(t *testing.T, repo *db.Repository, runID uint, want string) *model.AgentRun {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -52,7 +54,7 @@ func TestLaunchFinishesRunAndSurvivesPanic(t *testing.T) {
 	s, repo := newService(t)
 	sid := newSession(t, repo)
 
-	run, err := s.Launch(sid, db.RunPhaseChat, "ok", func(context.Context, *db.AgentRun) Outcome {
+	run, err := s.Launch(sid, db.RunPhaseChat, "ok", func(context.Context, *model.AgentRun) Outcome {
 		return Outcome{Summary: "fine"}
 	})
 	if err != nil {
@@ -62,7 +64,7 @@ func TestLaunchFinishesRunAndSurvivesPanic(t *testing.T) {
 		t.Fatalf("summary = %q", got.Summary)
 	}
 
-	run, err = s.Launch(sid, db.RunPhaseChat, "boom", func(context.Context, *db.AgentRun) Outcome { panic("boom") })
+	run, err = s.Launch(sid, db.RunPhaseChat, "boom", func(context.Context, *model.AgentRun) Outcome { panic("boom") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestStopAndShutdownCancelRuns(t *testing.T) {
 	s, repo := newService(t)
 	sid := newSession(t, repo)
 	started := make(chan struct{})
-	work := func(ctx context.Context, _ *db.AgentRun) Outcome {
+	work := func(ctx context.Context, _ *model.AgentRun) Outcome {
 		close(started)
 		<-ctx.Done()
 		return Outcome{Err: ctx.Err()}

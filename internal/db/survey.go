@@ -1,5 +1,7 @@
 package db
 
+import "FileEngine/biz/dal/db/model"
+
 type EntryBrief struct {
 	ID           uint
 	OriginalPath string
@@ -13,7 +15,7 @@ type EntryBrief struct {
 }
 
 func (r *Repository) EachEntry(sessionID uint, plannedOnly bool, fn func(EntryBrief) bool) error {
-	q := r.Reader().Model(&FileEntry{}).
+	q := r.Reader().Model(&model.FileEntry{}).
 		Select("id, original_path, name, file_type, size, depth, new_path, role, reason").
 		Where("scan_session_id = ?", sessionID)
 	if plannedOnly {

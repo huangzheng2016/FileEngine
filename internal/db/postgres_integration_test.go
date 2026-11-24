@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
@@ -28,26 +30,26 @@ func postgresTestDSN(t *testing.T) string {
 
 func TestPostgresDialectSemantics(t *testing.T) {
 	dsn := postgresTestDSN(t)
-	if err := Init(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
 		t.Fatalf("init postgres: %v", err)
 	}
-	if DB.Dialector.Name() != "postgres" {
-		t.Fatalf("dialect selection: got %q, want postgres", DB.Dialector.Name())
+	if dal.DB().Dialector.Name() != "postgres" {
+		t.Fatalf("dialect selection: got %q, want postgres", dal.DB().Dialector.Name())
 	}
 
 	resetSchema(t)
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
-	fs := &Filesystem{Name: "pgfs", Protocol: "local", BasePath: "/data"}
+	fs := &model.Filesystem{Name: "pgfs", Protocol: "local", BasePath: "/data"}
 	if err := r.CreateFilesystem(fs); err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
-	session := &ScanSession{FilesystemID: fs.ID, Status: "tagging"}
+	session := &model.ScanSession{FilesystemID: fs.ID, Status: "tagging"}
 	if err := r.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
-	entries := []FileEntry{
+	entries := []model.FileEntry{
 		{ScanSessionID: session.ID, OriginalPath: "Docs", Name: "Docs", FileType: "directory"},
 		{ScanSessionID: session.ID, OriginalPath: "Docs/Report.PDF", Name: "Report.PDF", FileType: "file"},
 		{ScanSessionID: session.ID, OriginalPath: "docs", Name: "docs", FileType: "directory"},
@@ -103,20 +105,20 @@ func TestPostgresDialectSemantics(t *testing.T) {
 
 func TestPostgresBrainQueries(t *testing.T) {
 	dsn := postgresTestDSN(t)
-	if err := Init(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "postgres", DSN: dsn}); err != nil {
 		t.Fatalf("init postgres: %v", err)
 	}
 	resetSchema(t)
-	r := NewRepository(DB)
+	r := NewRepository(dal.DB())
 
 	seedPreviewFixture(t, r)
 	checkPreviewAfter(t, r)
 	checkPreviewBefore(t, r)
 
-	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.PSD", Content: "设计源文件"}); err != nil {
+	if _, err := r.UpsertMemory(&model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.PSD", Content: "设计源文件"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, err := r.UpsertMemory(&MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.psd", Content: "设计源文件 v2"}); err != nil {
+	if _, err := r.UpsertMemory(&model.MemoryItem{Scope: MemoryScopeFilesystem, ScopeID: 1, Kind: MemoryConvention, Key: "ext:.psd", Content: "设计源文件 v2"}); err != nil {
 		t.Fatalf("upsert same key: %v", err)
 	}
 	got, err := r.SearchMemory(MemorySearch{Query: "PSD", Scopes: []MemoryScopeRef{{Scope: MemoryScopeFilesystem, ScopeID: 1}}})

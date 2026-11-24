@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -32,8 +33,8 @@ func ParseMemoryOps(text string) ([]MemoryOp, error) {
 	return nil, fmt.Errorf("记忆整理结果不是合法的 JSON：%.200s", text)
 }
 
-func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSession, tagging *db.AgentRun) string {
-	var corrections []db.MemoryItem
+func buildReflectionInput(notes, longTerm []model.MemoryItem, session *model.ScanSession, tagging *model.AgentRun) string {
+	var corrections []model.MemoryItem
 	for _, m := range longTerm {
 		if m.Source == db.MemorySourceCorrection && !m.UpdatedAt.Before(session.CreatedAt) {
 			corrections = append(corrections, m)
@@ -94,7 +95,7 @@ func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSessi
 	return sb.String()
 }
 
-func (a *Agent) Reflect(ctx context.Context, logger *Logger, tagging *db.AgentRun) (MemoryOpsResult, error) {
+func (a *Agent) Reflect(ctx context.Context, logger *Logger, tagging *model.AgentRun) (MemoryOpsResult, error) {
 	notes, err := a.repo.NotesSince(a.sessionID, 0, reflectionNotesMax)
 	if err != nil {
 		return MemoryOpsResult{}, err

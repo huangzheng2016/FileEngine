@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
 
-func scanSession(t *testing.T, repo *db.Repository, fs remotefs.RemoteFS, root string, mut func(*db.ScanSession)) (*Scanner, *db.ScanSession) {
+func scanSession(t *testing.T, repo *db.Repository, fs remotefs.RemoteFS, root string, mut func(*model.ScanSession)) (*Scanner, *model.ScanSession) {
 	t.Helper()
-	session := &db.ScanSession{RootPath: root, Status: "scanning"}
+	session := &model.ScanSession{RootPath: root, Status: "scanning"}
 	if mut != nil {
 		mut(session)
 	}
@@ -29,7 +30,7 @@ func scanSession(t *testing.T, repo *db.Repository, fs remotefs.RemoteFS, root s
 	return sc, session
 }
 
-func entry(t *testing.T, repo *db.Repository, sessionID uint, p string) *db.FileEntry {
+func entry(t *testing.T, repo *db.Repository, sessionID uint, p string) *model.FileEntry {
 	t.Helper()
 	f, err := repo.GetFileByPath(sessionID, p)
 	if err != nil {
@@ -54,7 +55,7 @@ func TestScanStream_CommitsInBatchesWithCounts(t *testing.T) {
 	sc, session := scanSession(t, repo, fs, "root", nil)
 	want := 40*5 + 1
 	var n int64
-	repo.DB().Model(&db.FileEntry{}).Where("scan_session_id = ?", session.ID).Count(&n)
+	repo.DB().Model(&model.FileEntry{}).Where("scan_session_id = ?", session.ID).Count(&n)
 	if int(n) != want || session.TotalFiles != want || session.ScannedCount != want {
 		t.Errorf("rows=%d total=%d scanned=%d, want %d", n, session.TotalFiles, session.ScannedCount, want)
 	}
@@ -86,7 +87,7 @@ func TestScanRescan_KeepsDecisionsOfUnchangedEntries(t *testing.T) {
 	repo := setupFileTestDB(t)
 	_, session := scanSession(t, repo, fs, "root", nil)
 	decide := func(p, role, target string) {
-		repo.DB().Model(&db.FileEntry{}).Where("scan_session_id = ? AND original_path = ?", session.ID, p).
+		repo.DB().Model(&model.FileEntry{}).Where("scan_session_id = ? AND original_path = ?", session.ID, p).
 			Updates(map[string]any{"role": role, "new_path": target, "reason": "agent", "tagged": true})
 	}
 	decide("root/keep.txt", db.RoleFile, "docs/keep.txt")
@@ -225,7 +226,7 @@ func TestScanMetadata_LocalFS(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := setupFileTestDB(t)
-	_, session := scanSession(t, repo, fs, ".", func(s *db.ScanSession) { s.ExtractMetadata = true })
+	_, session := scanSession(t, repo, fs, ".", func(s *model.ScanSession) { s.ExtractMetadata = true })
 
 	check := func(p, source string, year int, camera string) {
 		t.Helper()
@@ -263,7 +264,7 @@ func TestScanDuplicates_LocalFS(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := setupFileTestDB(t)
-	_, session := scanSession(t, repo, fs, ".", func(s *db.ScanSession) { s.DetectDuplicates = true })
+	_, session := scanSession(t, repo, fs, ".", func(s *model.ScanSession) { s.DetectDuplicates = true })
 
 	orig := entry(t, repo, session.ID, "b/deep/copy.bin") // oldest wins over shorter paths
 	if orig.DuplicateOf != nil || orig.Role != db.RoleUndecided || orig.Hash == "" {

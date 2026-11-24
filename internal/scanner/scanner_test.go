@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
@@ -36,7 +37,7 @@ func setupTestDB(t *testing.T) *db.Repository {
 	if sqlDB, err := gdb.DB(); err == nil {
 		sqlDB.SetMaxOpenConns(1)
 	}
-	if err := gdb.AutoMigrate(&db.FileEntry{}, &db.ScanSession{}, &db.Category{}, &db.Filesystem{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FileEntry{}, &model.ScanSession{}, &model.Category{}, &model.Filesystem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db.NewRepository(gdb)
@@ -53,7 +54,7 @@ func TestScan_SMB(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)
@@ -81,7 +82,7 @@ func TestScan_FTP(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)
@@ -109,7 +110,7 @@ func TestScan_SFTP(t *testing.T) {
 	}
 	defer fs.Close()
 
-	session := &db.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
+	session := &model.ScanSession{ID: 1, RootPath: "", Status: "scanning"}
 	repo.CreateSession(session)
 
 	sc := New(fs, repo, "", nil)

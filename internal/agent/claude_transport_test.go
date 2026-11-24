@@ -18,8 +18,8 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
-	"FileEngine/internal/db"
 	modelfactory "FileEngine/internal/model"
 )
 
@@ -78,7 +78,7 @@ func runAgainst(t *testing.T, s *claudeServer) (*schema.Message, error, time.Dur
 	t.Helper()
 	setupToolTestRepo(t)
 	m, err := modelfactory.NewChatModelFromProvider(context.Background(),
-		&db.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: s.URL})
+		&model.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: s.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestClaudeErrorClassification(t *testing.T) {
 			s.Close()
 		}
 		m, _ := modelfactory.NewChatModelFromProvider(context.Background(),
-			&db.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: s.URL})
+			&model.ModelProvider{Provider: "claude", Model: "claude-opus-5-5", APIKey: "k", BaseURL: s.URL})
 		_, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")})
 		if got := classifyRunErrorWithStatus(err, 0); got != want {
 			t.Errorf("status %d: class %s, want %s (%v)", status, got, want, err)

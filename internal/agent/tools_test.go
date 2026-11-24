@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -11,15 +13,15 @@ import (
 func setupToolTestRepo(t *testing.T) *db.Repository {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := db.Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := db.Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("db init: %v", err)
 	}
-	return db.NewRepository(db.GetDB())
+	return db.NewRepository(dal.DB())
 }
 
 func seedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fileType string) {
 	t.Helper()
-	f := &db.FileEntry{
+	f := &model.FileEntry{
 		ScanSessionID: sessionID,
 		OriginalPath:  path,
 		Name:          filepath.Base(path),
@@ -32,14 +34,14 @@ func seedFile(t *testing.T, repo *db.Repository, sessionID uint, path, fileType 
 
 func seedCategory(t *testing.T, repo *db.Repository, filesystemID uint, name, path string) {
 	t.Helper()
-	if err := repo.CreateCategory(&db.Category{FilesystemID: filesystemID, Name: name, Path: path}); err != nil {
+	if err := repo.CreateCategory(&model.Category{FilesystemID: filesystemID, Name: name, Path: path}); err != nil {
 		t.Fatalf("seed category %s: %v", name, err)
 	}
 }
 
 func TestCategoryPathValidation(t *testing.T) {
 	repo := setupToolTestRepo(t)
-	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &db.ScanSession{AllowAutoCategory: true}, false)
+	tb := NewToolBuilder(repo, nil, 1, 7, NewLogger(1, 0, 0), config.AgentConfig{}, &model.ScanSession{AllowAutoCategory: true}, false)
 
 	if out := createCat(t, tb, "Bad", "/../evil"); okOf(out) {
 		t.Fatalf("create with escaping path: got %+v — want non-fatal rejection", out)

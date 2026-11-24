@@ -5,13 +5,13 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
 )
 
 func TestSubtreeCondMatchesExactPrefix(t *testing.T) {
@@ -71,12 +71,12 @@ func explain(t *testing.T, db *gorm.DB, build func(tx *gorm.DB) *gorm.DB) string
 
 func TestPathQueriesUseIndexes(t *testing.T) {
 	r := quietRepo(setupBrainRepo(t))
-	rows := make([]FileEntry, 0, 50000)
+	rows := make([]model.FileEntry, 0, 50000)
 	for i := 0; i < 50000; i++ {
 		dir := fmt.Sprintf("d%03d", i%500)
 		p := fmt.Sprintf("%s/f%05d.txt", dir, i)
 		np := fmt.Sprintf("/目标/%s/f%05d.txt", dir, i)
-		rows = append(rows, FileEntry{ScanSessionID: 1 + uint(i%2), OriginalPath: p, ParentPath: dir, Name: p[len(dir)+1:],
+		rows = append(rows, model.FileEntry{ScanSessionID: 1 + uint(i%2), OriginalPath: p, ParentPath: dir, Name: p[len(dir)+1:],
 			FileType: "file", NewPath: np, NewPathKey: CollisionKey(np), Operation: "planned", Role: RoleFile})
 	}
 	if err := r.CreateFiles(rows); err != nil {
@@ -95,21 +95,21 @@ func TestPathQueriesUseIndexes(t *testing.T) {
 		{"target count", "idx_session_newpath", func(tx *gorm.DB) *gorm.DB {
 			cond, args := targetCond(tx, "/目标/d007")
 			var n int64
-			return tx.Model(&FileEntry{}).Where("scan_session_id = ?", 1).Where(cond, args...).Count(&n)
+			return tx.Model(&model.FileEntry{}).Where("scan_session_id = ?", 1).Where(cond, args...).Count(&n)
 		}},
 		{"collision key", "idx_session_newkey", func(tx *gorm.DB) *gorm.DB {
 			var ids []uint
-			return tx.Model(&FileEntry{}).Where("scan_session_id = ? AND new_path_key = ? AND original_path <> ?", 1, "目标/d007/f00007.txt", "x").Limit(1).Pluck("id", &ids)
+			return tx.Model(&model.FileEntry{}).Where("scan_session_id = ? AND new_path_key = ? AND original_path <> ?", 1, "目标/d007/f00007.txt", "x").Limit(1).Pluck("id", &ids)
 		}},
 		{"keyset page", "idx_session_parent", func(tx *gorm.DB) *gorm.DB {
 			parent := "d007"
-			var fs []FileEntry
-			return applyFileFilters(tx.Model(&FileEntry{}), FileQuery{SessionID: 1, ParentPath: &parent}).
+			var fs []model.FileEntry
+			return applyFileFilters(tx.Model(&model.FileEntry{}), FileQuery{SessionID: 1, ParentPath: &parent}).
 				Where("(file_type, name, id) > (?, ?, ?)", "file", "f00007.txt", 7).Order(fileOrder).Limit(101).Find(&fs)
 		}},
 		{"role filter", "idx_session_role", func(tx *gorm.DB) *gorm.DB {
 			var n int64
-			return tx.Model(&FileEntry{}).Where("scan_session_id = ? AND role = ?", 1, RoleUnit).Count(&n)
+			return tx.Model(&model.FileEntry{}).Where("scan_session_id = ? AND role = ?", 1, RoleUnit).Count(&n)
 		}},
 	}
 	for _, tc := range cases {
@@ -129,10 +129,10 @@ func TestPathQueriesUseIndexes(t *testing.T) {
 
 func BenchmarkSubtreeUpdate(b *testing.B) {
 	r := quietRepo(setupBrainRepo(b))
-	rows := make([]FileEntry, 0, 50000)
+	rows := make([]model.FileEntry, 0, 50000)
 	for i := 0; i < 50000; i++ {
 		dir := fmt.Sprintf("d%03d", i%500)
-		rows = append(rows, FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("%s/f%05d", dir, i), ParentPath: dir, FileType: "file"})
+		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("%s/f%05d", dir, i), ParentPath: dir, FileType: "file"})
 	}
 	if err := r.CreateFiles(rows); err != nil {
 		b.Fatal(err)
@@ -147,18 +147,18 @@ func BenchmarkSubtreeUpdate(b *testing.B) {
 
 func TestRefreshSessionCountsWritesOnlyOnChange(t *testing.T) {
 	r := setupBrainRepo(t)
-	s := &ScanSession{Status: "scanned"}
+	s := &model.ScanSession{Status: "scanned"}
 	if err := r.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
 	seedEntry(t, r, s.ID, "a.txt", "file", 5)
 	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	stamp := func() {
-		if err := r.db.Model(&ScanSession{}).Where("id = ?", s.ID).UpdateColumn("updated_at", past).Error; err != nil {
+		if err := r.db.Model(&model.ScanSession{}).Where("id = ?", s.ID).UpdateColumn("updated_at", past).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	reload := func() *ScanSession {
+	reload := func() *model.ScanSession {
 		got, err := r.GetSession(s.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -185,7 +185,7 @@ func TestDecisionsRefreshCountsCoalesced(t *testing.T) {
 	countsDelay = 20 * time.Millisecond
 	defer func() { countsDelay = old }()
 	r := setupBrainRepo(t)
-	s := &ScanSession{Status: "scanned"}
+	s := &model.ScanSession{Status: "scanned"}
 	if err := r.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -212,14 +212,14 @@ func TestDecisionsRefreshCountsCoalesced(t *testing.T) {
 
 func TestUpdateCategoryPathSwapsPrefixOnly(t *testing.T) {
 	r := setupBrainRepo(t)
-	fsA, fsB := &Filesystem{Name: "a"}, &Filesystem{Name: "b"}
-	for _, f := range []*Filesystem{fsA, fsB} {
+	fsA, fsB := &model.Filesystem{Name: "a"}, &model.Filesystem{Name: "b"}
+	for _, f := range []*model.Filesystem{fsA, fsB} {
 		if err := r.CreateFilesystem(f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	sA, sB := &ScanSession{FilesystemID: fsA.ID}, &ScanSession{FilesystemID: fsB.ID}
-	for _, s := range []*ScanSession{sA, sB} {
+	sA, sB := &model.ScanSession{FilesystemID: fsA.ID}, &model.ScanSession{FilesystemID: fsB.ID}
+	for _, s := range []*model.ScanSession{sA, sB} {
 		if err := r.CreateSession(s); err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestUpdateCategoryPathSwapsPrefixOnly(t *testing.T) {
 	if _, err := r.Decide(sB.ID, Decision{Path: "other", Role: RoleFile, NewPath: "/Photo/z.jpg"}); err != nil {
 		t.Fatal(err)
 	}
-	cat := &Category{FilesystemID: fsA.ID, Name: "照片", Path: "/Photo"}
+	cat := &model.Category{FilesystemID: fsA.ID, Name: "照片", Path: "/Photo"}
 	if err := r.CreateCategory(cat); err != nil {
 		t.Fatal(err)
 	}
@@ -288,14 +288,14 @@ func TestCollisionKeyColumn(t *testing.T) {
 
 func TestListFilesAfterKeyset(t *testing.T) {
 	r := setupBrainRepo(t)
-	var rows []FileEntry
+	var rows []model.FileEntry
 	for i := 0; i < 523; i++ {
 		typ := "file"
 		if i%7 == 0 {
 			typ = "directory"
 		}
 		name := fmt.Sprintf("n%03d", i%200) // duplicate names exercise the id tie-break
-		rows = append(rows, FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("p/%d", i), ParentPath: "p", Name: name, FileType: typ})
+		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("p/%d", i), ParentPath: "p", Name: name, FileType: typ})
 	}
 	if err := r.CreateFiles(rows); err != nil {
 		t.Fatal(err)
@@ -335,13 +335,13 @@ func TestListFilesAfterKeyset(t *testing.T) {
 
 func TestSampleFilesDistinctAndFiltered(t *testing.T) {
 	r := setupBrainRepo(t)
-	var rows []FileEntry
+	var rows []model.FileEntry
 	for i := 0; i < 1000; i++ {
 		typ := "file"
 		if i%3 == 0 {
 			typ = "directory"
 		}
-		rows = append(rows, FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("f%04d", i), Name: fmt.Sprintf("f%04d", i), FileType: typ})
+		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("f%04d", i), Name: fmt.Sprintf("f%04d", i), FileType: typ})
 	}
 	if err := r.CreateFiles(rows); err != nil {
 		t.Fatal(err)
@@ -366,66 +366,34 @@ func TestSampleFilesDistinctAndFiltered(t *testing.T) {
 func TestInsertBatchFitsSQLiteVariableLimit(t *testing.T) {
 	r := setupBrainRepo(t)
 	stmt := &gorm.Statement{DB: r.db}
-	if err := stmt.Parse(&FileEntry{}); err != nil {
+	if err := stmt.Parse(&model.FileEntry{}); err != nil {
 		t.Fatal(err)
 	}
 	if vars := r.InsertBatchRows() * len(stmt.Schema.DBNames); vars > 32766 {
 		t.Fatalf("multi-row insert binds %d variables", vars)
 	}
-	rows := make([]FileEntry, 3000)
+	rows := make([]model.FileEntry, 3000)
 	for i := range rows {
-		rows[i] = FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("x/%d", i), FileType: "file"}
+		rows[i] = model.FileEntry{ScanSessionID: 1, OriginalPath: fmt.Sprintf("x/%d", i), FileType: "file"}
 	}
 	if err := r.CreateFiles(rows); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// Every index must fit InnoDB's 3072-byte key at 4 bytes per utf8mb4 char
-// once mysqlIndexPrefixes has applied its prefixes, and no indexed string
-// column may lack a size (MySQL cannot index unbounded TEXT).
-func TestMySQLIndexWidths(t *testing.T) {
-	cache := &sync.Map{}
-	for _, m := range allModels {
-		s, err := schema.Parse(m, cache, schema.NamingStrategy{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, idx := range s.ParseIndexes() {
-			for _, o := range idx.Fields {
-				if o.Field.DataType == schema.String && o.Field.Size == 0 {
-					t.Errorf("%s.%s: indexed string column %s has no size", s.Table, idx.Name, o.Field.DBName)
-				}
-			}
-			if n := mysqlIndexBytes(idx.Fields); n > mysqlMaxKeyBytes {
-				t.Errorf("%s.%s: %d bytes", s.Table, idx.Name, n)
-			}
-		}
-	}
-	s, _ := schema.Parse(&FileEntry{}, cache, schema.NamingStrategy{})
-	for _, idx := range s.ParseIndexes() {
-		if idx.Name == "idx_uniq_session_path" {
-			opts := mysqlIndexPrefixes(idx.Fields)
-			if opts[0].Length != 0 || opts[1].Length != 766 {
-				t.Fatalf("prefixes: %d %d", opts[0].Length, opts[1].Length)
-			}
-		}
-	}
-}
-
 func TestCategoryStatsGrouped(t *testing.T) {
 	r := setupBrainRepo(t)
-	fs := &Filesystem{Name: "fs"}
+	fs := &model.Filesystem{Name: "fs"}
 	if err := r.CreateFilesystem(fs); err != nil {
 		t.Fatal(err)
 	}
-	s := &ScanSession{FilesystemID: fs.ID}
+	s := &model.ScanSession{FilesystemID: fs.ID}
 	if err := r.CreateSession(s); err != nil {
 		t.Fatal(err)
 	}
 	// More categories than one UNION ALL chunk.
 	for i := 0; i < 250; i++ {
-		if err := r.CreateCategory(&Category{FilesystemID: fs.ID, Name: fmt.Sprintf("c%03d", i), Path: fmt.Sprintf("/c%03d", i)}); err != nil {
+		if err := r.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: fmt.Sprintf("c%03d", i), Path: fmt.Sprintf("/c%03d", i)}); err != nil {
 			t.Fatal(err)
 		}
 	}

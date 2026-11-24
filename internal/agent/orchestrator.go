@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
@@ -20,8 +21,8 @@ type OrchestratorRequest struct {
 type OrchestratorAgent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig
-	modelProvider *db.ModelProvider
-	session       *db.ScanSession
+	modelProvider *model.ModelProvider
+	session       *model.ScanSession
 	sessionID     uint
 	logger        *Logger
 	partial       bool
@@ -29,7 +30,7 @@ type OrchestratorAgent struct {
 
 func (o *OrchestratorAgent) Partial() bool { return o.partial }
 
-func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *db.ModelProvider, session *db.ScanSession, sessionID uint, logger *Logger) *OrchestratorAgent {
+func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger) *OrchestratorAgent {
 	return &OrchestratorAgent{
 		repo:          repo,
 		fsCfg:         fsCfg,

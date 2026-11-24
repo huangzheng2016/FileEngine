@@ -13,12 +13,13 @@ import (
 	"sort"
 	"strings"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
 
-func (e *Executor) journal(entryID uint, kind, src, dst string, isDir bool, st *remotefs.FileInfo) (*db.ExecOp, error) {
-	op := &db.ExecOp{RunID: e.run.ID, SessionID: e.sessionID, EntryID: entryID, Kind: kind,
+func (e *Executor) journal(entryID uint, kind, src, dst string, isDir bool, st *remotefs.FileInfo) (*model.ExecOp, error) {
+	op := &model.ExecOp{RunID: e.run.ID, SessionID: e.sessionID, EntryID: entryID, Kind: kind,
 		Src: src, Dst: dst, IsDir: isDir, State: db.ExecPending}
 	if st != nil {
 		op.Size, op.ModTime = st.Size, st.ModTime
@@ -26,20 +27,20 @@ func (e *Executor) journal(entryID uint, kind, src, dst string, isDir bool, st *
 	return op, e.repo.CreateExecOp(op)
 }
 
-func (e *Executor) setState(op *db.ExecOp, state, msg string) error {
+func (e *Executor) setState(op *model.ExecOp, state, msg string) error {
 	return e.repo.SetExecOpState(op, state, msg)
 }
 
 // keepState records a state that is already being reported to the caller via
 // another error; a lost journal write is logged because nothing else can act
 // on it.
-func (e *Executor) keepState(op *db.ExecOp, state, msg string) {
+func (e *Executor) keepState(op *model.ExecOp, state, msg string) {
 	if err := e.setState(op, state, msg); err != nil {
 		log.Printf("executor: journal op %d state %s: %v", op.ID, state, err)
 	}
 }
 
-func (e *Executor) failOp(op *db.ExecOp, msg string) {
+func (e *Executor) failOp(op *model.ExecOp, msg string) {
 	e.keepState(op, db.ExecFailed, msg)
 }
 
@@ -126,7 +127,7 @@ func (e *Executor) hash(ctx context.Context, p string) ([]byte, error) {
 
 // finishRename journals a rename that took effect. The op stays pending when
 // the destination cannot be read, which lets Recover settle it later.
-func (e *Executor) finishRename(ctx context.Context, op *db.ExecOp, st *remotefs.FileInfo) error {
+func (e *Executor) finishRename(ctx context.Context, op *model.ExecOp, st *remotefs.FileInfo) error {
 	ds, err := e.fs.Stat(ctx, op.Dst)
 	if err != nil {
 		return fmt.Errorf("重命名后无法读取目标：%w", err)
@@ -140,7 +141,7 @@ func (e *Executor) finishRename(ctx context.Context, op *db.ExecOp, st *remotefs
 
 // renameLanded answers whether a rename that reported an error actually took
 // effect (a lost reply): source gone and destination present.
-func (e *Executor) renameLanded(ctx context.Context, op *db.ExecOp) (bool, error) {
+func (e *Executor) renameLanded(ctx context.Context, op *model.ExecOp) (bool, error) {
 	_, srcOK, err := e.stat(ctx, op.Src)
 	if err != nil {
 		return false, fmt.Errorf("无法确认重命名结果：%w", err)
@@ -235,7 +236,7 @@ func (e *Executor) transferFile(ctx context.Context, entryID uint, src, dst stri
 // copyJournaled runs the copy of an already journaled copy/move op and
 // finishes it. The create notice journals ownership of dst before any data is
 // written.
-func (e *Executor) copyJournaled(ctx context.Context, op *db.ExecOp) error {
+func (e *Executor) copyJournaled(ctx context.Context, op *model.ExecOp) error {
 	src, dst := op.Src, op.Dst
 	created := remotefs.WithCreateNotice(ctx, func() error { return e.repo.SetExecOpCreated(op) })
 	if err := e.fs.CopyFile(created, src, dst); err != nil {
@@ -263,7 +264,7 @@ type unfinishedError struct{ error }
 
 func (e *unfinishedError) Unwrap() error { return e.error }
 
-func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
+func (e *Executor) finishCopy(ctx context.Context, op *model.ExecOp) error {
 	var ds *remotefs.FileInfo
 	if op.State == db.ExecPending {
 		var err error

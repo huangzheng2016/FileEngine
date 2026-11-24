@@ -1,11 +1,17 @@
+// Package db owns the database handle: connection and dialect setup, schema
+// migration, the typed query layer (package query) and the SQL helpers that
+// differ per dialect. Repository and domain logic live in internal/db and
+// biz/service.
 package db
 
 import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"FileEngine/biz/dal/db/query"
 	"FileEngine/internal/config"
 
 	"github.com/glebarez/sqlite"
@@ -14,25 +20,64 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-var DB *gorm.DB
-
-// nil on MySQL/PostgreSQL, whose single pool already serves concurrent
-// readers.
-var readDB *gorm.DB
+var (
+	gdb    *gorm.DB
+	q      *query.Query
+	readQ  *query.Query
+	readDB *gorm.DB // nil on MySQL/PostgreSQL, whose single pool already serves concurrent readers
+)
 
 // WAL lets readers run alongside the single writer connection.
 const readPoolSize = 4
 
-// On SQLite a separate query_only pool, so long reads never queue behind the
-// single writer connection.
+// DB is the writer handle; it is the only one on MySQL/PostgreSQL.
+func DB() *gorm.DB { return gdb }
+
+// Query is the typed query layer over DB.
+func Query() *query.Query { return q }
+
+// ReadDB is, on SQLite, a separate query_only pool so long reads never queue
+// behind the single writer connection; elsewhere it is DB.
 func ReadDB() *gorm.DB {
 	if readDB != nil {
 		return readDB
 	}
-	return DB
+	return gdb
 }
 
+// ReadQuery is Query over ReadDB.
+func ReadQuery() *query.Query {
+	if readQ != nil {
+		return readQ
+	}
+	return q
+}
+
+// Init opens the configured database, migrates the schema and sets the
+// package handles.
 func Init(cfg config.DatabaseConfig) error {
+	g, err := Open(cfg)
+	if err != nil {
+		return err
+	}
+	var rdb *gorm.DB
+	if cfg.Driver == "sqlite" {
+		// Opened after AutoMigrate: the file exists in WAL mode by now.
+		if rdb, err = openSQLiteReadPool(cfg.DSN); err != nil {
+			return err
+		}
+	}
+	gdb, readDB = g, rdb
+	q, readQ = query.Use(g), nil
+	if rdb != nil {
+		readQ = query.Use(rdb)
+	}
+	return nil
+}
+
+// Open connects and migrates without touching the package handles (dbtest uses
+// it to get isolated databases).
+func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	switch cfg.Driver {
 	case "sqlite":
@@ -42,21 +87,21 @@ func Init(cfg config.DatabaseConfig) error {
 	case "postgres":
 		dialector = postgres.Open(cfg.DSN)
 	default:
-		return fmt.Errorf("unsupported database driver: %s", cfg.Driver)
+		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
 	}
 
-	var err error
-	DB, err = gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+	g, err := gorm.Open(dialector, &gorm.Config{
+		TranslateError: true,
+		Logger:         logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to connect database: %w", err)
+		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 
 	if cfg.Driver == "sqlite" {
-		sqlDB, err := DB.DB()
+		sqlDB, err := g.DB()
 		if err != nil {
-			return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 		}
 		// SQLite allows one writer at a time; a single connection avoids lock
 		// contention.
@@ -70,37 +115,15 @@ func Init(cfg config.DatabaseConfig) error {
 		}
 		for _, p := range pragmas {
 			if _, err := sqlDB.Exec(p); err != nil {
-				return fmt.Errorf("failed to set %s: %w", p, err)
+				return nil, fmt.Errorf("failed to set %s: %w", p, err)
 			}
 		}
 	}
 
-	if err := migrate(DB); err != nil {
-		return fmt.Errorf("failed to migrate database: %w", err)
+	if err := Migrate(g); err != nil {
+		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
-
-	readDB = nil
-	if cfg.Driver == "sqlite" {
-		// Opened after AutoMigrate: the file exists in WAL mode by now.
-		if readDB, err = openSQLiteReadPool(cfg.DSN); err != nil {
-			return err
-		}
-	}
-	// Zombie sweeps: scans and runs still marked live belong to a previous
-	// process lifetime.
-	repo := NewRepository(DB)
-	if n, err := repo.MarkInterruptedScans(); err != nil {
-		return fmt.Errorf("failed to mark interrupted scans: %w", err)
-	} else if n > 0 {
-		log.Printf("db init: marked %d zombie scanning session(s) as interrupted", n)
-	}
-	if n, err := repo.SweepStaleRuns(); err != nil {
-		return fmt.Errorf("failed to sweep stale runs: %w", err)
-	} else if n > 0 {
-		log.Printf("db init: marked %d stale running run(s) as stopped", n)
-	}
-
-	return nil
+	return g, nil
 }
 
 // busy_timeout runs first so the remaining pragmas already wait on a locked
@@ -121,7 +144,8 @@ func openSQLiteReadPool(path string) (*gorm.DB, error) {
 		"&_pragma=cache_size(-65536)" +
 		"&_pragma=query_only(1)"
 	rdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		TranslateError: true,
+		Logger:         logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite read pool: %w", err)
@@ -136,10 +160,7 @@ func openSQLiteReadPool(path string) (*gorm.DB, error) {
 	return rdb, nil
 }
 
-func GetDB() *gorm.DB {
-	return DB
-}
-
+// WithRetry re-runs fn while SQLite reports a locked database.
 func WithRetry(fn func() error) error {
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
@@ -165,19 +186,6 @@ func isSQLiteLocked(err error) bool {
 	msg := err.Error()
 	return msg == "database is locked" ||
 		msg == string(sql.ErrConnDone.Error()) ||
-		contains(msg, "database is locked") ||
-		contains(msg, "SQLITE_BUSY")
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
+		strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "SQLITE_BUSY")
 }

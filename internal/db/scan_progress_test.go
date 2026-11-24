@@ -4,21 +4,23 @@ import (
 	"path/filepath"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/config"
 )
 
 func setupScanProgressRepo(t *testing.T) *Repository {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	return NewRepository(DB)
+	return NewRepository(dal.DB())
 }
 
 func TestUpdateScanProgress(t *testing.T) {
 	r := setupScanProgressRepo(t)
-	session := &ScanSession{FilesystemID: 1, Status: "scanning", TotalFiles: 7}
+	session := &model.ScanSession{FilesystemID: 1, Status: "scanning", TotalFiles: 7}
 	if err := r.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestUpdateScanProgress(t *testing.T) {
 
 func TestMarkInterruptedScans(t *testing.T) {
 	r := setupScanProgressRepo(t)
-	rows := []*ScanSession{
+	rows := []*model.ScanSession{
 		{FilesystemID: 1, Status: "scanning", ScannedCount: 42, CurrentPath: "a/b"},
 		{FilesystemID: 1, Status: "scanning"},
 		{FilesystemID: 1, Status: "scanned"},
@@ -101,19 +103,19 @@ func TestMarkInterruptedScans(t *testing.T) {
 
 func TestInitMarksZombieScansInterrupted(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	r := NewRepository(DB)
-	zombie := &ScanSession{FilesystemID: 1, Status: "scanning", CurrentPath: "x/y"}
+	r := NewRepository(dal.DB())
+	zombie := &model.ScanSession{FilesystemID: 1, Status: "scanning", CurrentPath: "x/y"}
 	if err := r.CreateSession(zombie); err != nil {
 		t.Fatalf("create zombie: %v", err)
 	}
 
-	if err := Init(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
+	if err := Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn}); err != nil {
 		t.Fatalf("re-init: %v", err)
 	}
-	got, err := NewRepository(DB).GetSession(zombie.ID)
+	got, err := NewRepository(dal.DB()).GetSession(zombie.ID)
 	if err != nil {
 		t.Fatalf("get zombie: %v", err)
 	}
@@ -125,11 +127,11 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 
 func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 	r := setupScanProgressRepo(t)
-	session := &ScanSession{FilesystemID: 1, Status: "scanning"}
+	session := &model.ScanSession{FilesystemID: 1, Status: "scanning"}
 	if err := r.CreateSession(session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	for _, f := range []FileEntry{
+	for _, f := range []model.FileEntry{
 		{ScanSessionID: session.ID, OriginalPath: "a", Name: "a", FileType: "file", Size: 10, Tagged: true, Operation: "move"},
 		{ScanSessionID: session.ID, OriginalPath: "b", Name: "b", FileType: "file", Size: 20},
 	} {
@@ -139,7 +141,7 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 		}
 	}
 
-	if err := r.db.Model(&ScanSession{}).Where("id = ?", session.ID).
+	if err := r.db.Model(&model.ScanSession{}).Where("id = ?", session.ID).
 		Updates(map[string]interface{}{
 			"status":        "scanned",
 			"scanned_count": 2,

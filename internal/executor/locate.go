@@ -4,6 +4,7 @@ import (
 	"path"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/db"
 )
 
@@ -60,7 +61,7 @@ func Locate(repo *db.Repository, sessionID uint, q string, limit int) ([]LocateI
 	return items, nil
 }
 
-func decidingEntry(repo *db.Repository, sessionID uint, f *db.FileEntry) (*db.FileEntry, error) {
+func decidingEntry(repo *db.Repository, sessionID uint, f *model.FileEntry) (*model.FileEntry, error) {
 	if f.Operation != "" && f.NewPath != "" {
 		return f, nil
 	}
@@ -71,12 +72,12 @@ func decidingEntry(repo *db.Repository, sessionID uint, f *db.FileEntry) (*db.Fi
 	if len(anc) == 0 {
 		return nil, nil
 	}
-	var rows []db.FileEntry
+	var rows []model.FileEntry
 	if err := repo.DB().Where("scan_session_id = ? AND original_path IN ? AND operation != '' AND new_path != ''", sessionID, anc).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	var best *db.FileEntry
+	var best *model.FileEntry
 	for i := range rows {
 		if best == nil || len(rows[i].OriginalPath) > len(best.OriginalPath) {
 			best = &rows[i]

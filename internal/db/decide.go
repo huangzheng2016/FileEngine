@@ -1,6 +1,8 @@
 package db
 
 import (
+	dal "FileEngine/biz/dal/db"
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/pathutil"
 	"errors"
 	"fmt"
@@ -59,7 +61,7 @@ var decidedRoles = []string{RoleUnit, RoleFile, RoleSkip}
 func (r *Repository) Decide(sessionID uint, d Decision) (*DecideResult, error) {
 	defer r.touchCounts(sessionID)
 	var res *DecideResult
-	err := WithRetry(func() error {
+	err := dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
 			var err error
 			res, err = decideTx(tx, sessionID, d)
@@ -80,7 +82,7 @@ func (r *Repository) DecideBatch(sessionID uint, ds []Decision) ([]DecideOutcome
 	const chunk = 200
 	for start := 0; start < len(ds); start += chunk {
 		end := min(start+chunk, len(ds))
-		err := WithRetry(func() error {
+		err := dal.WithRetry(func() error {
 			return r.db.Transaction(func(tx *gorm.DB) error {
 				for i := start; i < end; i++ {
 					res, err := decideTx(tx, sessionID, ds[i])
@@ -101,7 +103,7 @@ func (r *Repository) DecideBatch(sessionID uint, ds []Decision) ([]DecideOutcome
 
 func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 	p := strings.Trim(d.Path, "/")
-	var e FileEntry
+	var e model.FileEntry
 	if err := tx.Where("scan_session_id = ? AND original_path = ?", sessionID, p).Take(&e).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, reject("条目不存在：%s", d.Path)
@@ -173,7 +175,7 @@ func decideTx(tx *gorm.DB, sessionID uint, d Decision) (*DecideResult, error) {
 		op = "planned"
 	}
 	res.NeedsReview = res.NewPath != "" && d.Confidence > 0 && d.Confidence < ReviewConfidence
-	if err := tx.Model(&FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
+	if err := tx.Model(&model.FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
 		"role": role, "new_path": res.NewPath, "new_path_key": targetKey(res.NewPath), "operation": op, "reason": d.Reason,
 		"tagged": role != RoleUndecided, "needs_review": res.NeedsReview, "confidence": d.Confidence,
 	}).Error; err != nil {
@@ -215,17 +217,17 @@ func MemberReason(owner, ownerRole string) string {
 	return "随「" + owner + "」整体移动"
 }
 
-func governingAncestor(tx *gorm.DB, sessionID uint, p string) (*FileEntry, error) {
+func governingAncestor(tx *gorm.DB, sessionID uint, p string) (*model.FileEntry, error) {
 	anc := pathAncestors(path.Dir(p))
 	if len(anc) == 0 {
 		return nil, nil
 	}
-	var rows []FileEntry
+	var rows []model.FileEntry
 	if err := tx.Where("scan_session_id = ? AND original_path IN ? AND role IN ?", sessionID, anc, []string{RoleUnit, RoleSkip}).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	var best *FileEntry
+	var best *model.FileEntry
 	for i := range rows {
 		if best == nil || len(rows[i].OriginalPath) > len(best.OriginalPath) {
 			best = &rows[i]
@@ -234,7 +236,7 @@ func governingAncestor(tx *gorm.DB, sessionID uint, p string) (*FileEntry, error
 	return best, nil
 }
 
-func underUnitRejection(owner *FileEntry) error {
+func underUnitRejection(owner *model.FileEntry) error {
 	if owner.Role == RoleSkip {
 		return reject("该目录已整体保持原位「%s」；如需拆分请先调用 split_unit", owner.OriginalPath)
 	}
@@ -273,9 +275,9 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 	defer r.touchCounts(sessionID)
 	p = strings.Trim(p, "/")
 	var released int64
-	err := WithRetry(func() error {
+	err := dal.WithRetry(func() error {
 		return r.db.Transaction(func(tx *gorm.DB) error {
-			var e FileEntry
+			var e model.FileEntry
 			if err := tx.Where("scan_session_id = ? AND original_path = ?", sessionID, p).Take(&e).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return reject("条目不存在：%s", p)
@@ -285,7 +287,7 @@ func (r *Repository) SplitUnit(sessionID uint, p string) (int64, error) {
 			if e.FileType != "directory" || (e.Role != RoleUnit && e.Role != RoleSkip) {
 				return reject("%s 不是整体移动或整体跳过的目录，无需拆分", p)
 			}
-			if err := tx.Model(&FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
+			if err := tx.Model(&model.FileEntry{}).Where("id = ?", e.ID).Updates(map[string]any{
 				"role": RoleContainer, "new_path": "", "new_path_key": "", "operation": "", "reason": "拆分为逐项处理", "needs_review": false,
 			}).Error; err != nil {
 				return err

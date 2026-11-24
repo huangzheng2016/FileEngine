@@ -19,13 +19,13 @@ func TestLikeLiteral(t *testing.T) {
 		{"照片/2024", "照片/2024"},
 	}
 	for _, tc := range cases {
-		if got := likeLiteral(tc.in); got != tc.want {
-			t.Errorf("likeLiteral(%q): got %q, want %q", tc.in, got, tc.want)
+		if got := LikeLiteral(tc.in); got != tc.want {
+			t.Errorf("LikeLiteral(%q): got %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
 
-func TestNameSearchConditionPerDialect(t *testing.T) {
+func TestCILikeConditionPerDialect(t *testing.T) {
 	cases := []struct {
 		name      string
 		dialector gorm.Dialector
@@ -41,42 +41,11 @@ func TestNameSearchConditionPerDialect(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open %s dialector: %v", tc.name, err)
 			}
-			got := nameSearchCondition(db)
-			want := tc.wantOp + likeEscapeClause
+			got := CILikeCondition(db, "name")
+			want := tc.wantOp + LikeEscapeClause
 			if got != want {
-				t.Fatalf("nameSearchCondition(%s): got %q, want %q", tc.name, got, want)
+				t.Fatalf("CILikeCondition(%s): got %q, want %q", tc.name, got, want)
 			}
 		})
-	}
-}
-
-func TestApplyFileFiltersPostgresSQL(t *testing.T) {
-	db, err := gorm.Open(postgres.New(postgres.Config{
-		DSN:                 "host=localhost dbname=x sslmode=disable",
-		WithoutQuotingCheck: true,
-	}), &gorm.Config{DisableAutomaticPing: true})
-	if err != nil {
-		t.Fatalf("open postgres dialector: %v", err)
-	}
-	tx := applyFileFilters(db.Session(&gorm.Session{DryRun: true}).Model(&FileEntry{}),
-		FileQuery{SessionID: 7, Search: `100%_x`})
-	var files []FileEntry
-	stmt := tx.Find(&files).Statement
-
-	sql := stmt.SQL.String()
-	if !contains(sql, "ILIKE") {
-		t.Fatalf("postgres search SQL must use ILIKE: %s", sql)
-	}
-	if !contains(sql, "ESCAPE '!'") {
-		t.Fatalf("postgres search SQL must carry the escape clause: %s", sql)
-	}
-	var foundPattern bool
-	for _, v := range stmt.Vars {
-		if s, ok := v.(string); ok && s == "%100!%!_x%" {
-			foundPattern = true
-		}
-	}
-	if !foundPattern {
-		t.Fatalf("escaped search pattern missing from bind vars: %v", stmt.Vars)
 	}
 }

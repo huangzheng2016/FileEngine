@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"FileEngine/biz/dal/db/model"
 	"FileEngine/internal/app"
-	"FileEngine/internal/db"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -151,7 +151,7 @@ func (s *Service) Subscribe(req SubscribeRequest) (SubscribeResponse, error) {
 	topic := eventsTopic(req.SessionID)
 	emit := s.emitter()
 	stop, err := s.app.Follow(uint(sid), runID, after,
-		func(ev db.SessionEvent) error {
+		func(ev model.SessionEvent) error {
 			emit(topic, EventPayload{Seq: int64(ev.ID), RunID: strconv.FormatUint(uint64(ev.RunID), 10),
 				Kind: ev.Type, Data: ev.Data, CreatedAt: ev.CreatedAt.Unix()})
 			return nil
