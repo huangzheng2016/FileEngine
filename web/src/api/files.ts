@@ -13,7 +13,7 @@ export interface FileQuery {
 }
 
 export async function listFiles(q: FileQuery, signal?: AbortSignal) {
-  const r = await get<{ items: FileEntry[] | null; total: number }>(
+  const r = await get<{ items: FileEntry[] | null; total: number; review_confidence: number }>(
     '/api/file/list',
     {
       session_id: q.session_id,
@@ -26,7 +26,7 @@ export async function listFiles(q: FileQuery, signal?: AbortSignal) {
     },
     signal,
   )
-  return { items: list(r.items), total: r.total }
+  return { items: list(r.items), total: r.total, review_confidence: r.review_confidence ?? 0 }
 }
 
 export async function getFile(id: Id, signal?: AbortSignal) {
@@ -60,17 +60,17 @@ export async function resetPlans(sessionId: Id, fileIds: Id[]) {
   return r.reset
 }
 
-export const PREVIEW_LIMIT = 500
-
 export async function previewTree(
   sessionId: Id,
   side: PreviewSide,
   path: string,
+  offset: number,
+  limit: number,
   signal?: AbortSignal,
 ): Promise<{ items: PreviewItem[]; total: number }> {
   const r = await get<{ items: PreviewItem[] | null; total: number }>(
     '/api/plan/preview',
-    { session_id: sessionId, side, path, offset: 0, limit: PREVIEW_LIMIT },
+    { session_id: sessionId, side, path, offset, limit },
     signal,
   )
   const items = list(r.items)
