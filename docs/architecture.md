@@ -36,7 +36,7 @@ request ─▶ biz/mw (auth, limits) ─▶ biz/handler/api (bind, one call, con
 | Thing | Lives in |
 |---|---|
 | Storage connections | `Filesystem` (secrets encrypted at rest) |
-| Model providers | `ModelProvider` (`thinking_enabled`, `reasoning_effort`, `context_window`, `vision_enabled`; `temperature` 0 = model default, not sent; `max_tokens` 0 = no cap, Claude gets 8192 because its API requires one) |
+| Model providers | `ModelProvider` (`thinking_enabled`, `reasoning_effort`, `context_window`, `vision_enabled`; `temperature` 0 = model default, not sent; `max_tokens` 0 = model default; Claude, whose API requires a value, gets the model's output ceiling (64000, 32000 on Opus 4.0/4.1)) |
 | One organizing task | `ScanSession` (scan state, goal, scope, switches, model ids) |
 | Every scanned entry and its decision | `FileEntry` (`role`, `new_path`, `reason`, `confidence`, `needs_review`, metadata, hash) |
 | The 整理方案 | `SessionPlan` (Markdown, versioned, draft/approved) and `PlanRule` rows |
