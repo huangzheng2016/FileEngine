@@ -2,6 +2,7 @@ import { download, get, list, post } from './http'
 import type {
   AgentConfigPatch,
   AppConfig,
+  ConfigVersion,
   Filesystem,
   Id,
   ModelProvider,
@@ -142,9 +143,10 @@ export function getConfig(signal?: AbortSignal) {
   return get<AppConfig>('/api/config/get', undefined, signal)
 }
 
-// A patch: fields left out stay unchanged.
-export function saveConfig(agent: AgentConfigPatch) {
-  return post<AppConfig>('/api/config/update', { agent })
+// A patch: fields left out stay unchanged. baseVersion is the version the edit started from; a newer saved
+// version answers 409 (isConflict).
+export function saveConfig(agent: AgentConfigPatch, baseVersion: number) {
+  return post<AppConfig>('/api/config/update', { agent, base_version: baseVersion })
 }
 
 export function getPrompt(signal?: AbortSignal) {
@@ -152,8 +154,18 @@ export function getPrompt(signal?: AbortSignal) {
 }
 
 // A prompt equal to the default resets to it.
-export function savePrompt(prompt: string) {
-  return post<PromptInfo>('/api/config/prompt_update', { prompt })
+export function savePrompt(prompt: string, baseVersion: number) {
+  return post<PromptInfo>('/api/config/prompt_update', { prompt, base_version: baseVersion })
+}
+
+// Newest first.
+export async function listConfigVersions(page: number, pageSize: number, signal?: AbortSignal) {
+  const r = await get<{ items: ConfigVersion[] | null; total: number }>(
+    '/api/config/versions',
+    { page, page_size: pageSize },
+    signal,
+  )
+  return { items: list(r.items), total: r.total ?? 0 }
 }
 
 export function backupDatabase(filename: string) {

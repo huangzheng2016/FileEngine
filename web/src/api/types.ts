@@ -116,6 +116,7 @@ export type LocateItem = Narrow<idl.LocateItem, { execute_mode: '' | ExecMode; o
 export type AgentConfig = idl.AgentConfig
 export type AgentConfigPatch = idl.AgentConfigPatch
 export type AppConfig = Narrow<idl.ConfigResp, { agent: AgentConfig }>
+export type ConfigVersion = idl.ConfigVersion
 export type PromptInfo = idl.PromptResp
 export type ProbeDir = idl.ProbeDir
 export type ProbeResult = idl.TestFilesystemResp
