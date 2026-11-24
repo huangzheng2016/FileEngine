@@ -1,5 +1,7 @@
-// Package app wires config, database and the HTTP API into one unit shared
-// by the server binary and the desktop shell.
+// Package app wires config, database and the Hertz API into one unit shared by
+// the server binary and the desktop shell. The server serves HTTP on a listener
+// it is handed; the desktop never listens and dispatches in-process calls to
+// the same engine (see inproc.go).
 package app
 
 import (
@@ -8,41 +10,58 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net"
-	"net/http"
 	"sync"
 	"time"
 
-	"FileEngine/internal/api"
+	"FileEngine/biz/mw"
+	"FileEngine/biz/service/auth"
+	"FileEngine/container"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
+	"FileEngine/internal/scanner"
 	"FileEngine/internal/secret"
+
+	"github.com/cloudwego/hertz/pkg/app/server"
+	hzconfig "github.com/cloudwego/hertz/pkg/common/config"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/cloudwego/hertz/pkg/network/standard"
+	"github.com/cloudwego/hertz/pkg/route"
 )
 
-// No read/write timeout: the SSE event stream is a long-lived response.
 const (
-	readHeaderTimeout = 10 * time.Second
-	idleTimeout       = 120 * time.Second
+	idleTimeout = 120 * time.Second
+	readTimeout = 60 * time.Second
+	// Bodies are checked per route by mw.BodyLimit; the server reads at most the
+	// largest allowed body plus framing.
+	maxBodyBytes = mw.ImportBodyLimit + 1<<20
+	// Hertz waits this long for open connections after the registry closed the
+	// streams, so only a stuck request can consume it.
+	exitWait = time.Second
 )
 
 type Options struct {
 	ConfigPath string
 	// Nil serves the API only.
-	Frontend     fs.FS
-	Token        string
-	AllowedHosts []string
-	LocalRoots   []string
+	Frontend fs.FS
+	// Desktop runs without a token: calls arrive in-process (see Do) and the
+	// access token is neither read from nor written to the config.
+	Desktop    bool
+	LocalRoots []string
 }
 
 type App struct {
-	cfg    *config.Config
-	server *api.Server
+	cfg  *config.Config
+	opts Options
 
-	mu         sync.Mutex
-	httpServer *http.Server
-	served     chan error
-	cancelReqs context.CancelFunc
+	mu     sync.Mutex
+	hertz  *server.Hertz
+	served chan error
+
+	inprocOnce sync.Once
+	inproc     *route.Engine
 }
 
 func New(opts Options) (*App, error) {
@@ -68,72 +87,82 @@ func New(opts Options) (*App, error) {
 	if err := db.Init(cfg.Database); err != nil {
 		return nil, fmt.Errorf("initialize database: %w", err)
 	}
-	token := opts.Token
-	if token == "" {
-		t, generated, err := config.EnsureToken()
-		if err != nil {
-			return nil, fmt.Errorf("api token: %w", err)
-		}
-		if generated {
-			// Printed exactly once; afterwards it lives only in config.yaml.
-			log.Printf("Generated API access token (shown once, stored as server.token in %s): %s", config.Path(), t)
-		}
-		token = t
+	token, err := accessToken(opts)
+	if err != nil {
+		return nil, err
 	}
-	return &App{
-		cfg: cfg,
-		server: api.NewServer(db.NewRepository(db.GetDB()), opts.Frontend, api.Options{
-			Token:        token,
-			BindHost:     cfg.Server.Host,
-			AllowedHosts: opts.AllowedHosts,
-		}),
-	}, nil
+	if err := container.Init(db.GetDB(), auth.Options{Token: token, BindHost: cfg.Server.Host}); err != nil {
+		return nil, fmt.Errorf("build container: %w", err)
+	}
+	repo := container.Default.Repo
+	scanner.ApplyRulesHook = func(sessionID uint) {
+		if err := repo.PrepareSession(sessionID); err != nil {
+			slog.Error("apply rules after scan", "session", sessionID, "err", err)
+		}
+	}
+	hlog.SetLevel(hlog.LevelWarn)
+	return &App{cfg: cfg, opts: opts}, nil
 }
 
-func (a *App) Server() *api.Server { return a.server }
+func accessToken(opts Options) (string, error) {
+	if opts.Desktop {
+		return auth.NewToken()
+	}
+	t, generated, err := config.EnsureToken()
+	if err != nil {
+		return "", fmt.Errorf("api token: %w", err)
+	}
+	if generated {
+		// Printed exactly once; afterwards it lives only in config.yaml.
+		log.Printf("Generated API access token (shown once, stored as server.token in %s): %s", config.Path(), t)
+	}
+	return t, nil
+}
 
 func (a *App) Config() *config.Config { return a.cfg }
 
-func (a *App) Handler() http.Handler { return a.server.Handler() }
-
+// Addr is the configured listen address.
 func (a *App) Addr() string {
 	return net.JoinHostPort(a.cfg.Server.Host, fmt.Sprint(a.cfg.Server.Port))
 }
 
-// Request contexts derive from ctx and are cancelled when Shutdown begins, so
-// long-lived SSE streams do not hold the graceful shutdown open.
-func (a *App) Start(ctx context.Context, ln net.Listener, handler http.Handler) error {
+// BootstrapURL is the one-click login link for origin (server mode).
+func (a *App) BootstrapURL(origin string) string {
+	return container.Default.Auth.BootstrapURL(origin)
+}
+
+// newHertz builds the engine. Always the standard transport: it works on every
+// OS, including Windows, and takes a pre-opened listener.
+func (a *App) newHertz(extra ...hzconfig.Option) *server.Hertz {
+	opts := []hzconfig.Option{
+		server.WithTransport(standard.NewTransporter),
+		server.WithMaxRequestBodySize(maxBodyBytes),
+		server.WithReadTimeout(readTimeout),
+		server.WithIdleTimeout(idleTimeout),
+		server.WithExitWaitTime(exitWait),
+		server.WithDisablePrintRoute(true),
+	}
+	h := server.New(append(opts, extra...)...)
+	h.Use(mw.AccessLog(), mw.Recover(), mw.SecurityHeaders(), mw.HostGuard())
+	registerRoutes(h, a.opts.Frontend)
+	return h
+}
+
+// Start serves HTTP on ln until Shutdown. It returns once serving has begun.
+func (a *App) Start(ln net.Listener) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.httpServer != nil {
+	if a.hertz != nil {
 		return errors.New("app: already started")
 	}
-	reqCtx, cancel := context.WithCancel(ctx)
-	fresh := newFreshConns()
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-		BaseContext:       func(net.Listener) context.Context { return reqCtx },
-		ConnState:         fresh.track,
-	}
-	srv.RegisterOnShutdown(cancel)
-	// http.Server treats a connection that never sent a request as active for
-	// 5s, so speculative client dials would stall Shutdown that long.
-	srv.RegisterOnShutdown(fresh.closeAll)
-	a.httpServer = srv
-	a.cancelReqs = cancel
+	h := a.newHertz(server.WithListener(ln))
+	a.hertz = h
 	a.served = make(chan error, 1)
-	go func() {
-		err := srv.Serve(ln)
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
-		a.served <- err
-	}()
+	go func() { a.served <- h.Run() }()
 	return nil
 }
 
+// Wait blocks until the server stops serving.
 func (a *App) Wait() error {
 	a.mu.Lock()
 	served := a.served
@@ -146,54 +175,29 @@ func (a *App) Wait() error {
 	return err
 }
 
+// Shutdown stops everything in dependency order: open event streams first (they
+// would otherwise hold the HTTP shutdown open for its whole budget), then runs
+// and scans, then the HTTP server, then the database.
 func (a *App) Shutdown(ctx context.Context) error {
-	a.mu.Lock()
-	srv, cancel := a.httpServer, a.cancelReqs
-	a.mu.Unlock()
-
 	var errs []error
-	if err := a.server.Shutdown(ctx); err != nil {
+	if err := container.Default.Streams.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("close event streams: %w", err))
+	}
+	if err := container.Default.Runner.Shutdown(ctx); err != nil {
 		errs = append(errs, err)
 	}
-	if srv != nil {
-		if err := srv.Shutdown(ctx); err != nil {
+	a.mu.Lock()
+	h := a.hertz
+	a.mu.Unlock()
+	if h != nil {
+		if err := h.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("http shutdown: %w", err))
 		}
-		cancel()
 	}
-	if gdb := db.GetDB(); gdb != nil {
-		if sqlDB, err := gdb.DB(); err == nil {
-			if err := sqlDB.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("close database: %w", err))
-			}
+	if sqlDB, err := container.Default.DB.DB(); err == nil {
+		if err := sqlDB.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close database: %w", err))
 		}
 	}
 	return errors.Join(errs...)
-}
-
-type freshConns struct {
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
-}
-
-func newFreshConns() *freshConns {
-	return &freshConns{conns: make(map[net.Conn]struct{})}
-}
-
-func (f *freshConns) track(c net.Conn, state http.ConnState) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if state == http.StateNew {
-		f.conns[c] = struct{}{}
-	} else {
-		delete(f.conns, c)
-	}
-}
-
-func (f *freshConns) closeAll() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for c := range f.conns {
-		_ = c.Close()
-	}
 }
