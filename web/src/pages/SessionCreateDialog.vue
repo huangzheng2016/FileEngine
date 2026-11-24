@@ -6,7 +6,6 @@ import Combobox, { type ComboOption } from '@/base/Combobox.vue'
 import Segmented from '@/base/Segmented.vue'
 import Select from '@/base/Select.vue'
 import Switch from '@/base/Switch.vue'
-import { errorMessage } from '@/base/errors'
 import { fmtNumber, labelOptions } from '@/base/format'
 import { FILTER_MODE } from '@/base/labels'
 import { toast } from '@/base/toast'
@@ -18,6 +17,8 @@ import { listFilesystems, listModels, testFilesystem } from '@/api/settings'
 import { NO_ID, type Filesystem, type Id, type ModelProvider, type Session } from '@/api/types'
 import { SCOPE_OPTIONS, TASK_PRESETS, scopeExts, type ScopeKey, type TaskPreset } from '@/data/presets'
 import { joinExts, splitExts } from '@/lib/rules'
+import PathInput from '@/components/PathInput.vue'
+import { useFolderBrowser } from '@/lib/useFolderBrowser'
 import { createTask } from '@/lib/sessionCreate'
 import FolderPicker from './FolderPicker.vue'
 
@@ -115,7 +116,7 @@ async function submit() {
   saving.value = true
   try {
     const exts = scopeExts({ key: form.scope, exts: splitExts(form.custom_exts) })
-    const { session: s, failed } = await createTask(
+    const s = await createTask(
       {
         filesystem_id: form.storage!.value,
         scan_path: form.scan_path.trim().replace(/^\/+|\/+$/g, ''),
@@ -136,12 +137,7 @@ async function submit() {
       preset.value,
       form.start_now,
     )
-    if (failed) {
-      toast.error(
-        failed.step === 'template' ? '任务已创建，模板没能全部用上' : '任务已创建，没能开始整理',
-        failed.cause,
-      )
-    } else toast.success(form.start_now ? '已创建，开始整理' : '已创建')
+    toast.success(form.start_now ? '已创建，扫描完成后开始整理' : '已创建')
     guard.reset()
     emit('created', s)
     emit('close')
@@ -155,14 +151,15 @@ async function submit() {
 // ---- choosing the folder by browsing the storage ----
 
 const chosenStorage = computed(() => storages.value.find((f) => String(f.id) === form.storage?.value))
-const browser = reactive({
-  open: false,
-  path: '',
-  dirs: [] as { name: string; path: string }[],
-  loading: false,
-  error: '',
+const browsing = ref(false)
+const browser = useFolderBrowser((path, signal) => {
+  const fs = chosenStorage.value!
+  return testFilesystem(
+    { id: fs.id, protocol: fs.protocol, host: fs.host, port: fs.port, username: fs.username, base_path: path },
+    signal,
+  )
 })
-let browseCtl: AbortController | null = null
+const probe = browser.state
 
 const relOf = (fs: Filesystem, p: string) =>
   p
@@ -175,48 +172,29 @@ const fullOf = (fs: Filesystem, rel: string) => {
   return fs.base_path.replace(/[\\/]+$/, '') + sep + rel.split('/').join(sep)
 }
 
-async function browse(path: string) {
-  const fs = chosenStorage.value
-  if (!fs) return
-  browseCtl?.abort()
-  const ctl = (browseCtl = new AbortController())
-  Object.assign(browser, { open: true, path, loading: true, error: '' })
-  try {
-    const r = await testFilesystem(
-      { id: fs.id, protocol: fs.protocol, host: fs.host, port: fs.port, username: fs.username, base_path: path },
-      ctl.signal,
-    )
-    if (ctl.signal.aborted) return
-    browser.dirs = r.dirs
-    browser.error = r.success ? '' : (r.error ?? '读取失败')
-  } catch (e) {
-    if (!ctl.signal.aborted) Object.assign(browser, { dirs: [], error: errorMessage(e) })
-  } finally {
-    if (browseCtl === ctl) browser.loading = false
-  }
-}
-
 function toggleBrowser() {
   const fs = chosenStorage.value
-  if (browser.open || !fs) {
-    browser.open = false
+  if (browsing.value || !fs) {
+    browsing.value = false
+    browser.abort()
     return
   }
-  void browse(fullOf(fs, form.scan_path.trim().replace(/^\/+|\/+$/g, '')))
+  browsing.value = true
+  void browser.open(fullOf(fs, form.scan_path.trim().replace(/^\/+|\/+$/g, '')))
 }
 
 function openFolder(path: string) {
   const fs = chosenStorage.value
   if (!fs) return
   form.scan_path = relOf(fs, path)
-  void browse(path)
+  void browser.open(path)
 }
 
 watch(
   () => form.storage?.value,
   () => {
-    browseCtl?.abort()
-    browser.open = false
+    browsing.value = false
+    browser.reset()
   },
 )
 
@@ -243,32 +221,28 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
         </div>
         <div class="field">
           <span class="field-label">文件夹</span>
-          <div class="path-row">
-            <input
-              v-model="form.scan_path"
-              name="scan_path"
-              placeholder="留空整理整个存储"
-              autocapitalize="off"
-              spellcheck="false"
-              :aria-invalid="!!v.error('scan_path')"
-            />
-            <button type="button" :disabled="!chosenStorage" @click="toggleBrowser">
-              {{ browser.open ? '收起' : '浏览' }}
-            </button>
-          </div>
+          <PathInput
+            v-model="form.scan_path"
+            name="scan_path"
+            placeholder="留空整理整个存储"
+            :invalid="!!v.error('scan_path')"
+            :browse-blocked="chosenStorage ? '' : '先选择存储'"
+            @browse="toggleBrowser"
+          />
           <span v-if="v.error('scan_path')" class="field-error">{{ v.error('scan_path') }}</span>
         </div>
-        <div v-if="browser.open && chosenStorage" class="field span-2">
+        <div v-if="browsing && chosenStorage" class="field span-2">
           <FolderPicker
             :protocol="chosenStorage.protocol"
-            :path="browser.path"
+            :path="probe.path"
             :top="chosenStorage.base_path"
-            :dirs="browser.dirs"
-            :loading="browser.loading"
+            :dirs="probe.dirs"
+            :loading="probe.loading"
             :top-label="chosenStorage.name"
             @open="openFolder"
-          />
-          <span v-if="browser.error" class="field-error">{{ browser.error }}</span>
+          >
+            <template #empty>{{ probe.error || '这里没有子文件夹' }}</template>
+          </FolderPicker>
         </div>
         <label class="field span-2">
           <span class="field-label">整理要求</span>
@@ -377,14 +351,6 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
 </template>
 
 <style scoped>
-.path-row {
-  display: flex;
-  gap: var(--space-2);
-}
-.path-row input {
-  flex: 1;
-  min-width: 0;
-}
 .advanced {
   margin-top: var(--space-3);
 }
