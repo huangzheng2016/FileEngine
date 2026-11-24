@@ -9,13 +9,6 @@ func (r *Repository) AddChatTurn(t *model.ChatTurn) error {
 	return dal.WithRetry(func() error { return r.db.Create(t).Error })
 }
 
-func (r *Repository) ListChatTurns(sessionID uint) ([]model.ChatTurn, error) {
-	var turns []model.ChatTurn
-	err := r.db.Where("session_id = ? AND role IN ?", sessionID, []string{ChatRoleUser, ChatRoleAssistant}).
-		Order("id ASC").Find(&turns).Error
-	return turns, err
-}
-
 // The latest summary turn (nil if none) and every turn after the range it
 // covers, oldest first; turns with ID >= beforeID are excluded (0 = no
 // bound).

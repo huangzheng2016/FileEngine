@@ -30,7 +30,7 @@ func newService(t *testing.T) (*Service, *db.Repository) {
 func newSession(t *testing.T, repo *db.Repository) uint {
 	t.Helper()
 	s := &model.ScanSession{Status: "scanned"}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	return s.ID
@@ -133,7 +133,7 @@ func TestStopWaitsForRunsTheRunnerDoesNotOwn(t *testing.T) {
 func TestPanickingScanFailsTheSession(t *testing.T) {
 	s, repo := newService(t)
 	sess := &model.ScanSession{Status: "scanning"}
-	if err := repo.CreateSession(sess); err != nil {
+	if err := repo.DB().Create(sess).Error; err != nil {
 		t.Fatal(err)
 	}
 	s.StartScan(sess.ID, func(context.Context) { panic("scan boom") })

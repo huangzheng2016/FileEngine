@@ -46,9 +46,6 @@ func optID(v int64) (uint, error) {
 	return uint(v), nil
 }
 
-// idStr is the wire form of an id in a list<string> field.
-func idStr(v uint) string { return strconv.FormatUint(uint64(v), 10) }
-
 // parseIDs parses a list<string> of ids (the json ",string" option does not
 // apply to lists). At most max entries; every entry must be a positive number.
 func parseIDs(raw []string, max int) ([]uint, error) {

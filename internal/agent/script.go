@@ -255,14 +255,6 @@ func scriptStringArg(fn, name string, o tengo.Object) (string, error) {
 	return s.Value, nil
 }
 
-func scriptIntArg(fn, name string, o tengo.Object) (int, error) {
-	i, ok := o.(*tengo.Int)
-	if !ok {
-		return 0, fmt.Errorf("%s: %s must be an int, got %s", fn, name, o.TypeName())
-	}
-	return int(i.Value), nil
-}
-
 type scriptFilter struct {
 	parentPath   *string
 	fileType     string

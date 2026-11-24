@@ -97,15 +97,3 @@ func (r *Repository) ApprovePlan(sessionID uint) (*model.SessionPlan, error) {
 	}
 	return r.GetPlan(sessionID)
 }
-
-func (r *Repository) DeleteSessionBrainData(sessionID uint) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("session_id = ?", sessionID).Delete(&model.SessionPlan{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatTurn{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("scope = ? AND scope_id = ?", MemoryScopeSession, sessionID).Delete(&model.MemoryItem{}).Error
-	})
-}

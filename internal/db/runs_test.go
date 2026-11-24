@@ -28,7 +28,7 @@ func countEvents(t *testing.T, r *Repository, sessionID uint, typ string) int {
 func TestConcurrentStartsOfOneSessionYieldOneRunningRun(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	s := &model.ScanSession{Status: "scanned"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	const n = 8
@@ -59,7 +59,7 @@ func TestConcurrentStartsOfOneSessionYieldOneRunningRun(t *testing.T) {
 func TestScanWritesLeaveSettingsAndCountersAlone(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	s := &model.ScanSession{Status: "scanned", Goal: "旧目标"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := r.BeginScan(s.ID); err != nil {
@@ -99,10 +99,10 @@ func TestFlushCountsRunsPendingRefreshesNow(t *testing.T) {
 	defer func() { countsDelay = old }()
 	r := setupScanProgressRepo(t)
 	s := &model.ScanSession{Status: "scanned"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CreateFile(&model.FileEntry{ScanSessionID: s.ID, Name: "a", OriginalPath: "a", FileType: "file"}); err != nil {
+	if err := r.DB().Create(&model.FileEntry{ScanSessionID: s.ID, Name: "a", OriginalPath: "a", FileType: "file"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	r.touchCounts(s.ID)

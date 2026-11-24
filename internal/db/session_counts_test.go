@@ -14,7 +14,7 @@ func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
 	defer func() { countsDelay = old }()
 
 	sess := &model.ScanSession{Status: "scanned"}
-	if err := r.CreateSession(sess); err != nil {
+	if err := r.DB().Create(sess).Error; err != nil {
 		t.Fatal(err)
 	}
 	files := []model.FileEntry{
@@ -23,7 +23,7 @@ func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
 		{ScanSessionID: sess.ID, OriginalPath: "c", Name: "c", FileType: "file", Operation: "planned", NewPath: "/x/c"},
 		{ScanSessionID: sess.ID, OriginalPath: "d", Name: "d", FileType: "file"},
 	}
-	if err := r.CreateFiles(files); err != nil {
+	if err := r.DB().CreateInBatches(files, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 	sub := Subscribe(sess.ID)
@@ -40,7 +40,7 @@ func TestReviewCountAndSessionUpdatedEvent(t *testing.T) {
 		t.Fatalf("event after refresh = %+v", ev)
 	}
 
-	// The refresh CreateFiles scheduled may still land; let it settle first.
+	// The refresh the insert scheduled may still land; let it settle first.
 	settle := time.After(5 * countsDelay)
 drain:
 	for {

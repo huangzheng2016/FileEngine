@@ -97,7 +97,7 @@ func TestSubscribeResumesAndEnds(t *testing.T) {
 	s, cap := newService(t)
 	repo := container.Default.Repo
 	sess := &model.ScanSession{Status: "scanned"}
-	if err := repo.CreateSession(sess); err != nil {
+	if err := repo.DB().Create(sess).Error; err != nil {
 		t.Fatal(err)
 	}
 	run, err := repo.CreateRun(sess.ID, db.RunPhaseTagging, "t")
@@ -167,7 +167,7 @@ func TestSubscribeRejectsBadInput(t *testing.T) {
 func TestShutdownEndsSubscriptions(t *testing.T) {
 	s, cap := newService(t)
 	sess := &model.ScanSession{Status: "scanned"}
-	if err := container.Default.Repo.CreateSession(sess); err != nil {
+	if err := container.Default.Repo.DB().Create(sess).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Subscribe(SubscribeRequest{SessionID: strconv.FormatUint(uint64(sess.ID), 10)}); err != nil {

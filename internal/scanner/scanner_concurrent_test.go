@@ -156,7 +156,7 @@ func runScan(t *testing.T, fs remotefs.RemoteFS, filterMode string, filterDirs [
 	t.Helper()
 	repo := setupTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	sc := New(fs, repo, filterMode, filterDirs)
@@ -260,7 +260,7 @@ func TestScanConcurrent_DepthAndParent(t *testing.T) {
 	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: testTree()}}
 	repo := setupTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	repo.CreateSession(session)
+	_ = repo.DB().Create(session).Error
 	sc := New(hfs, repo, "", nil)
 	if err := sc.Scan(context.Background(), session); err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -323,7 +323,7 @@ func TestRescanKeepsRowsUnderUnlistableDir(t *testing.T) {
 	fs := &fakeFS{root: testTree()}
 	repo := setupTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := New(fs, repo, "", nil).Scan(context.Background(), session); err != nil {
@@ -389,7 +389,7 @@ func TestScanConcurrent_WideTreeNoDeadlock(t *testing.T) {
 	done := make(chan error, 1)
 	repo := setupTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	repo.CreateSession(session)
+	_ = repo.DB().Create(session).Error
 	sc := New(hfs, repo, "", nil)
 	go func() { done <- sc.Scan(context.Background(), session) }()
 	select {
@@ -417,7 +417,7 @@ func TestScanConcurrent_CancelStops(t *testing.T) {
 	hfs := &fakeHandleFS{fakeFS: &fakeFS{root: deep}}
 	repo := setupTestDB(t)
 	session := &model.ScanSession{ID: 1, RootPath: "root", Status: "scanning"}
-	repo.CreateSession(session)
+	_ = repo.DB().Create(session).Error
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
 	sc := New(hfs, repo, "", nil)

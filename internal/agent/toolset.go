@@ -38,14 +38,6 @@ var mainOnlyToolNames = []string{
 	"update_category", "delete_category", "update_rule", "delete_rule", "read_plan", "write_plan", "remember",
 }
 
-func ToolNames(kind ToolsetKind) []string {
-	names := append([]string(nil), taggingToolNames...)
-	if kind == ToolsetMain {
-		names = append(names, mainOnlyToolNames...)
-	}
-	return names
-}
-
 func (tb *ToolBuilder) toolSpecs(kind ToolsetKind) []toolSpec {
 	vision := toolSpec{name: "view_image", build: func(string) (tool.BaseTool, error) { return tb.buildVisionTool() }}
 	script := toolSpec{name: "run_script", build: func(string) (tool.BaseTool, error) { return tb.buildScriptTool() }}

@@ -20,7 +20,7 @@ func scanSession(t *testing.T, repo *db.Repository, fs remotefs.RemoteFS, root s
 	if mut != nil {
 		mut(session)
 	}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	sc := New(fs, repo, "", nil)

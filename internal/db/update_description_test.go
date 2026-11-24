@@ -17,11 +17,11 @@ func TestUpdateDescriptionColumnScoped(t *testing.T) {
 	r := NewRepository(dal.DB())
 
 	fe := &model.FileEntry{ScanSessionID: 1, OriginalPath: "cam/dir", Name: "dir", FileType: "directory"}
-	if err := r.CreateFile(fe); err != nil {
+	if err := r.DB().Create(fe).Error; err != nil {
 		t.Fatalf("create file: %v", err)
 	}
 
-	if _, _, err := r.SetTargetUnique(1, "cam/dir", "/surveillance-recordings/dir", "directory"); err != nil {
+	if _, _, err := setTargetUnique(r, 1, "cam/dir", "/surveillance-recordings/dir", "directory"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 	if err := r.UpdateDescription(1, "cam/dir", "监控录像存档"); err != nil {

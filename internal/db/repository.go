@@ -28,10 +28,6 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
-func (r *Repository) CreateSession(s *model.ScanSession) error {
-	return r.db.Create(s).Error
-}
-
 func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
 	var s model.ScanSession
 	err := r.db.First(&s, id).Error
@@ -225,23 +221,6 @@ func (r *Repository) GetSessionProgress(id uint) (SessionProgress, error) {
 		Planned:  int(counts.Planned),
 		Executed: int(counts.Executed),
 	}, err
-}
-
-func (r *Repository) CreateFile(f *model.FileEntry) error {
-	return r.db.Create(f).Error
-}
-
-func (r *Repository) CreateFiles(files []model.FileEntry) error {
-	if len(files) == 0 {
-		return nil
-	}
-	// One explicit transaction for the whole bulk load: bare CreateInBatches
-	// commits every batch, and on bind-mounted SQLite volumes (Docker on
-	// macOS) each commit's fsync costs ~100ms — hundreds of batches meant
-	// the DB tail of a scan dwarfed the traversal itself.
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		return tx.CreateInBatches(files, r.InsertBatchRows()).Error
-	})
 }
 
 func (r *Repository) GetFile(id uint) (*model.FileEntry, error) {
@@ -585,17 +564,6 @@ func targetCond(tx *gorm.DB, categoryPath string) (string, []any) {
 	return dal.AtOrUnderCond(tx, "new_path", dir)
 }
 
-func (r *Repository) GetPlannedFiles(sessionID uint) ([]model.FileEntry, error) {
-	var files []model.FileEntry
-	err := r.db.Where("scan_session_id = ? AND operation != '' AND executed = ? AND needs_review = ?", sessionID, false, false).
-		Find(&files).Error
-	return files, err
-}
-
-func (r *Repository) CreateCategory(c *model.Category) error {
-	return r.db.Create(c).Error
-}
-
 func (r *Repository) CreateCategoryWithConflict(c *model.Category) (created bool, err error) {
 	err = r.db.Create(c).Error
 	if err != nil {
@@ -714,16 +682,6 @@ func (r *Repository) UpdateCategoryPath(c *model.Category, oldPath string) error
 
 func (r *Repository) DeleteCategory(id uint) error {
 	return r.db.Delete(&model.Category{}, id).Error
-}
-
-func (r *Repository) CreateFilesystem(fs *model.Filesystem) error {
-	return r.db.Create(fs).Error
-}
-
-func (r *Repository) GetFilesystem(id uint) (*model.Filesystem, error) {
-	var fs model.Filesystem
-	err := r.db.First(&fs, id).Error
-	return &fs, err
 }
 
 func (r *Repository) GetModelProvider(id uint) (*model.ModelProvider, error) {

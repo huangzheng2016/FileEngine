@@ -59,7 +59,7 @@ func TestClassifyRunError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyRunError(tc.err); got != tc.want {
+			if got := classifyRunErrorWithStatus(tc.err, 0); got != tc.want {
 				t.Fatalf("classifyRunError(%v): got %s, want %s", tc.err, got, tc.want)
 			}
 		})

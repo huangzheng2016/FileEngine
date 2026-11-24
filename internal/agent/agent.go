@@ -8,11 +8,6 @@ import (
 	"FileEngine/internal/db"
 )
 
-type fileBatch struct {
-	files    []model.FileEntry
-	batchIdx int32
-}
-
 type Agent struct {
 	repo          *db.Repository
 	fsCfg         config.RemoteFSConfig

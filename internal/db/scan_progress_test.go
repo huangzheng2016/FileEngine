@@ -21,7 +21,7 @@ func setupScanProgressRepo(t *testing.T) *Repository {
 func TestUpdateScanProgress(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	session := &model.ScanSession{FilesystemID: 1, Status: "scanning", TotalFiles: 7}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestMarkInterruptedScans(t *testing.T) {
 		{FilesystemID: 1, Status: "done"},
 	}
 	for _, s := range rows {
-		if err := r.CreateSession(s); err != nil {
+		if err := r.DB().Create(s).Error; err != nil {
 			t.Fatalf("create session %s: %v", s.Status, err)
 		}
 	}
@@ -108,7 +108,7 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 	}
 	r := NewRepository(dal.DB())
 	zombie := &model.ScanSession{FilesystemID: 1, Status: "scanning", CurrentPath: "x/y"}
-	if err := r.CreateSession(zombie); err != nil {
+	if err := r.DB().Create(zombie).Error; err != nil {
 		t.Fatalf("create zombie: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestInitMarksZombieScansInterrupted(t *testing.T) {
 func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	session := &model.ScanSession{FilesystemID: 1, Status: "scanning"}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	for _, f := range []model.FileEntry{
@@ -136,7 +136,7 @@ func TestRefreshSessionCountsOnlyWritesCountColumns(t *testing.T) {
 		{ScanSessionID: session.ID, OriginalPath: "b", Name: "b", FileType: "file", Size: 20},
 	} {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file: %v", err)
 		}
 	}

@@ -11,17 +11,17 @@ import (
 func TestPruneEmptyAgentCategories(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := repo.CreateFilesystem(fs); err != nil {
+	if err := repo.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
 	session := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
 	mk := func(name, path string, agentCreated bool) {
 		t.Helper()
-		if err := repo.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
+		if err := repo.DB().Create(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}).Error; err != nil {
 			t.Fatalf("seed category %s: %v", name, err)
 		}
 	}
@@ -31,7 +31,7 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 	mk("未分类", "/uncategorized", false) // fallback, empty → kept
 
 	seedFile(t, repo, session.ID, "in/a.tar.gz", "file")
-	if _, _, err := repo.SetTargetUnique(session.ID, "in/a.tar.gz", "/website/a.tar.gz", "file"); err != nil {
+	if _, _, err := setTargetUnique(repo, session.ID, "in/a.tar.gz", "/website/a.tar.gz", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 
@@ -63,21 +63,21 @@ func TestPruneEmptyAgentCategories(t *testing.T) {
 func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := repo.CreateFilesystem(fs); err != nil {
+	if err := repo.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create fs: %v", err)
 	}
 	sessA := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
-	if err := repo.CreateSession(sessA); err != nil {
+	if err := repo.DB().Create(sessA).Error; err != nil {
 		t.Fatalf("create session A: %v", err)
 	}
 	sessB := &model.ScanSession{FilesystemID: fs.ID, Status: "scanned"}
-	if err := repo.CreateSession(sessB); err != nil {
+	if err := repo.DB().Create(sessB).Error; err != nil {
 		t.Fatalf("create session B: %v", err)
 	}
 
 	mk := func(name, path string, agentCreated bool) {
 		t.Helper()
-		if err := repo.CreateCategory(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}); err != nil {
+		if err := repo.DB().Create(&model.Category{FilesystemID: fs.ID, Name: name, Path: path, AgentCreated: agentCreated, AgentEditable: agentCreated}).Error; err != nil {
 			t.Fatalf("seed category %s: %v", name, err)
 		}
 	}
@@ -85,7 +85,7 @@ func TestPruneEmptyAgentCategories_CrossSession(t *testing.T) {
 	mk("真空分类", "/truly-empty", true)  // empty across all sessions
 
 	seedFile(t, repo, sessA.ID, "in/site.tar.gz", "file")
-	if _, _, err := repo.SetTargetUnique(sessA.ID, "in/site.tar.gz", "/history-used/site.tar.gz", "file"); err != nil {
+	if _, _, err := setTargetUnique(repo, sessA.ID, "in/site.tar.gz", "/history-used/site.tar.gz", "file"); err != nil {
 		t.Fatalf("set target: %v", err)
 	}
 

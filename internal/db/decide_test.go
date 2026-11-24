@@ -111,13 +111,13 @@ func TestDecideRolesAndReview(t *testing.T) {
 	if !e.NeedsReview || e.Confidence != 0.4 || e.Reason != "说明" || e.Operation != "planned" {
 		t.Fatalf("stored: %+v", e)
 	}
-	if planned, _ := r.GetPlannedFiles(1); len(planned) != 0 {
+	if planned := plannedFiles(t, r, 1); len(planned) != 0 {
 		t.Fatal("needs_review entries are not executable")
 	}
 	if n, _ := r.ConfirmReview(1, []uint{e.ID}); n != 1 {
 		t.Fatal("confirm")
 	}
-	if planned, _ := r.GetPlannedFiles(1); len(planned) != 1 {
+	if planned := plannedFiles(t, r, 1); len(planned) != 1 {
 		t.Fatal("confirmed entries are executable")
 	}
 
@@ -170,7 +170,7 @@ func TestDecideBatchReportsPerItem(t *testing.T) {
 func TestScopeAndSensitive(t *testing.T) {
 	r := setupBrainRepo(t)
 	s := &model.ScanSession{FilesystemID: 1, ScopeExts: "JPG, .png"}
-	if err := r.CreateSession(s); err != nil {
+	if err := r.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"a.jpg", "b.PNG", "c.txt", "id_rsa", "我的身份证.jpg", "notes.md", "taxonomy.pdf"} {
@@ -282,7 +282,7 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 	mt := time.Date(2022, 7, 1, 0, 0, 0, 0, time.UTC)
 	for _, p := range []string{"a/x.jpg", "b/x.jpg", "c/y.jpg", "d/z.png", "e/doc.pdf"} {
 		f := &model.FileEntry{ScanSessionID: 1, OriginalPath: p, Name: p[2:], ParentPath: p[:1], FileType: "file", ModTime: mt}
-		if err := r.CreateFile(f); err != nil {
+		if err := r.DB().Create(f).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -349,7 +349,7 @@ func TestApplyRulesFirstMatchPreviewAndCollisions(t *testing.T) {
 
 func TestClearPlannedByTargetPathUndecides(t *testing.T) {
 	r := decisionFixture(t)
-	if err := r.CreateSession(&model.ScanSession{ID: 1, FilesystemID: 7}); err != nil {
+	if err := r.DB().Create(&model.ScanSession{ID: 1, FilesystemID: 7}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Decide(1, Decision{Path: "proj", Role: RoleUnit, NewPath: "/代码/proj", Reason: "Go 项目", Confidence: 0.4}); err != nil {
@@ -371,4 +371,28 @@ func TestClearPlannedByTargetPathUndecides(t *testing.T) {
 	if e := entry(t, r, "loose.txt"); e.Role != RoleFile || e.NewPath != "/文档/loose.txt" {
 		t.Fatalf("entry outside the category must keep its decision: %+v", e)
 	}
+}
+
+func plannedFiles(t *testing.T, r *Repository, sessionID uint) []model.FileEntry {
+	t.Helper()
+	var files []model.FileEntry
+	if err := r.DB().Where("scan_session_id = ? AND operation != '' AND executed = ? AND needs_review = ?", sessionID, false, false).Find(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+func setTargetUnique(r *Repository, sessionID uint, originalPath, newPath, fileType string) (string, int64, error) {
+	role := RoleFile
+	if fileType == "directory" {
+		role = RoleUnit
+	}
+	if newPath == "" {
+		role = RoleUndecided
+	}
+	res, err := r.Decide(sessionID, Decision{Path: originalPath, Role: role, NewPath: newPath, Override: true})
+	if err != nil {
+		return "", 0, err
+	}
+	return res.NewPath, res.OverriddenCount, nil
 }

@@ -69,10 +69,6 @@ func httpStatusFromError(err error) (int, bool) {
 	return 0, false
 }
 
-func classifyRunError(err error) errorClass {
-	return classifyRunErrorWithStatus(err, 0)
-}
-
 // statusHint is the least precise source and only used when err carries no
 // status. The caller checks the parent ctx first, so a context error here
 // means the per-attempt timeout, not a user stop.

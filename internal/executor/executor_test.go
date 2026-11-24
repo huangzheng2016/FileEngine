@@ -74,7 +74,7 @@ func newEnv(t *testing.T) *env {
 	}
 	repo := db.NewRepository(gdb)
 	s := &model.ScanSession{Status: "scanned"}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -121,7 +121,7 @@ func (e *env) entry(p, target string) *model.FileEntry {
 	if target != "" {
 		f.NewPath, f.Operation = "/"+target, "planned"
 	}
-	if err := e.repo.CreateFile(f); err != nil {
+	if err := e.repo.DB().Create(f).Error; err != nil {
 		e.t.Fatal(err)
 	}
 	return f

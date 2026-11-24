@@ -36,7 +36,7 @@ func seedPreviewFixture(t *testing.T, r *Repository) {
 		if p == "proj" {
 			typ = "directory"
 		}
-		if _, _, err := r.SetTargetUnique(1, p, target, typ); err != nil {
+		if _, _, err := setTargetUnique(r, 1, p, target, typ); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -146,7 +146,7 @@ func TestPreviewScales(t *testing.T) {
 		rows = append(rows, model.FileEntry{ScanSessionID: 1, OriginalPath: p, Name: fmt.Sprintf("f%04d.txt", i), FileType: "file",
 			ParentPath: fmt.Sprintf("in/d%03d", i%100), Size: 1, NewPath: fmt.Sprintf("/文档/%d/f%04d.txt", i%10, i), Operation: "planned"})
 	}
-	if err := r.CreateFiles(rows); err != nil {
+	if err := r.DB().CreateInBatches(rows, 200).Error; err != nil {
 		t.Fatal(err)
 	}
 	page, err := r.PreviewAfter(1, "/文档", 0, 50)

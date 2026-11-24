@@ -75,7 +75,7 @@ func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.Sca
 		_ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{})
 	})
 	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	provider := &model.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
@@ -88,7 +88,7 @@ func seedEntry(t *testing.T, repo *db.Repository, e model.FileEntry) {
 	if e.Name == "" {
 		e.Name = e.OriginalPath[strings.LastIndex(e.OriginalPath, "/")+1:]
 	}
-	if err := repo.CreateFile(&e); err != nil {
+	if err := repo.DB().Create(&e).Error; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -155,7 +155,7 @@ func TestChatHistoryAppendOnly(t *testing.T) {
 	if int(n) != len(foldsAt) {
 		t.Fatalf("summary turns = %d, folds = %d", n, len(foldsAt))
 	}
-	listed, _ := repo.ListChatTurns(1)
+	listed := listChatTurns(t, repo, 1)
 	for _, tr := range listed {
 		if tr.Role == db.ChatRoleSummary {
 			t.Fatal("summary turns are never listed")
@@ -183,7 +183,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 		t.Fatalf("turn 2: %q %v", ans, err)
 	}
 
-	turns, _ := repo.ListChatTurns(session.ID)
+	turns := listChatTurns(t, repo, session.ID)
 	want := []string{"user:帮我整理照片", "assistant:你想按年还是按月？", "user:按年，以后都这样", "assistant:好的，已记住。"}
 	if len(turns) != len(want) {
 		t.Fatalf("turns: %+v", turns)
@@ -227,7 +227,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 func TestComputeTreeOverview(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	s := &model.ScanSession{FilesystemID: 1, RootPath: "data"}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range []model.FileEntry{
@@ -299,7 +299,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 func TestBuildReviewMaterial(t *testing.T) {
 	repo := setupToolTestRepo(t)
 	s := &model.ScanSession{FilesystemID: 1, RootPath: "."}
-	if err := repo.CreateSession(s); err != nil {
+	if err := repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	seedCategory(t, repo, 1, "照片", "/照片")

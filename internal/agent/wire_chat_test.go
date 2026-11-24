@@ -22,7 +22,7 @@ func wireChatAgent(t *testing.T, ws *wireServer) (*db.Repository, *Agent, *model
 		_ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{})
 	})
 	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理", AllowReadFile: true, AllowScript: true, AllowAutoCategory: true}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	seedEntry(t, repo, model.FileEntry{ScanSessionID: session.ID, OriginalPath: "a.jpg", FileType: "file", ParentPath: ".", Size: 2048})

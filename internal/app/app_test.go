@@ -226,7 +226,7 @@ func TestRequestGuards(t *testing.T) {
 func newSession(t *testing.T) uint {
 	t.Helper()
 	s := &model.ScanSession{Status: "scanned"}
-	if err := container.Default.Repo.CreateSession(s); err != nil {
+	if err := container.Default.Repo.DB().Create(s).Error; err != nil {
 		t.Fatal(err)
 	}
 	return s.ID

@@ -50,10 +50,6 @@ func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-func ptrStr(s string) *string {
-	return &s
-}
-
 const defaultReadChars = 8000
 
 func (tb *ToolBuilder) readPageChars() int {

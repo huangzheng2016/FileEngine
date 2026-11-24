@@ -71,12 +71,12 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 	t.Helper()
 	repo := setupToolTestRepo(t)
 	session := &model.ScanSession{FilesystemID: 7, Goal: goal, ScopeExts: "", AllowScript: true, AllowAutoCategory: true}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []model.Category{{FilesystemID: 7, Name: "代码", Path: "/代码"}, {FilesystemID: 7, Name: "文档", Path: "/文档"}, {FilesystemID: 7, Name: "软件", Path: "/软件"}} {
 		c := c
-		if err := repo.CreateCategory(&c); err != nil {
+		if err := repo.DB().Create(&c).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -90,7 +90,7 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 			parent = e.p[:i]
 		}
 		f := &model.FileEntry{ScanSessionID: session.ID, OriginalPath: e.p, Name: e.p[strings.LastIndex(e.p, "/")+1:], FileType: e.typ, ParentPath: parent, Depth: strings.Count(e.p, "/")}
-		if err := repo.CreateFile(f); err != nil {
+		if err := repo.DB().Create(f).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -392,7 +392,7 @@ func TestSurveyNeverDecides(t *testing.T) {
 
 func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	if err := repo.CreateFile(&model.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}); err != nil {
+	if err := repo.DB().Create(&model.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, &model.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)

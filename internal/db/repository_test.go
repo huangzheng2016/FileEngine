@@ -17,11 +17,11 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	r := NewRepository(dal.DB())
 
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
 	session := &model.ScanSession{FilesystemID: fs.ID, Status: "tagging"}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		{FilesystemID: fs.ID, Name: "空分类", Path: "/empty"},
 	} {
 		cat := c
-		if err := r.CreateCategory(&cat); err != nil {
+		if err := r.DB().Create(&cat).Error; err != nil {
 			t.Fatalf("create category %s: %v", c.Name, err)
 		}
 	}
@@ -44,7 +44,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 	}
 	for _, f := range files {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -97,11 +97,11 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 	r := NewRepository(dal.DB())
 
 	fs := &model.Filesystem{Name: "fs", Protocol: "local", BasePath: "/data"}
-	if err := r.CreateFilesystem(fs); err != nil {
+	if err := r.DB().Create(fs).Error; err != nil {
 		t.Fatalf("create filesystem: %v", err)
 	}
 	session := &model.ScanSession{FilesystemID: fs.ID, Status: "scanning"}
-	if err := r.CreateSession(session); err != nil {
+	if err := r.DB().Create(session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestSampleFiles(t *testing.T) {
 		{ScanSessionID: 2, OriginalPath: "other/x.jpg", ParentPath: "other", Name: "x.jpg", FileType: "file"},
 	} {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -200,7 +200,7 @@ func TestCountUntaggedByType(t *testing.T) {
 	}
 	for _, f := range entries {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -232,7 +232,7 @@ func TestTaggedStatusByIDs(t *testing.T) {
 	tagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/a.txt", Name: "a.txt", FileType: "file", Tagged: true}
 	untagged := &model.FileEntry{ScanSessionID: 1, OriginalPath: "in/b.txt", Name: "b.txt", FileType: "file"}
 	for _, f := range []*model.FileEntry{tagged, untagged} {
-		if err := r.CreateFile(f); err != nil {
+		if err := r.DB().Create(f).Error; err != nil {
 			t.Fatalf("create file: %v", err)
 		}
 	}
@@ -268,7 +268,7 @@ func TestUnitMembersLiteralUnderscore(t *testing.T) {
 	}
 	for _, f := range entries {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}
@@ -306,7 +306,7 @@ func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 		{ScanSessionID: 1, OriginalPath: "in/1000x.txt", Name: "1000x.txt", FileType: "file"},
 	} {
 		fe := f
-		if err := r.CreateFile(&fe); err != nil {
+		if err := r.DB().Create(&fe).Error; err != nil {
 			t.Fatalf("create file %s: %v", f.OriginalPath, err)
 		}
 	}

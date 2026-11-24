@@ -39,7 +39,7 @@ func seedSharedContext(t *testing.T) (*db.Repository, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
 	session := &model.ScanSession{FilesystemID: 7, Goal: "照片按年份整理，项目保持完整"}
-	if err := repo.CreateSession(session); err != nil {
+	if err := repo.DB().Create(session).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []model.Category{
@@ -47,7 +47,7 @@ func seedSharedContext(t *testing.T) (*db.Repository, *model.ScanSession) {
 		{FilesystemID: 7, Name: "代码", Path: "/代码"},
 	} {
 		c := c
-		if err := repo.CreateCategory(&c); err != nil {
+		if err := repo.DB().Create(&c).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -66,7 +66,7 @@ func seedSharedContext(t *testing.T) (*db.Repository, *model.ScanSession) {
 		{ScanSessionID: session.ID, OriginalPath: "Photos/2023/trip", Name: "trip", FileType: "directory", ParentPath: "Photos/2023", Description: "2023 旅行"},
 	} {
 		e := e
-		if err := repo.CreateFile(&e); err != nil {
+		if err := repo.DB().Create(&e).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestSharedContextSectionsAndStability(t *testing.T) {
 		}
 		last = i
 	}
-	if _, _, err := repo.SetTargetUnique(session.ID, "Photos", "/照片/Photos", "directory"); err != nil {
+	if _, _, err := setTargetUnique(repo, session.ID, "Photos", "/照片/Photos", "directory"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.ApplyRules(session.ID, 0, false); err != nil {

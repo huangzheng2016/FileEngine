@@ -15,7 +15,6 @@ const (
 	CodeTooLarge        = 1006
 	CodeTooManyRequests = 1007
 	CodeUnavailable     = 1008
-	CodeNotImplemented  = 1009
 )
 
 type Error struct {
@@ -39,8 +38,6 @@ var (
 	TooLarge        = &Error{http.StatusRequestEntityTooLarge, CodeTooLarge, "请求体过大"}
 	TooManyRequests = &Error{http.StatusTooManyRequests, CodeTooManyRequests, "请求过于频繁，请稍后再试"}
 	Internal        = &Error{http.StatusInternalServerError, CodeInternal, "服务器内部错误"}
-	// NotImplemented marks a generated handler that no lane has filled yet.
-	NotImplemented = &Error{http.StatusNotImplemented, CodeNotImplemented, "该功能尚未实现"}
 
 	BadRequest   = Invalid("请求参数错误")
 	NotLoggedIn  = Unauthorized("未登录或令牌无效")
