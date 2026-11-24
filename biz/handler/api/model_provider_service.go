@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	model_provider "FileEngine/biz/model/api/model_provider"
+	base "FileEngine/biz/model/base"
+	mpsvc "FileEngine/biz/service/modelprovider"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListModelProviders .
@@ -20,7 +22,16 @@ func ListModelProviders(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rows, err := container.Default.Models.List(ctx)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*model_provider.ModelProvider, len(rows))
+	for i, r := range rows {
+		items[i] = toModelProvider(r)
+	}
+	c.JSON(consts.StatusOK, &model_provider.ListModelProvidersResp{Items: items, Total: int64(len(items))})
 }
 
 // GetModelProvider .
@@ -30,7 +41,17 @@ func GetModelProvider(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Models.Get(ctx, mid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &model_provider.ModelProviderResp{Item: toModelProvider(row)})
 }
 
 // CreateModelProvider .
@@ -40,7 +61,12 @@ func CreateModelProvider(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	row, err := container.Default.Models.Create(ctx, mpSaveInput(&req, 0))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &model_provider.ModelProviderResp{Item: toModelProvider(row)})
 }
 
 // UpdateModelProvider .
@@ -50,7 +76,17 @@ func UpdateModelProvider(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Models.Update(ctx, mpSaveInput(&req, mid))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &model_provider.ModelProviderResp{Item: toModelProvider(row)})
 }
 
 // DeleteModelProvider .
@@ -60,7 +96,16 @@ func DeleteModelProvider(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	if err := container.Default.Models.Delete(ctx, mid); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }
 
 // TestModelProvider .
@@ -70,7 +115,23 @@ func TestModelProvider(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := optID(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	res, err := container.Default.Models.Test(ctx, mpsvc.TestInput{
+		ID: mid, Provider: req.Provider, Model: req.Model, BaseURL: req.BaseURL, Temperature: req.Temperature,
+		MaxTokens: int(req.MaxTokens), APIKey: req.APIKey, ThinkingEnabled: req.ThinkingEnabled,
+		ReasoningEffort: req.ReasoningEffort, ContextWindow: optInt(req.ContextWindow),
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &model_provider.TestModelProviderResp{
+		Success: res.Success, Reply: res.Reply, Error: res.Error, Detail: res.Detail,
+	})
 }
 
 // ListProviderModels .
@@ -80,5 +141,19 @@ func ListProviderModels(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := optID(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	res, err := container.Default.Models.Catalog(ctx, mpsvc.CatalogInput{
+		ID: mid, Provider: req.Provider, BaseURL: req.BaseURL, APIKey: req.APIKey,
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &model_provider.ListProviderModelsResp{
+		Success: res.Success, Models: res.Models, Error: res.Error, Detail: res.Detail,
+	})
 }

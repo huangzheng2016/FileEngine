@@ -679,54 +679,10 @@ func (r *Repository) GetFilesystem(id uint) (*model.Filesystem, error) {
 	return &fs, err
 }
 
-func (r *Repository) ListFilesystems() ([]model.Filesystem, error) {
-	var fss []model.Filesystem
-	err := r.db.Order("name ASC").Find(&fss).Error
-	return fss, err
-}
-
-func (r *Repository) UpdateFilesystem(fs *model.Filesystem) error {
-	return r.db.Save(fs).Error
-}
-
-func (r *Repository) CountSessionsUsingFilesystem(id uint) (int64, error) {
-	var n int64
-	err := r.db.Model(&model.ScanSession{}).Where("filesystem_id = ?", id).Count(&n).Error
-	return n, err
-}
-
-func (r *Repository) CountSessionsUsingModel(id uint) (int64, error) {
-	var n int64
-	err := r.db.Model(&model.ScanSession{}).Where("model_provider_id = ? OR bulk_model_provider_id = ?", id, id).Count(&n).Error
-	return n, err
-}
-
-func (r *Repository) DeleteFilesystem(id uint) error {
-	return r.db.Delete(&model.Filesystem{}, id).Error
-}
-
-func (r *Repository) CreateModelProvider(m *model.ModelProvider) error {
-	return r.db.Create(m).Error
-}
-
 func (r *Repository) GetModelProvider(id uint) (*model.ModelProvider, error) {
 	var m model.ModelProvider
 	err := r.db.First(&m, id).Error
 	return &m, err
-}
-
-func (r *Repository) ListModelProviders() ([]model.ModelProvider, error) {
-	var providers []model.ModelProvider
-	err := r.db.Order("id ASC").Find(&providers).Error
-	return providers, err
-}
-
-func (r *Repository) UpdateModelProvider(m *model.ModelProvider) error {
-	return r.db.Save(m).Error
-}
-
-func (r *Repository) DeleteModelProvider(id uint) error {
-	return r.db.Delete(&model.ModelProvider{}, id).Error
 }
 
 func (r *Repository) NextManualBatchIndex(sessionID uint) int {

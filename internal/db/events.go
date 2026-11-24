@@ -17,7 +17,7 @@ import (
 // Session event stream. Every event is persisted into session_events (the row
 // id is the stream sequence number) and then broadcast to the session's live
 // subscribers. Emit (runs.go) is the only producer entry point; the SSE
-// endpoint (internal/api/handler_events.go) replays persisted rows and then
+// endpoint (biz/handler/api/event_service.go) replays persisted rows and then
 // follows the live broadcast.
 //
 // Text/reasoning deltas are coalesced per (run, worker): consecutive deltas

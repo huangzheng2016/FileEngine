@@ -9,9 +9,9 @@
 - 查看数据：
   - SQLite DB（只读）：`python3 -c "import sqlite3; c=sqlite3.connect('file:deploy/data/fileengine.db?mode=ro',uri=True); ..."`，关键表 `file_entries / scan_sessions / categories / agent_logs`
   - 运行日志：`docker compose logs -f`
-  - SSE 事件流：`./deploy/sse-watch.sh <session_id> [logfile]`；历史在 UI 会话中心或 `GET /api/v1/logs?session_id=N`
+  - SSE 事件流：`./deploy/sse-watch.sh <session_id> [logfile]`；历史在 UI 会话中心或 `GET /api/event/list?session_id=N`
   - 四轮实测的 SSE 原始流与 UI 验收截图：`deploy/runs/`
-- 重跑打标：会话中心选中会话 → 打标按钮（tagged/tagged_partial 均可重跑，只处理未打标余项）；或 `POST /api/v1/sessions/:id/tag`
+- 重跑打标：会话中心选中会话 → 打标按钮（tagged/tagged_partial 均可重跑，只处理未打标余项）；或 `POST /api/run/tag`（`session_id`）
 - 本环境**从未也不会**调用任何 execute 端点（Phase 2 文件移动）；所有评估均为扫描+打标（纯 DB 操作）
 
 ## 2. 数据集与全链路

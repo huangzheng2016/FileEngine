@@ -1168,6 +1168,8 @@ type ConfigService interface {
 
 	UpdateConfig(ctx context.Context, req *config.UpdateConfigReq) (r *config.ConfigResp, err error)
 
+	ListConfigVersions(ctx context.Context, req *config.ListConfigVersionsReq) (r *config.ListConfigVersionsResp, err error)
+
 	GetPrompt(ctx context.Context, req *base.EmptyReq) (r *config.PromptResp, err error)
 
 	UpdatePrompt(ctx context.Context, req *config.UpdatePromptReq) (r *config.PromptResp, err error)
@@ -1213,6 +1215,15 @@ func (p *ConfigServiceClient) UpdateConfig(ctx context.Context, req *config.Upda
 	_args.Req = req
 	var _result ConfigServiceUpdateConfigResult
 	if err = p.Client_().Call(ctx, "UpdateConfig", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+func (p *ConfigServiceClient) ListConfigVersions(ctx context.Context, req *config.ListConfigVersionsReq) (r *config.ListConfigVersionsResp, err error) {
+	var _args ConfigServiceListConfigVersionsArgs
+	_args.Req = req
+	var _result ConfigServiceListConfigVersionsResult
+	if err = p.Client_().Call(ctx, "ListConfigVersions", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil
@@ -24324,6 +24335,7 @@ func NewConfigServiceProcessor(handler ConfigService) *ConfigServiceProcessor {
 	self := &ConfigServiceProcessor{handler: handler, processorMap: make(map[string]thrift.TProcessorFunction)}
 	self.AddToProcessorMap("GetConfig", &configServiceProcessorGetConfig{handler: handler})
 	self.AddToProcessorMap("UpdateConfig", &configServiceProcessorUpdateConfig{handler: handler})
+	self.AddToProcessorMap("ListConfigVersions", &configServiceProcessorListConfigVersions{handler: handler})
 	self.AddToProcessorMap("GetPrompt", &configServiceProcessorGetPrompt{handler: handler})
 	self.AddToProcessorMap("UpdatePrompt", &configServiceProcessorUpdatePrompt{handler: handler})
 	return self
@@ -24425,6 +24437,54 @@ func (p *configServiceProcessorUpdateConfig) Process(ctx context.Context, seqId 
 		result.Success = retval
 	}
 	if err2 = oprot.WriteMessageBegin("UpdateConfig", thrift.REPLY, seqId); err2 != nil {
+		err = err2
+	}
+	if err2 = result.Write(oprot); err == nil && err2 != nil {
+		err = err2
+	}
+	if err2 = oprot.WriteMessageEnd(); err == nil && err2 != nil {
+		err = err2
+	}
+	if err2 = oprot.Flush(ctx); err == nil && err2 != nil {
+		err = err2
+	}
+	if err != nil {
+		return
+	}
+	return true, err
+}
+
+type configServiceProcessorListConfigVersions struct {
+	handler ConfigService
+}
+
+func (p *configServiceProcessorListConfigVersions) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
+	args := ConfigServiceListConfigVersionsArgs{}
+	if err = args.Read(iprot); err != nil {
+		iprot.ReadMessageEnd()
+		x := thrift.NewTApplicationException(thrift.PROTOCOL_ERROR, err.Error())
+		oprot.WriteMessageBegin("ListConfigVersions", thrift.EXCEPTION, seqId)
+		x.Write(oprot)
+		oprot.WriteMessageEnd()
+		oprot.Flush(ctx)
+		return false, err
+	}
+
+	iprot.ReadMessageEnd()
+	var err2 error
+	result := ConfigServiceListConfigVersionsResult{}
+	var retval *config.ListConfigVersionsResp
+	if retval, err2 = p.handler.ListConfigVersions(ctx, args.Req); err2 != nil {
+		x := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing ListConfigVersions: "+err2.Error())
+		oprot.WriteMessageBegin("ListConfigVersions", thrift.EXCEPTION, seqId)
+		x.Write(oprot)
+		oprot.WriteMessageEnd()
+		oprot.Flush(ctx)
+		return true, err2
+	} else {
+		result.Success = retval
+	}
+	if err2 = oprot.WriteMessageBegin("ListConfigVersions", thrift.REPLY, seqId); err2 != nil {
 		err = err2
 	}
 	if err2 = result.Write(oprot); err == nil && err2 != nil {
@@ -25119,6 +25179,298 @@ func (p *ConfigServiceUpdateConfigResult) String() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("ConfigServiceUpdateConfigResult(%+v)", *p)
+
+}
+
+type ConfigServiceListConfigVersionsArgs struct {
+	Req *config.ListConfigVersionsReq `thrift:"req,1"`
+}
+
+func NewConfigServiceListConfigVersionsArgs() *ConfigServiceListConfigVersionsArgs {
+	return &ConfigServiceListConfigVersionsArgs{}
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) InitDefault() {
+}
+
+var ConfigServiceListConfigVersionsArgs_Req_DEFAULT *config.ListConfigVersionsReq
+
+func (p *ConfigServiceListConfigVersionsArgs) GetReq() (v *config.ListConfigVersionsReq) {
+	if !p.IsSetReq() {
+		return ConfigServiceListConfigVersionsArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+
+var fieldIDToName_ConfigServiceListConfigVersionsArgs = map[int16]string{
+	1: "req",
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) Read(iprot thrift.TProtocol) (err error) {
+	var fieldTypeId thrift.TType
+	var fieldId int16
+
+	if _, err = iprot.ReadStructBegin(); err != nil {
+		goto ReadStructBeginError
+	}
+
+	for {
+		_, fieldTypeId, fieldId, err = iprot.ReadFieldBegin()
+		if err != nil {
+			goto ReadFieldBeginError
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.STRUCT {
+				if err = p.ReadField1(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		default:
+			if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		}
+		if err = iprot.ReadFieldEnd(); err != nil {
+			goto ReadFieldEndError
+		}
+	}
+	if err = iprot.ReadStructEnd(); err != nil {
+		goto ReadStructEndError
+	}
+
+	return nil
+ReadStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct begin error: ", p), err)
+ReadFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d begin error: ", p, fieldId), err)
+ReadFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d '%s' error: ", p, fieldId, fieldIDToName_ConfigServiceListConfigVersionsArgs[fieldId]), err)
+SkipFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T field %d skip type %d error: ", p, fieldId, fieldTypeId), err)
+
+ReadFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read field end error", p), err)
+ReadStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) ReadField1(iprot thrift.TProtocol) error {
+	_field := config.NewListConfigVersionsReq()
+	if err := _field.Read(iprot); err != nil {
+		return err
+	}
+	p.Req = _field
+	return nil
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) Write(oprot thrift.TProtocol) (err error) {
+	var fieldId int16
+	if err = oprot.WriteStructBegin("ListConfigVersions_args"); err != nil {
+		goto WriteStructBeginError
+	}
+	if p != nil {
+		if err = p.writeField1(oprot); err != nil {
+			fieldId = 1
+			goto WriteFieldError
+		}
+	}
+	if err = oprot.WriteFieldStop(); err != nil {
+		goto WriteFieldStopError
+	}
+	if err = oprot.WriteStructEnd(); err != nil {
+		goto WriteStructEndError
+	}
+	return nil
+WriteStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+WriteFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T write field %d error: ", p, fieldId), err)
+WriteFieldStopError:
+	return thrift.PrependError(fmt.Sprintf("%T write field stop error: ", p), err)
+WriteStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) writeField1(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("req", thrift.STRUCT, 1); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := p.Req.Write(oprot); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 1 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 1 end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfigServiceListConfigVersionsArgs(%+v)", *p)
+
+}
+
+type ConfigServiceListConfigVersionsResult struct {
+	Success *config.ListConfigVersionsResp `thrift:"success,0,optional"`
+}
+
+func NewConfigServiceListConfigVersionsResult() *ConfigServiceListConfigVersionsResult {
+	return &ConfigServiceListConfigVersionsResult{}
+}
+
+func (p *ConfigServiceListConfigVersionsResult) InitDefault() {
+}
+
+var ConfigServiceListConfigVersionsResult_Success_DEFAULT *config.ListConfigVersionsResp
+
+func (p *ConfigServiceListConfigVersionsResult) GetSuccess() (v *config.ListConfigVersionsResp) {
+	if !p.IsSetSuccess() {
+		return ConfigServiceListConfigVersionsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+
+var fieldIDToName_ConfigServiceListConfigVersionsResult = map[int16]string{
+	0: "success",
+}
+
+func (p *ConfigServiceListConfigVersionsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ConfigServiceListConfigVersionsResult) Read(iprot thrift.TProtocol) (err error) {
+	var fieldTypeId thrift.TType
+	var fieldId int16
+
+	if _, err = iprot.ReadStructBegin(); err != nil {
+		goto ReadStructBeginError
+	}
+
+	for {
+		_, fieldTypeId, fieldId, err = iprot.ReadFieldBegin()
+		if err != nil {
+			goto ReadFieldBeginError
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+
+		switch fieldId {
+		case 0:
+			if fieldTypeId == thrift.STRUCT {
+				if err = p.ReadField0(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		default:
+			if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		}
+		if err = iprot.ReadFieldEnd(); err != nil {
+			goto ReadFieldEndError
+		}
+	}
+	if err = iprot.ReadStructEnd(); err != nil {
+		goto ReadStructEndError
+	}
+
+	return nil
+ReadStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct begin error: ", p), err)
+ReadFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d begin error: ", p, fieldId), err)
+ReadFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d '%s' error: ", p, fieldId, fieldIDToName_ConfigServiceListConfigVersionsResult[fieldId]), err)
+SkipFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T field %d skip type %d error: ", p, fieldId, fieldTypeId), err)
+
+ReadFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read field end error", p), err)
+ReadStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsResult) ReadField0(iprot thrift.TProtocol) error {
+	_field := config.NewListConfigVersionsResp()
+	if err := _field.Read(iprot); err != nil {
+		return err
+	}
+	p.Success = _field
+	return nil
+}
+
+func (p *ConfigServiceListConfigVersionsResult) Write(oprot thrift.TProtocol) (err error) {
+	var fieldId int16
+	if err = oprot.WriteStructBegin("ListConfigVersions_result"); err != nil {
+		goto WriteStructBeginError
+	}
+	if p != nil {
+		if err = p.writeField0(oprot); err != nil {
+			fieldId = 0
+			goto WriteFieldError
+		}
+	}
+	if err = oprot.WriteFieldStop(); err != nil {
+		goto WriteFieldStopError
+	}
+	if err = oprot.WriteStructEnd(); err != nil {
+		goto WriteStructEndError
+	}
+	return nil
+WriteStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+WriteFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T write field %d error: ", p, fieldId), err)
+WriteFieldStopError:
+	return thrift.PrependError(fmt.Sprintf("%T write field stop error: ", p), err)
+WriteStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsResult) writeField0(oprot thrift.TProtocol) (err error) {
+	if p.IsSetSuccess() {
+		if err = oprot.WriteFieldBegin("success", thrift.STRUCT, 0); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := p.Success.Write(oprot); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 0 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 0 end error: ", p), err)
+}
+
+func (p *ConfigServiceListConfigVersionsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConfigServiceListConfigVersionsResult(%+v)", *p)
 
 }
 

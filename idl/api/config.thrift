@@ -68,10 +68,36 @@ struct ConfigResp {
     5: AgentConfig agent
     // the built-in category policy, shown when category_policy is empty
     6: string default_category_policy
+    // saved version of the agent settings; 0 = never saved (defaults)
+    7: i64 version
 }
 
+// Agent settings and the system prompt are one versioned document. A save
+// names the version it was edited from; a newer one answers 409.
 struct UpdateConfigReq {
     1: AgentConfigPatch agent
+    2: i64 base_version
+}
+
+struct ConfigVersion {
+    1: i64 version
+    // unix seconds
+    2: i64 saved_at
+    // names of the settings that differ from the previous version
+    3: list<string> changed
+}
+
+struct ListConfigVersionsReq {
+    1: i32 page (api.query="page")
+    2: i32 page_size (api.query="page_size")
+}
+
+// Newest first.
+struct ListConfigVersionsResp {
+    1: i32 code
+    2: string msg
+    3: list<ConfigVersion> items
+    4: i64 total
 }
 
 struct PromptResp {
@@ -82,9 +108,12 @@ struct PromptResp {
     4: string default_prompt
     // false when the default is in use
     5: bool is_custom
+    // same version stream as the agent settings
+    6: i64 version
 }
 
 // A prompt equal to the default resets to it.
 struct UpdatePromptReq {
     1: string prompt
+    2: i64 base_version
 }

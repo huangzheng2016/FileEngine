@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,80 +16,22 @@ func writeConfig(t *testing.T, content string) string {
 	return p
 }
 
-func TestAgentTimeoutDefaultsToUnlimited(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "server:\n  port: 9999\n"))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Agent.AgentTimeout != 0 {
-		t.Fatalf("agent_timeout default: got %d, want 0 (unlimited)", cfg.Agent.AgentTimeout)
-	}
-}
-
-func TestAgentTimeoutExplicitValuesPreserved(t *testing.T) {
+func TestLoadRejectsInvalidConfig(t *testing.T) {
 	cases := []struct {
-		name string
-		yaml string
-		want int
+		name, yaml, want string
 	}{
-		{"positive cap", "agent:\n  agent_timeout: 120\n", 120},
-		{"explicit unlimited", "agent:\n  agent_timeout: -1\n", -1},
+		{"unknown key", "server:\n  prot: 9\n", "prot"},
+		{"agent section is settings now", "agent:\n  concurrency: 4\n", "agent"},
+		{"postgres without dsn", "database:\n  driver: postgres\n", "dsn"},
+		{"mysql without dsn", "database:\n  driver: mysql\n", "dsn"},
+		{"unknown driver", "database:\n  driver: oracle\n  dsn: x\n", "driver"},
+		{"port out of range", "server:\n  port: 70000\n", "port"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, tc.yaml))
-			if err != nil {
-				t.Fatalf("load: %v", err)
-			}
-			if cfg.Agent.AgentTimeout != tc.want {
-				t.Fatalf("agent_timeout: got %d, want %d", cfg.Agent.AgentTimeout, tc.want)
-			}
-		})
-	}
-}
-
-func TestAgentDefaultsStillApplied(t *testing.T) {
-	cfg, err := Load(writeConfig(t, ""))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Agent.Concurrency != 6 || cfg.Agent.MaxRetries != 3 || cfg.Agent.MaxStep != 150 {
-		t.Fatalf("agent defaults not applied: %+v", cfg.Agent)
-	}
-	if cfg.Agent.RateLimitMaxRetries != 8 || cfg.Agent.RetryBaseDelay != 2 || cfg.Agent.RetryMaxDelay != 60 {
-		t.Fatalf("retry defaults not applied: %+v", cfg.Agent)
-	}
-}
-
-func TestRetryMaxDelayClampedToBase(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "agent:\n  retry_base_delay: 10\n  retry_max_delay: 5\n"))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Agent.RetryMaxDelay != 10 {
-		t.Fatalf("retry_max_delay: got %d, want clamped to base 10", cfg.Agent.RetryMaxDelay)
-	}
-}
-
-func TestDatabaseDSNDefaultFollowsDriver(t *testing.T) {
-	cases := []struct {
-		name string
-		yaml string
-		want string
-	}{
-		{"unset driver", "", "fileengine.db"},
-		{"sqlite", "database:\n  driver: sqlite\n", "fileengine.db"},
-		{"mysql", "database:\n  driver: mysql\n", "fileengine.db"},
-		{"postgres", "database:\n  driver: postgres\n", "host=localhost port=5432 user=postgres dbname=fileengine sslmode=disable"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, tc.yaml))
-			if err != nil {
-				t.Fatalf("load: %v", err)
-			}
-			if cfg.Database.DSN != tc.want {
-				t.Fatalf("default DSN: got %q, want %q", cfg.Database.DSN, tc.want)
+			_, err := Load(writeConfig(t, tc.yaml))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want mention of %q", err, tc.want)
 			}
 		})
 	}
@@ -104,30 +47,26 @@ func TestDatabaseExplicitDSNPreserved(t *testing.T) {
 	}
 }
 
-func TestCategoryPolicyDefaultApplied(t *testing.T) {
+func TestAgentStartsAtDefaults(t *testing.T) {
 	cfg, err := Load(writeConfig(t, ""))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Agent.CategoryPolicy != DefaultCategoryPolicy {
-		t.Fatalf("category_policy default: got %q", cfg.Agent.CategoryPolicy)
+	if cfg.Agent.Concurrency != 6 || cfg.Agent.MaxStep != 150 || cfg.Agent.AgentTimeout != 0 || cfg.Agent.CategoryPolicy != DefaultCategoryPolicy {
+		t.Fatalf("agent defaults: %+v", cfg.Agent)
 	}
 }
 
-func TestCategoryPolicyExplicitPreserved(t *testing.T) {
-	custom := "自定义规范：\n- 只按年份建类"
-	cfg, err := Load(writeConfig(t, "agent:\n  category_policy: \"自定义规范：\\n- 只按年份建类\"\n"))
-	if err != nil {
-		t.Fatalf("load: %v", err)
+func TestSetAgentSwapsSnapshot(t *testing.T) {
+	cfg, _ := Load(writeConfig(t, "server:\n  token: keep\n"))
+	a := cfg.Agent
+	a.Concurrency = 9
+	SetAgent(a)
+	if Get().Agent.Concurrency != 9 || Get().Server.Token != "keep" {
+		t.Fatalf("SetAgent: %+v", Get())
 	}
-	if cfg.Agent.CategoryPolicy != custom {
-		t.Fatalf("explicit category_policy: got %q, want %q", cfg.Agent.CategoryPolicy, custom)
-	}
-
-	updated := &Config{Agent: AgentConfig{CategoryPolicy: custom}}
-	Update(updated)
-	if Get().Agent.CategoryPolicy != custom {
-		t.Fatalf("Update must preserve explicit category_policy: got %q", Get().Agent.CategoryPolicy)
+	if cfg.Agent.Concurrency == 9 {
+		t.Fatal("an earlier snapshot must not change")
 	}
 }
 
@@ -147,9 +86,8 @@ func TestLoadCreatesMissingConfig(t *testing.T) {
 	if st.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %o, want 600", st.Mode().Perm())
 	}
-	again, err := Load(p)
-	if err != nil || again.Server.Port != 8080 || again.Agent.MaxStep != cfg.Agent.MaxStep {
-		t.Fatalf("reload: %+v %v", again, err)
+	if _, err := Load(p); err != nil {
+		t.Fatalf("reload of the created file: %v", err)
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing-dir", "config.yaml")); err == nil {
 		t.Fatal("a missing parent directory must fail, not be created")

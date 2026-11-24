@@ -1,12 +1,13 @@
 # Security
 
-- **Access token.** One token per instance, generated on first start (`server.token` in the loaded
+- **Access token.** Server mode: one token per instance, generated on first start (`server.token` in the loaded
   `config.yaml`, mode 0600) and printed once to the log. Clients send `Authorization: Bearer <token>` or the
-  HttpOnly, SameSite=Strict `fe_session` cookie set by `POST /api/v1/auth/login`. The desktop app injects a
-  per-launch token.
+  HttpOnly, SameSite=Strict `fe_session` cookie set by `POST /api/auth/login` (or the one-click
+  `GET /api/auth/bootstrap` link). Login and bootstrap share one rate limit. The desktop app has no token and no
+  listener: the window calls the in-process engine through Wails bindings (see `docs/architecture.md`, Desktop).
 - **Network.** The server binds `127.0.0.1` by default. On a loopback bind only loopback `Host` values are
   served (DNS rebinding); cross-site requests and foreign `Origin`s are rejected unless they carry a bearer
-  header. There are no CORS headers.
+  header. There are no CORS headers. The desktop app never opens a port.
 - **Secrets at rest.** Filesystem passwords, SFTP private keys and their passphrases, and model API keys are
   AES-GCM encrypted with `FE_SECRET_KEY`
   (32 bytes, base64) or a generated `secret.key` next to the database. Back up the key with the database.
@@ -22,7 +23,7 @@
   sanitized; prompts state that both are data, never instructions. Files flagged sensitive are never read.
 - **Limits.** Request bodies are capped (1 MB, 8 MB for category import); connection and model test endpoints
   and login are rate limited.
-- **Operations.** `GET /healthz` needs no token. `POST /api/v1/admin/backup` streams a consistent SQLite
+- **Operations.** `GET /healthz` needs no token. `POST /api/admin/backup` streams a consistent SQLite
   snapshot. Logs redact tokens, keys and passwords.
 
 | Variable | Purpose |

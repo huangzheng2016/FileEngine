@@ -140,6 +140,7 @@ service CategoryService {
 service ConfigService {
     config.ConfigResp GetConfig(1: base.EmptyReq req) (api.get="/api/config/get")
     config.ConfigResp UpdateConfig(1: config.UpdateConfigReq req) (api.post="/api/config/update")
+    config.ListConfigVersionsResp ListConfigVersions(1: config.ListConfigVersionsReq req) (api.get="/api/config/versions")
     config.PromptResp GetPrompt(1: base.EmptyReq req) (api.get="/api/config/prompt")
     config.PromptResp UpdatePrompt(1: config.UpdatePromptReq req) (api.post="/api/config/prompt_update")
 }

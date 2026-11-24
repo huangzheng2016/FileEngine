@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,10 +15,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config is the process configuration read from config.yaml. Agent is not part
+// of the file: it is the runtime settings document (biz/service/settings), which
+// installs each saved version here with SetAgent for the agent packages to read.
 type Config struct {
 	Server   ServerConfig   `yaml:"server" json:"server"`
 	Database DatabaseConfig `yaml:"database" json:"database"`
-	Agent    AgentConfig    `yaml:"agent" json:"agent"`
+	Agent    AgentConfig    `yaml:"-" json:"agent"`
 }
 
 type ServerConfig struct {
@@ -91,7 +96,8 @@ var (
 	mu         sync.RWMutex
 )
 
-// Save always writes back to the loaded file, never to a CWD-relative guess.
+// Load reads and validates the file; a missing file is created once with the
+// explicit defaults. Unknown keys and invalid values fail startup.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -101,10 +107,16 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	setDefaults(&cfg)
+	applyServerDefaults(&cfg)
+	if err := validate(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.Agent = DefaultAgent()
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -118,7 +130,7 @@ func Load(path string) (*Config, error) {
 
 func createDefault(path string) ([]byte, error) {
 	var cfg Config
-	setDefaults(&cfg)
+	applyServerDefaults(&cfg)
 	data, err := yaml.Marshal(&cfg)
 	if err != nil {
 		return nil, err
@@ -134,47 +146,79 @@ func createDefault(path string) ([]byte, error) {
 	return data, f.Close()
 }
 
+// Optional keys: the listen address and the SQLite file. Everything a server
+// cannot guess (a PostgreSQL or MySQL DSN) is required by validate.
+func applyServerDefaults(cfg *Config) {
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8080
+	}
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "127.0.0.1"
+	}
+	if cfg.Database.Driver == "" {
+		cfg.Database.Driver = "sqlite"
+	}
+	if cfg.Database.DSN == "" && cfg.Database.Driver == "sqlite" {
+		cfg.Database.DSN = "fileengine.db"
+	}
+}
+
+func validate(cfg *Config) error {
+	if cfg.Server.Port < 1 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be between 1 and 65535, got %d", cfg.Server.Port)
+	}
+	switch cfg.Database.Driver {
+	case "sqlite", "mysql", "postgres":
+	default:
+		return fmt.Errorf("database.driver must be sqlite, mysql or postgres, got %q", cfg.Database.Driver)
+	}
+	if cfg.Database.DSN == "" {
+		return fmt.Errorf("database.dsn is required for driver %s", cfg.Database.Driver)
+	}
+	return nil
+}
+
 func Path() string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return loadedPath
 }
 
+// Get returns the current snapshot; callers must not modify it. Every change
+// installs a new snapshot, so a reader never sees a half-applied update.
 func Get() *Config {
 	mu.RLock()
 	defer mu.RUnlock()
 	return global
 }
 
+// Update installs cfg as the current snapshot. Zero agent fields take their
+// defaults, so tests and embedders can build a Config piecemeal.
 func Update(cfg *Config) {
-	setDefaults(cfg)
+	if cfg != nil {
+		fillAgentDefaults(&cfg.Agent)
+	}
 	mu.Lock()
 	global = cfg
 	mu.Unlock()
 }
 
-func UpdateAgentJSON(raw []byte) (*Config, error) {
-	cur := Get()
-	if cur == nil {
-		return nil, errors.New("config not loaded")
+// SetAgent installs a saved settings version for the agent packages. The caller
+// has already validated and persisted it.
+func SetAgent(a AgentConfig) {
+	mu.Lock()
+	defer mu.Unlock()
+	next := Config{}
+	if global != nil {
+		next = *global
 	}
-	next := *cur
-	if err := json.Unmarshal(raw, &next.Agent); err != nil {
-		return nil, err
-	}
-	Update(&next)
-	return &next, nil
+	next.Agent = a
+	global = &next
 }
 
-// 0600: it holds the API token and possibly a DSN password. Temp file +
+// 0600: the file holds the API token and possibly a DSN password. Temp file +
 // rename so a crash never leaves a truncated config.
-func Save() error {
-	mu.RLock()
-	cfg, path := global, loadedPath
-	mu.RUnlock()
-	if cfg == nil || path == "" {
-		return errors.New("config not loaded")
-	}
+func save(cfg *Config, path string) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
@@ -198,25 +242,27 @@ func Save() error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// The caller prints the token once; it is shown nowhere else.
+// The caller prints the token once; it is shown nowhere else. The new token is
+// written before it becomes visible.
 func EnsureToken() (token string, generated bool, err error) {
-	cur := Get()
-	if cur == nil {
+	mu.Lock()
+	defer mu.Unlock()
+	if global == nil || loadedPath == "" {
 		return "", false, errors.New("config not loaded")
 	}
-	if cur.Server.Token != "" {
-		return cur.Server.Token, false, nil
+	if global.Server.Token != "" {
+		return global.Server.Token, false, nil
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", false, err
 	}
-	next := *cur
+	next := *global
 	next.Server.Token = base64.RawURLEncoding.EncodeToString(b)
-	Update(&next)
-	if err := Save(); err != nil {
+	if err := save(&next, loadedPath); err != nil {
 		return "", false, err
 	}
+	global = &next
 	return next.Server.Token, true, nil
 }
 
@@ -234,75 +280,66 @@ func DataDir(cfg *Config) string {
 	return wd
 }
 
-func setDefaults(cfg *Config) {
-	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+// DefaultAgent is the agent document before the first save.
+func DefaultAgent() AgentConfig {
+	var a AgentConfig
+	fillAgentDefaults(&a)
+	return a
+}
+
+func fillAgentDefaults(a *AgentConfig) {
+	if a.Concurrency == 0 {
+		a.Concurrency = 6
 	}
-	if cfg.Server.Host == "" {
-		cfg.Server.Host = "127.0.0.1"
+	if a.MaxFileReadSize == 0 {
+		a.MaxFileReadSize = 8000
 	}
-	if cfg.Database.Driver == "" {
-		cfg.Database.Driver = "sqlite"
+	if a.ArchiveEntryMaxSize == 0 {
+		a.ArchiveEntryMaxSize = 64 * 1024
 	}
-	if cfg.Database.DSN == "" {
-		if cfg.Database.Driver == "postgres" {
-			cfg.Database.DSN = "host=localhost port=5432 user=postgres dbname=fileengine sslmode=disable"
-		} else {
-			cfg.Database.DSN = "fileengine.db"
-		}
+	if a.MaxRetries == 0 {
+		a.MaxRetries = 3
 	}
-	if cfg.Agent.Concurrency == 0 {
-		cfg.Agent.Concurrency = 6
+	if a.RateLimitMaxRetries <= 0 {
+		a.RateLimitMaxRetries = 8
 	}
-	if cfg.Agent.MaxFileReadSize == 0 {
-		cfg.Agent.MaxFileReadSize = 8000
+	if a.RetryBaseDelay <= 0 {
+		a.RetryBaseDelay = 2
 	}
-	if cfg.Agent.ArchiveEntryMaxSize == 0 {
-		cfg.Agent.ArchiveEntryMaxSize = 64 * 1024
+	if a.RetryMaxDelay <= 0 {
+		a.RetryMaxDelay = 60
 	}
-	if cfg.Agent.MaxRetries == 0 {
-		cfg.Agent.MaxRetries = 3
+	if a.RetryMaxDelay < a.RetryBaseDelay {
+		a.RetryMaxDelay = a.RetryBaseDelay
 	}
-	if cfg.Agent.RateLimitMaxRetries <= 0 {
-		cfg.Agent.RateLimitMaxRetries = 8
+	if a.MaxStep == 0 {
+		a.MaxStep = 150
 	}
-	if cfg.Agent.RetryBaseDelay <= 0 {
-		cfg.Agent.RetryBaseDelay = 2
+	if a.ChatMaxStep == 0 {
+		a.ChatMaxStep = 50
 	}
-	if cfg.Agent.RetryMaxDelay <= 0 {
-		cfg.Agent.RetryMaxDelay = 60
+	if a.VisionMaxImagesPerBatch == 0 {
+		a.VisionMaxImagesPerBatch = 4
 	}
-	if cfg.Agent.RetryMaxDelay < cfg.Agent.RetryBaseDelay {
-		cfg.Agent.RetryMaxDelay = cfg.Agent.RetryBaseDelay
+	if a.VisionImageMaxPx == 0 {
+		a.VisionImageMaxPx = 512
 	}
-	if cfg.Agent.MaxStep == 0 {
-		cfg.Agent.MaxStep = 150
+	if a.VisionMaxImageBytes == 0 {
+		a.VisionMaxImageBytes = 20 * 1024 * 1024
 	}
-	if cfg.Agent.ChatMaxStep == 0 {
-		cfg.Agent.ChatMaxStep = 50
+	if a.ScriptMaxSize == 0 {
+		a.ScriptMaxSize = 16 * 1024
 	}
-	if cfg.Agent.VisionMaxImagesPerBatch == 0 {
-		cfg.Agent.VisionMaxImagesPerBatch = 4
+	if a.ScriptTimeout == 0 {
+		a.ScriptTimeout = 10
 	}
-	if cfg.Agent.VisionImageMaxPx == 0 {
-		cfg.Agent.VisionImageMaxPx = 512
+	if a.ScriptMaxResultSize == 0 {
+		a.ScriptMaxResultSize = 8 * 1024
 	}
-	if cfg.Agent.VisionMaxImageBytes == 0 {
-		cfg.Agent.VisionMaxImageBytes = 20 * 1024 * 1024
+	if a.ArchivePromptMaxEntries == 0 {
+		a.ArchivePromptMaxEntries = 6
 	}
-	if cfg.Agent.ScriptMaxSize == 0 {
-		cfg.Agent.ScriptMaxSize = 16 * 1024
-	}
-	if cfg.Agent.ScriptTimeout == 0 {
-		cfg.Agent.ScriptTimeout = 10
-	}
-	if cfg.Agent.ScriptMaxResultSize == 0 {
-		cfg.Agent.ScriptMaxResultSize = 8 * 1024
-	}
-	if cfg.Agent.ArchivePromptMaxEntries == 0 {
-		cfg.Agent.ArchivePromptMaxEntries = 6
-	}
-	if cfg.Agent.CategoryPolicy == "" {
-		cfg.Agent.CategoryPolicy = DefaultCategoryPolicy
+	if a.CategoryPolicy == "" {
+		a.CategoryPolicy = DefaultCategoryPolicy
 	}
 }

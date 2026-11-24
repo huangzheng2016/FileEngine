@@ -53,17 +53,3 @@ func TestSecretsNeverJSON(t *testing.T) {
 		t.Fatalf("secret leaked into JSON: %s", raw)
 	}
 }
-
-func TestUpdateAgentJSONMergesPartially(t *testing.T) {
-	loadTemp(t, "server:\n  token: keep\nagent:\n  concurrency: 4\n  max_step: 77\n")
-	cfg, err := UpdateAgentJSON([]byte(`{"concurrency": 9}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Agent.Concurrency != 9 || cfg.Agent.MaxStep != 77 {
-		t.Fatalf("merge wrong: concurrency=%d max_step=%d", cfg.Agent.Concurrency, cfg.Agent.MaxStep)
-	}
-	if Get().Server.Token != "keep" {
-		t.Fatal("server section changed by agent merge")
-	}
-}
