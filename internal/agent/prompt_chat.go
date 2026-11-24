@@ -33,7 +33,7 @@ const chatPrompt = `你是 FileEngine 的整理助手。你在一个整理任务
 
 - 改归类：decide，action 用 move（文件，new_path 含文件名）、unit（目录整体移动）、container（目录本身不动，子项逐个处理）、skip（不动）、undo（撤销）；每条带 reason；一次最多 200 条，攒成一批发出。已整体移动的目录要逐项处理时，先 split_unit，再 list_entries 看子项分别设置。
 - 查条目：list_entries（目录翻页，或用 paths 查具体条目）；需要看内容时 read_file。
-- 同类条目约 20 个以上不要逐个调用：未决定的条目用 add_rule，先 apply_rules 的 preview 看匹配，再 apply_rules；规则不改已决定的条目，改它们用 run_script 批量写 decide 类决定，或分批 decide。
+- 同类条目约 20 个以上不要逐个调用：未决定的条目用 add_rule，先 apply_rules 的 preview 看匹配，再 apply_rules；规则不改已决定的条目，改它们用 run_script 在脚本里调 decide(items)，或分批调用 decide 工具。
 - 改分类：update_category 改名称、路径或说明，路径变更会同步更新已规划的目标；delete_category 会撤销该分类路径下的全部规划（返回 reverted 条数）。合并两个分类时，先用 decide 把要删的分类下的条目改到保留的分类，再删除它。
 - 改规则：update_rule、delete_rule 按规则名，只改给出的字段，要去掉的条件放进 clear。
 - 互不依赖的工具调用放在同一轮并行发出。
@@ -104,7 +104,7 @@ const reviewPrompt = `你是 FileEngine 的整理复核员。一次自动整理�
 ## 怎么处理
 
 - 明显的错误直接修：decide 改条目的决定（move / unit / container / skip / undo，每条带 reason，攒成一批发出）；需要更多信息时用 list_entries，必要时 read_file。
-- 同类错误很多时不要逐个改：用 run_script 批量写决定。
+- 同类错误很多时不要逐个改：用 run_script 在脚本里调 decide(items) 批量写决定。
 - 重复分类：先用 decide 把要删的分类下的条目改到保留的分类，再 delete_category（它会撤销该分类路径下剩余的规划）。
 - 拿不准的不要改，写进报告让用户决定。
 - ` + switchesRule + `

@@ -447,14 +447,15 @@ func TestScriptDecisionBuiltins(t *testing.T) {
 	out := mustRunScript(t, tb, `
 s := signals("proj")
 dirs := list_dirs()
-n := apply_rule("pdf")
-d := decide_dir("proj", "unit", "/代码/proj", "Go 项目")
-bad := decide_dir("proj/main.go", "skip", "", "已在整体内")
-r := set_targets([{path: "readme.txt", new_path: "/文档/readme.txt", reason: "说明", confidence: 0.9}])
-noReason := set_targets([{path: "Tool-1.0.zip", new_path: "/软件/Tool-1.0.zip"}])
-result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: is_error(bad), ok: r.ok, nr: noReason.failed[0]["error"]}`)
+ar := apply_rules({rule: "pdf"})
+n := ar.rules[0].matched
+d := decide([{path: "proj", action: "unit", new_path: "/代码/proj", reason: "Go 项目"}])
+bad := decide([{path: "proj/main.go", action: "skip", reason: "已在整体内"}])
+r := decide([{path: "readme.txt", action: "move", new_path: "/文档/readme.txt", reason: "说明", confidence: 0.9}])
+noReason := decide([{path: "Tool-1.0.zip", action: "move", new_path: "/软件/Tool-1.0.zip"}])
+result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.ok, bad: len(bad.failed), ok: r.ok, nr: noReason.failed[0]["error"]}`)
 	v := resultValue(t, out)
-	if v["marker"] != "go.mod" || v["dirs"] != float64(2) || v["n"] != float64(2) || v["role"] != "unit" || v["bad"] != true || v["ok"] != float64(1) {
+	if v["marker"] != "go.mod" || v["dirs"] != float64(2) || v["n"] != float64(2) || v["role"] != float64(1) || v["bad"] != float64(1) || v["ok"] != float64(1) {
 		t.Fatalf("builtins: %+v", v)
 	}
 	if !strings.Contains(v["nr"].(string), "reason") {
@@ -464,7 +465,7 @@ result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: i
 		t.Fatalf("no placeholder reason is written: %+v", e)
 	}
 	if e, _ := repo.GetFileByPath(a.sessionID, "misc/a.pdf"); e.NewPath != "/文档/misc/a.pdf" || e.Reason != "规则：pdf" {
-		t.Fatalf("apply_rule: %+v", e)
+		t.Fatalf("apply_rules: %+v", e)
 	}
 }
 

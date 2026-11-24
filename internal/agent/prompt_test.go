@@ -31,7 +31,7 @@ func TestPromptsAreStaticAndKnowOnlyExistingTools(t *testing.T) {
 		known[n] = true
 	}
 	// Words that look like tool names but are fields or helpers.
-	for _, w := range []string{"new_path", "next_cursor", "path_prefix", "query_files", "agent_editable", "file_type", "name_regex", "max_size", "min_size", "new_name", "new_path"} {
+	for _, w := range []string{"new_path", "next_cursor", "path_prefix", "query_files", "category_target", "agent_editable", "file_type", "name_regex", "max_size", "min_size", "new_name", "new_path"} {
 		known[w] = true
 	}
 	for name, p := range allPrompts(cfg) {

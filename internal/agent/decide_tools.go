@@ -204,13 +204,18 @@ func decisionFor(it DecideItem) (db.Decision, string) {
 }
 
 func (tb *ToolBuilder) decideTool(ctx context.Context, in *DecideInput) (*DecideOutput, error) {
+	return tb.decideItems(in.Items)
+}
+
+// decideItems is the core shared by the decide tool and the script builtin.
+func (tb *ToolBuilder) decideItems(items []DecideItem) (*DecideOutput, error) {
 	if msg := tb.decidingGate(); msg != "" {
 		return failed[DecideOutput](msg), nil
 	}
 	// Items with a malformed action are reported per item; the rest still go in.
 	var ds []db.Decision
 	var bad []BatchFailed
-	for _, it := range in.Items {
+	for _, it := range items {
 		d, msg := decisionFor(it)
 		if msg != "" {
 			bad = append(bad, BatchFailed{Path: SanitizeUntrustedName(normalizePath(it.Path)), Error: msg})
@@ -221,8 +226,8 @@ func (tb *ToolBuilder) decideTool(ctx context.Context, in *DecideInput) (*Decide
 	if len(ds) == 0 && len(bad) == 0 {
 		return failed[DecideOutput]("items 不能为空"), nil
 	}
-	if len(in.Items) > maxBatchItems {
-		return failed[DecideOutput](fmt.Sprintf("一次最多 %d 条，本次 %d 条", maxBatchItems, len(in.Items)), "分批调用，或用规则（add_rule）、脚本（run_script）处理大量同类条目"), nil
+	if len(items) > maxBatchItems {
+		return failed[DecideOutput](fmt.Sprintf("一次最多 %d 条，本次 %d 条", maxBatchItems, len(items)), "分批调用，或用规则（add_rule）、脚本（run_script）处理大量同类条目"), nil
 	}
 	var out *DecideOutput
 	if len(ds) > 0 {

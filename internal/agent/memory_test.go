@@ -204,15 +204,15 @@ func TestNotesAreSharedAcrossWorkers(t *testing.T) {
 	}
 }
 
-func TestScriptSetCategoryKeepsStructure(t *testing.T) {
+func TestScriptCategoryTargetKeepsStructure(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	scriptSeedFile(t, repo, 1, "incoming/trip/day1/p.jpg", "file")
 	scriptSeedFile(t, repo, 1, "incoming/trip/day2/p.jpg", "file")
 
 	out := mustRunScript(t, tb, `
-a := set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片", "incoming")
-b := set_category("incoming/trip/day2/p.jpg", "照片", "旅行照片", ".")
-c := set_category("incoming/photo1.jpg", "照片", "旅行照片", "docs")
+a := category_target("incoming/trip/day1/p.jpg", "照片", "incoming")
+b := category_target("incoming/trip/day2/p.jpg", "照片", ".")
+c := category_target("incoming/photo1.jpg", "照片", "docs")
 result = {a: a, b: b, c_err: is_error(c)}`)
 	v := resultValue(t, out)
 	if v["a"] != "/organized/photos/trip/day1/p.jpg" || v["b"] != "/organized/photos/incoming/trip/day2/p.jpg" || v["c_err"] != true {
@@ -221,20 +221,21 @@ result = {a: a, b: b, c_err: is_error(c)}`)
 
 	tb.SetUnitRoot("/incoming/trip/")
 	out = mustRunScript(t, tb, `
-a := set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片")
-b := set_category("incoming/photo2.jpg", "照片", "旅行照片")
+a := category_target("incoming/trip/day1/p.jpg", "照片")
+b := category_target("incoming/photo2.jpg", "照片")
 result = {a: a, b: b}`)
 	v = resultValue(t, out)
 	if v["a"] != "/organized/photos/day1/p.jpg" || v["b"] != "/organized/photos/photo2.jpg" {
 		t.Fatalf("unit-root default: %+v", v)
 	}
-	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day2/p.jpg", "照片", "旅行照片", "incoming/trip/day2")}`)
-	if v := resultValue(t, out); v["x"] != "/organized/photos/p.jpg" {
-		t.Fatalf("free name: %+v", v)
-	}
-	out = mustRunScript(t, tb, `result = {x: set_category("incoming/trip/day1/p.jpg", "照片", "旅行照片", "incoming/trip/day1")}`)
-	if v := resultValue(t, out); v["x"] != "/organized/photos/p (2).jpg" {
-		t.Fatalf("collision in script: %+v", v)
+	out = mustRunScript(t, tb, `
+x := category_target("incoming/trip/day2/p.jpg", "照片", "incoming/trip/day2")
+decide([{path: "incoming/trip/day2/p.jpg", action: "move", new_path: x, reason: "旅行照片"}])
+y := category_target("incoming/trip/day1/p.jpg", "照片", "incoming/trip/day1")
+r := decide([{path: "incoming/trip/day1/p.jpg", action: "move", new_path: y, reason: "旅行照片"}])
+result = {x: x, renamed: r.renamed[0]["new_path"]}`)
+	if v := resultValue(t, out); v["x"] != "/organized/photos/p.jpg" || v["renamed"] != "/organized/photos/p (2).jpg" {
+		t.Fatalf("free name and collision in script: %+v", v)
 	}
 }
 
