@@ -1,4 +1,4 @@
-// Command fileengine is the headless server: REST API + SSE + embedded SPA on
+// Command fileengine is the headless server: Hertz API + SSE + embedded SPA on
 // server.host:server.port. The desktop shell lives in cmd/fileengine-desktop.
 package main
 
@@ -40,7 +40,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := a.Start(context.Background(), ln, a.Handler()); err != nil {
+	if err := a.Start(ln); err != nil {
 		log.Fatalf("Start server: %v", err)
 	}
 	log.Printf("Starting FileEngine on %s", ln.Addr())

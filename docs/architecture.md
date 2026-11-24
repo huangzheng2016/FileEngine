@@ -58,9 +58,11 @@ A `revert` run undoes one executing run and stores its id in `reverts_run_id`; t
 `db.Emit` is the only publisher. It persists the event, assigns `seq`, then broadcasts; text and reasoning
 deltas are coalesced (150 ms / 2 KB) and flushed before any other event of the same run.
 
-`GET /api/v1/sessions/:id/events/stream` serves SSE frames `id/event/data`. Resume with `Last-Event-ID` or
-`?after=`; without either the replay starts at the latest run's first event. Replay then live is gap-free and
-ordered. History: `GET /sessions/:id/events?run_id&after&before&limit`.
+`GET /api/event/stream?session_id=` serves SSE frames `id/event/data` (a `: ping` comment every 20 s so a dead
+client is noticed by a failed write). Resume with `Last-Event-ID` or `?after=`; without either the replay starts at
+the latest run's first event. Replay then live is gap-free and ordered (`eventfeed.Follow`, shared by SSE and the
+desktop). History: `GET /api/event/list?session_id&run_id&after&before&limit`. Open streams are owned by one
+registry that the app cancels first at shutdown, before runs, scans and the HTTP server stop.
 
 | Event | Payload |
 |---|---|
@@ -151,6 +153,20 @@ temporary download (≤ 32 MB) on FTP.
 
 ## Desktop
 
-`cmd/fileengine-desktop` runs the same Gin server in process on `127.0.0.1:<random>` with a per-launch token
-(the Wails v3 asset handler cannot stream SSE on Windows). The window starts at the bootstrap URL, which sets
-the session cookie.
+`cmd/fileengine-desktop` runs the backend in process with no listener, token or cookie. The embedded UI is served
+by the Wails asset handler (behind `runtimeRequestGuard`), and the window reaches the backend through one Wails
+service, `FileEngine`, whose bindings are generated into `cmd/fileengine-desktop/bindings` (`task gen:bindings`):
+
+- `Call({method, path, query, body})` returns `{status, content_type, content_disposition, encoding, body}`. It
+  runs the request through the same Hertz engine and IDL routes as the web server, with a context marked by
+  `actor.WithDesktop` that default-deny auth accepts; only `/api` paths are served and `/api/event/stream` is
+  refused. `body` is JSON text (`encoding: "utf8"`) or base64 for downloads (`"base64"`). Failures are normal
+  responses with the `{code, msg}` envelope.
+- `Subscribe({session_id, run_id?, after})` / `Unsubscribe(subscription_id)` replace SSE. Events arrive as Wails
+  events on topic `session://events/<session_id>` with the payload `{seq, run_id, kind, data, created_at}`
+  (`data` is the JSON text of the SSE data field); `<topic>/end` carries `{subscription_id, error?}` when a feed
+  stops. `after` null starts at the latest run's first event, otherwise it resumes after that seq: history
+  first, then live, ordered and gap-free, like the SSE route.
+
+Shutdown cancels every subscription, then stops runs and scans, then closes the database; there is no HTTP
+server to stop.

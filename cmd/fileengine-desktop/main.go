@@ -1,7 +1,7 @@
-// Command fileengine-desktop is the Wails v3 desktop shell. It runs the full
-// FileEngine server in-process (no subprocess) on a random 127.0.0.1 port
-// guarded by a per-launch token, and points its window at that origin; see
-// loopback.go for why the Wails asset handler is not used to serve the UI.
+// Command fileengine-desktop is the Wails v3 desktop shell. The backend runs
+// in-process without a listener: the window serves the embedded UI from the
+// Wails asset handler and reaches the API through the Service bindings (see
+// service.go), which dispatch to the same Hertz routes as the web server.
 package main
 
 import (
@@ -16,11 +16,10 @@ import (
 	"os"
 	"runtime"
 
-	"FileEngine/internal/api"
 	"FileEngine/internal/app"
 	"FileEngine/internal/logging"
 
-	"github.com/gin-gonic/gin"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsevents "github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -73,6 +72,7 @@ func run(args []string) int {
 
 	var window *application.WebviewWindow
 	service := &Service{}
+	var assetHandler http.Handler
 	wailsApp := application.New(application.Options{
 		Name:        "FileEngine",
 		Description: "用 AI 整理 NAS 上的文件",
@@ -82,10 +82,17 @@ func run(args []string) int {
 			logger.Error("Wails error", "error", err)
 		},
 		Services: []application.Service{application.NewService(service)},
-		// The UI is served from the loopback server; the Wails origin only
-		// hosts the runtime endpoints, which the guard locks to the app.
+		// The guard keeps other documents away from the Wails runtime
+		// endpoints; everything else is the embedded UI.
 		Assets: application.AssetOptions{
-			Handler:    http.HandlerFunc(wailsOriginFallback),
+			// Set once the backend is up, before the window opens.
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if assetHandler == nil {
+					http.NotFound(w, r)
+					return
+				}
+				assetHandler.ServeHTTP(w, r)
+			}),
 			Middleware: runtimeRequestGuard,
 		},
 		Mac: application.MacOptions{
@@ -104,9 +111,8 @@ func run(args []string) int {
 		},
 	})
 
-	var startURL string
 	if startErr == nil {
-		startURL, startErr = startServer(service, paths, *webRoot)
+		assetHandler, startErr = startBackend(service, paths, *webRoot)
 	}
 	if startErr != nil {
 		return showStartupError(wailsApp, paths, startErr, logger)
@@ -114,7 +120,7 @@ func run(args []string) int {
 
 	windowOptions := application.WebviewWindowOptions{
 		Title:          "FileEngine",
-		URL:            startURL,
+		URL:            "/",
 		Width:          defaultWindowWidth,
 		Height:         defaultWindowHeight,
 		MinWidth:       minWindowWidth,
@@ -140,36 +146,28 @@ func run(args []string) int {
 	return 0
 }
 
-func startServer(service *Service, paths desktopPaths, webRoot string) (string, error) {
+// startBackend opens the database and builds the in-process backend. It
+// returns the handler that serves the embedded UI.
+func startBackend(service *Service, paths desktopPaths, webRoot string) (http.Handler, error) {
 	frontend, err := desktopFrontend(webRoot)
 	if err != nil {
-		return "", err
-	}
-	token, err := api.NewToken()
-	if err != nil {
-		return "", fmt.Errorf("generate session token: %w", err)
-	}
-	ln, err := listenLoopback()
-	if err != nil {
-		return "", fmt.Errorf("listen on loopback: %w", err)
+		return nil, err
 	}
 	var roots []string
 	if home, err := os.UserHomeDir(); err == nil {
 		roots = append(roots, home)
 	}
 	a, err := app.New(app.Options{
-		ConfigPath:   paths.ConfigFile,
-		Frontend:     frontend,
-		Token:        token,
-		AllowedHosts: []string{ln.Addr().String()},
-		LocalRoots:   roots,
+		ConfigPath: paths.ConfigFile,
+		Frontend:   frontend,
+		Desktop:    true,
+		LocalRoots: roots,
 	})
 	if err != nil {
-		ln.Close()
-		return "", err
+		return nil, err
 	}
-	service.app, service.ln, service.handler = a, ln, a.Handler()
-	return a.Server().BootstrapURL("http://" + ln.Addr().String()), nil
+	service.app = a
+	return app.SPAHandler(frontend), nil
 }
 
 // The log file comes first in the MultiWriter: a Windows GUI build has no
@@ -184,13 +182,8 @@ func setupLogging(paths desktopPaths, haveDataDir bool) (*slog.Logger, func()) {
 		}
 	}
 	log.SetOutput(out)
-	gin.DefaultWriter = out
-	gin.DefaultErrorWriter = out
+	hlog.SetOutput(out)
 	return logging.Setup(out), closeLog
-}
-
-func wailsOriginFallback(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "FileEngine serves its UI from the loopback server", http.StatusNotFound)
 }
 
 func showWindow(window *application.WebviewWindow) {

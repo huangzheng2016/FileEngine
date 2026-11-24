@@ -16,6 +16,10 @@ env:
 vars:
   BIN_DIR: bin
   WAILS_VERSION: v3.0.0-beta.27
+  # hz and thriftgo move together with the apache/thrift replace in go.mod.
+  HZ_VERSION: v0.9.7
+  THRIFTGO_VERSION: v0.4.1
+  GENERATED: biz,container,.hz,cmd/fileengine-desktop/bindings
   # CI passes VERSION (the release tag without "v"); local builds describe git.
   VERSION:
     sh: test -n "$VERSION" && echo "$VERSION" || git describe --tags --always --dirty 2>/dev/null || echo dev
@@ -29,13 +33,13 @@ tasks:
   fmt:
     desc: Format all Go sources
     cmds:
-      - '"$(go env GOROOT)/bin/gofmt" -w ./cmd ./internal ./web/embed.go ./main.go'
+      - '"$(go env GOROOT)/bin/gofmt" -w ./cmd ./internal ./biz ./container ./scripts ./web/embed.go ./main.go'
 
   fmt:check:
     desc: Fail when any Go source needs gofmt
     cmds:
       - |
-        files="$("$(go env GOROOT)/bin/gofmt" -l ./cmd ./internal ./web/embed.go ./main.go)"
+        files="$("$(go env GOROOT)/bin/gofmt" -l ./cmd ./internal ./biz ./container ./scripts ./web/embed.go ./main.go)"
         test -z "$files" || { printf 'gofmt required:\n%s\n' "$files" >&2; exit 1; }
 
   mod:verify:
@@ -43,6 +47,42 @@ tasks:
     cmds:
       - go mod verify
       - go mod tidy -diff
+
+  gen:tools:
+    desc: Install the pinned hz and thriftgo generators
+    cmds:
+      - go install github.com/cloudwego/hertz/cmd/hz@{{.HZ_VERSION}}
+      - go install github.com/cloudwego/thriftgo@{{.THRIFTGO_VERSION}}
+
+  gen:api:
+    desc: Regenerate biz/model, biz/router and new handler stubs from idl/
+    deps: [gen:tools]
+    cmds:
+      - ./scripts/hz_update.sh
+
+  gen:wire:
+    desc: Regenerate container/wire_gen.go
+    cmds:
+      - go generate ./container
+
+  gen:bindings:
+    desc: Regenerate the desktop's Wails bindings (needs the desktop build dependencies)
+    cmds:
+      - wails3 generate bindings -d cmd/fileengine-desktop/bindings -ts -clean ./cmd/fileengine-desktop
+
+  gen:
+    desc: Regenerate all generated code
+    cmds:
+      - task: gen:api
+      - task: gen:wire
+      - task: gen:bindings
+
+  gen:check:
+    desc: Fail when regenerating changes any generated file
+    cmds:
+      - GOOS= GOARCH= go run ./scripts/gencheck snapshot -paths {{.GENERATED}} -state {{.BIN_DIR}}/gencheck.state
+      - task: gen
+      - GOOS= GOARCH= go run ./scripts/gencheck verify -paths {{.GENERATED}} -state {{.BIN_DIR}}/gencheck.state
 
   web:install:
     desc: Install frontend dependencies from the lockfile
@@ -102,6 +142,7 @@ tasks:
     cmds:
       - task: fmt:check
       - task: mod:verify
+      - task: gen:check
       - task: vet
       - task: vet:cross
       - task: test
