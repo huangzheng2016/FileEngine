@@ -69,7 +69,7 @@ func TestMainRunPromptsCarryPolicyOnce(t *testing.T) {
 func TestToolDescriptionsOmitPolicy(t *testing.T) {
 	session := &db.ScanSession{AllowAutoCategory: true, AllowScript: true}
 	tb := NewToolBuilder(nil, nil, 1, 1, NewLogger(1, 0, 0), config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session, false)
-	for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetChat} {
+	for _, kind := range []ToolsetKind{ToolsetTagging, ToolsetMain} {
 		tools, err := tb.BuildToolset(kind)
 		if err != nil {
 			t.Fatal(err)

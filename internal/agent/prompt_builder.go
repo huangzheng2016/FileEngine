@@ -238,7 +238,7 @@ func listingBlock(title string, rows []db.FileEntry, total int) string {
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## %s（%s）\n\n", title, listColumns))
-	sb.WriteString(WrapUntrusted(title, entryRows(shown)))
+	sb.WriteString(WrapUntrusted(title, entryRows(shown, false)))
 	sb.WriteString("\n")
 	if total > len(shown) {
 		sb.WriteString(fmt.Sprintf("（只列出前 %d 项，共 %d 项；其余用 list_files 翻页查看，或用规则批量处理）\n", len(shown), total))

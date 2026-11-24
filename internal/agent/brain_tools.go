@@ -16,15 +16,15 @@ type WritePlanInput struct {
 }
 
 type WritePlanOutput struct {
-	Success bool   `json:"success"`
+	Envelope
 	Version int    `json:"version,omitempty"`
 	Status  string `json:"status,omitempty"`
-	Error   string `json:"error,omitempty"`
 }
 
 type ReadPlanInput struct{}
 
 type ReadPlanOutput struct {
+	Envelope
 	Exists  bool   `json:"exists"`
 	Version int    `json:"version"`
 	Status  string `json:"status,omitempty"`
@@ -34,10 +34,10 @@ type ReadPlanOutput struct {
 func (tb *ToolBuilder) writePlan(ctx context.Context, in *WritePlanInput) (*WritePlanOutput, error) {
 	content := strings.TrimSpace(in.Content)
 	if content == "" {
-		return &WritePlanOutput{Error: "方案内容不能为空"}, nil
+		return failed[WritePlanOutput]("方案内容不能为空"), nil
 	}
 	if n := utf8.RuneCountInString(content); n > planMaxRunes {
-		return &WritePlanOutput{Error: fmt.Sprintf("方案有 %d 字，超过 %d 字上限：请精简（列规则和约定，不要逐个列文件）", n, planMaxRunes)}, nil
+		return failed[WritePlanOutput](fmt.Sprintf("方案有 %d 字，超过 %d 字上限", n, planMaxRunes), "精简：列规则和约定，不要逐个列文件"), nil
 	}
 	// Agent edits always go back to draft: the user approves the plan.
 	plan, err := tb.repo.SavePlan(tb.sessionID, content, -1, db.PlanDraft)
@@ -45,7 +45,9 @@ func (tb *ToolBuilder) writePlan(ctx context.Context, in *WritePlanInput) (*Writ
 		return nil, fmt.Errorf("write plan: %w", err)
 	}
 	db.Emit(tb.sessionID, tb.RunID, db.EvPlanUpdated, db.PlanUpdatedData{RunID: tb.RunID, Version: plan.Version, Status: plan.Status})
-	return &WritePlanOutput{Success: true, Version: plan.Version, Status: plan.Status}, nil
+	out := succeeded[WritePlanOutput]()
+	out.Version, out.Status = plan.Version, plan.Status
+	return out, nil
 }
 
 func (tb *ToolBuilder) readPlan(ctx context.Context, in *ReadPlanInput) (*ReadPlanOutput, error) {
@@ -53,5 +55,7 @@ func (tb *ToolBuilder) readPlan(ctx context.Context, in *ReadPlanInput) (*ReadPl
 	if err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
 	}
-	return &ReadPlanOutput{Exists: plan.Version > 0, Version: plan.Version, Status: plan.Status, Content: plan.Content}, nil
+	out := succeeded[ReadPlanOutput]()
+	out.Exists, out.Version, out.Status, out.Content = plan.Version > 0, plan.Version, plan.Status, plan.Content
+	return out, nil
 }

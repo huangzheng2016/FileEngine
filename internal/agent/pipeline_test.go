@@ -127,23 +127,22 @@ func TestPipelineTopDownUnits(t *testing.T) {
 	decide := func(tb *ToolBuilder, u workUnit) {
 		switch u.kind {
 		case unitDir:
-			role := db.RoleContainer
-			_, _ = tb.decideDirs(context.Background(), &DecideDirsInput{Items: []DecideItem{{Path: u.path, Role: role, Reason: "分组目录"}}})
+			_, _ = tb.decideTool(context.Background(), &DecideInput{Items: []DecideItem{{Path: u.path, Action: actionContainer, Reason: "分组目录"}}})
 		case unitGroup:
-			var items []TargetItem
+			var items []DecideItem
 			for _, f := range u.files {
-				items = append(items, TargetItem{Path: f.OriginalPath, NewPath: "/文档/" + f.Name, Reason: "文档"})
+				items = append(items, DecideItem{Path: f.OriginalPath, Action: actionMove, NewPath: "/文档/" + f.Name, Reason: "文档"})
 			}
-			out, _ := tb.setTargets(context.Background(), &SetTargetsInput{Items: items})
+			out, _ := tb.decideTool(context.Background(), &DecideInput{Items: items})
 			if !out.Success {
 				t.Errorf("group targets: %+v", out)
 			}
 		case unitVersions:
-			var items []TargetItem
+			var items []DecideItem
 			for _, m := range u.versions.Members {
-				items = append(items, TargetItem{Path: m.Path, NewPath: "/软件/Tool/" + m.Version + "/" + m.Name, Reason: "版本"})
+				items = append(items, DecideItem{Path: m.Path, Action: actionMove, NewPath: "/软件/Tool/" + m.Version + "/" + m.Name, Reason: "版本"})
 			}
-			_, _ = tb.setTargets(context.Background(), &SetTargetsInput{Items: items})
+			_, _ = tb.decideTool(context.Background(), &DecideInput{Items: items})
 		}
 	}
 	if err := a.walk(context.Background(), fakeWorkers(a, decide, &seen, &mu)); err != nil {
@@ -292,79 +291,161 @@ func TestToolOrderDeterministic(t *testing.T) {
 	if strings.Join(first, ",") != strings.Join(second, ",") {
 		t.Fatalf("order differs: %v vs %v", first, second)
 	}
-	want := "list_files,get_file_info,read_file,set_targets,decide_dirs,split_unit,update_description,list_categories,create_category,update_category,delete_category,add_rule,update_rule,delete_rule,apply_rules,read_plan,note,remember,recall,run_script"
+	want := "list_entries,read_file,view_image,decide,split_unit,describe,add_rule,apply_rules,run_script,create_category,note,recall"
 	if strings.Join(first, ",") != want {
 		t.Fatalf("tagging tools:\n%s\nwant\n%s", strings.Join(first, ","), want)
 	}
-	chat := names(ToolsetChat)
-	if !hasTool(chat, "write_plan") || hasTool(first, "write_plan") || !hasTool(chat, "add_rule") {
-		t.Fatalf("chat adds write_plan only: %v", chat)
+	wantMain := want + ",update_category,delete_category,update_rule,delete_rule,read_plan,write_plan,remember"
+	if got := strings.Join(names(ToolsetMain), ","); got != wantMain {
+		t.Fatalf("main tools:\n%s\nwant\n%s", got, wantMain)
+	}
+	if strings.Join(ToolNames(ToolsetMain), ",") != wantMain {
+		t.Fatal("ToolNames must match the built list")
 	}
 }
 
 func TestDecisionToolsCategoryCheckAndReview(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
 	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
-	ctx := context.Background()
-	out, err := tb.setTargets(ctx, &SetTargetsInput{Items: []TargetItem{
-		{Path: "readme.txt", NewPath: "/归档/readme.txt", Reason: "x"},
-		{Path: "misc/a.pdf", NewPath: "文档/a.pdf", Reason: "文档", Confidence: 0.3},
-		{Path: "misc/b.pdf", NewPath: "/文档/a.pdf", Reason: "文档"},
-	}})
-	if err != nil || out.Success || out.OK != 2 || len(out.Failed) != 1 || !strings.Contains(out.Failed[0].Error, "不在任何分类路径下") {
-		t.Fatalf("set_targets: %+v %v", out, err)
+	call := func(items ...map[string]any) map[string]any {
+		return callTool(t, tb, ToolsetTagging, "decide", map[string]any{"items": items})
 	}
-	if out.NeedsReview != 1 || len(out.Renamed) != 1 || out.Renamed[0].NewPath != "/文档/a (2).pdf" {
+	out := call(
+		map[string]any{"path": "readme.txt", "action": "move", "new_path": "/归档/readme.txt", "reason": "x"},
+		map[string]any{"path": "misc/a.pdf", "action": "move", "new_path": "文档/a.pdf", "reason": "文档", "confidence": 0.3},
+		map[string]any{"path": "misc/b.pdf", "action": "move", "new_path": "/文档/a.pdf", "reason": "文档"},
+	)
+	failed, _ := out["failed"].([]any)
+	if okOf(out) || out["ok"] != float64(2) || len(failed) != 1 || !strings.Contains(failed[0].(map[string]any)["error"].(string), "不在任何分类路径下") {
+		t.Fatalf("decide: %+v", out)
+	}
+	renamed, _ := out["renamed"].([]any)
+	if out["needs_review"] != float64(1) || len(renamed) != 1 || renamed[0].(map[string]any)["new_path"] != "/文档/a (2).pdf" {
 		t.Fatalf("review + collision: %+v", out)
 	}
 	if e, _ := repo.GetFileByPath(a.sessionID, "misc/a.pdf"); !e.NeedsReview || e.Reason != "文档" {
 		t.Fatalf("stored: %+v", e)
 	}
-	d, _ := tb.decideDirs(ctx, &DecideDirsInput{Items: []DecideItem{{Path: "misc", Role: db.RoleUnit, NewPath: "/文档/misc", Reason: "整体"}}})
-	if d.Success || !strings.Contains(d.Failed[0].Error, "override") {
+	d := call(map[string]any{"path": "misc", "action": "unit", "new_path": "/文档/misc", "reason": "整体"})
+	if okOf(d) || !strings.Contains(d["failed"].([]any)[0].(map[string]any)["error"].(string), "override") {
 		t.Fatalf("unit over decided children needs override: %+v", d)
 	}
-	d, _ = tb.decideDirs(ctx, &DecideDirsInput{Items: []DecideItem{{Path: "misc", Role: db.RoleUnit, NewPath: "/文档/misc", Reason: "整体", Override: true}}})
-	if !d.Success || len(d.Overridden) != 2 {
+	d = call(map[string]any{"path": "misc", "action": "unit", "new_path": "/文档/misc", "reason": "整体", "override": true})
+	if !okOf(d) || len(d["overridden"].([]any)) != 2 {
 		t.Fatalf("override: %+v", d)
 	}
-	out, _ = tb.setTargets(ctx, &SetTargetsInput{Items: []TargetItem{{Path: "misc/a.pdf", NewPath: "/文档/a.pdf", Reason: "x"}}})
-	if out.Success || !strings.Contains(out.Failed[0].Error, "split_unit") {
+	out = call(map[string]any{"path": "misc/a.pdf", "action": "move", "new_path": "/文档/a.pdf", "reason": "x"})
+	if okOf(out) || !strings.Contains(out["failed"].([]any)[0].(map[string]any)["error"].(string), "split_unit") {
 		t.Fatalf("under unit: %+v", out)
 	}
-	sp, _ := tb.splitUnit(ctx, &SplitUnitInput{Path: "misc"})
-	if !sp.Success || sp.Released != 4 {
+	sp := callTool(t, tb, ToolsetTagging, "split_unit", map[string]string{"path": "misc"})
+	if !okOf(sp) || sp["released"] != float64(4) {
 		t.Fatalf("split: %+v", sp)
 	}
-	if big, _ := tb.setTargets(ctx, &SetTargetsInput{Items: make([]TargetItem, 201)}); big.Error == "" {
+	big := make([]map[string]any, 201)
+	for i := range big {
+		big[i] = map[string]any{"path": "x", "action": "skip", "reason": "x"}
+	}
+	if r := call(big...); okOf(r) || errText(r) == "" {
 		t.Fatal("batch cap")
 	}
 }
 
-func TestListFilesCompactAndSensitiveRead(t *testing.T) {
+func TestDecideRequiresReasonAndValidAction(t *testing.T) {
+	a, repo := pipelineFixture(t, "")
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	out := callTool(t, tb, ToolsetTagging, "decide", map[string]any{"items": []map[string]any{
+		{"path": "readme.txt", "action": "move", "new_path": "/文档/readme.txt", "reason": "  "},
+		{"path": "misc/a.pdf", "action": "teleport", "reason": "x"},
+		{"path": "misc/b.pdf", "action": "move", "reason": "x"},
+		{"path": "Tool-1.0.zip", "action": "skip", "reason": "安装包不整理"},
+	}})
+	failed := out["failed"].([]any)
+	if okOf(out) || out["ok"] != float64(1) || len(failed) != 3 {
+		t.Fatalf("each bad item is reported, the good one is written: %+v", out)
+	}
+	if e, _ := repo.GetFileByPath(a.sessionID, "readme.txt"); e.Role != db.RoleUndecided {
+		t.Fatalf("no placeholder reason is written: %+v", e)
+	}
+	if e, _ := repo.GetFileByPath(a.sessionID, "Tool-1.0.zip"); e.Role != db.RoleSkip || e.Reason != "安装包不整理" {
+		t.Fatalf("skip: %+v", e)
+	}
+	undo := callTool(t, tb, ToolsetTagging, "decide", map[string]any{"items": []map[string]any{{"path": "Tool-1.0.zip", "action": "undo", "reason": "改主意"}}})
+	if !okOf(undo) {
+		t.Fatalf("undo: %+v", undo)
+	}
+	if e, _ := repo.GetFileByPath(a.sessionID, "Tool-1.0.zip"); e.Role != db.RoleUndecided {
+		t.Fatalf("undo clears the decision: %+v", e)
+	}
+}
+
+func TestSurveyNeverDecides(t *testing.T) {
+	a, repo := pipelineFixture(t, "")
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb.RunKind = db.RunPhaseSurvey
+	for name, args := range map[string]any{
+		"decide":      map[string]any{"items": []map[string]any{{"path": "readme.txt", "action": "skip", "reason": "x"}}},
+		"split_unit":  map[string]string{"path": "misc"},
+		"describe":    map[string]any{"items": []map[string]string{{"path": "misc", "description": "x"}}},
+		"apply_rules": map[string]any{},
+	} {
+		out := callTool(t, tb, ToolsetMain, name, args)
+		if okOf(out) || !strings.Contains(errText(out), "调研阶段") {
+			t.Fatalf("%s must be refused in a survey run: %+v", name, out)
+		}
+	}
+	if e, _ := repo.GetFileByPath(a.sessionID, "readme.txt"); e.Role != db.RoleUndecided {
+		t.Fatalf("nothing decided: %+v", e)
+	}
+	// Categories, rules and the plan stay open.
+	mustOK(t, callTool(t, tb, ToolsetMain, "add_rule", map[string]any{"name": "pdf", "exts": "pdf", "target": "文档/{parent}"}))
+	mustOK(t, callTool(t, tb, ToolsetMain, "read_plan", map[string]any{}))
+}
+
+func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
 	if err := repo.CreateFile(&db.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}); err != nil {
 		t.Fatal(err)
 	}
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
-	out, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Limit: 2})
-	if err != nil || !out.HasMore || out.NextCursor == 0 || strings.Count(out.Rows, "\n") != 2 || out.Columns != listColumns {
-		t.Fatalf("paged TSV: %+v %v", out, err)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &db.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)
+	list := func(args map[string]any) map[string]any {
+		return callTool(t, tb, ToolsetTagging, "list_entries", args)
 	}
-	rest, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Limit: 2, Cursor: out.NextCursor})
-	if err != nil || rest.HasMore || strings.Count(rest.Rows, "\n") != 2 || strings.Contains(out.Rows, strings.SplitN(rest.Rows, "\t", 2)[0]+"\t") {
-		t.Fatalf("second keyset page: %+v %v", rest, err)
+	out := list(map[string]any{"parent_path": "misc", "limit": 2})
+	if !okOf(out) || out["has_more"] != true || out["next_cursor"] == nil || !strings.Contains(out["rows"].(string), "<data ") {
+		t.Fatalf("paged TSV inside <data>: %+v", out)
 	}
-	if bad, err := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "misc", Cursor: 999999}); err != nil || bad.Error == "" {
-		t.Fatalf("stale cursor is a recoverable result: %+v %v", bad, err)
+	rest := list(map[string]any{"parent_path": "misc", "limit": 2, "cursor": out["next_cursor"]})
+	if !okOf(rest) || rest["has_more"] == true || out["rows"] == rest["rows"] {
+		t.Fatalf("second keyset page: %+v", rest)
 	}
-	all, _ := tb.listFiles(context.Background(), &ListFilesInput{ParentPath: "/misc/", Undecided: true})
-	if !strings.Contains(all.Rows, "evil name.txt\tf") || strings.Contains(all.Rows, "misc/") {
-		t.Fatalf("names sanitized and relative: %q", all.Rows)
+	if bad := list(map[string]any{"parent_path": "misc", "cursor": 999999}); okOf(bad) || errText(bad) == "" {
+		t.Fatalf("stale cursor is a recoverable result: %+v", bad)
 	}
-	r, err := tb.readFile(context.Background(), &ReadFileInput{Path: "keys/id_rsa"})
-	if err != nil || r.Content != sensitiveNotice {
-		t.Fatalf("sensitive files are never read: %+v %v", r, err)
+	all := list(map[string]any{"parent_path": "/misc/", "undecided": true})
+	if rows := all["rows"].(string); !strings.Contains(rows, "evil name.txt\tf") || strings.Contains(rows, "misc/") {
+		t.Fatalf("names sanitized and relative: %q", rows)
+	}
+	byPath := list(map[string]any{"paths": []string{"misc/a.pdf", "nope/x.txt", "misc/evil\nname.txt"}})
+	if !okOf(byPath) || !strings.Contains(byPath["rows"].(string), "misc/a.pdf\tf") || !strings.Contains(byPath["rows"].(string), "misc/evil name.txt") || len(byPath["missing"].([]any)) != 1 {
+		t.Fatalf("paths lookup: %+v", byPath)
+	}
+	if out := list(map[string]any{"paths": []string{"nope"}}); okOf(out) {
+		t.Fatalf("all missing: %+v", out)
+	}
+	if out := list(map[string]any{"paths": []string{"misc"}, "parent_path": "misc"}); okOf(out) {
+		t.Fatalf("paths and parent_path together: %+v", out)
+	}
+	r := callTool(t, tb, ToolsetTagging, "read_file", map[string]string{"path": "keys/id_rsa"})
+	if okOf(r) || !strings.Contains(errText(r), "敏感") {
+		t.Fatalf("sensitive files are never read: %+v", r)
+	}
+	if r := callTool(t, tb, ToolsetTagging, "read_file", map[string]string{"path": "../x"}); okOf(r) {
+		t.Fatalf("a bad path is a result, not a Go error: %+v", r)
+	}
+	off := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &db.ScanSession{ID: a.sessionID, AllowReadFile: false}, false)
+	if r := callTool(t, off, ToolsetTagging, "read_file", map[string]string{"path": "readme.txt"}); okOf(r) || !strings.Contains(errText(r), "未开启读取文件内容") {
+		t.Fatalf("switch off: %+v", r)
 	}
 }
 
@@ -380,12 +461,19 @@ s := signals("proj")
 dirs := list_dirs()
 n := apply_rule("pdf")
 d := decide_dir("proj", "unit", "/代码/proj", "Go 项目")
-bad := decide_dir("proj/main.go", "skip")
+bad := decide_dir("proj/main.go", "skip", "", "已在整体内")
 r := set_targets([{path: "readme.txt", new_path: "/文档/readme.txt", reason: "说明", confidence: 0.9}])
-result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: is_error(bad), ok: r.ok}`)
+noReason := set_targets([{path: "Tool-1.0.zip", new_path: "/软件/Tool-1.0.zip"}])
+result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: is_error(bad), ok: r.ok, nr: noReason.failed[0]["error"]}`)
 	v := resultValue(t, out)
 	if v["marker"] != "go.mod" || v["dirs"] != float64(2) || v["n"] != float64(2) || v["role"] != "unit" || v["bad"] != true || v["ok"] != float64(1) {
 		t.Fatalf("builtins: %+v", v)
+	}
+	if !strings.Contains(v["nr"].(string), "reason") {
+		t.Fatalf("a script decision needs a reason: %+v", v)
+	}
+	if e, _ := repo.GetFileByPath(a.sessionID, "Tool-1.0.zip"); e.Role != db.RoleUndecided {
+		t.Fatalf("no placeholder reason is written: %+v", e)
 	}
 	if e, _ := repo.GetFileByPath(a.sessionID, "misc/a.pdf"); e.NewPath != "/文档/misc/a.pdf" || e.Reason != "规则：pdf" {
 		t.Fatalf("apply_rule: %+v", e)
@@ -395,32 +483,57 @@ result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: i
 func TestRuleTools(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
 	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
-	ctx := context.Background()
-	if out, _ := tb.addRule(ctx, &RuleInput{Name: "x", Exts: "pdf", Target: "归档/{year}"}); out.Success || !strings.Contains(out.Error, "分类") {
+	add := func(args map[string]any) map[string]any { return callTool(t, tb, ToolsetMain, "add_rule", args) }
+	if out := add(map[string]any{"name": "x", "exts": "pdf", "target": "归档/{year}"}); okOf(out) || !strings.Contains(errText(out), "分类") {
 		t.Fatalf("agent rule outside categories: %+v", out)
 	}
-	if out, _ := tb.addRule(ctx, &RuleInput{Name: "x", Exts: "pdf", Target: "文档/{nope}"}); out.Success {
+	if out := add(map[string]any{"name": "x", "exts": "pdf", "target": "文档/{nope}"}); okOf(out) {
 		t.Fatal("unknown variable")
 	}
-	out, err := tb.addRule(ctx, &RuleInput{Name: "pdf", Exts: "pdf", Target: "文档/{parent}"})
-	if err != nil || !out.Success {
-		t.Fatalf("add: %+v %v", out, err)
+	out := add(map[string]any{"name": "pdf", "exts": "pdf", "target": "文档/{parent}"})
+	if !okOf(out) || out["matched_preview"] != float64(2) || out["rule"] != "pdf" {
+		t.Fatalf("add: %+v", out)
 	}
-	pv, _ := tb.applyRules(ctx, &ApplyRulesInput{Preview: true})
-	if !pv.Success || pv.Rules[0].Matched != 2 {
+	if dup := add(map[string]any{"name": "pdf", "exts": "doc", "target": "文档"}); okOf(dup) {
+		t.Fatalf("duplicate name: %+v", dup)
+	}
+	pv := callTool(t, tb, ToolsetMain, "apply_rules", map[string]any{"preview": true})
+	if !okOf(pv) || pv["rules"].([]any)[0].(map[string]any)["matched"] != float64(2) {
 		t.Fatalf("preview: %+v", pv)
 	}
-	if u, _ := tb.updateRule(ctx, &UpdateRuleInput{ID: out.ID, RuleInput: RuleInput{Name: "PDF 文档"}}); !u.Success {
+	if u := callTool(t, tb, ToolsetMain, "update_rule", map[string]any{"name": "pdf", "new_name": "PDF 文档", "name_regex": "^a"}); !okOf(u) {
 		t.Fatalf("update: %+v", u)
 	}
-	ap, _ := tb.applyRules(ctx, &ApplyRulesInput{})
-	if ap.Rules[0].Matched != 2 || ap.Rules[0].Name != "PDF 文档" {
+	if rules, _ := repo.ListRules(a.sessionID); rules[0].Exts != "pdf" || rules[0].NameRegex != "^a" {
+		t.Fatalf("only the given fields change: %+v", rules[0])
+	}
+	if u := callTool(t, tb, ToolsetMain, "update_rule", map[string]any{"name": "PDF 文档", "clear": []string{"name_regex"}}); !okOf(u) {
+		t.Fatalf("clear: %+v", u)
+	}
+	if rules, _ := repo.ListRules(a.sessionID); rules[0].NameRegex != "" {
+		t.Fatalf("clear removes the condition: %+v", rules[0])
+	}
+	if u := callTool(t, tb, ToolsetMain, "update_rule", map[string]any{"name": "nope"}); okOf(u) {
+		t.Fatalf("unknown rule: %+v", u)
+	}
+	ap := callTool(t, tb, ToolsetMain, "apply_rules", map[string]any{"rule": "PDF 文档"})
+	r0 := ap["rules"].([]any)[0].(map[string]any)
+	if r0["matched"] != float64(2) || r0["name"] != "PDF 文档" {
 		t.Fatalf("apply: %+v", ap)
 	}
-	if d, _ := tb.deleteRule(ctx, &RuleIDInput{ID: out.ID}); !d.Success {
-		t.Fatal("delete")
-	}
-	if d, _ := tb.deleteRule(ctx, &RuleIDInput{ID: out.ID}); d.Success {
+	mustOK(t, callTool(t, tb, ToolsetMain, "delete_rule", map[string]any{"name": "PDF 文档"}))
+	if d := callTool(t, tb, ToolsetMain, "delete_rule", map[string]any{"name": "PDF 文档"}); okOf(d) {
 		t.Fatal("delete twice")
 	}
+}
+
+func TestTaggingRulesNeedPathPrefix(t *testing.T) {
+	a, repo := pipelineFixture(t, "")
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb.RunKind = db.RunPhaseTagging
+	out := callTool(t, tb, ToolsetTagging, "add_rule", map[string]any{"name": "pdf", "exts": "pdf", "target": "文档/{parent}"})
+	if okOf(out) || !strings.Contains(errText(out), "path_prefix") {
+		t.Fatalf("a tagging rule without path_prefix: %+v", out)
+	}
+	mustOK(t, callTool(t, tb, ToolsetTagging, "add_rule", map[string]any{"name": "pdf", "exts": "pdf", "path_prefix": "misc", "target": "文档/{parent}"}))
 }

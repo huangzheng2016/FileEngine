@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -35,7 +36,18 @@ const estimatedTokensPerImagePart = 400
 const maxImagePixels = 50_000_000
 
 type ViewImageInput struct {
-	Paths []string `json:"paths" jsonschema_description:"要查看的图片的原路径；支持 jpg、jpeg、png、gif，HEIC 和 RAW 会跳过"`
+	Paths []string `json:"paths" jsonschema:"minItems=1" jsonschema_description:"要查看的图片的原路径；支持 jpg、jpeg、png、gif，HEIC 和 RAW 会跳过"`
+}
+
+func (tb *ToolBuilder) buildVisionTool() (tool.BaseTool, error) {
+	maxImages, maxPx, maxBytes := tb.visionLimits()
+	desc := fmt.Sprintf("查看图片内容，返回缩略图（长边 %dpx）。每次最多 %d 张，支持 jpg/jpeg/png/gif；HEIC/RAW 会跳过；单文件超过 %d MB 拒绝。只在文件名和内容文字都判断不了时使用。需要本任务开启看图且模型支持图片。", maxPx, maxImages, maxBytes/(1024*1024))
+	return newEnvImageTool("view_image", desc, tb.viewImage)
+}
+
+// dataNote wraps one per-path note: it echoes file-derived text.
+func dataNote(s string) string {
+	return "<data>" + dataTagDefang.Replace(s) + "</data>"
 }
 
 func (tb *ToolBuilder) visionLimits() (maxImages, maxPx, maxBytes int) {
@@ -57,57 +69,59 @@ func (tb *ToolBuilder) visionLimits() (maxImages, maxPx, maxBytes int) {
 // Per-file problems become text notes so one bad file never fails the whole
 // call.
 func (tb *ToolBuilder) viewImage(ctx context.Context, input *ViewImageInput) (*schema.ToolResult, error) {
+	if !tb.modelVisionEnabled || !tb.session.AllowVision {
+		return nil, rejectHint("只按文件名和位置判断", "本任务未开启看图，或当前模型不支持图片")
+	}
 	maxImages, maxPx, maxBytes := tb.visionLimits()
 	if len(input.Paths) == 0 {
-		return nil, fmt.Errorf("no paths provided")
+		return nil, rejectf("没有给出图片路径")
 	}
 	if len(input.Paths) > maxImages {
-		return nil, fmt.Errorf("too many images: %d requested, max %d per view_image call", len(input.Paths), maxImages)
+		return nil, rejectHint("分批查看", "一次最多看 %d 张，本次 %d 张", maxImages, len(input.Paths))
 	}
 
 	result := &schema.ToolResult{}
+	note := func(format string, args ...any) {
+		result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: dataNote(fmt.Sprintf(format, args...))})
+	}
 
 	for _, p := range input.Paths {
 		path := normalizePath(p)
+		shown := SanitizeUntrustedName(path)
 		if tb.isSensitivePath(path) {
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: SanitizeUntrustedName(path) + ": " + sensitiveNotice})
+			note("%s：%s", shown, sensitiveNotice)
 			continue
 		}
 		format := imageFormatFor(path)
 		if format == "" {
-			note := fmt.Sprintf("%s: skipped (unsupported format; supported: jpg/jpeg/png/gif)", path)
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
+			note("%s：已跳过（不支持的格式；支持 jpg/jpeg/png/gif）", shown)
 			continue
 		}
 
 		info, err := tb.fs.Stat(ctx, path)
 		if err != nil {
-			note := fmt.Sprintf("%s: skipped (stat failed: %v)", path, err)
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
+			note("%s：已跳过（无法读取：%v）", shown, err)
 			continue
 		}
 		if info.IsDir {
-			note := fmt.Sprintf("%s: skipped (is a directory)", path)
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
+			note("%s：已跳过（是目录）", shown)
 			continue
 		}
 		if info.Size > int64(maxBytes) {
-			note := fmt.Sprintf("%s: skipped (too large: %d bytes, limit %d)", path, info.Size, maxBytes)
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
+			note("%s：已跳过（文件过大：%d 字节，上限 %d）", shown, info.Size, maxBytes)
 			continue
 		}
 
 		data, mime, origW, origH, thumbW, thumbH, err := tb.loadThumbnail(ctx, path, format, maxPx, maxBytes)
 		if err != nil {
-			note := fmt.Sprintf("%s: skipped (%v)", path, err)
-			result.Parts = append(result.Parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: note})
+			note("%s：已跳过（%v）", shown, err)
 			continue
 		}
 
 		b64 := base64.StdEncoding.EncodeToString(data)
 		result.Parts = append(result.Parts,
 			schema.ToolOutputPart{Type: schema.ToolPartTypeText,
-				Text: fmt.Sprintf("%s (%dx%d -> %dx%d, %s):", path, origW, origH, thumbW, thumbH, mime)},
+				Text: dataNote(fmt.Sprintf("%s（%dx%d -> %dx%d，%s）：", shown, origW, origH, thumbW, thumbH, mime))},
 			schema.ToolOutputPart{Type: schema.ToolPartTypeImage,
 				Image: &schema.ToolOutputImage{MessagePartCommon: schema.MessagePartCommon{
 					Base64Data: &b64,
@@ -135,32 +149,32 @@ func imageFormatFor(path string) string {
 func (tb *ToolBuilder) loadThumbnail(ctx context.Context, path, format string, maxPx, maxBytes int) (data []byte, mime string, origW, origH, thumbW, thumbH int, err error) {
 	reader, err := tb.fs.ReadFile(ctx, path)
 	if err != nil {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("read failed: %w", err)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("读取失败：%w", err)
 	}
 	defer reader.Close()
 
 	// Second size defense in case Stat under-reported.
 	raw, err := io.ReadAll(io.LimitReader(reader, int64(maxBytes)+1))
 	if err != nil {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("read failed: %w", err)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("读取失败：%w", err)
 	}
 	if len(raw) > maxBytes {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("too large: over %d bytes", maxBytes)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("文件过大：超过 %d 字节", maxBytes)
 	}
 
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("decode failed: %w", err)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("解码失败：%w", err)
 	}
 	// Decompression-bomb guard: check header dimensions before Decode
 	// allocates by them (also keeps the area-average accumulator safe).
 	if pixels := int64(cfg.Width) * int64(cfg.Height); cfg.Width <= 0 || cfg.Height <= 0 || pixels > maxImagePixels {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("dimensions too large: %dx%d (limit %d pixels)", cfg.Width, cfg.Height, maxImagePixels)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("图片尺寸过大：%dx%d（上限 %d 像素）", cfg.Width, cfg.Height, maxImagePixels)
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("decode failed: %w", err)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("解码失败：%w", err)
 	}
 	origW, origH = cfg.Width, cfg.Height
 
@@ -178,7 +192,7 @@ func (tb *ToolBuilder) loadThumbnail(ctx context.Context, path, format string, m
 		err = png.Encode(&buf, thumb)
 	}
 	if err != nil {
-		return nil, "", 0, 0, 0, 0, fmt.Errorf("encode failed: %w", err)
+		return nil, "", 0, 0, 0, 0, fmt.Errorf("编码失败：%w", err)
 	}
 	return buf.Bytes(), mime, origW, origH, thumbW, thumbH, nil
 }
