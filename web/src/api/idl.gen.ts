@@ -385,6 +385,8 @@ export interface ListFilesReq {
 export interface ListFilesResp {
   items: FileEntry[]
   total: number
+  // decisions with a confidence below this wait for the user's confirmation
+  review_confidence: number
 }
 
 export interface GetFileReq {
@@ -560,6 +562,7 @@ export interface CreateMemoryReq {
   scope: string
   scope_id: Id
   kind: string
+  // empty = derived from the path ("path:<path>") or else the first 48 characters of the content ("user:...")
   key: string
   content: string
   path: string
@@ -686,6 +689,8 @@ export interface SessionPlan {
   updated_at: number
   // unix seconds; 0 = not approved
   approved_at: number
+  // decisions with a confidence below this wait for the user's confirmation
+  review_confidence: number
 }
 
 export interface GetPlanReq {

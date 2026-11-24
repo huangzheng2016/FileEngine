@@ -1380,6 +1380,7 @@ type CreateMemoryReq struct {
 	Scope   string `thrift:"scope,1" form:"scope" json:"scope" query:"scope"`
 	ScopeID int64  `thrift:"scope_id,2" json:"scope_id,string" form:"scope_id" query:"scope_id"`
 	Kind    string `thrift:"kind,3" form:"kind" json:"kind" query:"kind"`
+	// empty = derived from the path ("path:<path>") or else the first 48 characters of the content ("user:...")
 	Key     string `thrift:"key,4" form:"key" json:"key" query:"key"`
 	Content string `thrift:"content,5" form:"content" json:"content" query:"content"`
 	Path    string `thrift:"path,6" form:"path" json:"path" query:"path"`

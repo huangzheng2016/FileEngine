@@ -48,6 +48,7 @@ struct CreateMemoryReq {
     1: string scope
     2: i64 scope_id (go.tag='json:"scope_id,string"')
     3: string kind
+    // empty = derived from the path ("path:<path>") or else the first 48 characters of the content ("user:...")
     4: string key
     5: string content
     6: string path
