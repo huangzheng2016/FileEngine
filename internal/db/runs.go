@@ -10,6 +10,7 @@ import (
 	"FileEngine/biz/dal/db/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrSessionBusy = errors.New("整理任务正在运行中")
@@ -40,6 +41,14 @@ func (r *Repository) InsertRun(run *model.AgentRun) error {
 	run.Status, run.StartedAt = RunRunning, time.Now()
 	err := dal.WithRetry(func() error {
 		return r.DB().Transaction(func(tx *gorm.DB) error {
+			// Serializes concurrent starts of one session on MySQL/PostgreSQL; the
+			// count below would otherwise be a read-then-write race. SQLite has a
+			// single writer, so its dialect drops the clause. A missing session
+			// row locks nothing and is not an error.
+			var locked []model.ScanSession
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", run.SessionID).Find(&locked).Error; err != nil {
+				return err
+			}
 			var n int64
 			if err := tx.Model(&model.AgentRun{}).Where("session_id = ? AND status = ?", run.SessionID, RunRunning).Count(&n).Error; err != nil {
 				return err
@@ -66,24 +75,41 @@ func (r *Repository) InsertRun(run *model.AgentRun) error {
 	return nil
 }
 
-// Emits the terminal run_status plus run_done exactly once.
+// Emits the terminal run_status plus run_done exactly once: only the call whose
+// compare-and-set matched the still-running row finishes the run.
 func (r *Repository) FinishRun(run *model.AgentRun, status, summary, errMsg string, tokens TokenCounts) error {
 	now := time.Now()
+	var matched int64
+	err := dal.WithRetry(func() error {
+		res := r.DB().Model(&model.AgentRun{}).Where("id = ? AND status = ?", run.ID, RunRunning).Updates(map[string]any{
+			"status": status, "summary": summary, "error": errMsg, "ended_at": now,
+			"prompt_tokens": tokens.Prompt, "cached_tokens": tokens.Cached, "cache_write_tokens": tokens.CacheWrite,
+			"completion_tokens": tokens.Completion, "total_tokens": tokens.Total,
+		})
+		matched = res.RowsAffected
+		return res.Error
+	})
+	UnregisterRunCancel(run.ID)
+	if err != nil || matched == 0 {
+		return err
+	}
 	run.Status, run.Summary, run.Error, run.EndedAt = status, summary, errMsg, &now
 	run.PromptTokens, run.CachedTokens, run.CacheWriteTokens = tokens.Prompt, tokens.Cached, tokens.CacheWrite
 	run.CompletionTokens, run.TotalTokens = tokens.Completion, tokens.Total
 	run.FillCacheHitRate()
-	err := dal.WithRetry(func() error {
-		return r.DB().Model(&model.AgentRun{}).Where("id = ? AND status = ?", run.ID, RunRunning).Updates(map[string]any{
-			"status": status, "summary": summary, "error": errMsg, "ended_at": now,
-			"prompt_tokens": tokens.Prompt, "cached_tokens": tokens.Cached, "cache_write_tokens": tokens.CacheWrite,
-			"completion_tokens": tokens.Completion, "total_tokens": tokens.Total,
-		}).Error
-	})
-	UnregisterRunCancel(run.ID)
 	Emit(run.SessionID, run.ID, EvRunStatus, RunStatusData{RunID: run.ID, Phase: run.Phase, Status: status, Title: run.Title, Error: errMsg})
 	Emit(run.SessionID, run.ID, EvRunDone, RunDoneData{RunID: run.ID, Phase: run.Phase, Status: status, Summary: summary, Error: errMsg, Tokens: tokens})
-	return err
+	return nil
+}
+
+// SetRunCounters stores an executing run's final counters. Call it before
+// FinishRun so a client that sees run_done also sees them.
+func (r *Repository) SetRunCounters(runID uint, total, success, failed, skipped int) error {
+	return dal.WithRetry(func() error {
+		return r.DB().Model(&model.AgentRun{}).Where("id = ? AND status = ?", runID, RunRunning).Updates(map[string]any{
+			"exec_total": total, "exec_success": success, "exec_failed": failed, "exec_skipped": skipped,
+		}).Error
+	})
 }
 
 func RegisterRunCancel(runID uint, cancel context.CancelFunc) {
