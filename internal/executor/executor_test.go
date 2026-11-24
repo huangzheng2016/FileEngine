@@ -326,7 +326,7 @@ func TestJournalResumeAfterCrash(t *testing.T) {
 	e.write("x/b.txt", "BBBB")
 	sb, mb := st("b.txt")
 	e.repo.CreateExecOp(&db.ExecOp{RunID: run.ID, SessionID: e.sid, EntryID: fb.ID, Kind: db.ExecKindMove,
-		Src: "b.txt", Dst: "x/b.txt", Size: sb, ModTime: mb, State: db.ExecVerified})
+		Src: "b.txt", Dst: "x/b.txt", Size: sb, ModTime: mb, DstSize: sb, State: db.ExecVerified})
 	e.repo.FinishRun(run, db.RunStopped, "", "", db.TokenCounts{})
 
 	if err := New(e.repo, e.fs).Recover(context.Background(), e.sid); err != nil {

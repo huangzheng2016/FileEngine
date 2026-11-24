@@ -199,6 +199,12 @@ func (e *Executor) finishCopy(ctx context.Context, op *db.ExecOp) error {
 			e.setState(op, db.ExecVerified, "源文件在复制后被修改，未删除源")
 			return skip(IssueSourceChanged, "源文件在复制后被修改，已保留两份")
 		}
+		ds, err := e.fs.Stat(ctx, op.Dst)
+		if err != nil || !dstUnchanged(ds, op) {
+			msg := "副本已缺失或被修改，未删除源"
+			e.setState(op, db.ExecFailed, msg)
+			return skip(IssueSourceChanged, msg)
+		}
 		if err := e.fs.Delete(ctx, op.Src); err != nil {
 			e.setState(op, db.ExecVerified, "删除源失败："+err.Error())
 			return fmt.Errorf("副本已校验，但删除源失败：%w", err)
