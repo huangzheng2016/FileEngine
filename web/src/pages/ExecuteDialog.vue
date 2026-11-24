@@ -7,7 +7,7 @@ import Loading from '@/base/Loading.vue'
 import Segmented from '@/base/Segmented.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import { fmtLabel, fmtNumber, labelOptions } from '@/base/format'
-import { EXEC_MODE, ENTRY_FLAG, VALIDATION_ISSUE } from '@/base/labels'
+import { ENTRY_FLAG, EXEC_MODE, EXEC_MODE_HINT, VALIDATION_ISSUE } from '@/base/labels'
 import { vTip } from '@/base/tooltip'
 import { toast } from '@/base/toast'
 import { useFetch } from '@/base/useFetch'
@@ -50,10 +50,6 @@ const scopes = computed(() => [
   { value: 'all' as const, label: `全部 ${fmtNumber(props.pending)} 项` },
 ])
 const MODES = labelOptions(EXEC_MODE) as { value: ExecMode; label: string }[]
-const MODE_HINT: Record<ExecMode, string> = {
-  copy: '在新位置放一份副本，原文件不动，通常会多占一份空间',
-  move: '把文件挪到新位置，原来的位置不再保留',
-}
 
 const count = computed(() => (form.scope === 'sample' ? Math.min(form.sample, props.pending) : props.pending))
 const blocked = computed(() => (props.pending ? '' : '没有可执行的项'))
@@ -101,7 +97,7 @@ async function submit() {
       <div class="field">
         <span class="field-label">方式</span>
         <Segmented v-model="form.mode" :options="MODES" label="方式" />
-        <span class="field-hint">{{ MODE_HINT[form.mode] }}</span>
+        <span class="field-hint">{{ EXEC_MODE_HINT[form.mode] }}</span>
       </div>
       <div class="field">
         <span class="field-label">范围</span>

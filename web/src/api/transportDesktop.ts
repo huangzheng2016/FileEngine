@@ -16,6 +16,8 @@ export async function callDesktop(req: RawRequest): Promise<RawResponse> {
   const pending = Call({ method: req.method, path: req.path, query: req.query, body: req.body })
   const onAbort = () => pending.cancel()
   req.signal?.addEventListener('abort', onAbort, { once: true })
+  // aborted while the binding was loading
+  if (req.signal?.aborted) onAbort()
   try {
     const res = await pending
     const contentType = res.content_type

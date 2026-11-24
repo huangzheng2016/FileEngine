@@ -5,6 +5,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "paths": { "@/*": ["./src/*"] },
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true

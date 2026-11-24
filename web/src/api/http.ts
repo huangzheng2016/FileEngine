@@ -1,6 +1,7 @@
 // The one place that talks to the backend. `request` hides the transport: axios over HTTP in a browser,
 // the Wails `Call` binding in the desktop window. Both return the same raw response, which is turned into
 // data or a typed ApiError here, so no page ever sees an envelope or a transport detail.
+import { CanceledError } from 'axios'
 import { transport } from './env'
 import { callDesktop } from './transportDesktop'
 import { callWeb } from './transportWeb'
@@ -48,8 +49,6 @@ export class ApiError extends Error {
   }
 }
 
-export const isApiError = (e: unknown): e is ApiError => e instanceof ApiError
-
 export function isConflict(e: unknown): boolean {
   return e instanceof ApiError && e.status === 409
 }
@@ -93,7 +92,7 @@ async function send(method: 'GET' | 'POST', path: string, opts: RequestOptions, 
     signal: opts.signal,
     as,
   }
-  opts.signal?.throwIfAborted?.()
+  if (opts.signal?.aborted) throw new CanceledError('canceled')
   const res = await (transport() === 'desktop' ? callDesktop(raw) : callWeb(raw))
   if (res.status >= 200 && res.status < 300) {
     if (as === 'blob') return res

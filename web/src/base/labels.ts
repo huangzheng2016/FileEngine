@@ -8,13 +8,6 @@ export interface Label {
 
 export type LabelMap = Record<string, Label>
 
-export const SESSION_STATUS = {
-  scanning: { text: '扫描中', tone: 'accent' },
-  scanned: { text: '扫描完成', tone: 'neutral' },
-  error: { text: '扫描失败', tone: 'danger' },
-  interrupted: { text: '扫描中断', tone: 'warning' },
-} satisfies LabelMap
-
 // What a session is doing or waiting for, shown at the top of its page.
 export const SESSION_STAGE = {
   scanning: { text: '扫描中', tone: 'accent' },
@@ -88,20 +81,19 @@ export const PROVIDER = {
   ollama: { text: 'Ollama', tone: 'neutral' },
 } satisfies LabelMap
 
-export const FILE_TYPE = {
-  directory: { text: '文件夹', tone: 'neutral' },
-  file: { text: '文件', tone: 'neutral' },
-  symlink: { text: '链接', tone: 'neutral' },
-} satisfies LabelMap
-
 export const EXEC_MODE = {
   copy: { text: '复制', tone: 'neutral' },
   move: { text: '移动', tone: 'neutral' },
 } satisfies LabelMap
 
+export const EXEC_MODE_HINT = {
+  copy: '在新位置放一份副本，原文件不动，通常会多占一份空间',
+  move: '把文件挪到新位置，原来的位置不再保留',
+} as const satisfies Record<keyof typeof EXEC_MODE, string>
+
 export const FILTER_MODE = {
-  blacklist: { text: '跳过这些目录', tone: 'neutral' },
-  whitelist: { text: '只扫描这些目录', tone: 'neutral' },
+  blacklist: { text: '跳过这些文件夹', tone: 'neutral' },
+  whitelist: { text: '只扫描这些文件夹', tone: 'neutral' },
 } satisfies LabelMap
 
 // Decision of an entry; '' (undecided) is the key `pending`.
@@ -122,13 +114,22 @@ export const RULE_ROLE = {
 
 export const VALIDATION_ISSUE = {
   invalid_target: { text: '目标位置无效', tone: 'danger' },
-  into_self: { text: '目标位置在自身内部', tone: 'danger' },
-  nested: { text: '随上级文件夹移动', tone: 'neutral' },
-  collision: { text: '目标位置重名', tone: 'danger' },
-  target_exists: { text: '目标位置已有文件', tone: 'danger' },
+  into_self: { text: '目标位于源文件夹内', tone: 'danger' },
+  nested: { text: '上级文件夹已有决定', tone: 'neutral' },
+  collision: { text: '目标位置冲突', tone: 'danger' },
+  target_exists: { text: '目标已存在', tone: 'danger' },
   source_changed: { text: '源文件已变化', tone: 'warning' },
   source_missing: { text: '源文件不存在', tone: 'warning' },
-  failed: { text: '执行失败', tone: 'danger' },
+  failed: { text: '操作失败', tone: 'danger' },
+} satisfies LabelMap
+
+// Journal state of the operation that carried an entry (idl LocateItem.op_state); '' = no operation yet.
+export const OP_STATE = {
+  pending: { text: '进行中', tone: 'accent' },
+  verified: { text: '已校验', tone: 'info' },
+  done: { text: '已完成', tone: 'success' },
+  failed: { text: '失败', tone: 'danger' },
+  reverted: { text: '已撤销', tone: 'warning' },
 } satisfies LabelMap
 
 export const DATE_SOURCE = {
@@ -150,6 +151,7 @@ export const REASONING_EFFORT = {
   max: { text: '最高', tone: 'neutral' },
 } satisfies LabelMap
 
+// The agent is called 助手 everywhere in the UI, never AI or 智能体.
 // Agent tool names as the person reads them in a transcript.
 export const TOOL_LABEL: Record<string, string> = {
   list_files: '查看文件',
