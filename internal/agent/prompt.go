@@ -56,7 +56,7 @@ const taggingPromptBody = `你是 FileEngine 的文件整理 Agent：为 NAS 上
 - decide 一次最多 200 条：把同一任务的决定攒成一批发出。返回的 failed 逐条给出原因，按原因修正后只重发这几条。
 - 同类条目约 20 个以上不要逐个写：
   - 规律在这个目录内成立：add_rule（必须带 path_prefix 限定到任务目录）→ apply_rules。规则只作用于未决定的条目；运行开始时已有的规则已经应用过，本次新加的规则要 apply_rules 才生效；apply_rules 的 preview 先看匹配。规则作用于整个会话，别写会误伤别处的规则。
-  - 条件复杂：run_script，用 query_files 分页读、用脚本里的 decide 类函数写（每条都带 reason），最后 print 统计。
+  - 条件复杂：run_script，用 query_files 分页读、用脚本里的 decide(items)（与 decide 工具同参数，每条都带 reason；分类路径用 category_target 算）写，最后 print 统计。
 - 看懂了的目录用 describe 写一句描述（软件写名称、版本、用途；项目写语言或框架、用途；媒体写类型和主题或事件；文档写主题），可以一批写完。
 - 其他 worker 也该知道的发现（项目根目录、命名习惯、某目录的真实用途）用 note 记一句；需要以往经验时先 recall。
 - 优先归入现有分类，保留有意义的子结构，不要把文件夹拍平；重名时系统自动改成 "name (2).ext"。确无合适分类才 create_category，写清 description；被拒绝（本任务不允许新建，或名称、路径重复）就按返回的提示归入现有分类。

@@ -125,10 +125,10 @@ func TestScriptReadBuiltins(t *testing.T) {
 	out := mustRunScript(t, tb, `
 q := query_files({parent_path: "incoming", file_type: "file"})
 c := count_files({parent_path: "docs"})
-info := get_file_info("incoming/photo1.jpg")
+info := entry_info(["incoming/photo1.jpg"]).entries[0]
 cats := get_categories()
 s := sample_files({parent_path: "incoming"}, 1)
-missing := get_file_info("nope/nothere")
+missing := entry_info(["nope/nothere"]).missing
 result = {
 	q_more: q.has_more,
 	q_len: len(q.files),
@@ -139,7 +139,7 @@ result = {
 	cats_len: len(cats),
 	cat0_editable: is_bool(cats[0].agent_editable),
 	sample_len: len(s),
-	missing_is_error: is_error(missing)
+	missing_len: len(missing)
 }`)
 	v := resultValue(t, out)
 	if v["q_more"] != false || v["q_len"].(float64) != 2 {
@@ -152,7 +152,7 @@ result = {
 		t.Fatalf("count_files docs: %+v", v)
 	}
 	if v["info_path"].(string) != "incoming/photo1.jpg" || v["info_parent"].(string) != "incoming" {
-		t.Fatalf("get_file_info: %+v", v)
+		t.Fatalf("entry_info: %+v", v)
 	}
 	if v["cats_len"].(float64) != 2 {
 		t.Fatalf("get_categories: %+v", v)
@@ -163,8 +163,8 @@ result = {
 	if v["sample_len"].(float64) != 1 {
 		t.Fatalf("sample_files n=1: %+v", v)
 	}
-	if v["missing_is_error"] != true {
-		t.Fatalf("get_file_info on missing file must return an error value: %+v", v)
+	if v["missing_len"] != float64(1) {
+		t.Fatalf("entry_info must list missing paths: %+v", v)
 	}
 }
 
@@ -235,13 +235,18 @@ result = "done"`)
 func TestScriptBuiltinArgumentValidation(t *testing.T) {
 	tb, _ := scriptTestBuilder(t, nil)
 	for _, src := range []string{
-		`query_files({parrent_path: "incoming"})`, // typo key
-		`query_files({tagged: "yes"})`,            // wrong type
-		`get_file_info()`,                         // missing arg
-		`set_target("a", "b")`,                    // the reason is required
-		`set_target("a", "b", "c", "d")`,          // too many
-		`set_target(1, "b", "c")`,                 // wrong type
-		`decide_dir("a", "skip", "")`,             // the reason is required
+		`query_files({parrent_path: "incoming"})`,                // typo key
+		`query_files({tagged: "yes"})`,                           // wrong type
+		`entry_info()`,                                           // missing arg
+		`entry_info("a")`,                                        // not an array
+		`decide()`,                                               // missing arg
+		`decide({path: "a"})`,                                    // not an array
+		`decide([{path: "a", acton: "skip"}])`,                   // typo key
+		`decide([{path: 1, action: "skip"}])`,                    // wrong type
+		`decide([{path: "a", action: "skip", override: "yes"}])`, // wrong type
+		`category_target("a")`,                                   // too few
+		`category_target(1, "b")`,                                // wrong type
+		`apply_rules({rul: "x"})`,                                // typo key
 	} {
 		out, err := runScript(t, tb, src)
 		if err != nil || out.Error == "" {
@@ -250,52 +255,95 @@ func TestScriptBuiltinArgumentValidation(t *testing.T) {
 	}
 }
 
-func TestScriptSetTargetBuiltin(t *testing.T) {
+func TestScriptDecideBuiltin(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
-
 	out := mustRunScript(t, tb, `
-ok := set_target("incoming/photo1.jpg", "/organized/photos/photo1.jpg", "照片")
-bad := set_target("incoming/photo2.jpg", "/../escape", "照片")
-noreason := set_target("incoming/photo2.jpg", "/organized/photos/photo2.jpg", "")
-result = {ok: ok, bad_is_error: is_error(bad), bad_msg: string(bad), noreason: is_error(noreason)}`)
+r := decide([
+	{path: "incoming/photo1.jpg", action: "move", new_path: "/organized/photos/photo1.jpg", reason: "照片", confidence: 0.9},
+	{path: "incoming/photo2.jpg", action: "move", new_path: "/../escape", reason: "照片"},
+	{path: "docs", action: "move", new_path: "/organized/photos/docs", reason: ""},
+	{path: "incoming", action: "bogus", reason: "x"}
+])
+result = {ok: r.ok, failed: len(r.failed), nr: r.needs_review, ov: len(r.overridden), rn: len(r.renamed), err0: r.failed[0]["error"]}`)
 	v := resultValue(t, out)
-	if v["ok"] != "/organized/photos/photo1.jpg" || v["bad_is_error"] != true || v["noreason"] != true {
-		t.Fatalf("set_target outcomes: %+v", v)
+	if v["ok"] != float64(1) || v["failed"] != float64(3) || v["nr"] != float64(0) || v["ov"] != float64(0) || v["rn"] != float64(0) {
+		t.Fatalf("decide result: %+v", v)
 	}
-	if !strings.Contains(v["bad_msg"].(string), "new_path 不合法") {
-		t.Fatalf("illegal-target message must name the validation failure: %+v", v)
-	}
-
 	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
-	if f.NewPath != "/organized/photos/photo1.jpg" || f.Operation != "planned" {
-		t.Fatalf("legal target must be written: %+v", f)
+	if f.NewPath != "/organized/photos/photo1.jpg" || f.Reason != "照片" {
+		t.Fatalf("legal item must be written with its reason: %+v", f)
 	}
 	f2, _ := repo.GetFileByPath(1, "incoming/photo2.jpg")
-	if f2.NewPath != "" || f2.Operation != "" {
+	if f2.NewPath != "" {
 		t.Fatalf("illegal target must not be written: %+v", f2)
 	}
 
-	mustRunScript(t, tb, `set_target("incoming/photo1.jpg", "", "撤销")`)
+	mustRunScript(t, tb, `decide([{path: "incoming/photo1.jpg", action: "undo", reason: "撤销"}])`)
 	f, _ = repo.GetFileByPath(1, "incoming/photo1.jpg")
-	if f.NewPath != "" || f.Operation != "" {
-		t.Fatalf("clear must empty the target: %+v", f)
+	if f.NewPath != "" || f.Role != db.RoleUndecided {
+		t.Fatalf("undo must clear the decision: %+v", f)
 	}
 }
 
-func TestScriptSetCategoryBuiltin(t *testing.T) {
+func TestScriptDecideReasonRequiredAndBatchLimit(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
-ok := set_category("incoming/photo1.jpg", "照片", "照片归类")
-missing_cat := set_category("incoming/photo2.jpg", "不存在", "x")
-missing_file := set_category("nope/x.jpg", "照片", "x")
-result = {ok: ok, cat_err: is_error(missing_cat), file_err: is_error(missing_file)}`)
+r := decide([{path: "incoming/photo2.jpg", action: "move", new_path: "/organized/photos/photo2.jpg", reason: "  "}])
+items := []
+for i := 0; i < 201; i++ { items = append(items, {path: "incoming/photo2.jpg", action: "skip", reason: "x"}) }
+big := decide(items)
+empty := decide([])
+result = {reason_err: r.failed[0]["error"], big: is_error(big), big_msg: string(big), empty: is_error(empty)}`)
 	v := resultValue(t, out)
-	if v["ok"] != "/organized/photos/photo1.jpg" || v["cat_err"] != true || v["file_err"] != true {
-		t.Fatalf("set_category outcomes: %+v", v)
+	if !strings.Contains(v["reason_err"].(string), "reason") || v["big"] != true || v["empty"] != true || !strings.Contains(v["big_msg"].(string), "200") {
+		t.Fatalf("reason and batch limit: %+v", v)
 	}
-	f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg")
-	if f.NewPath != "/organized/photos/photo1.jpg" {
-		t.Fatalf("set_category must target category path + file name: got %q", f.NewPath)
+	if f, _ := repo.GetFileByPath(1, "incoming/photo2.jpg"); f.NewPath != "" || f.Role != db.RoleUndecided {
+		t.Fatalf("rejected items write nothing: %+v", f)
+	}
+}
+
+func TestScriptDecideOverride(t *testing.T) {
+	tb, repo := scriptTestBuilder(t, nil)
+	scriptSeedFile(t, repo, 1, "pack", "directory")
+	scriptSeedFile(t, repo, 1, "pack/a.txt", "file")
+	out := mustRunScript(t, tb, `
+a := decide([{path: "pack/a.txt", action: "move", new_path: "/organized/photos/a.txt", reason: "单独"}])
+b := decide([{path: "pack", action: "unit", new_path: "/organized/photos/pack", reason: "整体"}])
+c := decide([{path: "pack", action: "unit", new_path: "/organized/photos/pack", reason: "整体", override: true}])
+result = {a: a.ok, b_failed: len(b.failed), b_ok: b.ok, c_ok: c.ok, c_over: len(c.overridden)}`)
+	v := resultValue(t, out)
+	if v["a"] != float64(1) || v["b_failed"] != float64(1) || v["b_ok"] != float64(0) || v["c_ok"] != float64(1) || v["c_over"] != float64(1) {
+		t.Fatalf("override flow: %+v", v)
+	}
+}
+
+func TestScriptCategoryTarget(t *testing.T) {
+	tb, repo := scriptTestBuilder(t, nil)
+	out := mustRunScript(t, tb, `
+ok := category_target("incoming/photo1.jpg", "照片")
+rel := category_target("incoming/photo1.jpg", "照片", ".")
+under := category_target("incoming/photo1.jpg", "照片", "incoming")
+notunder := category_target("incoming/photo1.jpg", "照片", "docs")
+missing_cat := category_target("incoming/photo2.jpg", "不存在")
+missing_file := category_target("nope/x.jpg", "照片")
+result = {ok: ok, rel: rel, under: under, notunder: is_error(notunder), cat_err: is_error(missing_cat), file_err: is_error(missing_file)}`)
+	v := resultValue(t, out)
+	if v["ok"] != "/organized/photos/photo1.jpg" || v["rel"] != "/organized/photos/incoming/photo1.jpg" || v["under"] != "/organized/photos/photo1.jpg" ||
+		v["notunder"] != true || v["cat_err"] != true || v["file_err"] != true {
+		t.Fatalf("category_target outcomes: %+v", v)
+	}
+	if f, _ := repo.GetFileByPath(1, "incoming/photo1.jpg"); f.NewPath != "" {
+		t.Fatalf("category_target must not write: %+v", f)
+	}
+}
+
+func TestScriptRemovedBuiltinsAreGone(t *testing.T) {
+	tb, _ := scriptTestBuilder(t, nil)
+	for _, name := range []string{"set_targets", "set_target", "set_category", "decide_dir", "get_file_info", "apply_rule"} {
+		if _, ok := tb.scriptBuiltins(context.Background())[name]; ok {
+			t.Fatalf("%s must not exist", name)
+		}
 	}
 }
 
@@ -493,7 +541,7 @@ func TestScriptToolNameStable(t *testing.T) {
 	if info.Name != "run_script" {
 		t.Fatalf("tool name: got %q, want run_script", info.Name)
 	}
-	if !strings.Contains(info.Desc, "query_files") || !strings.Contains(info.Desc, "set_target") {
+	if !strings.Contains(info.Desc, "query_files") || !strings.Contains(info.Desc, "decide") {
 		t.Fatal("tool description must document the builtins")
 	}
 }
@@ -502,13 +550,14 @@ func TestScriptBulkWorkflow(t *testing.T) {
 	tb, repo := scriptTestBuilder(t, nil)
 	out := mustRunScript(t, tb, `
 q := query_files({parent_path: "incoming", file_type: "file", limit: 100})
-moved := 0
+items := []
 for f in q.files {
-	r := set_category(f.original_path, "照片", "整批归类")
-	if !is_error(r) { moved += 1 }
+	p := category_target(f.original_path, "照片")
+	if !is_error(p) { items = append(items, {path: f.original_path, action: "move", new_path: p, reason: "整批归类"}) }
 }
-print("classified", moved, "files")
-result = {moved: moved}`)
+r := decide(items)
+print("classified", r.ok, "files")
+result = {moved: r.ok}`)
 	v := resultValue(t, out)
 	if v["moved"].(float64) != 2 {
 		t.Fatalf("bulk classify: %+v (output %q)", v, out.Output)

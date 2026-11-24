@@ -51,3 +51,17 @@ func withPromptCacheKey(req *http.Request) (*http.Request, error) {
 	out.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	return out, nil
 }
+
+type longCacheTTLCtx struct{}
+
+// WithLongCacheTTL makes Claude models created under ctx cache the tools,
+// system prompt and shared context for one hour. Use it for human-paced runs
+// whose gaps exceed the default five minutes.
+func WithLongCacheTTL(ctx context.Context) context.Context {
+	return context.WithValue(ctx, longCacheTTLCtx{}, true)
+}
+
+func longCacheTTL(ctx context.Context) bool {
+	v, _ := ctx.Value(longCacheTTLCtx{}).(bool)
+	return v
+}

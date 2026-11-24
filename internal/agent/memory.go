@@ -204,7 +204,7 @@ func (tb *ToolBuilder) TakeNewNotes() (string, error) {
 	return BuildNotesBlock(others, notesPerUnitMax), nil
 }
 
-// Script set_category keeps file paths relative to the unit root.
+// Script category_target keeps file paths relative to the unit root.
 func (tb *ToolBuilder) SetUnitRoot(dir string) {
 	tb.unitRoot = strings.Trim(normalizePath(dir), "/")
 }
