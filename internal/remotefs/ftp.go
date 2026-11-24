@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/textproto"
 	"os"
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"FileEngine/internal/config"
 
@@ -30,6 +32,11 @@ type FTPFS struct {
 	basePath string
 	cfg      config.RemoteFSConfig // for re-dialing a dropped connection
 	broken   bool                  // conn dropped as poisoned, re-dial before next use
+
+	// CopyFile reads its source over a second control connection that is kept
+	// between copies; srcMu serializes its users and is taken before mu.
+	srcMu   sync.Mutex
+	srcConn *ftp.ServerConn
 }
 
 func NewFTPFS(cfg config.RemoteFSConfig) (*FTPFS, error) {
@@ -64,11 +71,15 @@ func dialFTP(cfg config.RemoteFSConfig) (*ftp.ServerConn, error) {
 		return nil, &OpError{Protocol: "ftp", Op: "dial", Path: cfg.Host, Err: err}
 	}
 
-	if cfg.Username != "" {
-		if err := conn.Login(cfg.Username, cfg.Password); err != nil {
-			conn.Quit()
-			return nil, &OpError{Protocol: "ftp", Op: "login", Path: cfg.Host, Err: err}
-		}
+	// Login also probes the server's features, switches to binary mode and
+	// enables UTF-8; without it transfers would run in ASCII mode.
+	user, pass := cfg.Username, cfg.Password
+	if user == "" {
+		user, pass = "anonymous", "anonymous@"
+	}
+	if err := conn.Login(user, pass); err != nil {
+		conn.Quit()
+		return nil, &OpError{Protocol: "ftp", Op: "login", Path: cfg.Host, Err: err}
 	}
 
 	return conn, nil
@@ -165,7 +176,7 @@ func (f *FTPFS) Stat(_ context.Context, p string) (*FileInfo, error) {
 	if err := f.ensureConn(); err != nil {
 		return nil, err
 	}
-	entry, err := f.conn.GetEntry(fullPath)
+	entry, err := f.statLocked(fullPath)
 	if err != nil {
 		if IsTimeout(err) {
 			f.dropConnLocked()
@@ -244,16 +255,31 @@ func (l *ftpLockedResponse) Close() error {
 	return err
 }
 
-// MLST when the server supports it, otherwise a LIST of the parent. Caller
-// holds f.mu with a live connection.
+// MLST when the server supports it, otherwise a LIST of the parent. A 550 to
+// MLST means "no such file" and is not retried with a LIST: for a new
+// destination that would list the whole target folder for every file.
+// Caller holds f.mu with a live connection.
 func (f *FTPFS) statLocked(full string) (*ftp.Entry, error) {
-	if e, err := f.conn.GetEntry(full); err == nil {
-		return e, nil
-	} else if IsTimeout(err) {
+	if full == "/" || full == "" || full == "." {
+		return &ftp.Entry{Name: "/", Type: ftp.EntryTypeFolder}, nil
+	}
+	if f.conn.IsTimePreciseInList() { // true exactly when the server supports MLST
+		e, err := f.conn.GetEntry(full)
+		if err == nil {
+			return e, nil
+		}
+		var te *textproto.Error
+		if errors.As(err, &te) && te.Code == ftp.StatusFileUnavailable {
+			return nil, os.ErrNotExist
+		}
 		return nil, err
 	}
 	entries, err := f.conn.List(path.Dir(full))
 	if err != nil {
+		var te *textproto.Error
+		if errors.As(err, &te) && te.Code == ftp.StatusFileUnavailable {
+			return nil, os.ErrNotExist // the parent is gone
+		}
 		return nil, err
 	}
 	base := path.Base(full)
@@ -297,10 +323,28 @@ func (f *FTPFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-// CopyFile streams the source over a dedicated control connection (RETR)
+// sourceConn returns the kept source connection, dialing it on first use.
+// Caller holds f.srcMu.
+func (f *FTPFS) sourceConn() (conn *ftp.ServerConn, reused bool, err error) {
+	if f.srcConn != nil {
+		return f.srcConn, true, nil
+	}
+	f.srcConn, err = dialFTP(f.cfg)
+	return f.srcConn, false, err
+}
+
+func (f *FTPFS) dropSourceConn() {
+	if f.srcConn != nil {
+		f.srcConn.Quit()
+		f.srcConn = nil
+	}
+}
+
+// CopyFile streams the source over a second control connection (RETR)
 // straight into STOR on the primary one — one control connection cannot
 // carry both transfers, and buffering the whole file in memory is not an
-// option for large media.
+// option for large media. The second connection is kept for the next copy
+// and re-dialed when the server closed it while idle.
 func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := f.resolve(src)
 	if err != nil {
@@ -310,15 +354,32 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	srcConn, err := dialFTP(f.cfg)
+	f.srcMu.Lock()
+	defer f.srcMu.Unlock()
+	// SIZE fails on directories, which doubles as the directory check.
+	srcConn, reused, err := f.sourceConn()
 	if err != nil {
 		return err
 	}
-	defer srcConn.Quit()
-	// SIZE fails on directories, which doubles as the directory check.
 	size, err := srcConn.FileSize(srcFull)
+	var te *textproto.Error
+	if err != nil && reused && !errors.As(err, &te) {
+		// No server reply: the idle connection is probably dead.
+		f.dropSourceConn()
+		if srcConn, _, err = f.sourceConn(); err != nil {
+			return err
+		}
+		size, err = srcConn.FileSize(srcFull)
+	}
 	if err != nil {
+		if !errors.As(err, &te) {
+			f.dropSourceConn()
+		}
 		return &OpError{Protocol: "ftp", Op: "size", Path: src, Err: err}
+	}
+	var srcTime time.Time
+	if srcConn.IsGetTimeSupported() {
+		srcTime, _ = srcConn.GetTime(srcFull)
 	}
 
 	f.mu.Lock()
@@ -337,6 +398,7 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 
 	resp, err := srcConn.Retr(srcFull)
 	if err != nil {
+		f.dropSourceConn()
 		return &OpError{Protocol: "ftp", Op: "open", Path: src, Err: err}
 	}
 	cr := &countingReader{r: resp}
@@ -352,8 +414,14 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 		err = shortCopyErr("ftp", dst, cr.n, size)
 	}
 	if err != nil {
+		f.dropSourceConn()
 		if IsTimeout(err) {
+			// The partial file is ours (the STOR started in this call), but
+			// the poisoned control connection cannot delete it.
 			f.dropConnLocked()
+			if f.ensureConn() == nil {
+				f.conn.Delete(dstFull)
+			}
 		} else {
 			f.conn.Delete(dstFull)
 		}
@@ -361,6 +429,9 @@ func (f *FTPFS) CopyFile(ctx context.Context, src, dst string) error {
 			err = &OpError{Protocol: "ftp", Op: "copy", Path: dst, Err: err}
 		}
 		return err
+	}
+	if !srcTime.IsZero() && f.conn.IsSetTimeSupported() {
+		_ = f.conn.SetTime(dstFull, srcTime)
 	}
 	return nil
 }
@@ -428,6 +499,9 @@ func (f *FTPFS) MkdirAll(_ context.Context, p string) error {
 }
 
 func (f *FTPFS) Close() error {
+	f.srcMu.Lock()
+	f.dropSourceConn()
+	f.srcMu.Unlock()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.conn.Quit()

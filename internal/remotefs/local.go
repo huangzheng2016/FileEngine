@@ -238,6 +238,10 @@ func (l *LocalFS) CopyFile(ctx context.Context, src, dst string) error {
 	if err == nil {
 		n, err = io.Copy(dstFile, srcFile)
 	}
+	if err == nil {
+		// A move deletes the source right after this returns.
+		err = dstFile.Sync()
+	}
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
 	}
