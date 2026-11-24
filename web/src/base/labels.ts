@@ -154,31 +154,6 @@ export const REASONING_EFFORT = {
 // The agent is called 助手 everywhere in the UI, never AI or 智能体.
 // Agent tool names as the person reads them in a transcript.
 export const TOOL_LABEL: Record<string, string> = {
-  list_files: '查看文件',
-  get_file_info: '查看文件信息',
-  read_file: '读取文件',
-  view_image: '查看图片',
-  run_script: '运行脚本',
-  set_targets: '设定目标位置',
-  decide_dirs: '决定文件夹',
-  split_unit: '拆分整体',
-  update_description: '写文件说明',
-  list_categories: '查看分类',
-  create_category: '新建分类',
-  update_category: '修改分类',
-  delete_category: '删除分类',
-  add_rule: '新建规则',
-  update_rule: '修改规则',
-  delete_rule: '删除规则',
-  apply_rules: '应用规则',
-  read_plan: '读方案',
-  write_plan: '写方案',
-  note: '记笔记',
-  remember: '记住',
-  recall: '查记忆',
-}
-
-export const AGENT_TOOL_LABEL: Record<string, string> = {
   list_entries: '查看文件',
   read_file: '读取文件',
   view_image: '查看图片',

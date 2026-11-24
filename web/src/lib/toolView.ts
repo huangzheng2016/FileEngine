@@ -1,4 +1,4 @@
-import { AGENT_TOOL_LABEL } from '@/base/labels'
+import { TOOL_LABEL } from '@/base/labels'
 import { baseName, parentOf } from './paths'
 import type { Item, Lane, RunView, ToolItem, UnitItem } from './transcript'
 
@@ -8,7 +8,7 @@ const s = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? S
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0)
 
-export const toolLabel = (name: string) => AGENT_TOOL_LABEL[name] ?? '其他操作'
+export const toolLabel = (name: string) => TOOL_LABEL[name] ?? '其他操作'
 
 // Tool output wraps untrusted text in <data> blocks; people read what is inside.
 const unwrapData = (text: string) =>
