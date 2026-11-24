@@ -65,8 +65,6 @@ func toolCall(id, name string, args any) schema.ToolCall {
 func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.ScanSession) {
 	t.Helper()
 	repo := setupToolTestRepo(t)
-	old := config.Get()
-	config.Update(&config.Config{Agent: config.AgentConfig{MaxStep: 20, ChatMaxStep: 20, MaxRetries: 1}})
 	restore := SetModelFactory(func(context.Context, *model.ModelProvider) (einomodel.ChatModel, error) { return fm, nil })
 	fsRoot := t.TempDir()
 	if err := remotefs.SetLocalPolicy(remotefs.LocalPolicy{Roots: []string{fsRoot}}); err != nil {
@@ -75,16 +73,13 @@ func brainAgent(t *testing.T, fm *fakeModel) (*db.Repository, *Agent, *model.Sca
 	t.Cleanup(func() {
 		restore()
 		_ = remotefs.SetLocalPolicy(remotefs.LocalPolicy{})
-		if old != nil {
-			config.Update(old)
-		}
 	})
 	session := &model.ScanSession{FilesystemID: 1, RootPath: ".", Status: "scanned", Goal: "照片按年份整理"}
 	if err := repo.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
 	provider := &model.ModelProvider{Name: "fake", Provider: "openai", Model: "fake"}
-	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session)
+	a := New(repo, config.RemoteFSConfig{Protocol: "local", BasePath: fsRoot}, session.ID, provider, session, testCfg(runCfg))
 	return repo, a, session
 }
 
@@ -203,7 +198,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	}
 
 	in1 := fm.streamed[0]
-	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent) {
+	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(a.cfg) {
 		t.Fatal("system prompt first and static")
 	}
 	if !strings.HasPrefix(in1[1].Content, "# 会话共享上下文") || !strings.Contains(in1[1].Content, "照片按年份整理") {
@@ -291,7 +286,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 	}
 	in := fm.streamed[0]
 	user := in[len(in)-1].Content
-	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent) {
+	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(a.cfg) {
 		t.Fatalf("survey input: %q", user)
 	}
 
@@ -362,7 +357,7 @@ func TestRunReviewSummaryAndReflection(t *testing.T) {
 	if !strings.HasPrefix(sum, report) || !strings.Contains(sum, "记忆已更新：新增 1 条") {
 		t.Fatalf("summary: %q", sum)
 	}
-	if in := fm.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
+	if in := fm.streamed[0]; in[0].Content != reviewSystemPrompt(a.cfg) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
 		t.Fatal("review input: static prompt + material")
 	}
 	if len(fm.genned) != 1 || !strings.Contains(fm.genned[0][1].Content, "mix 是浏览器下载目录") {

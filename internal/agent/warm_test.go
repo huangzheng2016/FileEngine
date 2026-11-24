@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"FileEngine/internal/config"
 )
 
 // Workers 1.. are not created until worker 0's first response begins.
@@ -26,7 +25,7 @@ func TestWalkStartsOtherWorkersAfterWorkerZeroWarmsTheCache(t *testing.T) {
 	newWorker := func(id int) (*tagWorker, func(), error) {
 		record("create")
 		w := &tagWorker{id: id, logger: a.logger.ForWorker(id)}
-		w.tb = NewToolBuilder(a.repo, nil, a.sessionID, 7, w.logger, config.Get().Agent, a.session, false)
+		w.tb = NewToolBuilder(a.repo, nil, a.sessionID, 7, w.logger, a.cfg, a.session, false)
 		if id == 0 {
 			w.warm = gate
 		}

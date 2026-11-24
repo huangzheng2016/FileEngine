@@ -12,7 +12,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/biz/dal/db/model"
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
@@ -232,8 +231,8 @@ func (a *Agent) RunReview(ctx context.Context, logger *Logger, tagging *model.Ag
 	report, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "review",
 		phase:       db.RunPhaseReview,
-		maxStep:     config.Get().Agent.MaxStep,
-		instruction: reviewSystemPrompt(config.Get().Agent),
+		maxStep:     a.cfg.MaxStep,
+		instruction: reviewSystemPrompt(a.cfg),
 		shared:      shared,
 		current:     shared.Categories,
 		messages:    []*schema.Message{{Role: schema.User, Content: material + "请复核以上规划，修正明显的错误，最后输出复核报告。"}},

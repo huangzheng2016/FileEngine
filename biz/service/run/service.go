@@ -16,6 +16,7 @@ import (
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/settings"
 	"FileEngine/internal/agent"
 	"FileEngine/internal/config"
 	"FileEngine/internal/db"
@@ -39,6 +40,7 @@ type Service struct {
 	q      *query.Query
 	repo   *db.Repository
 	runner *runner.Service
+	cfg    *settings.Service
 
 	mu sync.Mutex
 	// sessions whose running scan was started with auto_tag; only used to word
@@ -46,8 +48,8 @@ type Service struct {
 	autoTag map[uint]bool
 }
 
-func NewService(q *query.Query, repo *db.Repository, r *runner.Service) *Service {
-	return &Service{q: q, repo: repo, runner: r, autoTag: make(map[uint]bool)}
+func NewService(q *query.Query, repo *db.Repository, r *runner.Service, cfg *settings.Service) *Service {
+	return &Service{q: q, repo: repo, runner: r, cfg: cfg, autoTag: make(map[uint]bool)}
 }
 
 // Launch records a run and executes work on a detached context; see
@@ -130,7 +132,11 @@ func (s *Service) AgentFor(ctx context.Context, session *model.ScanSession) (*ag
 	if err != nil {
 		return nil, err
 	}
-	return agent.New(s.repo, cfg, session.ID, provider, session), nil
+	snap, err := s.cfg.Current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return agent.New(s.repo, cfg, session.ID, provider, session, snap.Agent), nil
 }
 
 // AgentForSession loads the session and builds its agent.
@@ -210,6 +216,10 @@ func (s *Service) StartScan(ctx context.Context, session *model.ScanSession, aut
 	if err != nil {
 		return err
 	}
+	snap, err := s.cfg.Current(ctx)
+	if err != nil {
+		return err
+	}
 	// The scan works on a copy: callers keep serializing their own struct.
 	sess := *session
 	filterMode := sess.FilterMode
@@ -251,7 +261,7 @@ func (s *Service) StartScan(ctx context.Context, session *model.ScanSession, aut
 			return
 		}
 		defer fs.Close()
-		if err := scanner.New(fs, s.repo, filterMode, filterDirs).Scan(ctx, &sess); err != nil {
+		if err := scanner.New(fs, s.repo, filterMode, filterDirs).PruneJunk(!snap.Agent.JunkFilterDisabled).Scan(ctx, &sess); err != nil {
 			if ctx.Err() != nil {
 				// Whoever cancelled owns the session state; an error written here
 				// would race a fresh rescan's "scanning".

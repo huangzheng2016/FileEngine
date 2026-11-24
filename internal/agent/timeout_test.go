@@ -4,43 +4,31 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"FileEngine/internal/config"
 )
 
 func TestAgentRunTimeoutSemantics(t *testing.T) {
-	old := config.Get()
-	defer func() {
-		if old != nil {
-			config.Update(old)
-		}
-	}()
-
-	config.Update(&config.Config{})
-	if got := agentRunTimeout(); got != 0 {
+	if got := agentRunTimeout(0); got != 0 {
 		t.Fatalf("default agentRunTimeout: got %v, want 0 (unlimited)", got)
 	}
-	ctx, cancel := withRunTimeout(context.Background())
+	ctx, cancel := withRunTimeout(context.Background(), 0)
 	defer cancel()
 	if _, hasDeadline := ctx.Deadline(); hasDeadline {
 		t.Fatal("unlimited run must not wrap ctx with a deadline")
 	}
 
-	config.Update(&config.Config{Agent: config.AgentConfig{AgentTimeout: -5}})
-	if got := agentRunTimeout(); got != 0 {
+	if got := agentRunTimeout(-5); got != 0 {
 		t.Fatalf("negative agentRunTimeout: got %v, want 0 (unlimited)", got)
 	}
-	ctx, cancel2 := withRunTimeout(context.Background())
+	ctx, cancel2 := withRunTimeout(context.Background(), -5)
 	defer cancel2()
 	if _, hasDeadline := ctx.Deadline(); hasDeadline {
 		t.Fatal("negative agent_timeout must not wrap ctx with a deadline")
 	}
 
-	config.Update(&config.Config{Agent: config.AgentConfig{AgentTimeout: 45}})
-	if got := agentRunTimeout(); got != 45*time.Second {
+	if got := agentRunTimeout(45); got != 45*time.Second {
 		t.Fatalf("agentRunTimeout: got %v, want 45s", got)
 	}
-	ctx, cancel3 := withRunTimeout(context.Background())
+	ctx, cancel3 := withRunTimeout(context.Background(), 45)
 	defer cancel3()
 	deadline, hasDeadline := ctx.Deadline()
 	if !hasDeadline {

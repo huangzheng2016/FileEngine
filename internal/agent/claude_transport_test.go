@@ -74,7 +74,7 @@ func claudeSSE(w http.ResponseWriter, text string) {
 	}
 }
 
-func runAgainst(t *testing.T, s *claudeServer) (*schema.Message, error, time.Duration) {
+func runAgainst(t *testing.T, cfg config.AgentConfig, s *claudeServer) (*schema.Message, error, time.Duration) {
 	t.Helper()
 	setupToolTestRepo(t)
 	m, err := modelfactory.NewChatModelFromProvider(context.Background(),
@@ -84,7 +84,7 @@ func runAgainst(t *testing.T, s *claudeServer) (*schema.Message, error, time.Dur
 	}
 	tracker := newTokenTrackingModel(m)
 	start := time.Now()
-	msg, err := runADKWithRetry(context.Background(), newEchoAgent(t, tracker, nil),
+	msg, err := runADKWithRetry(context.Background(), cfg, newEchoAgentCfg(t, cfg, tracker, nil),
 		[]*schema.Message{schema.UserMessage("go")}, NewLogger(300, 1, 0), "test", tracker)
 	return msg, err, time.Since(start)
 }
@@ -92,7 +92,9 @@ func runAgainst(t *testing.T, s *claudeServer) (*schema.Message, error, time.Dur
 // 429 with Retry-After: the SDK stays out of it, the app retries once after
 // at least the advertised wait.
 func TestClaudeRateLimitRetriedByAppHonoringRetryAfter(t *testing.T) {
-	config.Update(&config.Config{Agent: config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 3, RetryBaseDelay: 1, RetryMaxDelay: 2}})
+	cfg := testCfg(func(c *config.AgentConfig) {
+		c.MaxRetries, c.RateLimitMaxRetries, c.RetryBaseDelay, c.RetryMaxDelay = 2, 3, 1, 2
+	})
 	s := newClaudeServer(t, func(n int, w http.ResponseWriter) {
 		if n == 1 {
 			claudeErr(w, 429, "rate_limit_error", "1")
@@ -100,7 +102,7 @@ func TestClaudeRateLimitRetriedByAppHonoringRetryAfter(t *testing.T) {
 		}
 		claudeSSE(w, "done")
 	})
-	msg, err, took := runAgainst(t, s)
+	msg, err, took := runAgainst(t, cfg, s)
 	if err != nil || msg == nil || msg.Content != "done" {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -114,9 +116,9 @@ func TestClaudeRateLimitRetriedByAppHonoringRetryAfter(t *testing.T) {
 
 func TestClaudeBadRequestNotRetried(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 404} {
-		config.Update(&config.Config{Agent: config.AgentConfig{MaxRetries: 2, RateLimitMaxRetries: 3, RetryBaseDelay: 1}})
+		cfg := testCfg(func(c *config.AgentConfig) { c.MaxRetries, c.RateLimitMaxRetries, c.RetryBaseDelay = 2, 3, 1 })
 		s := newClaudeServer(t, func(_ int, w http.ResponseWriter) { claudeErr(w, status, "invalid_request_error", "") })
-		if _, err, _ := runAgainst(t, s); err == nil {
+		if _, err, _ := runAgainst(t, cfg, s); err == nil {
 			t.Fatalf("%d: expected an error", status)
 		}
 		if got := s.requests(); got != 1 {

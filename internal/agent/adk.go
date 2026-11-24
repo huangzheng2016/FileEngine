@@ -7,8 +7,6 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-
-	"FileEngine/internal/config"
 )
 
 // ASCII text is about 4 chars per token, CJK about 1.5.
@@ -58,16 +56,15 @@ func countTokens(msgs []adk.Message, tools []*schema.ToolInfo) int64 {
 
 // agentRunTimeout bounds one full ReAct run, not a single model call;
 // <= 0 means no timeout.
-func agentRunTimeout() time.Duration {
-	secs := config.Get().Agent.AgentTimeout
+func agentRunTimeout(secs int) time.Duration {
 	if secs <= 0 {
 		return 0
 	}
 	return time.Duration(secs) * time.Second
 }
 
-func withRunTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if timeout := agentRunTimeout(); timeout > 0 {
+func withRunTimeout(ctx context.Context, secs int) (context.Context, context.CancelFunc) {
+	if timeout := agentRunTimeout(secs); timeout > 0 {
 		return context.WithTimeout(ctx, timeout)
 	}
 	return ctx, func() {}

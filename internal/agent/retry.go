@@ -173,14 +173,6 @@ var rateLimitStreak atomic.Int64
 
 const rateLimitStreakBoostMax = 4
 
-func retryCfg() *config.AgentConfig {
-	cfg := config.Get()
-	if cfg == nil {
-		return &config.AgentConfig{}
-	}
-	return &cfg.Agent
-}
-
 func maxRetriesForClass(class errorClass, cfg *config.AgentConfig) int {
 	switch class {
 	case errClassRateLimit:

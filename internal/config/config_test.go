@@ -47,26 +47,10 @@ func TestDatabaseExplicitDSNPreserved(t *testing.T) {
 	}
 }
 
-func TestAgentStartsAtDefaults(t *testing.T) {
-	cfg, err := Load(writeConfig(t, ""))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Agent.Concurrency != 6 || cfg.Agent.MaxStep != 150 || cfg.Agent.AgentTimeout != 0 || cfg.Agent.CategoryPolicy != DefaultCategoryPolicy {
-		t.Fatalf("agent defaults: %+v", cfg.Agent)
-	}
-}
-
-func TestSetAgentSwapsSnapshot(t *testing.T) {
-	cfg, _ := Load(writeConfig(t, "server:\n  token: keep\n"))
-	a := cfg.Agent
-	a.Concurrency = 9
-	SetAgent(a)
-	if Get().Agent.Concurrency != 9 || Get().Server.Token != "keep" {
-		t.Fatalf("SetAgent: %+v", Get())
-	}
-	if cfg.Agent.Concurrency == 9 {
-		t.Fatal("an earlier snapshot must not change")
+func TestDefaultAgent(t *testing.T) {
+	a := DefaultAgent()
+	if a.Concurrency != 6 || a.MaxStep != 150 || a.AgentTimeout != 0 || a.CategoryPolicy != DefaultCategoryPolicy {
+		t.Fatalf("agent defaults: %+v", a)
 	}
 }
 

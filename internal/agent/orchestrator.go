@@ -25,12 +25,13 @@ type OrchestratorAgent struct {
 	session       *model.ScanSession
 	sessionID     uint
 	logger        *Logger
+	cfg           config.AgentConfig
 	partial       bool
 }
 
 func (o *OrchestratorAgent) Partial() bool { return o.partial }
 
-func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger) *OrchestratorAgent {
+func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, modelProvider *model.ModelProvider, session *model.ScanSession, sessionID uint, logger *Logger, cfg config.AgentConfig) *OrchestratorAgent {
 	return &OrchestratorAgent{
 		repo:          repo,
 		fsCfg:         fsCfg,
@@ -38,6 +39,7 @@ func NewOrchestratorAgent(repo *db.Repository, fsCfg config.RemoteFSConfig, mode
 		session:       session,
 		sessionID:     sessionID,
 		logger:        logger,
+		cfg:           cfg,
 	}
 }
 
@@ -53,7 +55,7 @@ func (o *OrchestratorAgent) Run(ctx context.Context, req OrchestratorRequest) (s
 func (o *OrchestratorAgent) runAutoTag(ctx context.Context) (string, error) {
 	log.Printf("orchestrator: routing to AutoTagAgent for session %d", o.sessionID)
 
-	autoTag := NewAutoTagAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger)
+	autoTag := NewAutoTagAgent(o.repo, o.fsCfg, o.modelProvider, o.session, o.sessionID, o.logger, o.cfg)
 	if err := autoTag.Run(ctx); err != nil {
 		return "", fmt.Errorf("auto-tag failed: %w", err)
 	}

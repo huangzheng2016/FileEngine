@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"FileEngine/biz/dal/db/model"
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
@@ -388,8 +387,8 @@ func (a *Agent) RunSurvey(ctx context.Context, logger *Logger, instructions stri
 	res, err := a.runMainAgent(ctx, logger, mainRunSpec{
 		label:       "survey",
 		phase:       db.RunPhaseSurvey,
-		maxStep:     config.Get().Agent.MaxStep,
-		instruction: surveySystemPrompt(config.Get().Agent),
+		maxStep:     a.cfg.MaxStep,
+		instruction: surveySystemPrompt(a.cfg),
 		shared:      shared,
 		current:     shared.Categories,
 		messages:    []*schema.Message{{Role: schema.User, Content: sb.String()}},

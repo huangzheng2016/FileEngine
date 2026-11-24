@@ -15,13 +15,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the process configuration read from config.yaml. Agent is not part
-// of the file: it is the runtime settings document (biz/service/settings), which
-// installs each saved version here with SetAgent for the agent packages to read.
+// Config is the process configuration read from config.yaml. The agent's
+// runtime settings are not part of it: they are versioned in biz/service/settings
+// and handed to each run explicitly.
 type Config struct {
 	Server   ServerConfig   `yaml:"server" json:"server"`
 	Database DatabaseConfig `yaml:"database" json:"database"`
-	Agent    AgentConfig    `yaml:"-" json:"agent"`
 }
 
 type ServerConfig struct {
@@ -116,7 +115,6 @@ func Load(path string) (*Config, error) {
 	if err := validate(&cfg); err != nil {
 		return nil, err
 	}
-	cfg.Agent = DefaultAgent()
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -190,30 +188,6 @@ func Get() *Config {
 	mu.RLock()
 	defer mu.RUnlock()
 	return global
-}
-
-// Update installs cfg as the current snapshot. Zero agent fields take their
-// defaults, so tests and embedders can build a Config piecemeal.
-func Update(cfg *Config) {
-	if cfg != nil {
-		fillAgentDefaults(&cfg.Agent)
-	}
-	mu.Lock()
-	global = cfg
-	mu.Unlock()
-}
-
-// SetAgent installs a saved settings version for the agent packages. The caller
-// has already validated and persisted it.
-func SetAgent(a AgentConfig) {
-	mu.Lock()
-	defer mu.Unlock()
-	next := Config{}
-	if global != nil {
-		next = *global
-	}
-	next.Agent = a
-	global = &next
 }
 
 // 0600: the file holds the API token and possibly a DSN password. Temp file +

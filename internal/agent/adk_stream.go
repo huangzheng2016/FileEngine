@@ -12,18 +12,19 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 )
 
-func runADKWithRetry(ctx context.Context, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
+func runADKWithRetry(ctx context.Context, cfg config.AgentConfig, agent *adk.ChatModelAgent, messages []*schema.Message, logger *Logger, label string, tracker *tokenTrackingModel) (*schema.Message, error) {
 	attempt := func(ctx context.Context) (*schema.Message, error) {
-		callCtx, callCancel := withRunTimeout(ctx)
+		callCtx, callCancel := withRunTimeout(ctx, cfg.AgentTimeout)
 		defer callCancel()
 		tracker.ResetUsage()
 		defer func() { logger.AddUsage(tracker.Usage()) }()
 		return runADKOnce(callCtx, agent, messages, logger)
 	}
-	return runWithRetry(ctx, attempt, logger, label)
+	return runWithRetry(ctx, &cfg, attempt, logger, label)
 }
 
 // runADKOnce executes one full streaming agent run and forwards it to the

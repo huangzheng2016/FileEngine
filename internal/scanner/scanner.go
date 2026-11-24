@@ -13,7 +13,6 @@ import (
 
 	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
-	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
 )
@@ -28,8 +27,8 @@ type Scanner struct {
 	filterMode string
 	filterDirs []string
 	progress   *Progress
-	pruneJunk  bool // config read once per scan
-	commits    int  // walk transactions committed by the last scan
+	pruneJunk  bool
+	commits    int // walk transactions committed by the last scan
 
 	skippedMu sync.Mutex
 	skipped   []string // directories the walk could not list (reset per scan)
@@ -69,6 +68,12 @@ type HandleLister interface {
 // operations in parallel without a pool of their own (local disk, SMB reads).
 const defaultWorkers = 8
 
+// PruneJunk turns system-junk pruning on (the default) or off for this scan.
+func (s *Scanner) PruneJunk(on bool) *Scanner {
+	s.pruneJunk = on
+	return s
+}
+
 func New(fs remotefs.RemoteFS, repo *db.Repository, filterMode string, filterDirs []string) *Scanner {
 	normalized := make([]string, 0, len(filterDirs))
 	for _, p := range filterDirs {
@@ -80,7 +85,7 @@ func New(fs remotefs.RemoteFS, repo *db.Repository, filterMode string, filterDir
 	if filterMode == "" {
 		filterMode = "blacklist"
 	}
-	return &Scanner{fs: fs, repo: repo, filterMode: filterMode, filterDirs: normalized}
+	return &Scanner{fs: fs, repo: repo, filterMode: filterMode, filterDirs: normalized, pruneJunk: true}
 }
 
 // Scan walks the session root and streams entries into the DB. When the
@@ -93,9 +98,6 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	if err := s.repo.BeginScan(session.ID); err != nil {
 		return err
 	}
-	cfg := config.Get()
-	s.pruneJunk = cfg == nil || !cfg.Agent.JunkFilterDisabled
-
 	s.progress = &Progress{}
 	s.skipped = nil
 	s.progress.setPath(session.RootPath)

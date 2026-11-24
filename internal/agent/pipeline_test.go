@@ -69,7 +69,6 @@ func TestDetectVersionGroups(t *testing.T) {
 // files, a version group, an out-of-scope file and junk.
 func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) {
 	t.Helper()
-	config.Update(&config.Config{})
 	repo := setupToolTestRepo(t)
 	session := &model.ScanSession{FilesystemID: 7, Goal: goal, ScopeExts: "", AllowScript: true, AllowAutoCategory: true}
 	if err := repo.CreateSession(session); err != nil {
@@ -95,14 +94,14 @@ func pipelineFixture(t *testing.T, goal string) (*AutoTagAgent, *db.Repository) 
 			t.Fatal(err)
 		}
 	}
-	a := NewAutoTagAgent(repo, config.RemoteFSConfig{}, &model.ModelProvider{}, session, session.ID, NewLogger(session.ID, 1, 0))
+	a := NewAutoTagAgent(repo, config.RemoteFSConfig{}, &model.ModelProvider{}, session, session.ID, NewLogger(session.ID, 1, 0), testCfg())
 	return a, repo
 }
 
 func fakeWorkers(a *AutoTagAgent, decide func(tb *ToolBuilder, u workUnit), seen *[]workUnit, mu *sync.Mutex) func(int) (*tagWorker, func(), error) {
 	return func(id int) (*tagWorker, func(), error) {
 		logger := a.logger.ForWorker(id)
-		tb := NewToolBuilder(a.repo, nil, a.sessionID, a.session.FilesystemID, logger, config.Get().Agent, a.session, false)
+		tb := NewToolBuilder(a.repo, nil, a.sessionID, a.session.FilesystemID, logger, a.cfg, a.session, false)
 		w := &tagWorker{id: id, logger: logger, tb: tb}
 		w.run = func(ctx context.Context, w *tagWorker, u workUnit) error {
 			mu.Lock()
@@ -238,8 +237,8 @@ func TestUnitMessagesShareByteIdenticalContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := a.logger.ForWorker(0)
-	w := &tagWorker{logger: logger, tb: NewToolBuilder(repo, nil, a.sessionID, 7, logger, config.Get().Agent, a.session, false)}
-	w2 := &tagWorker{logger: logger, tb: NewToolBuilder(repo, nil, a.sessionID, 7, logger, config.Get().Agent, a.session, false)}
+	w := &tagWorker{logger: logger, tb: NewToolBuilder(repo, nil, a.sessionID, 7, logger, a.cfg, a.session, false)}
+	w2 := &tagWorker{logger: logger, tb: NewToolBuilder(repo, nil, a.sessionID, 7, logger, a.cfg, a.session, false)}
 	m1, err := a.unitMessages(context.Background(), w, workUnit{kind: unitDir, path: "misc"})
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +294,7 @@ func TestToolOrderDeterministic(t *testing.T) {
 
 func TestDecisionToolsCategoryCheckAndReview(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	call := func(items ...map[string]any) map[string]any {
 		return callTool(t, tb, ToolsetTagging, "decide", map[string]any{"items": items})
 	}
@@ -342,7 +341,7 @@ func TestDecisionToolsCategoryCheckAndReview(t *testing.T) {
 
 func TestDecideRequiresReasonAndValidAction(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	out := callTool(t, tb, ToolsetTagging, "decide", map[string]any{"items": []map[string]any{
 		{"path": "readme.txt", "action": "move", "new_path": "/文档/readme.txt", "reason": "  "},
 		{"path": "misc/a.pdf", "action": "teleport", "reason": "x"},
@@ -370,7 +369,7 @@ func TestDecideRequiresReasonAndValidAction(t *testing.T) {
 
 func TestSurveyNeverDecides(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	tb.RunKind = db.RunPhaseSurvey
 	for name, args := range map[string]any{
 		"decide":      map[string]any{"items": []map[string]any{{"path": "readme.txt", "action": "skip", "reason": "x"}}},
@@ -396,7 +395,7 @@ func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	if err := repo.CreateFile(&model.FileEntry{ScanSessionID: a.sessionID, OriginalPath: "misc/evil\nname.txt", Name: "evil\nname.txt", FileType: "file", ParentPath: "misc"}); err != nil {
 		t.Fatal(err)
 	}
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &model.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, &model.ScanSession{ID: a.sessionID, AllowReadFile: true}, false)
 	list := func(args map[string]any) map[string]any {
 		return callTool(t, tb, ToolsetTagging, "list_entries", args)
 	}
@@ -432,7 +431,7 @@ func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 	if r := callTool(t, tb, ToolsetTagging, "read_file", map[string]string{"path": "../x"}); okOf(r) {
 		t.Fatalf("a bad path is a result, not a Go error: %+v", r)
 	}
-	off := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, &model.ScanSession{ID: a.sessionID, AllowReadFile: false}, false)
+	off := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, &model.ScanSession{ID: a.sessionID, AllowReadFile: false}, false)
 	if r := callTool(t, off, ToolsetTagging, "read_file", map[string]string{"path": "readme.txt"}); okOf(r) || !strings.Contains(errText(r), "未开启读取文件内容") {
 		t.Fatalf("switch off: %+v", r)
 	}
@@ -441,7 +440,7 @@ func TestListEntriesCompactAndSensitiveRead(t *testing.T) {
 func TestScriptDecisionBuiltins(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
 	a.session.AllowScript = true
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	if err := repo.CreateRule(&model.PlanRule{SessionID: a.sessionID, Name: "pdf", Exts: "pdf", Target: "文档/{parent}"}); err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +470,7 @@ result = {marker: s.markers[0].name, dirs: len(dirs), n: n, role: d.role, bad: i
 
 func TestRuleTools(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	add := func(args map[string]any) map[string]any { return callTool(t, tb, ToolsetMain, "add_rule", args) }
 	if out := add(map[string]any{"name": "x", "exts": "pdf", "target": "归档/{year}"}); okOf(out) || !strings.Contains(errText(out), "分类") {
 		t.Fatalf("agent rule outside categories: %+v", out)
@@ -518,7 +517,7 @@ func TestRuleTools(t *testing.T) {
 
 func TestTaggingRulesNeedPathPrefix(t *testing.T) {
 	a, repo := pipelineFixture(t, "")
-	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, config.Get().Agent, a.session, false)
+	tb := NewToolBuilder(repo, nil, a.sessionID, 7, a.logger, a.cfg, a.session, false)
 	tb.RunKind = db.RunPhaseTagging
 	out := callTool(t, tb, ToolsetTagging, "add_rule", map[string]any{"name": "pdf", "exts": "pdf", "target": "文档/{parent}"})
 	if okOf(out) || !strings.Contains(errText(out), "path_prefix") {

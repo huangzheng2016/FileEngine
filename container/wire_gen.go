@@ -43,12 +43,9 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 	query := newQuery(gdb)
 	filesystemService := filesystem.NewService(query)
 	modelproviderService := modelprovider.NewService(query)
-	settingsService, err := settings.NewService(query)
-	if err != nil {
-		return nil, err
-	}
+	settingsService := settings.NewService(query)
 	adminService := admin.NewService(gdb)
-	runService := run.NewService(query, repository, runnerService)
+	runService := run.NewService(query, repository, runnerService, settingsService)
 	fileService := file.NewService(query, repository, runService)
 	categoryService := category.NewService(query, repository)
 	planService := plan.NewService(query, repository, runService)
