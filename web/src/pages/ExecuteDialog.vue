@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ExecMode, Id } from '@/api/types'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import Alert from '@/base/Alert.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
 import Loading from '@/base/Loading.vue'
@@ -34,12 +34,16 @@ watch(
   },
 )
 
+// The sample size is typed, so the check waits for a pause.
+let timer: ReturnType<typeof setTimeout> | undefined
 watch(
   () => [form.mode, form.scope, form.sample],
   () => {
-    if (props.open) void check.refresh()
+    clearTimeout(timer)
+    if (props.open) timer = setTimeout(() => void check.refresh(), 300)
   },
 )
+onBeforeUnmount(() => clearTimeout(timer))
 
 const v = useFormValidation(() => ({
   sample: form.scope === 'sample' && (!Number.isInteger(form.sample) || form.sample < 1) ? '请输入要先试的数量' : '',
@@ -52,6 +56,7 @@ const scopes = computed(() => [
 const MODES = labelOptions(EXEC_MODE) as { value: ExecMode; label: string }[]
 
 const count = computed(() => (form.scope === 'sample' ? Math.min(form.sample, props.pending) : props.pending))
+const SHOWN_ISSUES = 50
 const blocked = computed(() => (props.pending ? '' : '没有可执行的项'))
 
 async function submit() {
@@ -76,23 +81,28 @@ async function submit() {
       <Loading v-if="check.loading.value" inline label="正在检查冲突" />
       <Alert v-else-if="check.error.value" tone="warning">检查冲突失败：{{ check.error.value }}</Alert>
       <template v-else-if="check.data.value && check.data.value.issues.length">
-        <Alert tone="warning"
-          >有 {{ fmtNumber(check.data.value.issues.length) }} 处冲突，这些文件执行时会被跳过。</Alert
-        >
+        <Alert tone="warning">
+          有 {{ fmtNumber(check.data.value.issues.length) }} 处冲突，这些文件会被跳过
+          <template v-if="check.data.value.issues.length > SHOWN_ISSUES">，下面列出前 {{ SHOWN_ISSUES }} 处</template>
+        </Alert>
         <div class="table-wrap issues">
           <table>
             <tbody>
-              <tr v-for="(i, n) in check.data.value.issues.slice(0, 50)" :key="n">
+              <tr v-for="(i, n) in check.data.value.issues.slice(0, SHOWN_ISSUES)" :key="n">
                 <td><StatusPill :value="i.code" :map="VALIDATION_ISSUE" /></td>
                 <td>
                   <span class="truncate">{{ i.new_path }}</span>
                   <span v-if="i.original_path" class="cell-sub">来自 {{ i.original_path }}</span>
+                  <span v-if="i.detail" class="cell-sub">{{ i.detail }}</span>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
       </template>
+      <ul v-if="check.data.value?.notes.length" class="notes text-sm text-muted">
+        <li v-for="(n, k) in check.data.value.notes" :key="k">{{ n }}</li>
+      </ul>
 
       <div class="field">
         <span class="field-label">方式</span>
@@ -102,7 +112,6 @@ async function submit() {
       <div class="field">
         <span class="field-label">范围</span>
         <Segmented v-model="form.scope" :options="scopes" label="范围" />
-        <span v-if="form.scope === 'sample'" class="field-hint">先处理一小部分，去存储里看过效果再执行其余的</span>
       </div>
       <label v-if="form.scope === 'sample'" class="field">
         <span class="field-label">先试的数量</span>
@@ -110,7 +119,7 @@ async function submit() {
         <span v-if="v.error('sample')" class="field-error">{{ v.error('sample') }}</span>
       </label>
       <Alert tone="info">
-        将{{ fmtLabel(EXEC_MODE, form.mode) }} {{ fmtNumber(count) }} 项到新位置，完成后可以撤销。
+        将{{ fmtLabel(EXEC_MODE, form.mode) }} {{ fmtNumber(count) }} 项到新位置。
         <template v-if="review">
           另有 {{ fmtNumber(review) }} 项{{ fmtLabel(ENTRY_FLAG, 'needs_review') }}，这次不会执行。
           <button type="button" class="ghost btn-sm" @click="emit('review')">去确认</button>
@@ -129,5 +138,9 @@ async function submit() {
 <style scoped>
 .issues {
   max-height: 200px;
+}
+.notes {
+  margin: 0;
+  padding-left: var(--space-5);
 }
 </style>
