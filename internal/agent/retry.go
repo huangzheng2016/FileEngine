@@ -12,9 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 
 	"FileEngine/internal/config"
+	modelfactory "FileEngine/internal/model"
 )
 
 // The class is in every retry log line so throttling is distinguishable from
@@ -51,6 +53,10 @@ func (c errorClass) String() string {
 var errStatusCodeRe = regexp.MustCompile(`error, status code: (\d+)`)
 
 func httpStatusFromError(err error) (int, bool) {
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) && anthropicErr.StatusCode > 0 {
+		return anthropicErr.StatusCode, true
+	}
 	var apiErr *einoopenai.APIError
 	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode > 0 {
 		return apiErr.HTTPStatusCode, true
@@ -92,8 +98,12 @@ func classifyRunErrorWithStatus(err error, statusHint int) errorClass {
 
 func classForStatus(status int) errorClass {
 	switch {
+	case status == modelfactory.StatusTransportFailure:
+		return errClassNetwork
 	case status == http.StatusTooManyRequests:
 		return errClassRateLimit
+	case status == http.StatusRequestTimeout, status == http.StatusConflict:
+		return errClassServer
 	case status >= 500 && status < 600:
 		return errClassServer
 	default:
@@ -136,6 +146,12 @@ func parseRetryAfterMessage(msg string) time.Duration {
 }
 
 func retryAfterFromError(err error) time.Duration {
+	var anthropicErr *anthropic.Error
+	if errors.As(err, &anthropicErr) && anthropicErr.Response != nil {
+		if d := modelfactory.ParseRetryAfter(anthropicErr.Response.Header.Get("Retry-After")); d > 0 {
+			return d
+		}
+	}
 	var carrier retryAfterCarrier
 	if errors.As(err, &carrier) {
 		if d := carrier.RetryAfter(); d > 0 {
