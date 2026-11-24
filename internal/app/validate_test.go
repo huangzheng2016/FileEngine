@@ -27,8 +27,8 @@ func TestIDLValidationRulesAreEnforced(t *testing.T) {
 			t.Errorf("%s: %s = %d %v, want 400 invalid", name, tc.path, st, body)
 		}
 	}
-	// a valid body passes validation and reaches the stub
-	if st, _ := do(t, testClient, "POST", base+"/api/execute/start", `{"session_id":"1","mode":"copy"}`, json); st != 501 {
-		t.Errorf("valid execute start = %d, want 501", st)
+	// a valid body passes validation and reaches the service
+	if st, _ := do(t, testClient, "POST", base+"/api/execute/start", `{"session_id":"1","mode":"copy"}`, json); st != 404 {
+		t.Errorf("valid execute start = %d, want 404 (no such session)", st)
 	}
 }

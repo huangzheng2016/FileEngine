@@ -113,8 +113,7 @@ func TestScanSessionAllowScriptDefaultsOn(t *testing.T) {
 		t.Fatal("AllowScript must default to true for a session created without setting it")
 	}
 
-	reloaded.AllowScript = false
-	if err := r.UpdateSession(reloaded); err != nil {
+	if err := r.DB().Model(&model.ScanSession{}).Where("id = ?", reloaded.ID).Update("allow_script", false).Error; err != nil {
 		t.Fatalf("update session: %v", err)
 	}
 	again, err := r.GetSession(session.ID)

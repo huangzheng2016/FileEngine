@@ -3,6 +3,7 @@
 package session
 
 import (
+	"FileEngine/biz/model/api/category"
 	"FileEngine/biz/model/api/run"
 	"fmt"
 	"github.com/apache/thrift/lib/go/thrift"
@@ -279,6 +280,10 @@ type Session struct {
 	LatestRun *RunRef `thrift:"latest_run,31,optional" form:"latest_run" json:"latest_run,omitempty" query:"latest_run"`
 	// token totals over the session's runs; only present in GetSession
 	Tokens *run.TokenCounts `thrift:"tokens,32,optional" form:"tokens" json:"tokens,omitempty" query:"tokens"`
+	// status scanned only: what the scan had to skip (for example unreadable
+	// folders); empty when nothing was skipped. error_message is set only
+	// when status is error or interrupted.
+	ScanWarning string `thrift:"scan_warning,33" form:"scan_warning" json:"scan_warning" query:"scan_warning"`
 }
 
 func NewSession() *Session {
@@ -426,6 +431,10 @@ func (p *Session) GetTokens() (v *run.TokenCounts) {
 	return p.Tokens
 }
 
+func (p *Session) GetScanWarning() (v string) {
+	return p.ScanWarning
+}
+
 var fieldIDToName_Session = map[int16]string{
 	1:  "id",
 	2:  "filesystem_id",
@@ -459,6 +468,7 @@ var fieldIDToName_Session = map[int16]string{
 	30: "updated_at",
 	31: "latest_run",
 	32: "tokens",
+	33: "scan_warning",
 }
 
 func (p *Session) IsSetLatestRun() bool {
@@ -738,6 +748,14 @@ func (p *Session) Read(iprot thrift.TProtocol) (err error) {
 		case 32:
 			if fieldTypeId == thrift.STRUCT {
 				if err = p.ReadField32(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 33:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField33(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -1118,6 +1136,17 @@ func (p *Session) ReadField32(iprot thrift.TProtocol) error {
 	p.Tokens = _field
 	return nil
 }
+func (p *Session) ReadField33(iprot thrift.TProtocol) error {
+
+	var _field string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ScanWarning = _field
+	return nil
+}
 
 func (p *Session) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -1251,6 +1280,10 @@ func (p *Session) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField32(oprot); err != nil {
 			fieldId = 32
+			goto WriteFieldError
+		}
+		if err = p.writeField33(oprot); err != nil {
+			fieldId = 33
 			goto WriteFieldError
 		}
 	}
@@ -1787,12 +1820,740 @@ WriteFieldBeginError:
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 32 end error: ", p), err)
 }
+func (p *Session) writeField33(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("scan_warning", thrift.STRING, 33); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteString(p.ScanWarning); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 33 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 33 end error: ", p), err)
+}
 
 func (p *Session) String() string {
 	if p == nil {
 		return "<nil>"
 	}
 	return fmt.Sprintf("Session(%+v)", *p)
+
+}
+
+// A template rule created together with the session; same fields and meaning as
+// rule.CreateRuleReq without the session.
+type SessionRuleDraft struct {
+	Name       *string `thrift:"name,1,optional" form:"name" json:"name,omitempty" query:"name"`
+	Exts       *string `thrift:"exts,2,optional" form:"exts" json:"exts,omitempty" query:"exts"`
+	NameRegex  *string `thrift:"name_regex,3,optional" form:"name_regex" json:"name_regex,omitempty" query:"name_regex"`
+	PathPrefix *string `thrift:"path_prefix,4,optional" form:"path_prefix" json:"path_prefix,omitempty" query:"path_prefix"`
+	FileType   *string `thrift:"file_type,5,optional" form:"file_type" json:"file_type,omitempty" query:"file_type"`
+	MinSize    *int64  `thrift:"min_size,6,optional" form:"min_size" json:"min_size,omitempty" query:"min_size"`
+	MaxSize    *int64  `thrift:"max_size,7,optional" form:"max_size" json:"max_size,omitempty" query:"max_size"`
+	Target     *string `thrift:"target,8,optional" form:"target" json:"target,omitempty" query:"target"`
+	Role       *string `thrift:"role,9,optional" form:"role" json:"role,omitempty" query:"role"`
+	Position   *int32  `thrift:"position,10,optional" form:"position" json:"position,omitempty" query:"position"`
+	Source     *string `thrift:"source,11,optional" form:"source" json:"source,omitempty" query:"source"`
+}
+
+func NewSessionRuleDraft() *SessionRuleDraft {
+	return &SessionRuleDraft{}
+}
+
+func (p *SessionRuleDraft) InitDefault() {
+}
+
+var SessionRuleDraft_Name_DEFAULT string
+
+func (p *SessionRuleDraft) GetName() (v string) {
+	if !p.IsSetName() {
+		return SessionRuleDraft_Name_DEFAULT
+	}
+	return *p.Name
+}
+
+var SessionRuleDraft_Exts_DEFAULT string
+
+func (p *SessionRuleDraft) GetExts() (v string) {
+	if !p.IsSetExts() {
+		return SessionRuleDraft_Exts_DEFAULT
+	}
+	return *p.Exts
+}
+
+var SessionRuleDraft_NameRegex_DEFAULT string
+
+func (p *SessionRuleDraft) GetNameRegex() (v string) {
+	if !p.IsSetNameRegex() {
+		return SessionRuleDraft_NameRegex_DEFAULT
+	}
+	return *p.NameRegex
+}
+
+var SessionRuleDraft_PathPrefix_DEFAULT string
+
+func (p *SessionRuleDraft) GetPathPrefix() (v string) {
+	if !p.IsSetPathPrefix() {
+		return SessionRuleDraft_PathPrefix_DEFAULT
+	}
+	return *p.PathPrefix
+}
+
+var SessionRuleDraft_FileType_DEFAULT string
+
+func (p *SessionRuleDraft) GetFileType() (v string) {
+	if !p.IsSetFileType() {
+		return SessionRuleDraft_FileType_DEFAULT
+	}
+	return *p.FileType
+}
+
+var SessionRuleDraft_MinSize_DEFAULT int64
+
+func (p *SessionRuleDraft) GetMinSize() (v int64) {
+	if !p.IsSetMinSize() {
+		return SessionRuleDraft_MinSize_DEFAULT
+	}
+	return *p.MinSize
+}
+
+var SessionRuleDraft_MaxSize_DEFAULT int64
+
+func (p *SessionRuleDraft) GetMaxSize() (v int64) {
+	if !p.IsSetMaxSize() {
+		return SessionRuleDraft_MaxSize_DEFAULT
+	}
+	return *p.MaxSize
+}
+
+var SessionRuleDraft_Target_DEFAULT string
+
+func (p *SessionRuleDraft) GetTarget() (v string) {
+	if !p.IsSetTarget() {
+		return SessionRuleDraft_Target_DEFAULT
+	}
+	return *p.Target
+}
+
+var SessionRuleDraft_Role_DEFAULT string
+
+func (p *SessionRuleDraft) GetRole() (v string) {
+	if !p.IsSetRole() {
+		return SessionRuleDraft_Role_DEFAULT
+	}
+	return *p.Role
+}
+
+var SessionRuleDraft_Position_DEFAULT int32
+
+func (p *SessionRuleDraft) GetPosition() (v int32) {
+	if !p.IsSetPosition() {
+		return SessionRuleDraft_Position_DEFAULT
+	}
+	return *p.Position
+}
+
+var SessionRuleDraft_Source_DEFAULT string
+
+func (p *SessionRuleDraft) GetSource() (v string) {
+	if !p.IsSetSource() {
+		return SessionRuleDraft_Source_DEFAULT
+	}
+	return *p.Source
+}
+
+var fieldIDToName_SessionRuleDraft = map[int16]string{
+	1:  "name",
+	2:  "exts",
+	3:  "name_regex",
+	4:  "path_prefix",
+	5:  "file_type",
+	6:  "min_size",
+	7:  "max_size",
+	8:  "target",
+	9:  "role",
+	10: "position",
+	11: "source",
+}
+
+func (p *SessionRuleDraft) IsSetName() bool {
+	return p.Name != nil
+}
+
+func (p *SessionRuleDraft) IsSetExts() bool {
+	return p.Exts != nil
+}
+
+func (p *SessionRuleDraft) IsSetNameRegex() bool {
+	return p.NameRegex != nil
+}
+
+func (p *SessionRuleDraft) IsSetPathPrefix() bool {
+	return p.PathPrefix != nil
+}
+
+func (p *SessionRuleDraft) IsSetFileType() bool {
+	return p.FileType != nil
+}
+
+func (p *SessionRuleDraft) IsSetMinSize() bool {
+	return p.MinSize != nil
+}
+
+func (p *SessionRuleDraft) IsSetMaxSize() bool {
+	return p.MaxSize != nil
+}
+
+func (p *SessionRuleDraft) IsSetTarget() bool {
+	return p.Target != nil
+}
+
+func (p *SessionRuleDraft) IsSetRole() bool {
+	return p.Role != nil
+}
+
+func (p *SessionRuleDraft) IsSetPosition() bool {
+	return p.Position != nil
+}
+
+func (p *SessionRuleDraft) IsSetSource() bool {
+	return p.Source != nil
+}
+
+func (p *SessionRuleDraft) Read(iprot thrift.TProtocol) (err error) {
+	var fieldTypeId thrift.TType
+	var fieldId int16
+
+	if _, err = iprot.ReadStructBegin(); err != nil {
+		goto ReadStructBeginError
+	}
+
+	for {
+		_, fieldTypeId, fieldId, err = iprot.ReadFieldBegin()
+		if err != nil {
+			goto ReadFieldBeginError
+		}
+		if fieldTypeId == thrift.STOP {
+			break
+		}
+
+		switch fieldId {
+		case 1:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField1(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 2:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField2(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 3:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField3(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 4:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField4(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 5:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField5(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 6:
+			if fieldTypeId == thrift.I64 {
+				if err = p.ReadField6(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 7:
+			if fieldTypeId == thrift.I64 {
+				if err = p.ReadField7(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 8:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField8(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 9:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField9(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 10:
+			if fieldTypeId == thrift.I32 {
+				if err = p.ReadField10(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 11:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField11(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		default:
+			if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		}
+		if err = iprot.ReadFieldEnd(); err != nil {
+			goto ReadFieldEndError
+		}
+	}
+	if err = iprot.ReadStructEnd(); err != nil {
+		goto ReadStructEndError
+	}
+
+	return nil
+ReadStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct begin error: ", p), err)
+ReadFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d begin error: ", p, fieldId), err)
+ReadFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T read field %d '%s' error: ", p, fieldId, fieldIDToName_SessionRuleDraft[fieldId]), err)
+SkipFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T field %d skip type %d error: ", p, fieldId, fieldTypeId), err)
+
+ReadFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read field end error", p), err)
+ReadStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
+}
+
+func (p *SessionRuleDraft) ReadField1(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Name = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField2(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Exts = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField3(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.NameRegex = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField4(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.PathPrefix = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField5(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.FileType = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField6(iprot thrift.TProtocol) error {
+
+	var _field *int64
+	if v, err := iprot.ReadI64(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.MinSize = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField7(iprot thrift.TProtocol) error {
+
+	var _field *int64
+	if v, err := iprot.ReadI64(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.MaxSize = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField8(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Target = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField9(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Role = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField10(iprot thrift.TProtocol) error {
+
+	var _field *int32
+	if v, err := iprot.ReadI32(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Position = _field
+	return nil
+}
+func (p *SessionRuleDraft) ReadField11(iprot thrift.TProtocol) error {
+
+	var _field *string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = &v
+	}
+	p.Source = _field
+	return nil
+}
+
+func (p *SessionRuleDraft) Write(oprot thrift.TProtocol) (err error) {
+	var fieldId int16
+	if err = oprot.WriteStructBegin("SessionRuleDraft"); err != nil {
+		goto WriteStructBeginError
+	}
+	if p != nil {
+		if err = p.writeField1(oprot); err != nil {
+			fieldId = 1
+			goto WriteFieldError
+		}
+		if err = p.writeField2(oprot); err != nil {
+			fieldId = 2
+			goto WriteFieldError
+		}
+		if err = p.writeField3(oprot); err != nil {
+			fieldId = 3
+			goto WriteFieldError
+		}
+		if err = p.writeField4(oprot); err != nil {
+			fieldId = 4
+			goto WriteFieldError
+		}
+		if err = p.writeField5(oprot); err != nil {
+			fieldId = 5
+			goto WriteFieldError
+		}
+		if err = p.writeField6(oprot); err != nil {
+			fieldId = 6
+			goto WriteFieldError
+		}
+		if err = p.writeField7(oprot); err != nil {
+			fieldId = 7
+			goto WriteFieldError
+		}
+		if err = p.writeField8(oprot); err != nil {
+			fieldId = 8
+			goto WriteFieldError
+		}
+		if err = p.writeField9(oprot); err != nil {
+			fieldId = 9
+			goto WriteFieldError
+		}
+		if err = p.writeField10(oprot); err != nil {
+			fieldId = 10
+			goto WriteFieldError
+		}
+		if err = p.writeField11(oprot); err != nil {
+			fieldId = 11
+			goto WriteFieldError
+		}
+	}
+	if err = oprot.WriteFieldStop(); err != nil {
+		goto WriteFieldStopError
+	}
+	if err = oprot.WriteStructEnd(); err != nil {
+		goto WriteStructEndError
+	}
+	return nil
+WriteStructBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
+WriteFieldError:
+	return thrift.PrependError(fmt.Sprintf("%T write field %d error: ", p, fieldId), err)
+WriteFieldStopError:
+	return thrift.PrependError(fmt.Sprintf("%T write field stop error: ", p), err)
+WriteStructEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write struct end error: ", p), err)
+}
+
+func (p *SessionRuleDraft) writeField1(oprot thrift.TProtocol) (err error) {
+	if p.IsSetName() {
+		if err = oprot.WriteFieldBegin("name", thrift.STRING, 1); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.Name); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 1 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 1 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField2(oprot thrift.TProtocol) (err error) {
+	if p.IsSetExts() {
+		if err = oprot.WriteFieldBegin("exts", thrift.STRING, 2); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.Exts); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 2 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 2 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField3(oprot thrift.TProtocol) (err error) {
+	if p.IsSetNameRegex() {
+		if err = oprot.WriteFieldBegin("name_regex", thrift.STRING, 3); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.NameRegex); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 3 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 3 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField4(oprot thrift.TProtocol) (err error) {
+	if p.IsSetPathPrefix() {
+		if err = oprot.WriteFieldBegin("path_prefix", thrift.STRING, 4); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.PathPrefix); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 4 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 4 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField5(oprot thrift.TProtocol) (err error) {
+	if p.IsSetFileType() {
+		if err = oprot.WriteFieldBegin("file_type", thrift.STRING, 5); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.FileType); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 5 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 5 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField6(oprot thrift.TProtocol) (err error) {
+	if p.IsSetMinSize() {
+		if err = oprot.WriteFieldBegin("min_size", thrift.I64, 6); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteI64(*p.MinSize); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 6 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 6 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField7(oprot thrift.TProtocol) (err error) {
+	if p.IsSetMaxSize() {
+		if err = oprot.WriteFieldBegin("max_size", thrift.I64, 7); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteI64(*p.MaxSize); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 7 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 7 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField8(oprot thrift.TProtocol) (err error) {
+	if p.IsSetTarget() {
+		if err = oprot.WriteFieldBegin("target", thrift.STRING, 8); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.Target); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 8 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 8 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField9(oprot thrift.TProtocol) (err error) {
+	if p.IsSetRole() {
+		if err = oprot.WriteFieldBegin("role", thrift.STRING, 9); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.Role); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 9 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 9 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField10(oprot thrift.TProtocol) (err error) {
+	if p.IsSetPosition() {
+		if err = oprot.WriteFieldBegin("position", thrift.I32, 10); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteI32(*p.Position); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 10 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 10 end error: ", p), err)
+}
+func (p *SessionRuleDraft) writeField11(oprot thrift.TProtocol) (err error) {
+	if p.IsSetSource() {
+		if err = oprot.WriteFieldBegin("source", thrift.STRING, 11); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteString(*p.Source); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 11 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 11 end error: ", p), err)
+}
+
+func (p *SessionRuleDraft) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SessionRuleDraft(%+v)", *p)
 
 }
 
@@ -1818,6 +2579,11 @@ type CreateSessionReq struct {
 	AllowReadFile     *bool  `thrift:"allow_read_file,14,optional" form:"allow_read_file" json:"allow_read_file,omitempty" query:"allow_read_file"`
 	AllowAutoCategory *bool  `thrift:"allow_auto_category,15,optional" form:"allow_auto_category" json:"allow_auto_category,omitempty" query:"allow_auto_category"`
 	AllowScript       *bool  `thrift:"allow_script,16,optional" form:"allow_script" json:"allow_script,omitempty" query:"allow_script"`
+	// created in the same transaction as the session, before the scan starts; at
+	// most 200 each, any invalid entry rejects the whole request
+	Rules []*SessionRuleDraft `thrift:"rules,17,optional" form:"rules" json:"rules,omitempty" query:"rules"`
+	// categories of the session's storage (existing names are kept as they are)
+	Categories []*category.CategoryTemplate `thrift:"categories,18,optional" form:"categories" json:"categories,omitempty" query:"categories"`
 }
 
 func NewCreateSessionReq() *CreateSessionReq {
@@ -1911,6 +2677,24 @@ func (p *CreateSessionReq) GetAllowScript() (v bool) {
 	return *p.AllowScript
 }
 
+var CreateSessionReq_Rules_DEFAULT []*SessionRuleDraft
+
+func (p *CreateSessionReq) GetRules() (v []*SessionRuleDraft) {
+	if !p.IsSetRules() {
+		return CreateSessionReq_Rules_DEFAULT
+	}
+	return p.Rules
+}
+
+var CreateSessionReq_Categories_DEFAULT []*category.CategoryTemplate
+
+func (p *CreateSessionReq) GetCategories() (v []*category.CategoryTemplate) {
+	if !p.IsSetCategories() {
+		return CreateSessionReq_Categories_DEFAULT
+	}
+	return p.Categories
+}
+
 var fieldIDToName_CreateSessionReq = map[int16]string{
 	1:  "filesystem_id",
 	2:  "scan_path",
@@ -1928,6 +2712,8 @@ var fieldIDToName_CreateSessionReq = map[int16]string{
 	14: "allow_read_file",
 	15: "allow_auto_category",
 	16: "allow_script",
+	17: "rules",
+	18: "categories",
 }
 
 func (p *CreateSessionReq) IsSetExtractMetadata() bool {
@@ -1944,6 +2730,14 @@ func (p *CreateSessionReq) IsSetAllowAutoCategory() bool {
 
 func (p *CreateSessionReq) IsSetAllowScript() bool {
 	return p.AllowScript != nil
+}
+
+func (p *CreateSessionReq) IsSetRules() bool {
+	return p.Rules != nil
+}
+
+func (p *CreateSessionReq) IsSetCategories() bool {
+	return p.Categories != nil
 }
 
 func (p *CreateSessionReq) Read(iprot thrift.TProtocol) (err error) {
@@ -2087,6 +2881,22 @@ func (p *CreateSessionReq) Read(iprot thrift.TProtocol) (err error) {
 		case 16:
 			if fieldTypeId == thrift.BOOL {
 				if err = p.ReadField16(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 17:
+			if fieldTypeId == thrift.LIST {
+				if err = p.ReadField17(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 18:
+			if fieldTypeId == thrift.LIST {
+				if err = p.ReadField18(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -2297,6 +3107,52 @@ func (p *CreateSessionReq) ReadField16(iprot thrift.TProtocol) error {
 	p.AllowScript = _field
 	return nil
 }
+func (p *CreateSessionReq) ReadField17(iprot thrift.TProtocol) error {
+	_, size, err := iprot.ReadListBegin()
+	if err != nil {
+		return err
+	}
+	_field := make([]*SessionRuleDraft, 0, size)
+	values := make([]SessionRuleDraft, size)
+	for i := 0; i < size; i++ {
+		_elem := &values[i]
+		_elem.InitDefault()
+
+		if err := _elem.Read(iprot); err != nil {
+			return err
+		}
+
+		_field = append(_field, _elem)
+	}
+	if err := iprot.ReadListEnd(); err != nil {
+		return err
+	}
+	p.Rules = _field
+	return nil
+}
+func (p *CreateSessionReq) ReadField18(iprot thrift.TProtocol) error {
+	_, size, err := iprot.ReadListBegin()
+	if err != nil {
+		return err
+	}
+	_field := make([]*category.CategoryTemplate, 0, size)
+	values := make([]category.CategoryTemplate, size)
+	for i := 0; i < size; i++ {
+		_elem := &values[i]
+		_elem.InitDefault()
+
+		if err := _elem.Read(iprot); err != nil {
+			return err
+		}
+
+		_field = append(_field, _elem)
+	}
+	if err := iprot.ReadListEnd(); err != nil {
+		return err
+	}
+	p.Categories = _field
+	return nil
+}
 
 func (p *CreateSessionReq) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -2366,6 +3222,14 @@ func (p *CreateSessionReq) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField16(oprot); err != nil {
 			fieldId = 16
+			goto WriteFieldError
+		}
+		if err = p.writeField17(oprot); err != nil {
+			fieldId = 17
+			goto WriteFieldError
+		}
+		if err = p.writeField18(oprot); err != nil {
+			fieldId = 18
 			goto WriteFieldError
 		}
 	}
@@ -2649,6 +3513,58 @@ WriteFieldBeginError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 16 begin error: ", p), err)
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 16 end error: ", p), err)
+}
+func (p *CreateSessionReq) writeField17(oprot thrift.TProtocol) (err error) {
+	if p.IsSetRules() {
+		if err = oprot.WriteFieldBegin("rules", thrift.LIST, 17); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Rules)); err != nil {
+			return err
+		}
+		for _, v := range p.Rules {
+			if err := v.Write(oprot); err != nil {
+				return err
+			}
+		}
+		if err := oprot.WriteListEnd(); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 17 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 17 end error: ", p), err)
+}
+func (p *CreateSessionReq) writeField18(oprot thrift.TProtocol) (err error) {
+	if p.IsSetCategories() {
+		if err = oprot.WriteFieldBegin("categories", thrift.LIST, 18); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Categories)); err != nil {
+			return err
+		}
+		for _, v := range p.Categories {
+			if err := v.Write(oprot); err != nil {
+				return err
+			}
+		}
+		if err := oprot.WriteListEnd(); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 18 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 18 end error: ", p), err)
 }
 
 func (p *CreateSessionReq) String() string {

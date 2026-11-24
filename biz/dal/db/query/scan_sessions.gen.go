@@ -36,6 +36,7 @@ func newScanSession(db *gorm.DB, opts ...gen.DOOption) scanSession {
 	_scanSession.ScannedCount = field.NewInt(tableName, "scanned_count")
 	_scanSession.CurrentPath = field.NewString(tableName, "current_path")
 	_scanSession.ErrorMessage = field.NewString(tableName, "error_message")
+	_scanSession.ScanWarning = field.NewString(tableName, "scan_warning")
 	_scanSession.TaggedFiles = field.NewInt(tableName, "tagged_files")
 	_scanSession.PlannedOps = field.NewInt(tableName, "planned_ops")
 	_scanSession.ReviewCount = field.NewInt(tableName, "review_count")
@@ -76,6 +77,7 @@ type scanSession struct {
 	ScannedCount        field.Int
 	CurrentPath         field.String
 	ErrorMessage        field.String
+	ScanWarning         field.String
 	TaggedFiles         field.Int
 	PlannedOps          field.Int
 	ReviewCount         field.Int
@@ -122,6 +124,7 @@ func (s *scanSession) updateTableName(table string) *scanSession {
 	s.ScannedCount = field.NewInt(table, "scanned_count")
 	s.CurrentPath = field.NewString(table, "current_path")
 	s.ErrorMessage = field.NewString(table, "error_message")
+	s.ScanWarning = field.NewString(table, "scan_warning")
 	s.TaggedFiles = field.NewInt(table, "tagged_files")
 	s.PlannedOps = field.NewInt(table, "planned_ops")
 	s.ReviewCount = field.NewInt(table, "review_count")
@@ -168,7 +171,7 @@ func (s *scanSession) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (s *scanSession) fillFieldMap() {
-	s.fieldMap = make(map[string]field.Expr, 30)
+	s.fieldMap = make(map[string]field.Expr, 31)
 	s.fieldMap["id"] = s.ID
 	s.fieldMap["filesystem_id"] = s.FilesystemID
 	s.fieldMap["scan_path"] = s.ScanPath
@@ -179,6 +182,7 @@ func (s *scanSession) fillFieldMap() {
 	s.fieldMap["scanned_count"] = s.ScannedCount
 	s.fieldMap["current_path"] = s.CurrentPath
 	s.fieldMap["error_message"] = s.ErrorMessage
+	s.fieldMap["scan_warning"] = s.ScanWarning
 	s.fieldMap["tagged_files"] = s.TaggedFiles
 	s.fieldMap["planned_ops"] = s.PlannedOps
 	s.fieldMap["review_count"] = s.ReviewCount

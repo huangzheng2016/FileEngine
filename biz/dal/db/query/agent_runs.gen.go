@@ -33,6 +33,10 @@ func newAgentRun(db *gorm.DB, opts ...gen.DOOption) agentRun {
 	_agentRun.Title = field.NewString(tableName, "title")
 	_agentRun.ExecMode = field.NewString(tableName, "exec_mode")
 	_agentRun.RevertsRunID = field.NewUint(tableName, "reverts_run_id")
+	_agentRun.ExecTotal = field.NewInt(tableName, "exec_total")
+	_agentRun.ExecSuccess = field.NewInt(tableName, "exec_success")
+	_agentRun.ExecFailed = field.NewInt(tableName, "exec_failed")
+	_agentRun.ExecSkipped = field.NewInt(tableName, "exec_skipped")
 	_agentRun.Summary = field.NewString(tableName, "summary")
 	_agentRun.Error = field.NewString(tableName, "error")
 	_agentRun.PromptTokens = field.NewInt(tableName, "prompt_tokens")
@@ -59,6 +63,10 @@ type agentRun struct {
 	Title            field.String
 	ExecMode         field.String
 	RevertsRunID     field.Uint
+	ExecTotal        field.Int
+	ExecSuccess      field.Int
+	ExecFailed       field.Int
+	ExecSkipped      field.Int
 	Summary          field.String
 	Error            field.String
 	PromptTokens     field.Int
@@ -91,6 +99,10 @@ func (a *agentRun) updateTableName(table string) *agentRun {
 	a.Title = field.NewString(table, "title")
 	a.ExecMode = field.NewString(table, "exec_mode")
 	a.RevertsRunID = field.NewUint(table, "reverts_run_id")
+	a.ExecTotal = field.NewInt(table, "exec_total")
+	a.ExecSuccess = field.NewInt(table, "exec_success")
+	a.ExecFailed = field.NewInt(table, "exec_failed")
+	a.ExecSkipped = field.NewInt(table, "exec_skipped")
 	a.Summary = field.NewString(table, "summary")
 	a.Error = field.NewString(table, "error")
 	a.PromptTokens = field.NewInt(table, "prompt_tokens")
@@ -124,7 +136,7 @@ func (a *agentRun) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (a *agentRun) fillFieldMap() {
-	a.fieldMap = make(map[string]field.Expr, 16)
+	a.fieldMap = make(map[string]field.Expr, 20)
 	a.fieldMap["id"] = a.ID
 	a.fieldMap["session_id"] = a.SessionID
 	a.fieldMap["phase"] = a.Phase
@@ -132,6 +144,10 @@ func (a *agentRun) fillFieldMap() {
 	a.fieldMap["title"] = a.Title
 	a.fieldMap["exec_mode"] = a.ExecMode
 	a.fieldMap["reverts_run_id"] = a.RevertsRunID
+	a.fieldMap["exec_total"] = a.ExecTotal
+	a.fieldMap["exec_success"] = a.ExecSuccess
+	a.fieldMap["exec_failed"] = a.ExecFailed
+	a.fieldMap["exec_skipped"] = a.ExecSkipped
 	a.fieldMap["summary"] = a.Summary
 	a.fieldMap["error"] = a.Error
 	a.fieldMap["prompt_tokens"] = a.PromptTokens

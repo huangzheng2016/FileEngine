@@ -145,11 +145,6 @@ func TestRunLifecycle(t *testing.T) {
 	if err := r.FinishRun(next, RunDone, "", "", TokenCounts{Total: 1}); err != nil {
 		t.Fatal(err)
 	}
-	tok, err := r.SessionTokens(30)
-	if err != nil || tok.Total != 16 || tok.Prompt != 10 {
-		t.Fatalf("session tokens = %+v (%v)", tok, err)
-	}
-
 	start, err := r.LatestRunStartSeq(30)
 	if err != nil {
 		t.Fatal(err)

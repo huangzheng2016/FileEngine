@@ -23,7 +23,7 @@ struct Issue {
     1: i64 entry_id (go.tag='json:"entry_id,string"')
     2: string original_path
     3: string new_path
-    // invalid_target | into_self | nested | collision | target_exists
+    // invalid_target | into_self | collision | target_exists
     // | source_changed | source_missing | failed
     4: string code
     5: string detail

@@ -112,7 +112,9 @@ type ScanSession struct {
 	ScannedCount int    `json:"scanned_count"`
 	CurrentPath  string `gorm:"size:1024" json:"current_path"`
 	// Kept out of Status so the enum stays short and the full message survives.
-	ErrorMessage        string    `gorm:"type:text" json:"error_message"`
+	ErrorMessage string `gorm:"type:text" json:"error_message"`
+	// Set on a successfully scanned session: what the walk had to skip.
+	ScanWarning         string    `gorm:"type:text" json:"scan_warning"`
 	TaggedFiles         int       `json:"tagged_files"`
 	PlannedOps          int       `json:"planned_ops"`
 	ReviewCount         int       `json:"review_count"` // planned, unexecuted entries waiting in needs_review
@@ -165,14 +167,19 @@ func (p *ModelProvider) EffectiveContextWindow() int {
 
 // Token totals of a session are the sum over its runs.
 type AgentRun struct {
-	ID               uint       `gorm:"primaryKey" json:"id"`
-	SessionID        uint       `gorm:"index:idx_run_session,priority:1" json:"session_id"`
-	Phase            string     `gorm:"size:16" json:"phase"`
-	Status           string     `gorm:"size:16;index" json:"status"`
-	Title            string     `gorm:"size:512" json:"title"`
-	ExecMode         string     `gorm:"size:16" json:"exec_mode,omitempty"`    // executing runs: copy / move
-	RevertsRunID     *uint      `gorm:"index" json:"reverts_run_id,omitempty"` // set on a revert run
-	RevertedByRunID  *uint      `gorm:"-" json:"reverted_by_run_id,omitempty"` // derived from the revert run's reverts_run_id
+	ID              uint   `gorm:"primaryKey" json:"id"`
+	SessionID       uint   `gorm:"index:idx_run_session,priority:1" json:"session_id"`
+	Phase           string `gorm:"size:16" json:"phase"`
+	Status          string `gorm:"size:16;index" json:"status"`
+	Title           string `gorm:"size:512" json:"title"`
+	ExecMode        string `gorm:"size:16" json:"exec_mode,omitempty"`    // executing runs: copy / move
+	RevertsRunID    *uint  `gorm:"index" json:"reverts_run_id,omitempty"` // set on a revert run
+	RevertedByRunID *uint  `gorm:"-" json:"reverted_by_run_id,omitempty"` // derived from the revert run's reverts_run_id
+	// Final counters of executing and revert runs, written when the run ends.
+	ExecTotal        int        `json:"exec_total"`
+	ExecSuccess      int        `json:"exec_success"`
+	ExecFailed       int        `json:"exec_failed"`
+	ExecSkipped      int        `json:"exec_skipped"`
 	Summary          string     `gorm:"type:text" json:"summary"`
 	Error            string     `gorm:"type:text" json:"error"`
 	PromptTokens     int        `json:"prompt_tokens"`

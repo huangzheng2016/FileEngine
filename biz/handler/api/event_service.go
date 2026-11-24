@@ -4,20 +4,17 @@ package api
 
 import (
 	"context"
-	"errors"
-	"strconv"
 
 	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
 	event "FileEngine/biz/model/api/event"
+	eventsvc "FileEngine/biz/service/event"
 	"FileEngine/biz/service/eventfeed"
 	"FileEngine/container"
-	"FileEngine/internal/db"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/hertz-contrib/sse"
-	"gorm.io/gorm"
 )
 
 // ListSessionEvents .
@@ -27,19 +24,15 @@ func ListSessionEvents(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	sessionID, err := id(req.SessionID)
-	if err != nil {
-		resp.Fail(ctx, c, err)
-		return
-	}
+	sessionID, err0 := id(req.SessionID)
 	runID, err1 := optID(req.RunID)
 	after, err2 := optID(req.After)
 	before, err3 := optID(req.Before)
-	if err = errors.Join(err1, err2, err3); err != nil || req.Limit < 0 {
-		resp.Fail(ctx, c, errs.BadRequest)
+	if err := firstBad(err0, err1, err2, err3); err != nil {
+		resp.Fail(ctx, c, err)
 		return
 	}
-	rows, more, err := container.Default.Repo.ListEvents(db.EventQuery{
+	rows, more, err := container.Default.Event.List(ctx, eventsvc.ListQuery{
 		SessionID: sessionID, RunID: runID, After: after, Before: before, Limit: int(req.Limit),
 	})
 	if err != nil {
@@ -58,43 +51,21 @@ func StreamSessionEvents(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	sessionID, err := id(req.SessionID)
-	if err != nil {
+	sessionID, err0 := id(req.SessionID)
+	runID, err1 := optID(req.RunID)
+	if err := firstBad(err0, err1); err != nil {
 		resp.Fail(ctx, c, err)
 		return
 	}
-	runID, err := optID(req.RunID)
-	if err != nil {
-		resp.Fail(ctx, c, err)
-		return
-	}
-	repo := container.Default.Repo
-	if _, err := repo.GetSession(sessionID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errs.NoSession
-		}
-		resp.Fail(ctx, c, err)
-		return
-	}
-
 	resume := sse.GetLastEventID(c)
 	if resume == "" {
 		resume, _ = c.GetQuery("after")
 	}
-	var after uint
-	if resume != "" {
-		n, err := strconv.ParseUint(resume, 10, 64)
-		if err != nil {
-			resp.Fail(ctx, c, errs.Invalid("Last-Event-ID 无效"))
-			return
-		}
-		after = uint(n)
-	} else {
-		var err error
-		if after, err = eventfeed.StartSeq(repo, sessionID, runID); err != nil {
-			resp.Fail(ctx, c, err)
-			return
-		}
+	events := container.Default.Event
+	after, err := events.StreamStart(ctx, sessionID, runID, resume)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
 	}
 
 	streamCtx, done, err := container.Default.Streams.Begin()
@@ -109,7 +80,7 @@ func StreamSessionEvents(ctx context.Context, c *app.RequestContext) {
 	if sink.comment("stream") != nil {
 		return
 	}
-	_ = eventfeed.Follow(streamCtx, repo, eventfeed.Query{
+	_ = events.Follow(streamCtx, eventfeed.Query{
 		SessionID: sessionID, RunID: runID, After: after, Heartbeat: SSEHeartbeat,
 	}, sink)
 }

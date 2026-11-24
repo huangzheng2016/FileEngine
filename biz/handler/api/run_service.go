@@ -5,50 +5,94 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
-	run "FileEngine/biz/model/api/run"
+	runmodel "FileEngine/biz/model/api/run"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // StartTagging .
 // @router /api/run/tag [POST]
 func StartTagging(ctx context.Context, c *app.RequestContext) {
-	var req run.StartTaggingReq
+	var req runmodel.StartTaggingReq
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	r, err := container.Default.Run.StartTagging(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &runmodel.StartRunResp{RunID: int64(r.ID)})
 }
 
 // ListSessionRuns .
 // @router /api/run/list [GET]
 func ListSessionRuns(ctx context.Context, c *app.RequestContext) {
-	var req run.ListSessionRunsReq
+	var req runmodel.ListSessionRunsReq
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Run.List(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*runmodel.Run, len(rows))
+	for i := range rows {
+		items[i] = toRun(&rows[i])
+	}
+	c.JSON(consts.StatusOK, &runmodel.ListSessionRunsResp{Items: items, Total: int64(len(items))})
 }
 
 // GetRun .
 // @router /api/run/get [GET]
 func GetRun(ctx context.Context, c *app.RequestContext) {
-	var req run.GetRunReq
+	var req runmodel.GetRunReq
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rid, err := id(req.RunID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	r, err := container.Default.Run.Get(ctx, rid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &runmodel.RunResp{Item: toRun(r)})
 }
 
 // StopRun .
 // @router /api/run/stop [POST]
 func StopRun(ctx context.Context, c *app.RequestContext) {
-	var req run.StopRunReq
+	var req runmodel.StopRunReq
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rid, err := id(req.RunID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	r, err := container.Default.Run.Stop(ctx, rid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &runmodel.RunResp{Item: toRun(r)})
 }

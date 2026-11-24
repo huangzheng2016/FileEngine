@@ -189,6 +189,9 @@ func (e *Executor) finish(run *model.AgentRun, res *Result, err error, verb stri
 	if rerr := e.repo.RefreshSessionCounts(run.SessionID); rerr != nil {
 		log.Printf("executor run %d: refresh counts: %v", run.ID, rerr)
 	}
+	if cerr := e.repo.SetRunCounters(run.ID, res.Total, res.Success, res.Failed, res.Skipped); cerr != nil {
+		log.Printf("executor run %d: store counters: %v", run.ID, cerr)
+	}
 	if ferr := e.repo.FinishRun(run, status, Summary(verb, res), errMsg, db.TokenCounts{}); ferr != nil {
 		log.Printf("executor run %d: finish: %v", run.ID, ferr)
 	}

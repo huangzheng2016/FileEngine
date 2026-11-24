@@ -11,14 +11,18 @@ import (
 	"FileEngine/biz/service/auth"
 	"FileEngine/biz/service/category"
 	"FileEngine/biz/service/chat"
+	"FileEngine/biz/service/event"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/execute"
 	"FileEngine/biz/service/file"
 	"FileEngine/biz/service/filesystem"
 	"FileEngine/biz/service/memory"
 	"FileEngine/biz/service/modelprovider"
 	"FileEngine/biz/service/plan"
 	"FileEngine/biz/service/rule"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/session"
 	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
@@ -52,6 +56,10 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 	ruleService := rule.NewService(repository, factory)
 	memoryService := memory.NewService(repository)
 	chatService := chat.NewService(query, factory, runnerService)
+	runService := run.NewService(query, repository, runnerService)
+	sessionService := session.NewService(query, repository, runService)
+	executeService := execute.NewService(repository, runService)
+	eventService := event.NewService(repository, runService)
 	container := &Container{
 		DB:          gdb,
 		Repo:        repository,
@@ -69,6 +77,10 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		Rules:       ruleService,
 		Memory:      memoryService,
 		Chat:        chatService,
+		Session:     sessionService,
+		Run:         runService,
+		Execute:     executeService,
+		Event:       eventService,
 	}
 	return container, nil
 }

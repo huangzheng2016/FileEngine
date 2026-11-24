@@ -1,6 +1,7 @@
 namespace go api.session
 
 include "run.thrift"
+include "category.thrift"
 
 struct RunRef {
     1: i64 id (go.tag='json:"id,string"')
@@ -50,6 +51,26 @@ struct Session {
     31: optional RunRef latest_run
     // token totals over the session's runs; only present in GetSession
     32: optional run.TokenCounts tokens
+    // status scanned only: what the scan had to skip (for example unreadable
+    // folders); empty when nothing was skipped. error_message is set only
+    // when status is error or interrupted.
+    33: string scan_warning
+}
+
+// A template rule created together with the session; same fields and meaning as
+// rule.CreateRuleReq without the session.
+struct SessionRuleDraft {
+    1: optional string name
+    2: optional string exts
+    3: optional string name_regex
+    4: optional string path_prefix
+    5: optional string file_type
+    6: optional i64 min_size
+    7: optional i64 max_size
+    8: optional string target
+    9: optional string role
+    10: optional i32 position
+    11: optional string source
 }
 
 // Absent optional fields take the default of a new task (extraction and the
@@ -74,6 +95,11 @@ struct CreateSessionReq {
     14: optional bool allow_read_file
     15: optional bool allow_auto_category
     16: optional bool allow_script
+    // created in the same transaction as the session, before the scan starts; at
+    // most 200 each, any invalid entry rejects the whole request
+    17: optional list<SessionRuleDraft> rules
+    // categories of the session's storage (existing names are kept as they are)
+    18: optional list<category.CategoryTemplate> categories
 }
 
 struct SessionResp {

@@ -112,19 +112,45 @@ func (s *Service) Stop(runID uint) (*model.AgentRun, error) {
 	if run.Status != db.RunRunning {
 		return run, nil
 	}
-	s.mu.Lock()
-	done := s.done[runID]
-	s.mu.Unlock()
-	if db.CancelRun(runID) && done != nil {
-		select {
-		case <-done:
-		case <-time.After(s.stopWait):
+	if db.CancelRun(runID) {
+		if !s.awaitEnd(runID) {
 			slog.Warn("stop run: still winding down", "run", runID, "after", s.stopWait)
 		}
-	} else if done == nil {
+	} else {
+		// A running row nobody can cancel belongs to no live goroutine.
 		_ = s.repo.FinishRun(run, db.RunStopped, "", "", db.TokenCounts{})
 	}
 	return s.repo.GetRun(runID)
+}
+
+// awaitEnd waits until the run's goroutine has exited (runs the runner
+// launched) or its row left running (the executor's runs, which finish their
+// own row), for at most the stop wait.
+func (s *Service) awaitEnd(runID uint) bool {
+	s.mu.Lock()
+	done := s.done[runID]
+	s.mu.Unlock()
+	deadline := time.After(s.stopWait)
+	if done != nil {
+		select {
+		case <-done:
+			return true
+		case <-deadline:
+			return false
+		}
+	}
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if r, err := s.repo.GetRun(runID); err != nil || r.Status != db.RunRunning {
+			return true
+		}
+		select {
+		case <-tick.C:
+		case <-deadline:
+			return false
+		}
+	}
 }
 
 // StopSession stops every running run of the session and waits for them.
@@ -134,14 +160,8 @@ func (s *Service) StopSession(sessionID uint) {
 		return
 	}
 	for _, r := range runs {
-		s.mu.Lock()
-		done := s.done[r.ID]
-		s.mu.Unlock()
-		if db.CancelRun(r.ID) && done != nil {
-			select {
-			case <-done:
-			case <-time.After(s.stopWait):
-			}
+		if db.CancelRun(r.ID) {
+			s.awaitEnd(r.ID)
 		}
 	}
 }
@@ -170,6 +190,9 @@ func (s *Service) StartScan(sessionID uint, scan func(ctx context.Context)) {
 		defer func() {
 			if p := recover(); p != nil {
 				slog.Error("scan panicked", "session", sessionID, "panic", p, "stack", string(debug.Stack()))
+				if err := s.repo.FailScan(sessionID, "内部错误"); err != nil {
+					slog.Error("fail scan after panic", "session", sessionID, "err", err)
+				}
 			}
 		}()
 		scan(ctx)
@@ -216,6 +239,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		scanning := len(s.scans)
 		s.mu.Unlock()
 		if live := db.LiveRunCount(); live == 0 && scanning == 0 {
+			// Last: runs and scans schedule counter refreshes, whose timers must
+			// not fire after the database closes.
+			db.FlushCounts()
 			return nil
 		}
 		select {

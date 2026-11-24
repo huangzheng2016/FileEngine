@@ -38,20 +38,35 @@ func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
 	return &s, err
 }
 
-func (r *Repository) ListSessions() ([]model.ScanSession, error) {
-	var sessions []model.ScanSession
-	err := r.db.Order("id DESC").Find(&sessions).Error
-	return sessions, err
+// BeginScan marks the session scanning and clears the previous scan's progress
+// and messages. Column-scoped: settings the user changes meanwhile are never
+// written back.
+func (r *Repository) BeginScan(id uint) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ?", id).Updates(map[string]any{
+			"status": "scanning", "scanned_count": 0, "current_path": "", "error_message": "", "scan_warning": "",
+		}).Error
+	})
 }
 
-func (r *Repository) ListSessionsByFilesystem(filesystemID uint) ([]model.ScanSession, error) {
-	var sessions []model.ScanSession
-	err := r.db.Where("filesystem_id = ?", filesystemID).Order("id DESC").Find(&sessions).Error
-	return sessions, err
+// FinishScan completes a scan that is still scanning; a session whose scan was
+// replaced or failed meanwhile is left alone.
+func (r *Repository) FinishScan(id uint, scanned int, warning string) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+			"status": "scanned", "total_files": scanned, "scanned_count": scanned, "current_path": "",
+			"error_message": "", "scan_warning": warning,
+		}).Error
+	})
 }
 
-func (r *Repository) UpdateSession(s *model.ScanSession) error {
-	return r.db.Save(s).Error
+// FailScan records why a scan that is still scanning could not complete.
+func (r *Repository) FailScan(id uint, message string) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+			"status": "error", "error_message": message, "current_path": "",
+		}).Error
+	})
 }
 
 // Column-scoped: the scanner calls this every few seconds, and a full-row
@@ -72,21 +87,6 @@ func (r *Repository) MarkInterruptedScans() (int64, error) {
 			"current_path":  "",
 		})
 	return res.RowsAffected, res.Error
-}
-
-func (r *Repository) DeleteSession(id uint) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("scan_session_id = ?", id).Delete(&model.FileEntry{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", id).Delete(&model.SessionEvent{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", id).Delete(&model.AgentRun{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&model.ScanSession{}, id).Error
-	})
 }
 
 // Never called on a read path: writers call it at the end of a phase, and
@@ -142,20 +142,59 @@ type countsKey struct {
 	id uint
 }
 
-var countsPending sync.Map
+type pendingCount struct {
+	timer *time.Timer
+	run   func()
+}
+
+var counts = struct {
+	mu      sync.Mutex
+	pending map[countsKey]*pendingCount
+	wg      sync.WaitGroup // one per armed timer, done when its refresh has run
+}{pending: make(map[countsKey]*pendingCount)}
 
 func (r *Repository) touchCounts(sessionID uint) {
 	k := countsKey{r.db, sessionID}
-	if _, loaded := countsPending.LoadOrStore(k, struct{}{}); loaded {
+	counts.mu.Lock()
+	defer counts.mu.Unlock()
+	if _, ok := counts.pending[k]; ok {
 		return
 	}
 	reader := r.Reader() // resolved here: the timer must not read the package globals
-	time.AfterFunc(countsDelay, func() {
-		countsPending.Delete(k)
+	run := func() {
 		if err := dal.WithRetry(func() error { return r.refreshCounts(reader, sessionID) }); err != nil {
 			log.Printf("refresh counts of session %d: %v", sessionID, err)
 		}
+	}
+	p := &pendingCount{run: run}
+	counts.wg.Add(1)
+	p.timer = time.AfterFunc(countsDelay, func() {
+		defer counts.wg.Done()
+		counts.mu.Lock()
+		delete(counts.pending, k)
+		counts.mu.Unlock()
+		run()
 	})
+	counts.pending[k] = p
+}
+
+// FlushCounts runs every scheduled counter refresh now and waits for the ones
+// already firing. Shutdown calls it before the database closes.
+func FlushCounts() {
+	counts.mu.Lock()
+	armed := make([]*pendingCount, 0, len(counts.pending))
+	for k, p := range counts.pending {
+		armed = append(armed, p)
+		delete(counts.pending, k)
+	}
+	counts.mu.Unlock()
+	for _, p := range armed {
+		if p.timer.Stop() {
+			p.run()
+			counts.wg.Done()
+		}
+	}
+	counts.wg.Wait()
 }
 
 type SessionProgress struct {

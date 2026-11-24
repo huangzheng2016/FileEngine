@@ -12,14 +12,18 @@ import (
 	"FileEngine/biz/service/auth"
 	"FileEngine/biz/service/category"
 	"FileEngine/biz/service/chat"
+	"FileEngine/biz/service/event"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/execute"
 	"FileEngine/biz/service/file"
 	"FileEngine/biz/service/filesystem"
 	"FileEngine/biz/service/memory"
 	"FileEngine/biz/service/modelprovider"
 	"FileEngine/biz/service/plan"
 	"FileEngine/biz/service/rule"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/session"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 
@@ -36,7 +40,7 @@ type Container struct {
 	// Streams owns every open event stream; the app closes it first at shutdown.
 	Streams *eventfeed.Registry
 
-	// Lane B3: storages, models, runtime settings, operator actions.
+	// Storages, models, runtime settings, operator actions.
 	Filesystems *filesystem.Service
 	Models      *modelprovider.Service
 	Settings    *settings.Service
@@ -51,11 +55,19 @@ type Container struct {
 	Rules      *rule.Service
 	Memory     *memory.Service
 	Chat       *chat.Service
+
+	// Sessions, runs, execution and events.
+	Session *session.Service
+	Run     *run.Service
+	Execute *execute.Service
+	Event   *event.Service
 }
 
-func newQuery(gdb *gorm.DB) *query.Query { return query.Use(gdb) }
-
 var Default *Container
+
+// newQuery is the typed query layer of the writer handle; wire cannot inject
+// query.Use's variadic options.
+func newQuery(gdb *gorm.DB) *query.Query { return query.Use(gdb) }
 
 // Init builds the container over an opened database and installs it as Default.
 func Init(gdb *gorm.DB, authOpts auth.Options) error {

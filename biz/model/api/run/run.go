@@ -353,6 +353,12 @@ type Run struct {
 	StartedAt int64 `thrift:"started_at,17" form:"started_at" json:"started_at" query:"started_at"`
 	// unix seconds; 0 while running
 	EndedAt int64 `thrift:"ended_at,18" form:"ended_at" json:"ended_at" query:"ended_at"`
+	// executing and revert runs: the final counters, set when the run ends (0
+	// while running; the live values come from progress events)
+	ExecTotal   int32 `thrift:"exec_total,19" form:"exec_total" json:"exec_total" query:"exec_total"`
+	ExecSuccess int32 `thrift:"exec_success,20" form:"exec_success" json:"exec_success" query:"exec_success"`
+	ExecFailed  int32 `thrift:"exec_failed,21" form:"exec_failed" json:"exec_failed" query:"exec_failed"`
+	ExecSkipped int32 `thrift:"exec_skipped,22" form:"exec_skipped" json:"exec_skipped" query:"exec_skipped"`
 }
 
 func NewRun() *Run {
@@ -434,6 +440,22 @@ func (p *Run) GetEndedAt() (v int64) {
 	return p.EndedAt
 }
 
+func (p *Run) GetExecTotal() (v int32) {
+	return p.ExecTotal
+}
+
+func (p *Run) GetExecSuccess() (v int32) {
+	return p.ExecSuccess
+}
+
+func (p *Run) GetExecFailed() (v int32) {
+	return p.ExecFailed
+}
+
+func (p *Run) GetExecSkipped() (v int32) {
+	return p.ExecSkipped
+}
+
 var fieldIDToName_Run = map[int16]string{
 	1:  "id",
 	2:  "session_id",
@@ -453,6 +475,10 @@ var fieldIDToName_Run = map[int16]string{
 	16: "total_tokens",
 	17: "started_at",
 	18: "ended_at",
+	19: "exec_total",
+	20: "exec_success",
+	21: "exec_failed",
+	22: "exec_skipped",
 }
 
 func (p *Run) Read(iprot thrift.TProtocol) (err error) {
@@ -612,6 +638,38 @@ func (p *Run) Read(iprot thrift.TProtocol) (err error) {
 		case 18:
 			if fieldTypeId == thrift.I64 {
 				if err = p.ReadField18(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 19:
+			if fieldTypeId == thrift.I32 {
+				if err = p.ReadField19(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 20:
+			if fieldTypeId == thrift.I32 {
+				if err = p.ReadField20(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 21:
+			if fieldTypeId == thrift.I32 {
+				if err = p.ReadField21(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 22:
+			if fieldTypeId == thrift.I32 {
+				if err = p.ReadField22(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -844,6 +902,50 @@ func (p *Run) ReadField18(iprot thrift.TProtocol) error {
 	p.EndedAt = _field
 	return nil
 }
+func (p *Run) ReadField19(iprot thrift.TProtocol) error {
+
+	var _field int32
+	if v, err := iprot.ReadI32(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ExecTotal = _field
+	return nil
+}
+func (p *Run) ReadField20(iprot thrift.TProtocol) error {
+
+	var _field int32
+	if v, err := iprot.ReadI32(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ExecSuccess = _field
+	return nil
+}
+func (p *Run) ReadField21(iprot thrift.TProtocol) error {
+
+	var _field int32
+	if v, err := iprot.ReadI32(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ExecFailed = _field
+	return nil
+}
+func (p *Run) ReadField22(iprot thrift.TProtocol) error {
+
+	var _field int32
+	if v, err := iprot.ReadI32(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ExecSkipped = _field
+	return nil
+}
 
 func (p *Run) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -921,6 +1023,22 @@ func (p *Run) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField18(oprot); err != nil {
 			fieldId = 18
+			goto WriteFieldError
+		}
+		if err = p.writeField19(oprot); err != nil {
+			fieldId = 19
+			goto WriteFieldError
+		}
+		if err = p.writeField20(oprot); err != nil {
+			fieldId = 20
+			goto WriteFieldError
+		}
+		if err = p.writeField21(oprot); err != nil {
+			fieldId = 21
+			goto WriteFieldError
+		}
+		if err = p.writeField22(oprot); err != nil {
+			fieldId = 22
 			goto WriteFieldError
 		}
 	}
@@ -1228,6 +1346,70 @@ WriteFieldBeginError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 18 begin error: ", p), err)
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 18 end error: ", p), err)
+}
+func (p *Run) writeField19(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("exec_total", thrift.I32, 19); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI32(p.ExecTotal); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 19 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 19 end error: ", p), err)
+}
+func (p *Run) writeField20(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("exec_success", thrift.I32, 20); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI32(p.ExecSuccess); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 20 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 20 end error: ", p), err)
+}
+func (p *Run) writeField21(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("exec_failed", thrift.I32, 21); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI32(p.ExecFailed); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 21 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 21 end error: ", p), err)
+}
+func (p *Run) writeField22(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("exec_skipped", thrift.I32, 22); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI32(p.ExecSkipped); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 22 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 22 end error: ", p), err)
 }
 
 func (p *Run) String() string {
