@@ -11,6 +11,8 @@ struct SessionPlan {
     5: i64 updated_at
     // unix seconds; 0 = not approved
     6: i64 approved_at
+    // decisions with a confidence below this wait for the user's confirmation
+    7: double review_confidence
 }
 
 struct GetPlanReq {

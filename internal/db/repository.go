@@ -376,10 +376,6 @@ func (r *Repository) SampleFiles(q FileQuery, n int) ([]model.FileEntry, error) 
 	return files, err
 }
 
-func (r *Repository) UpdateFile(f *model.FileEntry) error {
-	return r.db.Save(f).Error
-}
-
 // eino executes parallel tool calls, so a full-row Save of a loaded struct
 // would clobber concurrent field writes.
 func (r *Repository) UpdateDescription(sessionID uint, path, description string) error {
@@ -426,40 +422,59 @@ func (r *Repository) CountUntaggedByType(sessionID uint) (UntaggedBreakdown, err
 	return b, err
 }
 
+// Junk is decided as skip through DecideBatch with override, so decided entries
+// below a junk folder are reported by the decision rules and never overwritten
+// silently. Entries under a unit or skipped folder are refused and stay as they
+// are. Returns the number of entries marked, members included.
 func (r *Repository) MarkJunkEntries(sessionID uint, fileNames, dirNames []string) (int64, error) {
-	var total int64
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.FileEntry{}).
-			Where("scan_session_id = ? AND role = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+dal.LikeEscapeClause+")", sessionID, RoleUndecided, fileNames).
-			Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾文件", "batch_index": JunkBatchIndex})
-		if res.Error != nil {
-			return res.Error
-		}
-		total += res.RowsAffected
-
-		var dirs []model.FileEntry
-		if err := tx.Where("scan_session_id = ? AND role = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, RoleUndecided, dirNames).
-			Find(&dirs).Error; err != nil {
-			return err
-		}
-		for _, d := range dirs {
-			if err := tx.Model(&model.FileEntry{}).Where("id = ?", d.ID).
-				Updates(map[string]interface{}{"tagged": true, "role": RoleSkip, "reason": "系统垃圾目录", "batch_index": JunkBatchIndex}).Error; err != nil {
-				return err
-			}
-			res := entriesUnder(tx, sessionID, d.OriginalPath).
-				Updates(map[string]interface{}{"tagged": true, "role": RoleMember, "reason": MemberReason(d.OriginalPath, RoleSkip), "new_path": "", "new_path_key": "", "operation": "", "batch_index": JunkBatchIndex})
-			if res.Error != nil {
-				return res.Error
-			}
-			total += res.RowsAffected + 1
-		}
-		return nil
-	})
-	if err == nil && total > 0 {
-		r.touchCounts(sessionID)
+	var files, dirs []model.FileEntry
+	if err := r.db.Select("id", "original_path").
+		Where("scan_session_id = ? AND role = ? AND file_type = 'file' AND (lower(name) IN ? OR name LIKE '.!_%'"+dal.LikeEscapeClause+")", sessionID, RoleUndecided, fileNames).
+		Find(&files).Error; err != nil {
+		return 0, err
 	}
-	return total, err
+	if err := r.db.Select("id", "original_path").
+		Where("scan_session_id = ? AND role = ? AND file_type = 'directory' AND lower(name) IN ?", sessionID, RoleUndecided, dirNames).
+		Find(&dirs).Error; err != nil {
+		return 0, err
+	}
+	ds := make([]Decision, 0, len(files)+len(dirs))
+	for _, f := range files {
+		ds = append(ds, Decision{Path: f.OriginalPath, Role: RoleSkip, Reason: "系统垃圾文件", Override: true})
+	}
+	for _, d := range dirs {
+		ds = append(ds, Decision{Path: d.OriginalPath, Role: RoleSkip, Reason: "系统垃圾目录", Override: true})
+	}
+	outcomes, err := r.DecideBatch(sessionID, ds)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	var ids []uint
+	for i, o := range outcomes {
+		if o.Err != nil || o.Result == nil {
+			continue
+		}
+		total += 1 + o.Result.Members
+		if i < len(files) {
+			ids = append(ids, files[i].ID)
+			continue
+		}
+		d := dirs[i-len(files)]
+		ids = append(ids, d.ID)
+		// batch_index is bookkeeping, not part of the decision.
+		if err := entriesUnder(r.db, sessionID, d.OriginalPath).Where("role = ?", RoleMember).
+			Update("batch_index", JunkBatchIndex).Error; err != nil {
+			return total, err
+		}
+	}
+	for start := 0; start < len(ids); start += 500 {
+		if err := r.db.Model(&model.FileEntry{}).Where("id IN ?", ids[start:min(start+500, len(ids))]).
+			Update("batch_index", JunkBatchIndex).Error; err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 func (r *Repository) CountIgnoredJunk(sessionID uint) (int64, error) {
@@ -538,14 +553,6 @@ func (r *Repository) GetPlannedFiles(sessionID uint) ([]model.FileEntry, error) 
 	return files, err
 }
 
-func (r *Repository) GetTreeNodes(sessionID uint, parentPath string) ([]model.FileEntry, error) {
-	var files []model.FileEntry
-	err := r.db.Where("scan_session_id = ? AND parent_path = ? AND file_type = ?", sessionID, parentPath, "directory").
-		Order("name ASC").
-		Find(&files).Error
-	return files, err
-}
-
 func (r *Repository) CreateCategory(c *model.Category) error {
 	return r.db.Create(c).Error
 }
@@ -559,12 +566,6 @@ func (r *Repository) CreateCategoryWithConflict(c *model.Category) (created bool
 		return false, err
 	}
 	return true, nil
-}
-
-func (r *Repository) GetCategory(id uint) (*model.Category, error) {
-	var c model.Category
-	err := r.db.First(&c, id).Error
-	return &c, err
 }
 
 func (r *Repository) ListCategories(filesystemID uint) ([]model.Category, error) {
@@ -637,31 +638,38 @@ func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]cat
 	return out, nil
 }
 
-func (r *Repository) UpdateCategory(c *model.Category) error {
-	return r.db.Save(c).Error
-}
-
-// The prefix is swapped by position, so "/photo" -> "/pics" leaves
-// "/photos2" alone and a repeated substring deeper in the path is untouched.
+// UpdateCategoryPath writes the category's editable columns and cascades a path
+// change into the planned targets of the category's own filesystem, in one
+// transaction. filesystem_id is never written. The prefix is swapped by
+// position, so "/photo" -> "/pics" leaves "/photos2" alone and a repeated
+// substring deeper in the path is untouched.
 func (r *Repository) UpdateCategoryPath(c *model.Category, oldPath string) error {
-	if err := r.db.Save(c).Error; err != nil {
-		return err
-	}
 	from, to := categoryDir(oldPath), categoryDir(c.Path)
-	if from == "" || to == "" || from == to {
-		return nil
-	}
-	sessions, err := r.filesystemSessionIDs(c.FilesystemID)
-	if err != nil || len(sessions) == 0 {
-		return err
-	}
-	cond, args := dal.AtOrUnderCond(r.db, "new_path", from)
 	return dal.WithRetry(func() error {
-		return r.db.Model(&model.FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
-			Updates(map[string]any{
-				"new_path":     gorm.Expr(dal.ConcatExpr(r.db, "?", "substr(new_path, ?)"), to, utf8.RuneCountInString(from)+1),
-				"new_path_key": gorm.Expr(dal.ConcatExpr(r.db, "?", "substr(new_path_key, ?)"), CollisionKey(to), utf8.RuneCountInString(CollisionKey(from))+1),
-			}).Error
+		return r.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Category{}).Where("id = ?", c.ID).Updates(map[string]any{
+				"name": c.Name, "path": c.Path, "structure": c.Structure, "description": c.Description,
+				"updated_at": time.Now(),
+			}).Error; err != nil {
+				return err
+			}
+			if from == "" || to == "" || from == to {
+				return nil
+			}
+			var sessions []uint
+			if err := tx.Model(&model.ScanSession{}).Where("filesystem_id = ?", c.FilesystemID).Pluck("id", &sessions).Error; err != nil {
+				return err
+			}
+			if len(sessions) == 0 {
+				return nil
+			}
+			cond, args := dal.AtOrUnderCond(tx, "new_path", from)
+			return tx.Model(&model.FileEntry{}).Where("scan_session_id IN ?", sessions).Where(cond, args...).
+				Updates(map[string]any{
+					"new_path":     gorm.Expr(dal.ConcatExpr(tx, "?", "substr(new_path, ?)"), to, utf8.RuneCountInString(from)+1),
+					"new_path_key": gorm.Expr(dal.ConcatExpr(tx, "?", "substr(new_path_key, ?)"), CollisionKey(to), utf8.RuneCountInString(CollisionKey(from))+1),
+				}).Error
+		})
 	})
 }
 

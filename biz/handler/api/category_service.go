@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	category "FileEngine/biz/model/api/category"
+	base "FileEngine/biz/model/base"
+	svc "FileEngine/biz/service/category"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListCategories .
@@ -20,7 +22,21 @@ func ListCategories(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.FilesystemID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Categories.List(ctx, fsID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*category.Category, len(rows))
+	for i, r := range rows {
+		items[i] = toCategory(r)
+	}
+	c.JSON(consts.StatusOK, &category.ListCategoriesResp{Items: items, Total: int64(len(items))})
 }
 
 // CreateCategory .
@@ -30,7 +46,17 @@ func CreateCategory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	in, err := categoryInput(&req)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Categories.Create(ctx, in)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &category.CategoryResp{Item: toCategory(row)})
 }
 
 // UpdateCategory .
@@ -40,7 +66,22 @@ func UpdateCategory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	cid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	in, err := categoryInput(&req)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Categories.Update(ctx, cid, in)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &category.CategoryResp{Item: toCategory(row)})
 }
 
 // DeleteCategory .
@@ -50,7 +91,16 @@ func DeleteCategory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	cid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	if err := container.Default.Categories.Delete(ctx, cid); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }
 
 // ExportCategories .
@@ -60,7 +110,21 @@ func ExportCategories(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.FilesystemID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Categories.List(ctx, fsID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*category.CategoryTemplate, len(rows))
+	for i, r := range rows {
+		items[i] = &category.CategoryTemplate{Name: r.Name, Path: r.Path, Structure: r.Structure, Description: r.Description}
+	}
+	c.JSON(consts.StatusOK, &category.ExportCategoriesResp{Items: items})
 }
 
 // ImportCategories .
@@ -70,5 +134,21 @@ func ImportCategories(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.FilesystemID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]svc.Template, len(req.Items))
+	for i, it := range req.Items {
+		if it != nil {
+			items[i] = svc.Template{Name: it.Name, Path: it.Path, Structure: it.Structure, Description: it.Description}
+		}
+	}
+	created, skipped, err := container.Default.Categories.Import(ctx, fsID, items)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &category.ImportCategoriesResp{Created: int32(created), Skipped: int32(skipped)})
 }

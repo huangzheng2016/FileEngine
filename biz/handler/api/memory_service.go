@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	memory "FileEngine/biz/model/api/memory"
+	base "FileEngine/biz/model/base"
+	svc "FileEngine/biz/service/memory"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListMemory .
@@ -20,7 +22,25 @@ func ListMemory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	var scopeID *uint
+	if req.ScopeID != nil {
+		v, err := optID(*req.ScopeID)
+		if err != nil {
+			resp.Fail(ctx, c, err)
+			return
+		}
+		scopeID = &v
+	}
+	rows, err := container.Default.Memory.List(ctx, req.Scope, scopeID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*memory.MemoryItem, len(rows))
+	for i := range rows {
+		items[i] = toMemoryItem(&rows[i])
+	}
+	c.JSON(consts.StatusOK, &memory.ListMemoryResp{Items: items, Total: int64(len(items))})
 }
 
 // CreateMemory .
@@ -30,7 +50,20 @@ func CreateMemory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	scopeID, err := optID(req.ScopeID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, created, err := container.Default.Memory.Create(ctx, svc.CreateInput{
+		Scope: req.Scope, ScopeID: scopeID, Kind: req.Kind, Key: req.Key,
+		Content: req.Content, Path: req.Path, Pinned: req.Pinned,
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &memory.MemoryResp{Item: toMemoryItem(row), Created: created})
 }
 
 // UpdateMemory .
@@ -40,7 +73,19 @@ func UpdateMemory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Memory.Update(ctx, mid, svc.Patch{
+		Kind: req.Kind, Key: req.Key, Content: req.Content, Path: req.Path, Pinned: req.Pinned,
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &memory.MemoryResp{Item: toMemoryItem(row)})
 }
 
 // DeleteMemory .
@@ -50,5 +95,14 @@ func DeleteMemory(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	mid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	if err := container.Default.Memory.Delete(ctx, mid); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }

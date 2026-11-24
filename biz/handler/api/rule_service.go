@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	rule "FileEngine/biz/model/api/rule"
+	base "FileEngine/biz/model/base"
+	svc "FileEngine/biz/service/rule"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListRules .
@@ -20,7 +22,21 @@ func ListRules(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Rules.List(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*rule.PlanRule, len(rows))
+	for i := range rows {
+		items[i] = toPlanRule(&rows[i])
+	}
+	c.JSON(consts.StatusOK, &rule.ListRulesResp{Items: items, Total: int64(len(items))})
 }
 
 // CreateRule .
@@ -30,7 +46,21 @@ func CreateRule(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Rules.Create(ctx, sid, svc.Patch{
+		Name: req.Name, Exts: req.Exts, NameRegex: req.NameRegex, PathPrefix: req.PathPrefix, FileType: req.FileType,
+		Target: req.Target, Role: req.Role, Source: req.Source, MinSize: req.MinSize, MaxSize: req.MaxSize,
+		Position: intPtr(req.Position),
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &rule.RuleResp{Item: toPlanRule(row)})
 }
 
 // UpdateRule .
@@ -40,7 +70,21 @@ func UpdateRule(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Rules.Update(ctx, rid, svc.Patch{
+		Name: req.Name, Exts: req.Exts, NameRegex: req.NameRegex, PathPrefix: req.PathPrefix, FileType: req.FileType,
+		Target: req.Target, Role: req.Role, Source: req.Source, MinSize: req.MinSize, MaxSize: req.MaxSize,
+		Position: intPtr(req.Position),
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &rule.RuleResp{Item: toPlanRule(row)})
 }
 
 // DeleteRule .
@@ -50,7 +94,16 @@ func DeleteRule(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	if err := container.Default.Rules.Delete(ctx, rid); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }
 
 // ApplyRules .
@@ -60,5 +113,24 @@ func ApplyRules(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	res, err := container.Default.Rules.Apply(ctx, sid, req.Preview)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*rule.RuleApplyStat, len(res.Stats))
+	for i, st := range res.Stats {
+		samples := make([]*rule.RuleSample, len(st.Samples))
+		for j, sm := range st.Samples {
+			samples[j] = &rule.RuleSample{OriginalPath: sm.Path, NewPath: sm.Target}
+		}
+		items[i] = &rule.RuleApplyStat{RuleID: int64(st.RuleID), Name: st.Name, Matched: int32(st.Matched),
+			Skipped: int32(st.Skipped), Samples: samples}
+	}
+	c.JSON(consts.StatusOK, &rule.ApplyRulesResp{Items: items, Applied: int32(res.Applied), Skipped: int32(res.Skipped)})
 }

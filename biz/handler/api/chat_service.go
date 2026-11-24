@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	chat "FileEngine/biz/model/api/chat"
+	run "FileEngine/biz/model/api/run"
+	svc "FileEngine/biz/service/chat"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // SendChat .
@@ -20,7 +22,22 @@ func SendChat(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	fileIDs, err := parseIDs(req.FileIds, svc.MaxFiles)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	runID, err := container.Default.Chat.Send(ctx, sid, req.Content, fileIDs)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &run.StartRunResp{RunID: int64(runID)})
 }
 
 // ListChatTurns .
@@ -30,5 +47,20 @@ func ListChatTurns(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Chat.List(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*chat.ChatTurn, len(rows))
+	for i, t := range rows {
+		items[i] = &chat.ChatTurn{ID: int64(t.ID), SessionID: int64(t.SessionID), RunID: int64(t.RunID),
+			Role: t.Role, Content: t.Content, CreatedAt: unix(t.CreatedAt)}
+	}
+	c.JSON(consts.StatusOK, &chat.ListChatTurnsResp{Items: items, Total: int64(len(items))})
 }

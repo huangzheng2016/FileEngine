@@ -10,9 +10,15 @@ import (
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/category"
+	"FileEngine/biz/service/chat"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/file"
 	"FileEngine/biz/service/filesystem"
+	"FileEngine/biz/service/memory"
 	"FileEngine/biz/service/modelprovider"
+	"FileEngine/biz/service/plan"
+	"FileEngine/biz/service/rule"
 	"FileEngine/biz/service/runner"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
@@ -35,9 +41,18 @@ type Container struct {
 	Models      *modelprovider.Service
 	Settings    *settings.Service
 	Admin       *admin.Service
+
+	// Query is the typed query layer over the writer handle.
+	Query *query.Query
+	// Resource services: files, categories, plan, rules, memory, chat.
+	Files      *file.Service
+	Categories *category.Service
+	Plans      *plan.Service
+	Rules      *rule.Service
+	Memory     *memory.Service
+	Chat       *chat.Service
 }
 
-// newQuery is the typed query layer over the writer handle.
 func newQuery(gdb *gorm.DB) *query.Query { return query.Use(gdb) }
 
 var Default *Container

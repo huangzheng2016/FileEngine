@@ -18,6 +18,8 @@ type SessionPlan struct {
 	UpdatedAt int64 `thrift:"updated_at,5" form:"updated_at" json:"updated_at" query:"updated_at"`
 	// unix seconds; 0 = not approved
 	ApprovedAt int64 `thrift:"approved_at,6" form:"approved_at" json:"approved_at" query:"approved_at"`
+	// decisions with a confidence below this wait for the user's confirmation
+	ReviewConfidence float64 `thrift:"review_confidence,7" form:"review_confidence" json:"review_confidence" query:"review_confidence"`
 }
 
 func NewSessionPlan() *SessionPlan {
@@ -51,6 +53,10 @@ func (p *SessionPlan) GetApprovedAt() (v int64) {
 	return p.ApprovedAt
 }
 
+func (p *SessionPlan) GetReviewConfidence() (v float64) {
+	return p.ReviewConfidence
+}
+
 var fieldIDToName_SessionPlan = map[int16]string{
 	1: "session_id",
 	2: "version",
@@ -58,6 +64,7 @@ var fieldIDToName_SessionPlan = map[int16]string{
 	4: "content",
 	5: "updated_at",
 	6: "approved_at",
+	7: "review_confidence",
 }
 
 func (p *SessionPlan) Read(iprot thrift.TProtocol) (err error) {
@@ -121,6 +128,14 @@ func (p *SessionPlan) Read(iprot thrift.TProtocol) (err error) {
 		case 6:
 			if fieldTypeId == thrift.I64 {
 				if err = p.ReadField6(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 7:
+			if fieldTypeId == thrift.DOUBLE {
+				if err = p.ReadField7(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -221,6 +236,17 @@ func (p *SessionPlan) ReadField6(iprot thrift.TProtocol) error {
 	p.ApprovedAt = _field
 	return nil
 }
+func (p *SessionPlan) ReadField7(iprot thrift.TProtocol) error {
+
+	var _field float64
+	if v, err := iprot.ReadDouble(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ReviewConfidence = _field
+	return nil
+}
 
 func (p *SessionPlan) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -250,6 +276,10 @@ func (p *SessionPlan) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField6(oprot); err != nil {
 			fieldId = 6
+			goto WriteFieldError
+		}
+		if err = p.writeField7(oprot); err != nil {
+			fieldId = 7
 			goto WriteFieldError
 		}
 	}
@@ -365,6 +395,22 @@ WriteFieldBeginError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 6 begin error: ", p), err)
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 6 end error: ", p), err)
+}
+func (p *SessionPlan) writeField7(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("review_confidence", thrift.DOUBLE, 7); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteDouble(p.ReviewConfidence); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 7 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 7 end error: ", p), err)
 }
 
 func (p *SessionPlan) String() string {

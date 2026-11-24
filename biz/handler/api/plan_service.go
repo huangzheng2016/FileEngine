@@ -4,13 +4,15 @@ package api
 
 import (
 	"context"
+	"fmt"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	plan "FileEngine/biz/model/api/plan"
+	run "FileEngine/biz/model/api/run"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // GetPlan .
@@ -20,7 +22,17 @@ func GetPlan(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Plans.Get(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &plan.PlanResp{Item: toSessionPlan(row)})
 }
 
 // UpdatePlan .
@@ -30,7 +42,17 @@ func UpdatePlan(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Plans.Update(ctx, sid, req.Content, int(req.Version))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &plan.PlanResp{Item: toSessionPlan(row)})
 }
 
 // ApprovePlan .
@@ -40,7 +62,17 @@ func ApprovePlan(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Plans.Approve(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &plan.PlanResp{Item: toSessionPlan(row)})
 }
 
 // DraftPlan .
@@ -50,7 +82,17 @@ func DraftPlan(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	runID, err := container.Default.Plans.Draft(ctx, sid, req.Instructions)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &run.StartRunResp{RunID: int64(runID)})
 }
 
 // ListPlanOps .
@@ -60,7 +102,22 @@ func ListPlanOps(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	ops, err := container.Default.Plans.Ops(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*plan.PlanOp, len(ops))
+	for i, o := range ops {
+		items[i] = &plan.PlanOp{FileID: int64(o.FileID), OriginalPath: o.OriginalPath, NewPath: o.NewPath,
+			Operation: o.Operation, Name: o.Name, FileType: o.Type}
+	}
+	c.JSON(consts.StatusOK, &plan.ListPlanOpsResp{Items: items, Total: int64(len(items))})
 }
 
 // ExportPlanOps .
@@ -70,7 +127,20 @@ func ExportPlanOps(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	data, err := container.Default.Plans.ExportCSV(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.Response.Header.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Response.Header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=plans_session_%d.csv", sid))
+	c.Response.SetBodyRaw(data)
+	c.SetStatusCode(consts.StatusOK)
 }
 
 // ResetPlanOps .
@@ -80,7 +150,22 @@ func ResetPlanOps(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	ids, err := parseIDs(req.FileIds, 5000)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	n, err := container.Default.Plans.Reset(ctx, sid, ids)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &plan.ResetPlanOpsResp{Reset: int32(n)})
 }
 
 // PreviewTree .
@@ -90,7 +175,26 @@ func PreviewTree(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	page, err := container.Default.Plans.Preview(ctx, sid, req.Side, req.Path, int(req.Offset), int(req.Limit))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*plan.PreviewItem, len(page.Items))
+	for i, it := range page.Items {
+		items[i] = &plan.PreviewItem{
+			Name: it.Name, Path: it.Path, IsDir: it.IsDir, FileCount: it.FileCount, Size: it.Size,
+			FileID: int64(it.FileID), OriginalPath: it.OriginalPath, Status: it.Status, NewPath: it.NewPath,
+			MovedCount: it.MovedCount, Role: it.Role, Reason: it.Reason, NeedsReview: it.NeedsReview,
+			Confidence: it.Confidence, Sensitive: it.Sensitive,
+		}
+	}
+	c.JSON(consts.StatusOK, &plan.PreviewTreeResp{Items: items, Total: page.Total})
 }
 
 // ConfirmReview .
@@ -100,5 +204,20 @@ func ConfirmReview(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	ids, err := parseIDs(req.FileIds, 5000)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	n, err := container.Default.Plans.Confirm(ctx, sid, ids)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &plan.ConfirmReviewResp{Confirmed: int32(n)})
 }

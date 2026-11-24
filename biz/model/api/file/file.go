@@ -2316,6 +2316,8 @@ type ListFilesResp struct {
 	Msg   string       `thrift:"msg,2" form:"msg" json:"msg" query:"msg"`
 	Items []*FileEntry `thrift:"items,3" form:"items" json:"items" query:"items"`
 	Total int64        `thrift:"total,4" form:"total" json:"total" query:"total"`
+	// decisions with a confidence below this wait for the user's confirmation
+	ReviewConfidence float64 `thrift:"review_confidence,5" form:"review_confidence" json:"review_confidence" query:"review_confidence"`
 }
 
 func NewListFilesResp() *ListFilesResp {
@@ -2341,11 +2343,16 @@ func (p *ListFilesResp) GetTotal() (v int64) {
 	return p.Total
 }
 
+func (p *ListFilesResp) GetReviewConfidence() (v float64) {
+	return p.ReviewConfidence
+}
+
 var fieldIDToName_ListFilesResp = map[int16]string{
 	1: "code",
 	2: "msg",
 	3: "items",
 	4: "total",
+	5: "review_confidence",
 }
 
 func (p *ListFilesResp) Read(iprot thrift.TProtocol) (err error) {
@@ -2393,6 +2400,14 @@ func (p *ListFilesResp) Read(iprot thrift.TProtocol) (err error) {
 		case 4:
 			if fieldTypeId == thrift.I64 {
 				if err = p.ReadField4(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 5:
+			if fieldTypeId == thrift.DOUBLE {
+				if err = p.ReadField5(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -2483,6 +2498,17 @@ func (p *ListFilesResp) ReadField4(iprot thrift.TProtocol) error {
 	p.Total = _field
 	return nil
 }
+func (p *ListFilesResp) ReadField5(iprot thrift.TProtocol) error {
+
+	var _field float64
+	if v, err := iprot.ReadDouble(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ReviewConfidence = _field
+	return nil
+}
 
 func (p *ListFilesResp) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -2504,6 +2530,10 @@ func (p *ListFilesResp) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField4(oprot); err != nil {
 			fieldId = 4
+			goto WriteFieldError
+		}
+		if err = p.writeField5(oprot); err != nil {
+			fieldId = 5
 			goto WriteFieldError
 		}
 	}
@@ -2595,6 +2625,22 @@ WriteFieldBeginError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 4 begin error: ", p), err)
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 4 end error: ", p), err)
+}
+func (p *ListFilesResp) writeField5(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("review_confidence", thrift.DOUBLE, 5); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteDouble(p.ReviewConfidence); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 5 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 5 end error: ", p), err)
 }
 
 func (p *ListFilesResp) String() string {

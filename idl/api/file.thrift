@@ -70,6 +70,8 @@ struct ListFilesResp {
     2: string msg
     3: list<FileEntry> items
     4: i64 total
+    // decisions with a confidence below this wait for the user's confirmation
+    5: double review_confidence
 }
 
 struct GetFileReq {

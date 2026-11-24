@@ -114,7 +114,7 @@ func (r *Repository) CreateRule(rule *model.PlanRule) error {
 // The unique (session_id, name) index is the backstop for concurrent creators.
 func duplicateRuleName(rule *model.PlanRule, err error) error {
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return reject("已有同名规则「%s」", rule.Name)
+		return &Rejection{Msg: fmt.Sprintf("已有同名规则「%s」", rule.Name), Conflict: true}
 	}
 	return err
 }

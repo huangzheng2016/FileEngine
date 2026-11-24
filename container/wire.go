@@ -5,10 +5,17 @@ package container
 import (
 	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/category"
+	"FileEngine/biz/service/chat"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/file"
 	"FileEngine/biz/service/filesystem"
+	"FileEngine/biz/service/memory"
 	"FileEngine/biz/service/modelprovider"
+	"FileEngine/biz/service/plan"
+	"FileEngine/biz/service/rule"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/sessionagent"
 	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 
@@ -29,6 +36,13 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		modelprovider.NewService,
 		settings.NewService,
 		admin.NewService,
+		sessionagent.NewFactory,
+		file.NewService,
+		category.NewService,
+		plan.NewService,
+		rule.NewService,
+		memory.NewService,
+		chat.NewService,
 		wire.Struct(new(Container), "*"),
 	)
 	return nil, nil
