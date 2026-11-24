@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,12 +21,12 @@ func TestDoIsTrustedAndRoutesLikeHTTP(t *testing.T) {
 	if err := json.Unmarshal(res.Body, &me); err != nil || res.Status != 200 || me["desktop"] != true {
 		t.Fatalf("me = %d %s", res.Status, res.Body)
 	}
-	// the same route table: a generated stub answers its 501 envelope
-	if res := a.Do(context.Background(), Call{Method: "GET", Path: "/api/session/list", Query: map[string]string{"filesystem_id": "1"}}); res.Status != 501 {
-		t.Fatalf("stub = %d %s", res.Status, res.Body)
+	// the same route table as HTTP
+	if res := a.Do(context.Background(), Call{Method: "GET", Path: "/api/session/list", Query: map[string]string{"filesystem_id": "1"}}); res.Status != 200 {
+		t.Fatalf("session list = %d %s", res.Status, res.Body)
 	}
-	if res := a.Do(context.Background(), Call{Method: "POST", Path: "/api/session/create", Body: []byte(`{"filesystem_id":"1"}`)}); res.Status != 501 {
-		t.Fatalf("POST stub = %d %s", res.Status, res.Body)
+	if res := a.Do(context.Background(), Call{Method: "POST", Path: "/api/session/create", Body: []byte(`{"filesystem_id":"1"}`)}); res.Status != 400 || !strings.Contains(string(res.Body), "存储不存在") {
+		t.Fatalf("POST create = %d %s", res.Status, res.Body)
 	}
 	if res := a.Do(context.Background(), Call{Method: "POST", Path: "/api/session/create", Body: []byte(`{"filesystem_id":`)}); res.Status != 400 {
 		t.Fatalf("bad body = %d %s", res.Status, res.Body)

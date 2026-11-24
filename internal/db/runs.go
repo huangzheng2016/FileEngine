@@ -200,40 +200,8 @@ type RunRef struct {
 	Status string `json:"status"`
 }
 
-// Latest run per session; nil sessionIDs means every session.
-func (r *Repository) LatestRuns(sessionIDs []uint) (map[uint]RunRef, error) {
-	latest := r.db.Model(&model.AgentRun{}).Select("MAX(id)").Group("session_id")
-	if sessionIDs != nil {
-		if len(sessionIDs) == 0 {
-			return map[uint]RunRef{}, nil
-		}
-		latest = latest.Where("session_id IN ?", sessionIDs)
-	}
-	var rows []model.AgentRun
-	if err := r.db.Select("id", "session_id", "phase", "status").Where("id IN (?)", latest).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[uint]RunRef, len(rows))
-	for _, run := range rows {
-		out[run.SessionID] = RunRef{ID: run.ID, Phase: run.Phase, Status: run.Status}
-	}
-	return out, nil
-}
-
 func (r *Repository) RunningRuns(sessionID uint) ([]model.AgentRun, error) {
 	var runs []model.AgentRun
 	err := r.db.Where("session_id = ? AND status = ?", sessionID, RunRunning).Find(&runs).Error
 	return runs, err
-}
-
-func (r *Repository) SessionTokens(sessionID uint) (TokenCounts, error) {
-	var t TokenCounts
-	err := r.db.Model(&model.AgentRun{}).Where("session_id = ?", sessionID).
-		Select(`COALESCE(SUM(prompt_tokens), 0) AS prompt,
-			COALESCE(SUM(cached_tokens), 0) AS cached,
-			COALESCE(SUM(cache_write_tokens), 0) AS cache_write,
-			COALESCE(SUM(completion_tokens), 0) AS completion,
-			COALESCE(SUM(total_tokens), 0) AS total`).
-		Scan(&t).Error
-	return t, err
 }

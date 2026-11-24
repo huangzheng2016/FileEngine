@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	execute "FileEngine/biz/model/api/execute"
+	runmodel "FileEngine/biz/model/api/run"
+	svc "FileEngine/biz/service/execute"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // StartExecute .
@@ -20,7 +22,17 @@ func StartExecute(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	r, err := container.Default.Execute.Start(ctx, sid, svc.Options{Mode: req.Mode, Sample: int(req.Sample), CategoryPath: req.CategoryPath})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &runmodel.StartRunResp{RunID: int64(r.ID)})
 }
 
 // CheckExecute .
@@ -30,7 +42,17 @@ func CheckExecute(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	res, err := container.Default.Execute.Check(ctx, sid, svc.Options{Mode: req.Mode, Sample: int(req.Sample), CategoryPath: req.CategoryPath})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toCheckResp(res))
 }
 
 // RevertRun .
@@ -40,7 +62,17 @@ func RevertRun(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rid, err := id(req.RunID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	r, err := container.Default.Execute.Revert(ctx, rid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &runmodel.StartRunResp{RunID: int64(r.ID)})
 }
 
 // LocateEntries .
@@ -50,5 +82,16 @@ func LocateEntries(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items, err := container.Default.Execute.Locate(ctx, sid, req.Q)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	out := toLocateItems(items)
+	c.JSON(consts.StatusOK, &execute.LocateEntriesResp{Items: out, Total: int64(len(out))})
 }

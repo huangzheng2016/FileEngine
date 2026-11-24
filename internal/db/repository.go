@@ -38,18 +38,6 @@ func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
 	return &s, err
 }
 
-func (r *Repository) ListSessions() ([]model.ScanSession, error) {
-	var sessions []model.ScanSession
-	err := r.db.Order("id DESC").Find(&sessions).Error
-	return sessions, err
-}
-
-func (r *Repository) ListSessionsByFilesystem(filesystemID uint) ([]model.ScanSession, error) {
-	var sessions []model.ScanSession
-	err := r.db.Where("filesystem_id = ?", filesystemID).Order("id DESC").Find(&sessions).Error
-	return sessions, err
-}
-
 // BeginScan marks the session scanning and clears the previous scan's progress
 // and messages. Column-scoped: settings the user changes meanwhile are never
 // written back.
@@ -99,21 +87,6 @@ func (r *Repository) MarkInterruptedScans() (int64, error) {
 			"current_path":  "",
 		})
 	return res.RowsAffected, res.Error
-}
-
-func (r *Repository) DeleteSession(id uint) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("scan_session_id = ?", id).Delete(&model.FileEntry{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", id).Delete(&model.SessionEvent{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", id).Delete(&model.AgentRun{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&model.ScanSession{}, id).Error
-	})
 }
 
 // Never called on a read path: writers call it at the end of a phase, and

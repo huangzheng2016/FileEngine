@@ -4,8 +4,12 @@ package container
 
 import (
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/event"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/execute"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/session"
 	"FileEngine/internal/db"
 
 	"github.com/google/wire"
@@ -20,6 +24,11 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 		auth.NewService,
 		runner.NewService,
 		eventfeed.NewRegistry,
+		newQuery,
+		session.NewService,
+		run.NewService,
+		execute.NewService,
+		event.NewService,
 		wire.Struct(new(Container), "*"),
 	)
 	return nil, nil

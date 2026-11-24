@@ -73,8 +73,8 @@ func TestMarkInterruptedScans(t *testing.T) {
 		t.Fatalf("flipped %d rows, want 2", n)
 	}
 
-	sessions, err := r.ListSessions()
-	if err != nil {
+	var sessions []model.ScanSession
+	if err := r.DB().Find(&sessions).Error; err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}
 	byStatus := map[string]int{}

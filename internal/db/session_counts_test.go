@@ -73,35 +73,3 @@ drain:
 		t.Fatalf("review_count after confirm = %d, want 1", got.ReviewCount)
 	}
 }
-
-func TestLatestRuns(t *testing.T) {
-	r := setupScanProgressRepo(t)
-	a, b := &model.ScanSession{}, &model.ScanSession{}
-	if err := r.CreateSession(a); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CreateSession(b); err != nil {
-		t.Fatal(err)
-	}
-	first, err := r.CreateRun(a.ID, RunPhaseTagging, "整理")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.FinishRun(first, RunDone, "", "", TokenCounts{}); err != nil {
-		t.Fatal(err)
-	}
-	second, err := r.CreateRun(a.ID, RunPhaseReview, "复查")
-	if err != nil {
-		t.Fatal(err)
-	}
-	latest, err := r.LatestRuns([]uint{a.ID, b.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := latest[a.ID]; got != (RunRef{ID: second.ID, Phase: RunPhaseReview, Status: RunRunning}) {
-		t.Fatalf("latest of a = %+v", got)
-	}
-	if _, ok := latest[b.ID]; ok {
-		t.Fatal("session without runs must have no latest run")
-	}
-}

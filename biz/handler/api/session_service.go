@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	session "FileEngine/biz/model/api/session"
+	base "FileEngine/biz/model/base"
+	sessionsvc "FileEngine/biz/service/session"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // CreateSession .
@@ -20,7 +22,27 @@ func CreateSession(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err1 := id(req.FilesystemID)
+	modelID, err2 := optID(req.ModelProviderID)
+	bulkID, err3 := optID(req.BulkModelProviderID)
+	if err := firstBad(err1, err2, err3); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	in := sessionsvc.CreateInput{
+		FilesystemID: fsID, ScanPath: req.ScanPath, ModelProviderID: modelID, BulkModelProviderID: bulkID,
+		ExcludeCategoryDirs: req.ExcludeCategoryDirs, FilterMode: req.FilterMode, FilterDirs: req.FilterDirs,
+		AllowVision: req.AllowVision, ExtractMetadata: req.ExtractMetadata, DetectDuplicates: req.DetectDuplicates,
+		Goal: req.Goal, AutoTag: req.AutoTag, ScopeExts: req.ScopeExts, AllowReadFile: req.AllowReadFile,
+		AllowAutoCategory: req.AllowAutoCategory, AllowScript: req.AllowScript,
+		Rules: toRuleDrafts(req.Rules), Categories: toCategoryDrafts(req.Categories),
+	}
+	v, err := container.Default.Session.Create(ctx, in)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &session.SessionResp{Item: toSession(v)})
 }
 
 // ListSessions .
@@ -30,7 +52,21 @@ func ListSessions(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := optID(req.FilesystemID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Session.List(ctx, fsID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*session.Session, len(rows))
+	for i, v := range rows {
+		items[i] = toSession(v)
+	}
+	c.JSON(consts.StatusOK, &session.ListSessionsResp{Items: items, Total: int64(len(items))})
 }
 
 // GetSession .
@@ -40,7 +76,17 @@ func GetSession(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	v, err := container.Default.Session.Get(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &session.SessionResp{Item: toSession(v)})
 }
 
 // UpdateSession .
@@ -50,7 +96,30 @@ func UpdateSession(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	in := sessionsvc.UpdateInput{
+		AllowVision: req.AllowVision, AllowReadFile: req.AllowReadFile, AllowAutoCategory: req.AllowAutoCategory,
+		AllowScript: req.AllowScript, ExcludeCategoryDirs: req.ExcludeCategoryDirs, FilterMode: req.FilterMode,
+		FilterDirs: req.FilterDirs, ExtractMetadata: req.ExtractMetadata, DetectDuplicates: req.DetectDuplicates,
+		Goal: req.Goal, ScopeExts: req.ScopeExts,
+	}
+	if in.ModelProviderID, err = optUintRef(req.ModelProviderID); err == nil {
+		in.BulkModelProviderID, err = optUintRef(req.BulkModelProviderID)
+	}
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	v, err := container.Default.Session.Update(ctx, sid, in)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &session.SessionResp{Item: toSession(v)})
 }
 
 // DeleteSession .
@@ -60,7 +129,15 @@ func DeleteSession(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.ID)
+	if err == nil {
+		err = container.Default.Session.Delete(ctx, sid)
+	}
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }
 
 // RescanSession .
@@ -70,7 +147,17 @@ func RescanSession(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	v, err := container.Default.Session.Rescan(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &session.SessionResp{Item: toSession(v)})
 }
 
 // GetSessionStats .
@@ -80,5 +167,22 @@ func GetSessionStats(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	st, err := container.Default.Session.Stats(ctx, sid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	dist := make([]*session.CategoryDistribution, len(st.Distribution))
+	for i, d := range st.Distribution {
+		dist[i] = &session.CategoryDistribution{Name: d.Name, Path: d.Path, FileCount: d.FileCount, TotalSize: d.TotalSize}
+	}
+	c.JSON(consts.StatusOK, &session.SessionStatsResp{
+		CategoryDistribution: dist, TotalFiles: int32(st.TotalFiles), TaggedFiles: int32(st.TaggedFiles),
+		PlannedOps: int32(st.PlannedOps), TotalTokens: int32(st.TotalTokens),
+	})
 }

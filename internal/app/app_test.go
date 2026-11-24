@@ -103,9 +103,8 @@ func TestAuthDefaultDeny(t *testing.T) {
 	if st, _ := do(t, c, "GET", base+"/api/auth/me", "", map[string]string{"Authorization": "Bearer nope"}); st != 401 {
 		t.Fatalf("me with bad token = %d", st)
 	}
-	// A generated handler no lane has filled answers the enveloped 501.
-	if st, body := do(t, c, "GET", base+"/api/session/list", "", bearer()); st != 501 || body["code"] != float64(1009) {
-		t.Fatalf("stub = %d %v", st, body)
+	if st, body := do(t, c, "GET", base+"/api/session/list", "", bearer()); st != 200 || body["code"] != float64(0) {
+		t.Fatalf("session list = %d %v", st, body)
 	}
 	if st, body := do(t, c, "GET", base+"/api/nope", "", bearer()); st != 404 || body["code"] != float64(1004) {
 		t.Fatalf("unknown api route = %d %v", st, body)

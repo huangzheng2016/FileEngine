@@ -8,8 +8,12 @@ package container
 
 import (
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/event"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/execute"
+	"FileEngine/biz/service/run"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/session"
 	"FileEngine/internal/db"
 	"gorm.io/gorm"
 )
@@ -26,12 +30,21 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 	}
 	runnerService := runner.NewService(repository)
 	registry := eventfeed.NewRegistry()
+	query := newQuery(gdb)
+	runService := run.NewService(query, repository, runnerService)
+	sessionService := session.NewService(query, repository, runService)
+	executeService := execute.NewService(repository, runService)
+	eventService := event.NewService(repository, runService)
 	container := &Container{
 		DB:      gdb,
 		Repo:    repository,
 		Auth:    service,
 		Runner:  runnerService,
 		Streams: registry,
+		Session: sessionService,
+		Run:     runService,
+		Execute: executeService,
+		Event:   eventService,
 	}
 	return container, nil
 }
