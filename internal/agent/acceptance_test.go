@@ -303,17 +303,12 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 	}
 }
 
-// 9, unknown tool name. The handler is mine; it takes effect once the ADK
-// builder (adk_build.go, transport lane) sets
-// ToolsNodeConfig.UnknownToolsHandler = unknownToolHandler.
+// 9, unknown tool name.
 func TestWireUnknownToolIsAResultAndTheUnitContinues(t *testing.T) {
 	ws := newWireServer(t, byRound(calls(wireCall{"t1", "frobnicate", `{"x":1}`}), text("完成")))
 	a, _, _ := wireAgent(t, ws, nil)
 	w := newWireWorker(t, a, 0)
 	err := a.runUnitLLM(context.Background(), w, workUnit{kind: unitDir, path: "misc"})
-	if err != nil && strings.Contains(err.Error(), "not found in toolsNode") {
-		t.Skip("adk_build.go must set ToolsNodeConfig.UnknownToolsHandler = unknownToolHandler")
-	}
 	if err != nil {
 		t.Fatal(err)
 	}

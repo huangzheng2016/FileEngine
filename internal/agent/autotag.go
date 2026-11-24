@@ -138,6 +138,7 @@ func (a *AutoTagAgent) Run(ctx context.Context) error {
 		return err
 	}
 	a.modelProvider = bulk
+	ctx = modelfactory.WithPromptCacheKey(ctx, int64(a.sessionID), "tagging")
 	chatModel, err := modelfactory.NewChatModelFromProvider(ctx, a.modelProvider)
 	if err != nil {
 		return fmt.Errorf("create model: %w", err)

@@ -42,6 +42,7 @@ type mainRunSpec struct {
 }
 
 func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSpec) (string, error) {
+	ctx = modelfactory.WithPromptCacheKey(ctx, int64(a.sessionID), "main")
 	chatModel, err := newChatModel(ctx, a.modelProvider)
 	if err != nil {
 		return "", fmt.Errorf("create model: %w", err)

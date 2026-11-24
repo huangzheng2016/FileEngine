@@ -120,7 +120,7 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 		Instruction: instruction,
 		Model:       model,
 		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools},
+			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, UnknownToolsHandler: unknownToolHandler},
 		},
 		MaxIterations:    maxIterations,
 		ModelRetryConfig: modelRetryConfig(),

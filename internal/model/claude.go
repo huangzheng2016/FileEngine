@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	claude "github.com/cloudwego/eino-ext/components/model/claude"
@@ -66,7 +67,43 @@ func withTailBreakpoint(input []*schema.Message) []*schema.Message {
 }
 
 func (m *claudeModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	return m.inner.Stream(ctx, withTailBreakpoint(input), opts...)
+	return m.inner.Stream(ctx, withTailBreakpoint(withValidToolArguments(input)), opts...)
+}
+
+// The client embeds tool-call arguments as raw JSON, so one truncated call in
+// history (a stream cut at max_tokens) would make every later request body
+// invalid. Such arguments are replayed as an empty object; the tool already
+// answered that call with an argument error.
+func withValidToolArguments(input []*schema.Message) []*schema.Message {
+	var out []*schema.Message
+	for i, m := range input {
+		if m == nil || len(m.ToolCalls) == 0 {
+			continue
+		}
+		var calls []schema.ToolCall
+		for j, tc := range m.ToolCalls {
+			if tc.Function.Arguments == "" || json.Valid([]byte(tc.Function.Arguments)) {
+				continue
+			}
+			if calls == nil {
+				calls = append([]schema.ToolCall(nil), m.ToolCalls...)
+			}
+			calls[j].Function.Arguments = "{}"
+		}
+		if calls == nil {
+			continue
+		}
+		if out == nil {
+			out = append([]*schema.Message(nil), input...)
+		}
+		cp := *m
+		cp.ToolCalls = calls
+		out[i] = &cp
+	}
+	if out == nil {
+		return input
+	}
+	return out
 }
 
 func (m *claudeModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {

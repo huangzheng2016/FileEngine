@@ -7,8 +7,7 @@ import (
 
 // Truncated tool-call JSON from the model is replayed in the next request's
 // history, where the Claude client embeds it raw and the body stops being
-// JSON. The fix belongs to the model wrapper (transport lane): normalize
-// ToolCall.Function.Arguments once the stream is assembled.
+// JSON; the Claude wrapper replays invalid arguments as an empty object.
 func TestWireTruncatedToolArgumentsSurviveReplay(t *testing.T) {
 	ws := newWireServer(t, byRound(calls(wireCall{"t1", "decide", `{"items":[`}), text("完成")))
 	a, _, _ := wireAgent(t, ws, nil)
@@ -18,7 +17,7 @@ func TestWireTruncatedToolArgumentsSurviveReplay(t *testing.T) {
 	bad := ws.bad
 	ws.mu.Unlock()
 	if bad > 0 {
-		t.Skip("the model wrapper must replace invalid tool-call arguments before they are replayed")
+		t.Fatalf("%d request bodies were not valid JSON", bad)
 	}
 	if err != nil {
 		t.Fatal(err)
