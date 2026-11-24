@@ -24,7 +24,7 @@ func newService(t *testing.T) (*Service, *db.Repository) {
 			_ = sqlDB.Close()
 		}
 	})
-	return NewService(repo), repo
+	return NewService(repo, dal.Query()), repo
 }
 
 func newSession(t *testing.T, repo *db.Repository) uint {
@@ -40,12 +40,12 @@ func waitStatus(t *testing.T, repo *db.Repository, runID uint, want string) *mod
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if r, err := repo.GetRun(runID); err == nil && r.Status == want {
+		if r, err := getRun(repo, runID); err == nil && r.Status == want {
 			return r
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	r, _ := repo.GetRun(runID)
+	r, _ := getRun(repo, runID)
 	t.Fatalf("run %d did not reach %q: %+v", runID, want, r)
 	return nil
 }
@@ -172,4 +172,9 @@ func TestScanRegistryCancelAndShutdown(t *testing.T) {
 	if !s.CancelScan(9) {
 		t.Fatal("a panicking scan must still detach")
 	}
+}
+
+func getRun(repo *db.Repository, id uint) (*model.AgentRun, error) {
+	var run model.AgentRun
+	return &run, repo.DB().First(&run, id).Error
 }

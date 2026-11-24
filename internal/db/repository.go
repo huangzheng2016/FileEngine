@@ -24,6 +24,9 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithDB is a repository over another handle, for reads on the read pool.
+func (r *Repository) WithDB(db *gorm.DB) *Repository { return &Repository{db: db} }
+
 func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
@@ -602,7 +605,7 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	if err != nil {
 		return nil, err
 	}
-	stats, err := r.categoryStats(sessionID, cats)
+	stats, err := r.CategoryStats(sessionID, cats)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +616,8 @@ func (r *Repository) GetCategoryUsageSummary(filesystemID uint, sessionID uint) 
 	return result, nil
 }
 
-type categoryStat struct {
+// CategoryStat is the file count and total size under the category at Idx.
+type CategoryStat struct {
 	Idx   int
 	Count int64
 	Size  int64
@@ -623,8 +627,8 @@ type categoryStat struct {
 const categoryStatsChunk = 200
 
 // Every UNION ALL arm is an index range on idx_session_newpath.
-func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]categoryStat, error) {
-	out := make([]categoryStat, len(cats))
+func (r *Repository) CategoryStats(sessionID uint, cats []model.Category) ([]CategoryStat, error) {
+	out := make([]CategoryStat, len(cats))
 	for start := 0; start < len(cats); start += categoryStatsChunk {
 		end := min(start+categoryStatsChunk, len(cats))
 		arms := make([]string, 0, end-start)
@@ -634,7 +638,7 @@ func (r *Repository) categoryStats(sessionID uint, cats []model.Category) ([]cat
 			arms = append(arms, fmt.Sprintf("SELECT %d AS idx, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size FROM file_entries WHERE scan_session_id = ? AND %s", i, cond))
 			args = append(append(args, sessionID), cargs...)
 		}
-		var rows []categoryStat
+		var rows []CategoryStat
 		if err := r.db.Raw(strings.Join(arms, " UNION ALL "), args...).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -699,32 +703,4 @@ func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 		return JunkBatchIndex - 1
 	}
 	return *minBatch - 1
-}
-
-type CategoryDistribution struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	FileCount int64  `json:"file_count"`
-	TotalSize int64  `json:"total_size"`
-}
-
-func (r *Repository) GetSessionStats(sessionID uint, filesystemID uint) ([]CategoryDistribution, error) {
-	cats, err := r.ListCategories(filesystemID)
-	if err != nil {
-		return nil, err
-	}
-	stats, err := r.categoryStats(sessionID, cats)
-	if err != nil {
-		return nil, err
-	}
-	var result []CategoryDistribution
-	for i, c := range cats {
-		if stats[i].Count > 0 {
-			result = append(result, CategoryDistribution{
-				Name: c.Name, Path: c.Path,
-				FileCount: stats[i].Count, TotalSize: stats[i].Size,
-			})
-		}
-	}
-	return result, nil
 }

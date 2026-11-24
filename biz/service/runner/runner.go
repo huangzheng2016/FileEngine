@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"FileEngine/biz/dal/db/model"
+	"FileEngine/biz/dal/db/query"
 	"FileEngine/internal/db"
 )
 
@@ -28,6 +29,7 @@ type Outcome struct {
 
 type Service struct {
 	repo     *db.Repository
+	q        *query.Query
 	stopWait time.Duration
 
 	mu    sync.Mutex
@@ -41,9 +43,10 @@ type scanHandle struct {
 	done   chan struct{}
 }
 
-func NewService(repo *db.Repository) *Service {
+func NewService(repo *db.Repository, q *query.Query) *Service {
 	return &Service{
 		repo:     repo,
+		q:        q,
 		stopWait: 30 * time.Second,
 		done:     make(map[uint]chan struct{}),
 		scans:    make(map[uint]*scanHandle),
@@ -105,7 +108,7 @@ func safeWork(ctx context.Context, run *model.AgentRun, work func(context.Contex
 
 // Stop cancels a running run, waits for it to wind down and returns its final row.
 func (s *Service) Stop(runID uint) (*model.AgentRun, error) {
-	run, err := s.repo.GetRun(runID)
+	run, err := s.get(runID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +123,13 @@ func (s *Service) Stop(runID uint) (*model.AgentRun, error) {
 		// A running row nobody can cancel belongs to no live goroutine.
 		_ = s.repo.FinishRun(run, db.RunStopped, "", "", db.TokenCounts{})
 	}
-	return s.repo.GetRun(runID)
+	return s.get(runID)
+}
+
+// get reads the run row from the writer: callers act on its status right after
+// a write.
+func (s *Service) get(runID uint) (*model.AgentRun, error) {
+	return s.q.AgentRun.WithContext(context.Background()).Where(s.q.AgentRun.ID.Eq(runID)).First()
 }
 
 // awaitEnd waits until the run's goroutine has exited (runs the runner
@@ -142,7 +151,7 @@ func (s *Service) awaitEnd(runID uint) bool {
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		if r, err := s.repo.GetRun(runID); err != nil || r.Status != db.RunRunning {
+		if r, err := s.get(runID); err != nil || r.Status != db.RunRunning {
 			return true
 		}
 		select {

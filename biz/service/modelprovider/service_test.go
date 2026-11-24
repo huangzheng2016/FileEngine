@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/dbtest"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
@@ -17,7 +18,8 @@ func setup(t *testing.T) *Service {
 	if err := secret.SetKey(make([]byte, 32)); err != nil {
 		t.Fatal(err)
 	}
-	return NewService(dbtest.New(t))
+	q := dbtest.New(t)
+	return NewService(q, &dal.Reader{Query: q})
 }
 
 func ptr[T any](v T) *T { return &v }

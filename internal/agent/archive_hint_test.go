@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"strings"
 	"testing"
-
 )
 
 func makeZip(t *testing.T, names []string) ([]byte, int64) {

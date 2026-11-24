@@ -6,36 +6,33 @@ import (
 	"context"
 	"strconv"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
 	"FileEngine/biz/service/eventfeed"
 	"FileEngine/biz/service/run"
-	"FileEngine/internal/db"
 )
 
 type Service struct {
-	repo *db.Repository
-	run  *run.Service
+	rq  *dal.Reader
+	run *run.Service
 }
 
-func NewService(repo *db.Repository, r *run.Service) *Service {
-	return &Service{repo: repo, run: r}
+func NewService(rq *dal.Reader, r *run.Service) *Service {
+	return &Service{rq: rq, run: r}
 }
 
 // ListQuery selects a page of events: After and Before are exclusive seq bounds
 // (0 = unbounded) and Limit 0 means the default page.
-type ListQuery struct {
-	SessionID, RunID, After, Before uint
-	Limit                           int
-}
+type ListQuery = eventfeed.ListQuery
 
 // List returns events in ascending seq order and whether more exist beyond the
 // page.
-func (s *Service) List(_ context.Context, q ListQuery) ([]model.SessionEvent, bool, error) {
+func (s *Service) List(ctx context.Context, q ListQuery) ([]model.SessionEvent, bool, error) {
 	if q.Limit < 0 {
 		return nil, false, errs.BadRequest
 	}
-	return s.repo.ListEvents(db.EventQuery{SessionID: q.SessionID, RunID: q.RunID, After: q.After, Before: q.Before, Limit: q.Limit})
+	return eventfeed.List(ctx, s.rq.Query, q)
 }
 
 // StreamStart checks the session exists and resolves the seq a stream starts
@@ -52,11 +49,11 @@ func (s *Service) StreamStart(ctx context.Context, sessionID, runID uint, resume
 		}
 		return uint(n), nil
 	}
-	return eventfeed.StartSeq(s.repo, sessionID, runID)
+	return eventfeed.StartSeq(ctx, s.rq.Query, sessionID, runID)
 }
 
 // Follow delivers the session's events after the given seq to sink until ctx
 // ends or the sink fails.
 func (s *Service) Follow(ctx context.Context, q eventfeed.Query, sink eventfeed.Sink) error {
-	return eventfeed.Follow(ctx, s.repo, q, sink)
+	return eventfeed.Follow(ctx, s.rq.Query, q, sink)
 }

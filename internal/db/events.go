@@ -10,8 +10,6 @@ import (
 
 	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
-
-	"gorm.io/gorm"
 )
 
 // Session event stream. Every event is persisted into session_events (the row
@@ -223,70 +221,4 @@ func Unsubscribe(s *Subscriber) {
 	if len(bus.subs[s.sessionID]) == 0 {
 		delete(bus.subs, s.sessionID)
 	}
-}
-
-type EventQuery struct {
-	SessionID uint
-	RunID     uint // 0 = all runs
-	After     uint // seq > After
-	Before    uint // seq < Before (0 = no bound)
-	Limit     int
-}
-
-// With only Before set it returns the newest events below Before, still in
-// ascending order.
-func (r *Repository) ListEvents(q EventQuery) ([]model.SessionEvent, bool, error) {
-	if q.Limit <= 0 || q.Limit > 1000 {
-		q.Limit = 500
-	}
-	tx := r.db.Model(&model.SessionEvent{}).Where("session_id = ?", q.SessionID)
-	if q.RunID > 0 {
-		tx = tx.Where("run_id = ?", q.RunID)
-	}
-	if q.After > 0 {
-		tx = tx.Where("id > ?", q.After)
-	}
-	if q.Before > 0 {
-		tx = tx.Where("id < ?", q.Before)
-	}
-	desc := q.Before > 0 && q.After == 0
-	order := "id ASC"
-	if desc {
-		order = "id DESC"
-	}
-	var rows []model.SessionEvent
-	if err := tx.Order(order).Limit(q.Limit + 1).Find(&rows).Error; err != nil {
-		return nil, false, err
-	}
-	more := len(rows) > q.Limit
-	if more {
-		rows = rows[:q.Limit]
-	}
-	if desc {
-		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
-			rows[i], rows[j] = rows[j], rows[i]
-		}
-	}
-	return rows, more, nil
-}
-
-// The default replay origin of the SSE stream.
-func (r *Repository) LatestRunStartSeq(sessionID uint) (uint, error) {
-	var run model.AgentRun
-	err := r.db.Where("session_id = ?", sessionID).Order("id DESC").First(&run).Error
-	if err == gorm.ErrRecordNotFound {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	var first *uint
-	if err := r.db.Model(&model.SessionEvent{}).Where("session_id = ? AND run_id = ?", sessionID, run.ID).
-		Select("MIN(id)").Scan(&first).Error; err != nil {
-		return 0, err
-	}
-	if first == nil || *first == 0 {
-		return 0, nil
-	}
-	return *first - 1, nil
 }

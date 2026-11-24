@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -24,11 +25,12 @@ const (
 
 type Service struct {
 	q    *query.Query
+	rq   *dal.Reader
 	runs *run.Service
 }
 
-func NewService(q *query.Query, runs *run.Service) *Service {
-	return &Service{q: q, runs: runs}
+func NewService(q *query.Query, rq *dal.Reader, runs *run.Service) *Service {
+	return &Service{q: q, rq: rq, runs: runs}
 }
 
 // Send starts a chat run and returns its id; the reply streams as events.
@@ -84,10 +86,10 @@ func title(content string) string {
 
 // List is the conversation, oldest first; summary turns are internal.
 func (s *Service) List(ctx context.Context, sessionID uint) ([]*model.ChatTurn, error) {
-	if _, err := s.runs.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.ReadSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	t := s.q.ChatTurn
+	t := s.rq.ChatTurn
 	return t.WithContext(ctx).
 		Where(t.SessionID.Eq(sessionID), t.Role.In(db.ChatRoleUser, db.ChatRoleAssistant)).
 		Order(t.ID).Find()

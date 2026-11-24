@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -38,6 +39,7 @@ var (
 
 type Service struct {
 	q      *query.Query
+	rq     *dal.Reader
 	repo   *db.Repository
 	runner *runner.Service
 	cfg    *settings.Service
@@ -48,8 +50,8 @@ type Service struct {
 	autoTag map[uint]bool
 }
 
-func NewService(q *query.Query, repo *db.Repository, r *runner.Service, cfg *settings.Service) *Service {
-	return &Service{q: q, repo: repo, runner: r, cfg: cfg, autoTag: make(map[uint]bool)}
+func NewService(q *query.Query, rq *dal.Reader, repo *db.Repository, r *runner.Service, cfg *settings.Service) *Service {
+	return &Service{q: q, rq: rq, repo: repo, runner: r, cfg: cfg, autoTag: make(map[uint]bool)}
 }
 
 // Launch records a run and executes work on a detached context; see
@@ -70,7 +72,16 @@ func StartError(err error) error {
 
 // Session loads a session; a missing one is errs.NoSession.
 func (s *Service) Session(ctx context.Context, id uint) (*model.ScanSession, error) {
-	sess, err := s.q.ScanSession.WithContext(ctx).Where(s.q.ScanSession.ID.Eq(id)).First()
+	return loadSession(ctx, s.q, id)
+}
+
+// ReadSession is Session on the read pool, for read-only endpoints.
+func (s *Service) ReadSession(ctx context.Context, id uint) (*model.ScanSession, error) {
+	return loadSession(ctx, s.rq.Query, id)
+}
+
+func loadSession(ctx context.Context, q *query.Query, id uint) (*model.ScanSession, error) {
+	sess, err := q.ScanSession.WithContext(ctx).Where(q.ScanSession.ID.Eq(id)).First()
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, errs.NoSession
 	}
@@ -189,7 +200,7 @@ func (s *Service) startReviewAfterTagging(sessionID, taggingRunID uint, status s
 	_, a, err := s.AgentForSession(ctx, sessionID)
 	if err == nil {
 		var tagging *model.AgentRun
-		if tagging, err = s.repo.GetRun(taggingRunID); err == nil {
+		if tagging, err = s.fetch(ctx, s.q, taggingRunID); err == nil {
 			_, err = s.Launch(sessionID, db.RunPhaseReview, "复查", func(ctx context.Context, run *model.AgentRun) runner.Outcome {
 				logger := agent.NewLogger(sessionID, run.ID, 0)
 				report, err := a.RunReview(ctx, logger, tagging)
@@ -305,27 +316,77 @@ func (s *Service) StopScan(sessionID uint) {
 
 // List returns a session's runs, newest first.
 func (s *Service) List(ctx context.Context, sessionID uint) ([]model.AgentRun, error) {
-	if _, err := s.Session(ctx, sessionID); err != nil {
+	if _, err := s.ReadSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListRuns(sessionID)
+	ar := s.rq.AgentRun
+	rows, err := ar.WithContext(ctx).Where(ar.SessionID.Eq(sessionID)).Order(ar.ID.Desc()).Find()
+	if err != nil {
+		return nil, err
+	}
+	if err := fillRevertedBy(ctx, s.rq.Query, rows); err != nil {
+		return nil, err
+	}
+	runs := make([]model.AgentRun, len(rows))
+	for i, r := range rows {
+		runs[i] = *r
+	}
+	return runs, nil
 }
 
 // Get returns one run.
 func (s *Service) Get(ctx context.Context, id uint) (*model.AgentRun, error) {
-	run, err := s.repo.GetRun(id)
+	return s.fetch(ctx, s.rq.Query, id)
+}
+
+func (s *Service) fetch(ctx context.Context, q *query.Query, id uint) (*model.AgentRun, error) {
+	run, err := q.AgentRun.WithContext(ctx).Where(q.AgentRun.ID.Eq(id)).First()
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNoRun
 	}
-	return run, err
+	if err != nil {
+		return nil, err
+	}
+	return run, fillRevertedBy(ctx, q, []*model.AgentRun{run})
+}
+
+// fillRevertedBy sets the derived RevertedByRunID of executing runs that have
+// an effective revert run.
+func fillRevertedBy(ctx context.Context, q *query.Query, runs []*model.AgentRun) error {
+	var ids []uint
+	for _, r := range runs {
+		if r.Phase == db.RunPhaseExecuting {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	ar := q.AgentRun
+	reverts, err := ar.WithContext(ctx).Select(ar.ID, ar.RevertsRunID).
+		Where(ar.RevertsRunID.In(ids...), ar.Status.In(db.EffectiveRevertStatuses...)).Order(ar.ID).Find()
+	if err != nil {
+		return err
+	}
+	by := make(map[uint]uint, len(reverts))
+	for _, rv := range reverts {
+		by[*rv.RevertsRunID] = rv.ID
+	}
+	for _, r := range runs {
+		if id, ok := by[r.ID]; ok {
+			r.RevertedByRunID = &id
+		}
+	}
+	return nil
 }
 
 // Stop cancels a running run and returns its final row; a finished run is
 // returned as it is.
 func (s *Service) Stop(ctx context.Context, id uint) (*model.AgentRun, error) {
-	run, err := s.runner.Stop(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, err := s.runner.Stop(id); errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNoRun
+	} else if err != nil {
+		return nil, err
 	}
-	return run, err
+	return s.fetch(ctx, s.q, id)
 }

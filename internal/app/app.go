@@ -92,7 +92,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := container.Init(dal.DB(), auth.Options{Token: token, BindHost: cfg.Server.Host}); err != nil {
+	if err := container.Init(dal.DB(), dal.ReadDB(), auth.Options{Token: token, BindHost: cfg.Server.Host}); err != nil {
 		return nil, fmt.Errorf("build container: %w", err)
 	}
 	repo := container.Default.Repo

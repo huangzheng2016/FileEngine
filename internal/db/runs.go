@@ -21,7 +21,7 @@ var (
 )
 
 // A revert that was stopped or failed does not count, so the user can retry.
-var effectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
+var EffectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
 
 const RunInterruptedError = "服务重启，运行被中断"
 
@@ -57,7 +57,7 @@ func (r *Repository) InsertRun(run *model.AgentRun) error {
 				return ErrSessionBusy
 			}
 			if run.RevertsRunID != nil {
-				if err := tx.Model(&model.AgentRun{}).Where("reverts_run_id = ? AND status IN ?", *run.RevertsRunID, effectiveRevertStatuses).Count(&n).Error; err != nil {
+				if err := tx.Model(&model.AgentRun{}).Where("reverts_run_id = ? AND status IN ?", *run.RevertsRunID, EffectiveRevertStatuses).Count(&n).Error; err != nil {
 					return err
 				}
 				if n > 0 {
@@ -146,52 +146,6 @@ func (r *Repository) SweepStaleRuns() (int64, error) {
 		"status": RunStopped, "error": RunInterruptedError, "ended_at": time.Now(),
 	})
 	return res.RowsAffected, res.Error
-}
-
-func (r *Repository) GetRun(id uint) (*model.AgentRun, error) {
-	var run model.AgentRun
-	if err := r.db.First(&run, id).Error; err != nil {
-		return &run, err
-	}
-	runs := []model.AgentRun{run}
-	err := r.fillRevertedBy(runs)
-	return &runs[0], err
-}
-
-func (r *Repository) ListRuns(sessionID uint) ([]model.AgentRun, error) {
-	var runs []model.AgentRun
-	if err := r.db.Where("session_id = ?", sessionID).Order("id DESC").Find(&runs).Error; err != nil {
-		return nil, err
-	}
-	return runs, r.fillRevertedBy(runs)
-}
-
-func (r *Repository) fillRevertedBy(runs []model.AgentRun) error {
-	var ids []uint
-	for _, run := range runs {
-		if run.Phase == RunPhaseExecuting {
-			ids = append(ids, run.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	var reverts []model.AgentRun
-	if err := r.db.Select("id", "reverts_run_id").
-		Where("reverts_run_id IN ? AND status IN ?", ids, effectiveRevertStatuses).
-		Order("id ASC").Find(&reverts).Error; err != nil {
-		return err
-	}
-	by := make(map[uint]uint, len(reverts))
-	for _, rv := range reverts {
-		by[*rv.RevertsRunID] = rv.ID
-	}
-	for i := range runs {
-		if id, ok := by[runs[i].ID]; ok {
-			runs[i].RevertedByRunID = &id
-		}
-	}
-	return nil
 }
 
 type RunRef struct {

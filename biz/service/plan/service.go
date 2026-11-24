@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/errs"
@@ -36,20 +37,21 @@ var (
 
 type Service struct {
 	q    *query.Query
+	rq   *dal.Reader
 	repo *db.Repository
 	runs *run.Service
 }
 
-func NewService(q *query.Query, repo *db.Repository, runs *run.Service) *Service {
-	return &Service{q: q, repo: repo, runs: runs}
+func NewService(q *query.Query, rq *dal.Reader, repo *db.Repository, runs *run.Service) *Service {
+	return &Service{q: q, rq: rq, repo: repo, runs: runs}
 }
 
 // Get returns the session's plan; a session without one gets version 0.
 func (s *Service) Get(ctx context.Context, sessionID uint) (*model.SessionPlan, error) {
-	if _, err := s.runs.Session(ctx, sessionID); err != nil {
+	if _, err := s.runs.ReadSession(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	p := s.q.SessionPlan
+	p := s.rq.SessionPlan
 	rows, err := p.WithContext(ctx).Where(p.SessionID.Eq(sessionID)).Limit(1).Find()
 	if err != nil {
 		return nil, err

@@ -12,10 +12,7 @@ import (
 
 func countEvents(t *testing.T, r *Repository, sessionID uint, typ string) int {
 	t.Helper()
-	rows, _, err := r.ListEvents(EventQuery{SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := eventsOf(t, r, sessionID)
 	n := 0
 	for _, ev := range rows {
 		if ev.Type == typ {
@@ -127,9 +124,9 @@ func TestSetRunCountersAreStoredOnTheRun(t *testing.T) {
 	if err := r.FinishRun(run, RunPartial, "", "", TokenCounts{}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.GetRun(run.ID)
-	if err != nil || got.ExecTotal != 10 || got.ExecSuccess != 7 || got.ExecFailed != 2 || got.ExecSkipped != 1 {
-		t.Fatalf("counters = %+v (%v)", got, err)
+	got := getRun(t, r, run.ID)
+	if got.ExecTotal != 10 || got.ExecSuccess != 7 || got.ExecFailed != 2 || got.ExecSkipped != 1 {
+		t.Fatalf("counters = %+v", got)
 	}
 }
 
@@ -152,8 +149,16 @@ func TestFinishRunTwiceEmitsOnce(t *testing.T) {
 	if n := countEvents(t, r, 31, EvRunStatus); n != 2 {
 		t.Fatalf("run_status events = %d, want 2", n)
 	}
-	got, err := r.GetRun(run.ID)
-	if err != nil || got.Status != RunDone {
-		t.Fatalf("stored run = %+v (%v)", got, err)
+	if got := getRun(t, r, run.ID); got.Status != RunDone {
+		t.Fatalf("stored run = %+v", got)
 	}
+}
+
+func getRun(t *testing.T, r *Repository, id uint) *model.AgentRun {
+	t.Helper()
+	var run model.AgentRun
+	if err := r.DB().First(&run, id).Error; err != nil {
+		t.Fatal(err)
+	}
+	return &run
 }

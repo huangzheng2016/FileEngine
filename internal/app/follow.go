@@ -2,14 +2,11 @@ package app
 
 import (
 	"context"
-	"errors"
 
 	"FileEngine/biz/dal/db/model"
 	"FileEngine/biz/errs"
 	"FileEngine/biz/service/eventfeed"
 	"FileEngine/container"
-
-	"gorm.io/gorm"
 )
 
 type noPing struct {
@@ -27,16 +24,13 @@ func (noPing) Ping() error                         { return nil }
 // The follower is registered with the stream registry, so Shutdown cancels it.
 func (a *App) Follow(sessionID, runID uint, after *uint, send func(model.SessionEvent) error, onEnd func(error)) (stop func(), err error) {
 	c := container.Default
-	if _, err := c.Repo.GetSession(sessionID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.NoSession
-		}
+	if _, err := c.Run.Session(context.Background(), sessionID); err != nil {
 		return nil, err
 	}
 	var from uint
 	if after != nil {
 		from = *after
-	} else if from, err = eventfeed.StartSeq(c.Repo, sessionID, runID); err != nil {
+	} else if from, err = eventfeed.StartSeq(context.Background(), c.Read.Query, sessionID, runID); err != nil {
 		return nil, err
 	}
 	ctx, done, err := c.Streams.Begin()
@@ -47,7 +41,7 @@ func (a *App) Follow(sessionID, runID uint, after *uint, send func(model.Session
 	go func() {
 		defer done()
 		defer cancel()
-		onEnd(eventfeed.Follow(ctx, c.Repo, eventfeed.Query{SessionID: sessionID, RunID: runID, After: from}, noPing{send}))
+		onEnd(eventfeed.Follow(ctx, c.Read.Query, eventfeed.Query{SessionID: sessionID, RunID: runID, After: from}, noPing{send}))
 	}()
 	return cancel, nil
 }

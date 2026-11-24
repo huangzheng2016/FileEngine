@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"FileEngine/biz/dal/db/model"
+	"FileEngine/biz/dal/db/query"
 	"FileEngine/internal/db"
 )
 
@@ -34,18 +35,18 @@ type Query struct {
 
 // StartSeq resolves where a follower without an explicit resume point begins:
 // the first event of the session's latest run (or 0 when a run filter is set).
-func StartSeq(repo *db.Repository, sessionID, runID uint) (uint, error) {
+func StartSeq(ctx context.Context, q *query.Query, sessionID, runID uint) (uint, error) {
 	if runID != 0 {
 		return 0, nil
 	}
-	return repo.LatestRunStartSeq(sessionID)
+	return latestRunStart(ctx, q, sessionID)
 }
 
 // Follow subscribes first, replays the persisted events after q.After, then
 // follows the live broadcast, dropping events it already replayed. A lagging
 // subscriber re-reads the gap from the database. It returns when ctx ends
 // (nil) or the sink or the database fails.
-func Follow(ctx context.Context, repo *db.Repository, q Query, sink Sink) error {
+func Follow(ctx context.Context, rq *query.Query, q Query, sink Sink) error {
 	sub := db.Subscribe(q.SessionID)
 	defer db.Unsubscribe(sub)
 
@@ -62,7 +63,7 @@ func Follow(ctx context.Context, repo *db.Repository, q Query, sink Sink) error 
 	}
 	replay := func() error {
 		for {
-			rows, more, err := repo.ListEvents(db.EventQuery{SessionID: q.SessionID, RunID: q.RunID, After: last, Limit: replayPageSize})
+			rows, more, err := List(ctx, rq, ListQuery{SessionID: q.SessionID, RunID: q.RunID, After: last, Limit: replayPageSize})
 			if err != nil {
 				return err
 			}

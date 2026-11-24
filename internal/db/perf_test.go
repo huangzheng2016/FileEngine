@@ -415,7 +415,7 @@ func TestCategoryStatsGrouped(t *testing.T) {
 	if counts["/c007"] != 2 || counts["/c249"] != 2 || counts["/c070"] != 0 || counts["/c000"] != 0 {
 		t.Fatalf("counts: c007=%d c249=%d", counts["/c007"], counts["/c249"])
 	}
-	stats, err := r.GetSessionStats(s.ID, fs.ID)
+	stats, err := statsOf(t, r, s.ID, fs.ID)
 	if err != nil || len(stats) != 2 || stats[0].Path != "/c007" || stats[0].TotalSize != 30 || stats[1].TotalSize != 90 {
 		t.Fatalf("stats: %+v %v", stats, err)
 	}

@@ -71,7 +71,7 @@ func TestGetCategoryUsageSummaryComplete(t *testing.T) {
 		t.Fatalf("/empty: got count=%d present=%v, want 0 present", c, ok)
 	}
 
-	stats, err := r.GetSessionStats(session.ID, fs.ID)
+	stats, err := statsOf(t, r, session.ID, fs.ID)
 	if err != nil {
 		t.Fatalf("GetSessionStats: %v", err)
 	}
@@ -326,4 +326,29 @@ func TestListFilesSearchCaseAndEscapes(t *testing.T) {
 	if total != 1 || len(files) != 1 || files[0].Name != "100%.txt" {
 		t.Fatalf("literal %% search must match only 100%%.txt: got total=%d files=%v", total, files)
 	}
+}
+
+type statRow struct {
+	Path                 string
+	FileCount, TotalSize int64
+}
+
+// statsOf lists the categories that have files, like the session overview.
+func statsOf(t *testing.T, r *Repository, sessionID, filesystemID uint) ([]statRow, error) {
+	t.Helper()
+	cats, err := r.ListCategories(filesystemID)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := r.CategoryStats(sessionID, cats)
+	if err != nil {
+		return nil, err
+	}
+	var out []statRow
+	for i, c := range cats {
+		if stats[i].Count > 0 {
+			out = append(out, statRow{Path: c.Path, FileCount: stats[i].Count, TotalSize: stats[i].Size})
+		}
+	}
+	return out, nil
 }

@@ -7,6 +7,7 @@ package container
 //go:generate go tool wire
 
 import (
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
@@ -48,6 +49,8 @@ type Container struct {
 
 	// Query is the typed query layer over the writer handle.
 	Query *query.Query
+	// Read is the typed query layer for reads that need no read-your-writes.
+	Read *dal.Reader
 	// Resource services: files, categories, plan, rules, memory, chat.
 	Files      *file.Service
 	Categories *category.Service
@@ -70,8 +73,12 @@ var Default *Container
 func newQuery(gdb *gorm.DB) *query.Query { return query.Use(gdb) }
 
 // Init builds the container over an opened database and installs it as Default.
-func Init(gdb *gorm.DB, authOpts auth.Options) error {
-	c, err := build(gdb, authOpts)
+// rdb is the read-only pool (nil: reads use gdb).
+func Init(gdb, rdb *gorm.DB, authOpts auth.Options) error {
+	if rdb == nil {
+		rdb = gdb
+	}
+	c, err := build(gdb, dal.NewReader(rdb), authOpts)
 	if err != nil {
 		return err
 	}
