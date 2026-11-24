@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 var ErrClosed = errors.New("event streams are closed")
@@ -18,6 +19,7 @@ type Registry struct {
 	mu     sync.Mutex
 	closed bool
 	wg     sync.WaitGroup
+	open   atomic.Int64
 }
 
 func NewRegistry() *Registry {
@@ -34,15 +36,20 @@ func (r *Registry) Begin() (context.Context, func(), error) {
 		return nil, nil, ErrClosed
 	}
 	r.wg.Add(1)
+	r.open.Add(1)
 	ctx, cancel := context.WithCancel(r.ctx)
 	var once sync.Once
 	return ctx, func() {
 		once.Do(func() {
 			cancel()
+			r.open.Add(-1)
 			r.wg.Done()
 		})
 	}, nil
 }
+
+// Open is the number of streams that have begun and not yet finished.
+func (r *Registry) Open() int { return int(r.open.Load()) }
 
 // Close cancels every stream and waits for them to finish, until ctx ends.
 func (r *Registry) Close(ctx context.Context) error {

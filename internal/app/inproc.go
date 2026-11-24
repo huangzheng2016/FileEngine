@@ -44,7 +44,7 @@ func (a *App) Do(ctx context.Context, call Call) Result {
 	if call.Path == streamPath {
 		return envelope(errs.Invalid("桌面版请使用事件订阅"))
 	}
-	h := a.inprocEngine()
+	h := a.Engine()
 	rc := h.NewContext()
 	uri := call.Path
 	if len(call.Query) > 0 {
@@ -78,8 +78,8 @@ func envelope(e *errs.Error) Result {
 	return Result{Status: e.Status, ContentType: "application/json; charset=utf-8", Body: body}
 }
 
-// inprocEngine is the engine behind Do. It never listens.
-func (a *App) inprocEngine() *route.Engine {
+// Engine is the engine behind Do (and behind hertz ut tests). It never listens.
+func (a *App) Engine() *route.Engine {
 	a.inprocOnce.Do(func() { a.inproc = a.newHertz().Engine })
 	return a.inproc
 }

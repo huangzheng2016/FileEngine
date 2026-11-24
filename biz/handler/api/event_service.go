@@ -27,13 +27,20 @@ func ListSessionEvents(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	if req.SessionID < 0 || req.RunID < 0 || req.After < 0 || req.Before < 0 || req.Limit < 0 {
+	sessionID, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	runID, err1 := optID(req.RunID)
+	after, err2 := optID(req.After)
+	before, err3 := optID(req.Before)
+	if err = errors.Join(err1, err2, err3); err != nil || req.Limit < 0 {
 		resp.Fail(ctx, c, errs.BadRequest)
 		return
 	}
 	rows, more, err := container.Default.Repo.ListEvents(db.EventQuery{
-		SessionID: uint(req.SessionID), RunID: uint(req.RunID),
-		After: uint(req.After), Before: uint(req.Before), Limit: int(req.Limit),
+		SessionID: sessionID, RunID: runID, After: after, Before: before, Limit: int(req.Limit),
 	})
 	if err != nil {
 		resp.Fail(ctx, c, err)
@@ -51,11 +58,16 @@ func StreamSessionEvents(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	if req.SessionID <= 0 || req.RunID < 0 || req.After < 0 {
-		resp.Fail(ctx, c, errs.BadRequest)
+	sessionID, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
 		return
 	}
-	sessionID, runID := uint(req.SessionID), uint(req.RunID)
+	runID, err := optID(req.RunID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
 	repo := container.Default.Repo
 	if _, err := repo.GetSession(sessionID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

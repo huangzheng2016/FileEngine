@@ -393,3 +393,37 @@ func TestShutdownEndsStreams(t *testing.T) {
 		t.Fatalf("Shutdown waited %v for an open stream", elapsed)
 	}
 }
+
+func TestHeartbeatNoticesAClosedClient(t *testing.T) {
+	prev := api.SSEHeartbeat
+	api.SSEHeartbeat = 20 * time.Millisecond
+	t.Cleanup(func() { api.SSEHeartbeat = prev })
+
+	a := newTestApp(t)
+	base := serve(t, a)
+	t.Cleanup(func() { _ = a.Shutdown(context.Background()) })
+	sid := newSession(t)
+
+	req, _ := http.NewRequest("GET", streamURL(base, sid, ""), nil)
+	req.Header.Set("Authorization", "Bearer "+token())
+	resp, err := testClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil || !strings.HasPrefix(line, ": stream") {
+		t.Fatalf("first line = %q, %v", line, err)
+	}
+	if n := container.Default.Streams.Open(); n != 1 {
+		t.Fatalf("open streams = %d, want 1", n)
+	}
+	// The client vanishes without any shutdown: only a failed heartbeat write can
+	// tell the handler (Hertz does not sense disconnects on Windows).
+	resp.Body.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for container.Default.Streams.Open() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("handler still registered 3s after the client closed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

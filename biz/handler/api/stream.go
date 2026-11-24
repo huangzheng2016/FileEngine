@@ -46,7 +46,7 @@ func (s *sseSink) comment(text string) error {
 func toSessionEvents(rows []db.SessionEvent) []*event.SessionEvent {
 	items := make([]*event.SessionEvent, len(rows))
 	for i, ev := range rows {
-		items[i] = &event.SessionEvent{Seq: int64(ev.ID), RunID: int64(ev.RunID), Kind: ev.Type, Data: ev.Data, CreatedAt: ev.CreatedAt.Unix()}
+		items[i] = &event.SessionEvent{Seq: int64(ev.ID), RunID: int64(ev.RunID), Kind: ev.Type, Data: ev.Data, CreatedAt: unix(ev.CreatedAt)}
 	}
 	return items
 }

@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"io/fs"
+	"mime"
 	"net/http"
+	"path"
 	"strings"
 
 	"FileEngine/biz/errs"
@@ -13,7 +15,6 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/common/adaptor"
 )
 
 // registerRoutes mounts every /api route from the IDL, the health probe and the
@@ -22,17 +23,47 @@ func registerRoutes(h *server.Hertz, frontend fs.FS) {
 	router.GeneratedRegister(h)
 	h.GET("/healthz", handler.Healthz)
 
-	var spa app.HandlerFunc
-	if frontend != nil {
-		spa = adaptor.HertzHandler(SPAHandler(frontend))
-	}
 	h.NoRoute(func(ctx context.Context, c *app.RequestContext) {
-		if spa == nil || string(c.Path()) == "/api" || strings.HasPrefix(string(c.Path()), "/api/") {
+		p := string(c.Path())
+		if frontend == nil || p == "/api" || strings.HasPrefix(p, "/api/") {
 			resp.Fail(ctx, c, errs.NoSuchRoute)
 			return
 		}
-		spa(ctx, c)
+		serveSPA(c, frontend, p)
 	})
+}
+
+// serveSPA answers a file of the built frontend, or index.html for any other
+// path so deep links such as /sessions/1 reach the router.
+func serveSPA(c *app.RequestContext, frontend fs.FS, p string) {
+	name := strings.TrimPrefix(path.Clean("/"+p), "/")
+	if name != "" {
+		if info, err := fs.Stat(frontend, name); err == nil && info.Mode().IsRegular() {
+			if data, err := fs.ReadFile(frontend, name); err == nil {
+				if strings.HasPrefix(name, "assets/") {
+					// Vite content-hashes everything under assets/
+					c.Header("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				c.Data(http.StatusOK, contentType(name), data)
+				return
+			}
+		}
+	}
+	index, err := fs.ReadFile(frontend, "index.html")
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	// index.html names the current hashed assets, so it must never be cached.
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", index)
+}
+
+func contentType(name string) string {
+	if t := mime.TypeByExtension(path.Ext(name)); t != "" {
+		return t
+	}
+	return "application/octet-stream"
 }
 
 // SPAHandler serves the built frontend with index.html as the fallback for deep
