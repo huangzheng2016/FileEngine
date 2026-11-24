@@ -170,3 +170,12 @@ service, `FileEngine`, whose bindings are generated into `cmd/fileengine-desktop
 
 Shutdown cancels every subscription, then stops runs and scans, then closes the database; there is no HTTP
 server to stop.
+
+## Configuration and settings
+
+`config.yaml` holds only what the process needs at startup: `server` (host, port, token) and `database` (driver,
+dsn). It is decoded strictly (unknown keys fail), validated at startup, and a PostgreSQL or MySQL DSN is required,
+never guessed. Everything an operator edits while the app runs, including the agent limits and the system prompt, is
+one document stored as append-only `settings_versions` rows (`biz/service/settings`). A save names the version it was
+edited from (`base_version`); a newer saved version answers 409. A save validates, persists, and only then installs
+the new snapshot with `config.SetAgent`, which is what `internal/agent` reads per use. Unchanged saves write nothing.

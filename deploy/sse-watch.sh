@@ -2,7 +2,7 @@
 # Watch a session's live agent events (SSE) from the host.
 # Usage: ./sse-watch.sh <session_id> [logfile]
 # Events stream to stdout; when a logfile is given they are tee'd into it.
-# The stream carries only new events — refetch GET /api/v1/logs?session_id=N
+# The stream carries only new events — refetch GET /api/event/list?session_id=N
 # for history. Ctrl-C stops watching (the run continues server-side).
 set -euo pipefail
 
@@ -24,7 +24,7 @@ if [ -z "$FE_TOKEN" ]; then
     echo "FE_TOKEN not set and data/config.yaml unreadable — set FE_TOKEN in deploy/.env" >&2
     exit 1
 fi
-URL="http://localhost:${PORT}/api/v1/sessions/${SESSION_ID}/events/stream"
+URL="http://localhost:${PORT}/api/event/stream?session_id=${SESSION_ID}"
 
 echo "watching $URL (Ctrl-C to stop)" >&2
 if [ $# -ge 2 ]; then

@@ -18,11 +18,6 @@ services:
       # Non-secret runtime config, interpolated from deploy/.env on the host.
       # Secrets (model API key) are NOT passed to the container — bootstrap.sh
       # pushes them straight into the API from the host.
-      FE_AGENT_CONCURRENCY: "${FE_AGENT_CONCURRENCY:-1}"
-      FE_AGENT_BATCH_SIZE: "${FE_AGENT_BATCH_SIZE:-50}"
-      FE_AGENT_MAX_STEP: "${FE_AGENT_MAX_STEP:-150}"
-      FE_AGENT_MAX_RETRIES: "${FE_AGENT_MAX_RETRIES:-3}"
-      FE_AGENT_MAX_FILE_READ_SIZE: "${FE_AGENT_MAX_FILE_READ_SIZE:-102400}"
       # NFS scan connection pool (see deploy/.env.example)
       FE_NFS_SCAN_CONNS: "${FE_NFS_SCAN_CONNS:-8}"
       # Host dirs LOCAL filesystems may use (mount them into the container).

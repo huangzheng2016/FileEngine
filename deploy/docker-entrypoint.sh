@@ -17,12 +17,6 @@ server:
 database:
   driver: ${FE_DB_DRIVER:-sqlite}
   dsn: ${FE_DB_DSN:-$DATA_DIR/fileengine.db}
-agent:
-  concurrency: ${FE_AGENT_CONCURRENCY:-1}
-  batch_size: ${FE_AGENT_BATCH_SIZE:-50}
-  max_step: ${FE_AGENT_MAX_STEP:-150}
-  max_retries: ${FE_AGENT_MAX_RETRIES:-3}
-  max_file_read_size: ${FE_AGENT_MAX_FILE_READ_SIZE:-102400}
 EOF
 fi
 
