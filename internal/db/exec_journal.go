@@ -94,6 +94,17 @@ func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 	return ops, err
 }
 
+// Finished single-step ops whose entry was never marked executed (a crash
+// between the op's done state and MarkEntryExecuted).
+func (r *Repository) ListDoneOpsOfPlannedEntries(sessionID uint) ([]ExecOp, error) {
+	var ops []ExecOp
+	err := r.db.Joins("JOIN file_entries ON file_entries.id = exec_ops.entry_id").
+		Where("exec_ops.session_id = ? AND exec_ops.state = ? AND exec_ops.kind IN ? AND file_entries.executed = ?",
+			sessionID, ExecDone, []string{ExecKindRename, ExecKindCopy, ExecKindMove}, false).
+		Order("exec_ops.id ASC").Find(&ops).Error
+	return ops, err
+}
+
 // The executor uses it to tell its own earlier output from a foreign file
 // when resuming a partially executed directory.
 func (r *Repository) FindDoneExecOp(sessionID uint, dst string) (*ExecOp, error) {

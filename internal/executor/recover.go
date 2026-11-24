@@ -28,6 +28,23 @@ func (e *Executor) Recover(ctx context.Context, sessionID uint) error {
 			return fmt.Errorf("op %d (%s %s -> %s): %w", ops[i].ID, ops[i].Kind, ops[i].Src, ops[i].Dst, err)
 		}
 	}
+	return e.reconcileFinished()
+}
+
+func (e *Executor) reconcileFinished() error {
+	done, err := e.repo.ListDoneOpsOfPlannedEntries(e.sessionID)
+	if err != nil {
+		return err
+	}
+	for i := range done {
+		mode := ModeMove
+		if done[i].Kind == db.ExecKindCopy {
+			mode = ModeCopy
+		}
+		if err := e.markIfEntryOp(&done[i], mode); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
