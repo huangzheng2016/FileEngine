@@ -449,3 +449,8 @@ func _updatesessionMw() []app.HandlerFunc {
 	// your code...
 	return nil
 }
+
+func _listconfigversionsMw() []app.HandlerFunc {
+	// your code...
+	return nil
+}

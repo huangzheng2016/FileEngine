@@ -50,6 +50,7 @@ func Register(r *server.Hertz) {
 			_config.GET("/prompt", append(_getpromptMw(), api.GetPrompt)...)
 			_config.POST("/prompt_update", append(_updatepromptMw(), api.UpdatePrompt)...)
 			_config.POST("/update", append(_updateconfigMw(), api.UpdateConfig)...)
+			_config.GET("/versions", append(_listconfigversionsMw(), api.ListConfigVersions)...)
 		}
 		{
 			_event := _api.Group("/event", _eventMw()...)

@@ -67,8 +67,8 @@ func TestEveryAPIRouteRequiresAuthExceptLoginAndBootstrap(t *testing.T) {
 			t.Errorf("%s %s without token = %d, want 401", r.Method, r.Path, st)
 		}
 	}
-	if n != 68 {
-		t.Errorf("checked %d protected routes, want 68", n)
+	if n != 69 {
+		t.Errorf("checked %d protected routes, want 69", n)
 	}
 }
 

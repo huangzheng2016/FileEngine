@@ -7,9 +7,13 @@
 package container
 
 import (
+	"FileEngine/biz/service/admin"
 	"FileEngine/biz/service/auth"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/filesystem"
+	"FileEngine/biz/service/modelprovider"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/settings"
 	"FileEngine/internal/db"
 	"gorm.io/gorm"
 )
@@ -26,12 +30,24 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 	}
 	runnerService := runner.NewService(repository)
 	registry := eventfeed.NewRegistry()
+	query := newQuery(gdb)
+	filesystemService := filesystem.NewService(query)
+	modelproviderService := modelprovider.NewService(query)
+	settingsService, err := settings.NewService(query)
+	if err != nil {
+		return nil, err
+	}
+	adminService := admin.NewService(gdb)
 	container := &Container{
-		DB:      gdb,
-		Repo:    repository,
-		Auth:    service,
-		Runner:  runnerService,
-		Streams: registry,
+		DB:          gdb,
+		Repo:        repository,
+		Auth:        service,
+		Runner:      runnerService,
+		Streams:     registry,
+		Filesystems: filesystemService,
+		Models:      modelproviderService,
+		Settings:    settingsService,
+		Admin:       adminService,
 	}
 	return container, nil
 }

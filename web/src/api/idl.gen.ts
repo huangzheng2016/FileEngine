@@ -189,10 +189,34 @@ export interface ConfigResp {
   agent: AgentConfig
   // the built-in category policy, shown when category_policy is empty
   default_category_policy: string
+  // saved version of the agent settings; 0 = never saved (defaults)
+  version: number
 }
 
+// Agent settings and the system prompt are one versioned document. A save
+// names the version it was edited from; a newer one answers 409.
 export interface UpdateConfigReq {
   agent: AgentConfigPatch
+  base_version: number
+}
+
+export interface ConfigVersion {
+  version: number
+  // unix seconds
+  saved_at: number
+  // names of the settings that differ from the previous version
+  changed: string[]
+}
+
+export interface ListConfigVersionsReq {
+  page: number
+  page_size: number
+}
+
+// Newest first.
+export interface ListConfigVersionsResp {
+  items: ConfigVersion[]
+  total: number
 }
 
 export interface PromptResp {
@@ -201,11 +225,14 @@ export interface PromptResp {
   default_prompt: string
   // false when the default is in use
   is_custom: boolean
+  // same version stream as the agent settings
+  version: number
 }
 
 // A prompt equal to the default resets to it.
 export interface UpdatePromptReq {
   prompt: string
+  base_version: number
 }
 
 // seq is the stream sequence (the SSE id) and stays a plain number so clients

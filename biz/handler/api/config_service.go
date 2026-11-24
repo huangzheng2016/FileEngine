@@ -5,13 +5,14 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
+	"FileEngine/biz/dal/db"
 	"FileEngine/biz/handler/resp"
-
 	config "FileEngine/biz/model/api/config"
 	base "FileEngine/biz/model/base"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // GetConfig .
@@ -21,7 +22,12 @@ func GetConfig(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	snap, err := container.Default.Settings.Current(ctx)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toConfigResp(snap))
 }
 
 // UpdateConfig .
@@ -31,7 +37,32 @@ func UpdateConfig(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	snap, err := container.Default.Settings.Save(ctx, req.BaseVersion, applyPatch(req.Agent))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toConfigResp(snap))
+}
+
+// ListConfigVersions .
+// @router /api/config/versions [GET]
+func ListConfigVersions(ctx context.Context, c *app.RequestContext) {
+	var req config.ListConfigVersionsReq
+	if !resp.Bind(c, &req) {
+		return
+	}
+	offset, limit := db.Page(req.Page, req.PageSize)
+	rows, total, err := container.Default.Settings.Versions(ctx, offset, limit)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*config.ConfigVersion, len(rows))
+	for i, r := range rows {
+		items[i] = &config.ConfigVersion{Version: r.Version, SavedAt: unix(r.SavedAt), Changed: r.Changed}
+	}
+	c.JSON(consts.StatusOK, &config.ListConfigVersionsResp{Items: items, Total: total})
 }
 
 // GetPrompt .
@@ -41,7 +72,12 @@ func GetPrompt(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	snap, err := container.Default.Settings.Current(ctx)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toPromptResp(snap))
 }
 
 // UpdatePrompt .
@@ -51,5 +87,10 @@ func UpdatePrompt(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	snap, err := container.Default.Settings.SavePrompt(ctx, req.BaseVersion, req.Prompt)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toPromptResp(snap))
 }

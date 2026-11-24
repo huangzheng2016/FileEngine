@@ -5,12 +5,13 @@ package api
 import (
 	"context"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	filesystem "FileEngine/biz/model/api/filesystem"
+	base "FileEngine/biz/model/base"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListFilesystems .
@@ -20,7 +21,16 @@ func ListFilesystems(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	rows, err := container.Default.Filesystems.List(ctx)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*filesystem.Filesystem, len(rows))
+	for i, r := range rows {
+		items[i] = toFilesystem(r)
+	}
+	c.JSON(consts.StatusOK, &filesystem.ListFilesystemsResp{Items: items, Total: int64(len(items))})
 }
 
 // GetFilesystem .
@@ -30,7 +40,17 @@ func GetFilesystem(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Filesystems.Get(ctx, fsID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &filesystem.FilesystemResp{Item: toFilesystem(row)})
 }
 
 // CreateFilesystem .
@@ -40,7 +60,12 @@ func CreateFilesystem(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	row, err := container.Default.Filesystems.Create(ctx, fsSaveInput(&req, 0))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &filesystem.FilesystemResp{Item: toFilesystem(row)})
 }
 
 // UpdateFilesystem .
@@ -50,7 +75,17 @@ func UpdateFilesystem(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Filesystems.Update(ctx, fsSaveInput(&req, fsID))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &filesystem.FilesystemResp{Item: toFilesystem(row)})
 }
 
 // DeleteFilesystem .
@@ -60,7 +95,16 @@ func DeleteFilesystem(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	if err := container.Default.Filesystems.Delete(ctx, fsID); err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &base.EmptyResp{})
 }
 
 // TestFilesystem .
@@ -70,5 +114,15 @@ func TestFilesystem(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fsID, err := optID(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	res, err := container.Default.Filesystems.Test(ctx, fsProbeInput(&req, fsID))
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, toProbeResp(res))
 }

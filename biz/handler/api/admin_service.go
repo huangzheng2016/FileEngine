@@ -4,21 +4,32 @@ package api
 
 import (
 	"context"
+	"mime"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	base "FileEngine/biz/model/base"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
-// BackupDatabase .
+// BackupDatabase streams a consistent SQLite snapshot as an attachment.
 // @router /api/admin/backup [POST]
 func BackupDatabase(ctx context.Context, c *app.RequestContext) {
 	var req base.EmptyReq
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	b, err := container.Default.Admin.Backup(ctx)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": b.Name}))
+	c.Header("Cache-Control", "no-store")
+	c.SetContentType("application/octet-stream")
+	// the stream is closed (and the temporary snapshot removed) once it is sent
+	c.SetBodyStream(b, int(b.Size))
+	c.SetStatusCode(consts.StatusOK)
 }
