@@ -17,37 +17,39 @@ import (
 
 func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 	return &Query{
-		db:            db,
-		AgentRun:      newAgentRun(db, opts...),
-		Category:      newCategory(db, opts...),
-		ChatTurn:      newChatTurn(db, opts...),
-		ExecOp:        newExecOp(db, opts...),
-		FileEntry:     newFileEntry(db, opts...),
-		Filesystem:    newFilesystem(db, opts...),
-		MemoryItem:    newMemoryItem(db, opts...),
-		ModelProvider: newModelProvider(db, opts...),
-		PlanRule:      newPlanRule(db, opts...),
-		ScanSession:   newScanSession(db, opts...),
-		SessionEvent:  newSessionEvent(db, opts...),
-		SessionPlan:   newSessionPlan(db, opts...),
+		db:              db,
+		AgentRun:        newAgentRun(db, opts...),
+		Category:        newCategory(db, opts...),
+		ChatTurn:        newChatTurn(db, opts...),
+		ExecOp:          newExecOp(db, opts...),
+		FileEntry:       newFileEntry(db, opts...),
+		Filesystem:      newFilesystem(db, opts...),
+		MemoryItem:      newMemoryItem(db, opts...),
+		ModelProvider:   newModelProvider(db, opts...),
+		PlanRule:        newPlanRule(db, opts...),
+		ScanSession:     newScanSession(db, opts...),
+		SessionEvent:    newSessionEvent(db, opts...),
+		SessionPlan:     newSessionPlan(db, opts...),
+		SettingsVersion: newSettingsVersion(db, opts...),
 	}
 }
 
 type Query struct {
 	db *gorm.DB
 
-	AgentRun      agentRun
-	Category      category
-	ChatTurn      chatTurn
-	ExecOp        execOp
-	FileEntry     fileEntry
-	Filesystem    filesystem
-	MemoryItem    memoryItem
-	ModelProvider modelProvider
-	PlanRule      planRule
-	ScanSession   scanSession
-	SessionEvent  sessionEvent
-	SessionPlan   sessionPlan
+	AgentRun        agentRun
+	Category        category
+	ChatTurn        chatTurn
+	ExecOp          execOp
+	FileEntry       fileEntry
+	Filesystem      filesystem
+	MemoryItem      memoryItem
+	ModelProvider   modelProvider
+	PlanRule        planRule
+	ScanSession     scanSession
+	SessionEvent    sessionEvent
+	SessionPlan     sessionPlan
+	SettingsVersion settingsVersion
 }
 
 func (q *Query) Available() bool { return q.db != nil }
@@ -56,19 +58,20 @@ func (q *Query) UnderlyingDB() *gorm.DB { return q.db }
 
 func (q *Query) clone(db *gorm.DB) *Query {
 	return &Query{
-		db:            db,
-		AgentRun:      q.AgentRun.clone(db),
-		Category:      q.Category.clone(db),
-		ChatTurn:      q.ChatTurn.clone(db),
-		ExecOp:        q.ExecOp.clone(db),
-		FileEntry:     q.FileEntry.clone(db),
-		Filesystem:    q.Filesystem.clone(db),
-		MemoryItem:    q.MemoryItem.clone(db),
-		ModelProvider: q.ModelProvider.clone(db),
-		PlanRule:      q.PlanRule.clone(db),
-		ScanSession:   q.ScanSession.clone(db),
-		SessionEvent:  q.SessionEvent.clone(db),
-		SessionPlan:   q.SessionPlan.clone(db),
+		db:              db,
+		AgentRun:        q.AgentRun.clone(db),
+		Category:        q.Category.clone(db),
+		ChatTurn:        q.ChatTurn.clone(db),
+		ExecOp:          q.ExecOp.clone(db),
+		FileEntry:       q.FileEntry.clone(db),
+		Filesystem:      q.Filesystem.clone(db),
+		MemoryItem:      q.MemoryItem.clone(db),
+		ModelProvider:   q.ModelProvider.clone(db),
+		PlanRule:        q.PlanRule.clone(db),
+		ScanSession:     q.ScanSession.clone(db),
+		SessionEvent:    q.SessionEvent.clone(db),
+		SessionPlan:     q.SessionPlan.clone(db),
+		SettingsVersion: q.SettingsVersion.clone(db),
 	}
 }
 
@@ -82,51 +85,54 @@ func (q *Query) WriteDB() *Query {
 
 func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 	return &Query{
-		db:            db,
-		AgentRun:      q.AgentRun.replaceDB(db),
-		Category:      q.Category.replaceDB(db),
-		ChatTurn:      q.ChatTurn.replaceDB(db),
-		ExecOp:        q.ExecOp.replaceDB(db),
-		FileEntry:     q.FileEntry.replaceDB(db),
-		Filesystem:    q.Filesystem.replaceDB(db),
-		MemoryItem:    q.MemoryItem.replaceDB(db),
-		ModelProvider: q.ModelProvider.replaceDB(db),
-		PlanRule:      q.PlanRule.replaceDB(db),
-		ScanSession:   q.ScanSession.replaceDB(db),
-		SessionEvent:  q.SessionEvent.replaceDB(db),
-		SessionPlan:   q.SessionPlan.replaceDB(db),
+		db:              db,
+		AgentRun:        q.AgentRun.replaceDB(db),
+		Category:        q.Category.replaceDB(db),
+		ChatTurn:        q.ChatTurn.replaceDB(db),
+		ExecOp:          q.ExecOp.replaceDB(db),
+		FileEntry:       q.FileEntry.replaceDB(db),
+		Filesystem:      q.Filesystem.replaceDB(db),
+		MemoryItem:      q.MemoryItem.replaceDB(db),
+		ModelProvider:   q.ModelProvider.replaceDB(db),
+		PlanRule:        q.PlanRule.replaceDB(db),
+		ScanSession:     q.ScanSession.replaceDB(db),
+		SessionEvent:    q.SessionEvent.replaceDB(db),
+		SessionPlan:     q.SessionPlan.replaceDB(db),
+		SettingsVersion: q.SettingsVersion.replaceDB(db),
 	}
 }
 
 type queryCtx struct {
-	AgentRun      *agentRunDo
-	Category      *categoryDo
-	ChatTurn      *chatTurnDo
-	ExecOp        *execOpDo
-	FileEntry     *fileEntryDo
-	Filesystem    *filesystemDo
-	MemoryItem    *memoryItemDo
-	ModelProvider *modelProviderDo
-	PlanRule      *planRuleDo
-	ScanSession   *scanSessionDo
-	SessionEvent  *sessionEventDo
-	SessionPlan   *sessionPlanDo
+	AgentRun        *agentRunDo
+	Category        *categoryDo
+	ChatTurn        *chatTurnDo
+	ExecOp          *execOpDo
+	FileEntry       *fileEntryDo
+	Filesystem      *filesystemDo
+	MemoryItem      *memoryItemDo
+	ModelProvider   *modelProviderDo
+	PlanRule        *planRuleDo
+	ScanSession     *scanSessionDo
+	SessionEvent    *sessionEventDo
+	SessionPlan     *sessionPlanDo
+	SettingsVersion *settingsVersionDo
 }
 
 func (q *Query) WithContext(ctx context.Context) *queryCtx {
 	return &queryCtx{
-		AgentRun:      q.AgentRun.WithContext(ctx),
-		Category:      q.Category.WithContext(ctx),
-		ChatTurn:      q.ChatTurn.WithContext(ctx),
-		ExecOp:        q.ExecOp.WithContext(ctx),
-		FileEntry:     q.FileEntry.WithContext(ctx),
-		Filesystem:    q.Filesystem.WithContext(ctx),
-		MemoryItem:    q.MemoryItem.WithContext(ctx),
-		ModelProvider: q.ModelProvider.WithContext(ctx),
-		PlanRule:      q.PlanRule.WithContext(ctx),
-		ScanSession:   q.ScanSession.WithContext(ctx),
-		SessionEvent:  q.SessionEvent.WithContext(ctx),
-		SessionPlan:   q.SessionPlan.WithContext(ctx),
+		AgentRun:        q.AgentRun.WithContext(ctx),
+		Category:        q.Category.WithContext(ctx),
+		ChatTurn:        q.ChatTurn.WithContext(ctx),
+		ExecOp:          q.ExecOp.WithContext(ctx),
+		FileEntry:       q.FileEntry.WithContext(ctx),
+		Filesystem:      q.Filesystem.WithContext(ctx),
+		MemoryItem:      q.MemoryItem.WithContext(ctx),
+		ModelProvider:   q.ModelProvider.WithContext(ctx),
+		PlanRule:        q.PlanRule.WithContext(ctx),
+		ScanSession:     q.ScanSession.WithContext(ctx),
+		SessionEvent:    q.SessionEvent.WithContext(ctx),
+		SessionPlan:     q.SessionPlan.WithContext(ctx),
+		SettingsVersion: q.SettingsVersion.WithContext(ctx),
 	}
 }
 

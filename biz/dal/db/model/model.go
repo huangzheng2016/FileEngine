@@ -13,7 +13,7 @@ import (
 // All lists every table the app owns.
 func All() []any {
 	return []any{&FileEntry{}, &Category{}, &Filesystem{}, &ScanSession{}, &ModelProvider{},
-		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &PlanRule{}, &ExecOp{}}
+		&AgentRun{}, &SessionEvent{}, &SessionPlan{}, &MemoryItem{}, &ChatTurn{}, &PlanRule{}, &ExecOp{}, &SettingsVersion{}}
 }
 
 type FileEntry struct {
@@ -287,4 +287,14 @@ func (r *AgentRun) FillCacheHitRate() {
 	if r.PromptTokens > 0 {
 		r.CacheHitRate = float64(r.CachedTokens) / float64(r.PromptTokens)
 	}
+}
+
+// SettingsVersion is one saved version of the runtime settings document
+// (internal/config.AgentConfig as JSON). Versions are append-only; the unique
+// index lets exactly one of two concurrent saves from the same base through.
+type SettingsVersion struct {
+	ID        uint   `gorm:"primaryKey"`
+	Version   int64  `gorm:"uniqueIndex"`
+	Data      string `gorm:"type:text"`
+	CreatedAt time.Time
 }
