@@ -99,7 +99,7 @@ func seedEntry(t *testing.T, repo *db.Repository, e db.FileEntry) {
 
 func historyBytes(t *testing.T, summary *db.ChatTurn, turns []db.ChatTurn) string {
 	t.Helper()
-	b, err := json.Marshal(chatHistoryMessages(summary, turns))
+	b, err := json.Marshal(chatHistoryMessages(summary, turns, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	}
 
 	in1 := model.streamed[0]
-	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent, a.session) {
+	if in1[0].Role != schema.System || in1[0].Content != chatSystemPrompt(config.Get().Agent) {
 		t.Fatal("system prompt first and static")
 	}
 	if !strings.HasPrefix(in1[1].Content, "# 会话共享上下文") || !strings.Contains(in1[1].Content, "照片按年份整理") {
@@ -216,8 +216,11 @@ func TestRunChatPersistsTurnsAndOrdersPrompt(t *testing.T) {
 	if in2[1].Content != in1[1].Content {
 		t.Fatal("shared context must be byte-identical across turns")
 	}
-	if in2[2].Content != "帮我整理照片" || in2[3].Role != schema.Assistant || in2[3].Content != "你想按年还是按月？" {
-		t.Fatalf("history after shared context: %+v", in2[2:4])
+	if in2[2].Content != last.Content || in2[3].Role != schema.Assistant || in2[3].Content != "你想按年还是按月？" {
+		t.Fatalf("history replays the exact message sent, then the answer: %+v", in2[2:4])
+	}
+	if turns[0].Content != "帮我整理照片" {
+		t.Fatal("the user sees the text they typed, not the message that was sent")
 	}
 	mem, _ := repo.ListLongTermMemory(1)
 	if len(mem) != 1 || mem[0].Key != "pref:photo-by-year" {
@@ -287,7 +290,7 @@ func TestRunSurveyWritesPlan(t *testing.T) {
 	}
 	in := model.streamed[0]
 	user := in[len(in)-1].Content
-	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent, a.session) {
+	if !strings.Contains(user, "## 目录树概览") || !strings.Contains(user, "## 用户补充要求\n\n按年") || in[0].Content != surveySystemPrompt(config.Get().Agent) {
 		t.Fatalf("survey input: %q", user)
 	}
 
@@ -358,7 +361,7 @@ func TestRunReviewSummaryAndReflection(t *testing.T) {
 	if !strings.HasPrefix(sum, report) || !strings.Contains(sum, "记忆已更新：新增 1 条") {
 		t.Fatalf("summary: %q", sum)
 	}
-	if in := model.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent, a.session) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
+	if in := model.streamed[0]; in[0].Content != reviewSystemPrompt(config.Get().Agent) || !strings.Contains(in[len(in)-1].Content, "# 复核材料") {
 		t.Fatal("review input: static prompt + material")
 	}
 	if len(model.genned) != 1 || !strings.Contains(model.genned[0][1].Content, "mix 是浏览器下载目录") {

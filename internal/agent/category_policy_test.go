@@ -29,19 +29,18 @@ func toolDesc(t *testing.T, tools []tool.BaseTool, name string) string {
 }
 
 func TestSystemPromptCategoryPolicyTwoStates(t *testing.T) {
-	session := &db.ScanSession{AllowAutoCategory: true, AllowScript: true}
-	without := systemPromptForSession(config.AgentConfig{}, session)
-	if strings.Contains(without, "## 分类规范") || without != defaultSystemPrompt(true, true) {
+	without := systemPromptForSession(config.AgentConfig{})
+	if strings.Contains(without, "## 分类规范") || without != defaultSystemPrompt()+systemPromptTail {
 		t.Fatal("empty policy must not add a 分类规范 section")
 	}
 
-	with := systemPromptForSession(config.AgentConfig{CategoryPolicy: testCategoryPolicy}, session)
+	with := systemPromptForSession(config.AgentConfig{CategoryPolicy: testCategoryPolicy})
 	if !strings.HasPrefix(with, without) || !strings.HasSuffix(with, "## 分类规范\n\n用户目标、整理方案和记忆没有另作要求时照此执行。\n\n"+testCategoryPolicy+"\n") {
 		t.Fatalf("non-empty policy must follow the prompt verbatim under a 分类规范 section: %q", with)
 	}
 
-	custom := systemPromptForSession(config.AgentConfig{SystemPrompt: "自定义", CategoryPolicy: testCategoryPolicy}, session)
-	if !strings.HasPrefix(custom, "自定义\n## 分类规范") || !strings.HasSuffix(custom, testCategoryPolicy+"\n") {
+	custom := systemPromptForSession(config.AgentConfig{SystemPrompt: "自定义", CategoryPolicy: testCategoryPolicy})
+	if !strings.HasPrefix(custom, "自定义") || !strings.Contains(custom, "## 结束") || !strings.HasSuffix(custom, testCategoryPolicy+"\n") {
 		t.Fatalf("a custom prompt still gets the configured policy: %q", custom)
 	}
 	if strings.Contains(DefaultSystemPrompt, config.DefaultCategoryPolicy) {
@@ -51,11 +50,10 @@ func TestSystemPromptCategoryPolicyTwoStates(t *testing.T) {
 
 func TestMainRunPromptsCarryPolicyOnce(t *testing.T) {
 	cfg := config.AgentConfig{CategoryPolicy: testCategoryPolicy}
-	session := &db.ScanSession{AllowAutoCategory: true, AllowScript: true}
 	for name, p := range map[string]string{
-		"chat":   chatSystemPrompt(cfg, session),
-		"survey": surveySystemPrompt(cfg, session),
-		"review": reviewSystemPrompt(cfg, session),
+		"chat":   chatSystemPrompt(cfg),
+		"survey": surveySystemPrompt(cfg),
+		"review": reviewSystemPrompt(cfg),
 	} {
 		if strings.Count(p, testCategoryPolicy) != 1 {
 			t.Fatalf("%s prompt must carry the policy exactly once", name)

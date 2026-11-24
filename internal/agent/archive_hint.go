@@ -30,7 +30,7 @@ func zipHint(ra io.ReaderAt, size int64, maxNames int) (string, error) {
 			continue
 		}
 		total++
-		if len(names) < maxNames && !strings.HasSuffix(f.Name, "/") {
+		if len(names) < maxNames && !strings.HasSuffix(f.Name, "/") && !hasSensitiveSegment(f.Name) {
 			names = append(names, f.Name)
 		}
 	}
@@ -59,7 +59,7 @@ func tarHint(r io.Reader, gz bool, maxNames int) (string, error) {
 			continue
 		}
 		total++
-		if len(names) < maxNames && hdr.Typeflag != tar.TypeDir {
+		if len(names) < maxNames && hdr.Typeflag != tar.TypeDir && !hasSensitiveSegment(hdr.Name) {
 			names = append(names, hdr.Name)
 		}
 	}

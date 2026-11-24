@@ -2,8 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"gorm.io/gorm"
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -24,18 +28,17 @@ func SetModelFactory(f func(context.Context, *db.ModelProvider) (einomodel.ChatM
 
 type mainRunSpec struct {
 	label       string
+	phase       string // db.RunPhase*: selects the handler gates
 	maxStep     int
 	instruction string
+	// shared is rendered once into message 0; the run never re-renders it.
+	shared SharedContext
+	// current is the categories the model has been told about (the snapshot
+	// plus any delta); it primes the create_category version guard.
+	current []db.Category
 	// messages follow the shared-context message: history, then this run's
 	// own input last.
 	messages []*schema.Message
-}
-
-func sharedContextMessage(block string) *schema.Message {
-	if strings.TrimSpace(block) == "" {
-		block = "（还没有目标、方案、记忆或分类）\n"
-	}
-	return modelfactory.MarkCacheBreakpoint(&schema.Message{Role: schema.User, Content: "# 会话共享上下文\n\n" + block})
 }
 
 func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSpec) (string, error) {
@@ -52,6 +55,8 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	tracker := newTokenTrackingModel(chatModel)
 	tb := NewToolBuilder(a.repo, fs, a.sessionID, a.session.FilesystemID, logger, config.Get().Agent, a.session, a.modelProvider.VisionEnabled)
 	tb.RunID = logger.RunID()
+	tb.RunKind = spec.phase
+	tb.guard.note(categoryNames(spec.current))
 	tools, err := tb.BuildChatTools()
 	if err != nil {
 		return "", fmt.Errorf("build tools: %w", err)
@@ -64,14 +69,10 @@ func (a *Agent) runMainAgent(ctx context.Context, logger *Logger, spec mainRunSp
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
+	logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
 	// Shared notes are tagging-time working state: main-model runs get the
 	// long-term context only (notes stay reachable through recall).
-	shared, err := BuildSharedContext(a.repo, a.session)
-	if err != nil {
-		return "", err
-	}
-	logger.SetBatch(a.repo.NextManualBatchIndex(a.sessionID))
-	msgs := append([]*schema.Message{sharedContextMessage(shared)}, spec.messages...)
+	msgs := append([]*schema.Message{SharedContextMessage(RenderSharedContext(spec.shared))}, spec.messages...)
 	result, err := runADKWithRetry(ctx, agentInst, msgs, logger, spec.label, tracker)
 	if err != nil {
 		return "", err
@@ -92,9 +93,19 @@ const (
 	chatFilesMax  = 100
 )
 
+// Turn rows with these roles are never shown to the user and never part of
+// ChatHistory: the epoch snapshot (a JSON SharedContext keyed by the summary
+// turn that opened the epoch) and the exact user message that was sent for a
+// user turn (keyed by that turn).
+const (
+	chatRoleSnapshot = "snapshot"
+	chatRoleSent     = "sent"
+)
+
 // The output for a history is a prefix of the output for that history plus
-// later turns, so provider prefix caches keep hitting.
-func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn) []*schema.Message {
+// later turns, so provider prefix caches keep hitting. A user turn replays
+// the exact message that was sent for it, not the text the user typed.
+func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn, sent map[uint]string) []*schema.Message {
 	var msgs []*schema.Message
 	if summary != nil {
 		msgs = append(msgs, &schema.Message{Role: schema.User, Content: "## 之前对话的摘要\n\n" + summary.Content})
@@ -104,9 +115,66 @@ func chatHistoryMessages(summary *db.ChatTurn, turns []db.ChatTurn) []*schema.Me
 		if t.Role == db.ChatRoleAssistant {
 			role = schema.Assistant
 		}
-		msgs = append(msgs, &schema.Message{Role: role, Content: t.Content})
+		content := t.Content
+		if s, ok := sent[t.ID]; ok && role == schema.User {
+			content = s
+		}
+		msgs = append(msgs, &schema.Message{Role: role, Content: content})
 	}
 	return msgs
+}
+
+func (a *Agent) sentMessages(turns []db.ChatTurn) (map[uint]string, error) {
+	var ids []uint
+	for _, t := range turns {
+		if t.Role == db.ChatRoleUser {
+			ids = append(ids, t.ID)
+		}
+	}
+	out := map[uint]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []db.ChatTurn
+	if err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through IN ?", a.sessionID, chatRoleSent, ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.CoversThrough] = r.Content
+	}
+	return out, nil
+}
+
+// chatEpochSnapshot is the shared context the epoch opened with. It is stored
+// so every turn of the epoch renders byte-identical message 0, however much
+// the plan, categories or memory changed since.
+func (a *Agent) chatEpochSnapshot(summary *db.ChatTurn) (SharedContext, error) {
+	var epoch uint
+	if summary != nil {
+		epoch = summary.ID
+	}
+	var row db.ChatTurn
+	err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through = ?", a.sessionID, chatRoleSnapshot, epoch).Order("id DESC").Take(&row).Error
+	if err == nil {
+		var c SharedContext
+		if json.Unmarshal([]byte(row.Content), &c) == nil {
+			return c, nil
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return SharedContext{}, err
+	}
+	c, err := LoadSharedContext(a.repo, a.session)
+	if err != nil {
+		return c, err
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return c, err
+	}
+	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, Role: chatRoleSnapshot, Content: string(raw), CoversThrough: epoch}); err != nil {
+		return c, err
+	}
+	return c, nil
 }
 
 func turnsTokens(turns []db.ChatTurn) int64 {
@@ -209,10 +277,28 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 		return "", err
 	}
 
-	msgs := chatHistoryMessages(summary, turns)
-	msgs = append(msgs, &schema.Message{Role: schema.User, Content: renderSelectedFiles(files) + content})
+	base, err := a.chatEpochSnapshot(summary)
+	if err != nil {
+		return "", err
+	}
+	cur, err := LoadSharedContext(a.repo, a.session)
+	if err != nil {
+		return "", err
+	}
+	// The message sent is stored verbatim: the next turn replays it, so its
+	// request starts with this request's messages.
+	sentText := RenderDelta(base, cur, false) + renderSelectedFiles(files) + content
+	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: chatRoleSent, Content: sentText, CoversThrough: user.ID}); err != nil {
+		return "", err
+	}
+	sent, err := a.sentMessages(turns)
+	if err != nil {
+		return "", err
+	}
+	msgs := chatHistoryMessages(summary, turns, sent)
+	msgs = append(msgs, &schema.Message{Role: schema.User, Content: sentText})
 	maxStep := config.Get().Agent.ChatMaxStep
-	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", maxStep: maxStep, instruction: chatSystemPrompt(config.Get().Agent, a.session), messages: msgs})
+	answer, err := a.runMainAgent(ctx, logger, mainRunSpec{label: "chat", phase: db.RunPhaseChat, maxStep: maxStep, instruction: chatSystemPrompt(config.Get().Agent), shared: base, current: cur.Categories, messages: msgs})
 	if err != nil {
 		return "", err
 	}

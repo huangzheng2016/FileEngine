@@ -52,44 +52,44 @@ func buildReflectionInput(notes, longTerm []db.MemoryItem, session *db.ScanSessi
 
 	var sb strings.Builder
 	if g := strings.TrimSpace(session.Goal); g != "" {
-		sb.WriteString("## 用户目标\n\n" + g + "\n\n")
+		sb.WriteString("## 用户目标\n\n" + WrapUntrusted("用户目标", SanitizeUntrustedName(oneLine(g))) + "\n\n")
 	}
-	sb.WriteString("## 已有长期记忆\n\n")
-	if len(longTerm) == 0 {
-		sb.WriteString("（无）\n")
-	}
+	var mem strings.Builder
 	for _, m := range longTerm {
 		owner := ""
 		if m.Pinned || m.Source == db.MemorySourceUser {
 			owner = "，用户维护"
 		}
-		sb.WriteString(fmt.Sprintf("- [id=%d，%s，%s%s] %s：%s", m.ID, m.Scope, m.Kind, owner, m.Key, m.Content))
+		mem.WriteString(fmt.Sprintf("- [id=%d，%s，%s%s] %s：%s", m.ID, m.Scope, m.Kind, owner, SanitizeUntrustedName(m.Key), SanitizeUntrustedName(oneLine(m.Content))))
 		if m.Path != "" {
-			sb.WriteString("（路径：" + SanitizeUntrustedName(m.Path) + "）")
+			mem.WriteString("（路径：" + SanitizeUntrustedName(m.Path) + "）")
 		}
-		sb.WriteString("\n")
+		mem.WriteString("\n")
 	}
-	sb.WriteString("\n")
+	if mem.Len() == 0 {
+		mem.WriteString("（无）\n")
+	}
+	sb.WriteString("## 已有长期记忆\n\n" + WrapUntrusted("已有长期记忆", strings.TrimRight(mem.String(), "\n")) + "\n\n")
 	if len(corrections) > 0 {
-		sb.WriteString("## 本会话期间用户做的纠正\n\n")
+		var c strings.Builder
 		for _, m := range corrections {
-			sb.WriteString(fmt.Sprintf("- [id=%d] %s\n", m.ID, SanitizeUntrustedName(m.Content)))
+			c.WriteString(fmt.Sprintf("- [id=%d] %s\n", m.ID, SanitizeUntrustedName(m.Content)))
 		}
-		sb.WriteString("\n")
+		sb.WriteString("## 本会话期间用户做的纠正\n\n" + WrapUntrusted("用户纠正", strings.TrimRight(c.String(), "\n")) + "\n\n")
 	}
 	if len(notes) > 0 {
-		sb.WriteString("## 本会话的工作笔记\n\n")
-		for _, n := range notes {
-			sb.WriteString("- " + SanitizeUntrustedName(n.Content))
-			if n.Path != "" {
-				sb.WriteString("（" + SanitizeUntrustedName(n.Path) + "）")
+		var n strings.Builder
+		for _, note := range notes {
+			n.WriteString("- " + SanitizeUntrustedName(note.Content))
+			if note.Path != "" {
+				n.WriteString("（" + SanitizeUntrustedName(note.Path) + "）")
 			}
-			sb.WriteString("\n")
+			n.WriteString("\n")
 		}
-		sb.WriteString("\n")
+		sb.WriteString("## 本会话的工作笔记\n\n" + WrapUntrusted("工作笔记", strings.TrimRight(n.String(), "\n")) + "\n\n")
 	}
 	if strings.TrimSpace(failures) != "" {
-		sb.WriteString("## 本次运行的失败与遗漏\n\n" + failures + "\n")
+		sb.WriteString("## 本次运行的失败与遗漏\n\n" + WrapUntrusted("失败与遗漏", strings.TrimSpace(failures)) + "\n")
 	}
 	return sb.String()
 }
