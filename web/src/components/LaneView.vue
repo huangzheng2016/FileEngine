@@ -3,8 +3,9 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
-import { laneBlocks, type Item } from '@/lib/transcript'
+import { createLaneBlocks, type Item } from '@/lib/transcript'
 import TranscriptBlock from './TranscriptBlock.vue'
+import { provideOpenState } from './openState'
 
 // One worker's stream. Follows new output while the reader is at the bottom and
 // stops once they scroll up; long lanes render only the visible blocks.
@@ -15,7 +16,10 @@ const props = withDefaults(defineProps<{ items: readonly Item[]; prompts?: boole
 
 const VIRTUAL_THRESHOLD = 60
 
-const blocks = computed(() => laneBlocks(props.items, props.prompts))
+provideOpenState()
+
+const build = computed(() => createLaneBlocks(props.prompts))
+const blocks = computed(() => build.value(props.items))
 const virtual = computed(() => blocks.value.length > VIRTUAL_THRESHOLD)
 
 const box = ref<HTMLElement | null>(null)
@@ -47,11 +51,18 @@ function toBottom() {
   following.value = true
 }
 
-// a change anywhere in the last item (streamed text) counts as new output
+// Anything that changes what the reader should see at the bottom: streamed text,
+// a tool result landing, a unit finishing, a new block.
 const revision = computed(() => {
   const last = props.items[props.items.length - 1]
-  if (!last) return 0
-  return props.items.length * 1e6 + (last.kind === 'message' ? last.text.length + last.reasoning.length : 0)
+  if (!last) return ''
+  const tail =
+    last.kind === 'message'
+      ? last.text.length + last.reasoning.length
+      : last.kind === 'tool'
+        ? last.status
+        : `${last.done}:${last.tagged}`
+  return `${props.items.length}:${blocks.value.length}:${tail}`
 })
 
 watch(revision, async () => {

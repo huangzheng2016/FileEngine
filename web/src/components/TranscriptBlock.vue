@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
 import { fmtNumber } from '@/base/format'
 import { stepSummary, type Block } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import ToolCard from './ToolCard.vue'
+import { useOpenState } from './openState'
 
-const props = defineProps<{ block: Block }>()
+const props = defineProps<{ block: Block; scope?: string }>()
 
-const toggled = ref<boolean | null>(null)
-const open = computed(() => toggled.value ?? (props.block.kind === 'steps' && props.block.failed))
-const thinkingOpen = ref(false)
+const state = useOpenState()
+const stateKey = computed(() => `${props.scope ?? ''}b:${props.block.key}`)
+const open = computed(() => state.get(stateKey.value) ?? (props.block.kind === 'steps' && props.block.failed))
+const toggle = () => state.set(stateKey.value, !open.value)
 </script>
 
 <template>
@@ -37,32 +39,19 @@ const thinkingOpen = ref(false)
       <p class="text-danger system-line"><Icon name="alert-triangle" :size="14" />{{ block.item.text }}</p>
     </template>
     <template v-else>
-      <template v-if="block.item.reasoning && !block.item.text">
-        <button
-          type="button"
-          class="ghost btn-sm steps-head"
-          :aria-expanded="thinkingOpen"
-          @click="thinkingOpen = !thinkingOpen"
-        >
-          <Icon name="chevron-right" :size="14" class="chev" />思考过程
-        </button>
-        <div v-if="thinkingOpen || block.item.streaming" class="thinking">
-          <StreamMarkdown :source="block.item.reasoning" :streaming="block.item.streaming" />
-        </div>
-      </template>
-      <StreamMarkdown v-if="block.item.text" :source="block.item.text" :streaming="block.item.streaming" />
+      <StreamMarkdown :source="block.item.text" :streaming="block.item.streaming" />
     </template>
   </div>
 
   <div v-else class="steps">
-    <button type="button" class="ghost btn-sm steps-head" :aria-expanded="open" @click="toggled = !open">
+    <button type="button" class="ghost btn-sm steps-head" :aria-expanded="open" @click="toggle">
       <Icon name="chevron-right" :size="14" class="chev" />
       {{ stepSummary(block) }}
       <Icon v-if="block.failed" name="x-circle" :size="14" class="text-danger" />
     </button>
     <div v-if="open" class="steps-body">
-      <template v-for="it in block.items" :key="it.id">
-        <ToolCard v-if="it.kind === 'tool'" :tool="it" />
+      <template v-for="it in block.items" :key="it.kind === 'tool' ? it.key : it.id">
+        <ToolCard v-if="it.kind === 'tool'" :tool="it" :scope="scope" />
         <template v-else>
           <div v-if="it.reasoning" class="thinking">
             <div class="field-label">思考过程</div>

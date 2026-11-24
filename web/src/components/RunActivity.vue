@@ -3,21 +3,17 @@ import { computed, ref } from 'vue'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
 import ProgressBar from '@/base/ProgressBar.vue'
-import StatusPill from '@/base/StatusPill.vue'
 import { fmtNumber } from '@/base/format'
-import { ENTRY_FLAG } from '@/base/labels'
 import { baseName } from '@/lib/paths'
-import { landing, runActivity } from '@/lib/toolView'
+import { createRunActivity, landing } from '@/lib/toolView'
 import type { RunView } from '@/lib/transcript'
 import RunTranscript from './RunTranscript.vue'
 
-// What a running agent run is doing, in the person's terms: how far along it is,
-// which folders it is looking at, and what it has decided so far. The raw
-// transcript stays one click away.
 const props = defineProps<{ run: RunView; mode?: 'copy' | 'move' }>()
 
 const SHOWN = 8
-const activity = computed(() => runActivity(props.run))
+const activityOf = createRunActivity()
+const activity = computed(() => activityOf(props.run))
 const showAll = ref(false)
 const decisions = computed(() =>
   showAll.value ? activity.value.decisions.slice(0, 200) : activity.value.decisions.slice(0, SHOWN),
@@ -29,15 +25,15 @@ const moves = computed(() => props.run.phase === 'executing' || props.run.phase 
 const title = computed(() => {
   switch (props.run.phase) {
     case 'survey':
-      return 'AI 正在写整理方案'
+      return '助手正在写整理方案'
     case 'review':
-      return 'AI 正在检查整理结果'
+      return '助手正在检查整理结果'
     case 'executing':
       return props.mode === 'move' ? '正在移动文件' : '正在复制文件'
     case 'revert':
       return '正在撤销'
     default:
-      return 'AI 正在整理'
+      return '助手正在整理'
   }
 })
 
@@ -56,9 +52,8 @@ const desc = computed(() => {
     if (p.skipped) parts.push(`跳过 ${fmtNumber(p.skipped)} 项`)
     return parts.join('，')
   }
-  if (props.run.phase === 'tagging' && p?.total)
-    return `已决定 ${fmtNumber(p.tagged)} / ${fmtNumber(p.total)} 项，这一步不会移动文件`
-  return '这一步不会移动文件'
+  if (props.run.phase === 'tagging' && p?.total) return `已决定 ${fmtNumber(p.tagged)} / ${fmtNumber(p.total)} 项`
+  return ''
 })
 </script>
 
@@ -70,7 +65,7 @@ const desc = computed(() => {
           <Loading v-if="!run.done" inline label="" :delay="0" />
           {{ title }}
         </h3>
-        <p class="card-desc tabular">{{ desc }}</p>
+        <p v-if="desc" class="card-desc tabular">{{ desc }}</p>
       </div>
     </div>
     <ProgressBar
@@ -97,7 +92,6 @@ const desc = computed(() => {
             <span class="truncate decision-name">{{ baseName(d.path) }}</span>
             <Icon name="arrow-right" :size="14" class="text-muted" />
             <span class="truncate">{{ landing(d.path, d.target) }}</span>
-            <StatusPill v-if="d.review" value="needs_review" :map="ENTRY_FLAG" />
           </span>
           <span v-if="d.reason" class="cell-sub">{{ d.reason }}</span>
         </li>

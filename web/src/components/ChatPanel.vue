@@ -6,11 +6,12 @@ import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useFetch } from '@/base/useFetch'
 import { listChat, sendChat } from '@/api/runs'
-import type { ChatTurn, Id } from '@/api/types'
+import type { Id } from '@/api/types'
 import { chatFiles, clearChatFiles, removeChatFile } from '@/lib/chatFiles'
-import { laneBlocks, type Block, type Timeline } from '@/lib/transcript'
+import { createLaneBlocks, type Block, type Item, type Timeline } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import TranscriptBlock from './TranscriptBlock.vue'
+import { provideOpenState } from './openState'
 
 // bare: rendered inside the 助手 tab, which already names it.
 const props = defineProps<{ sessionId: Id; timeline: Timeline; busyReason: string; bare?: boolean }>()
@@ -22,10 +23,13 @@ const sending = ref(false)
 const sentText = ref(new Map<Id, string>())
 const files = computed(() => chatFiles(props.sessionId))
 
+provideOpenState()
+
 const liveRuns = computed(() =>
   props.timeline.order.map((id) => props.timeline.runs[id]).filter((r) => r && r.phase === 'chat'),
 )
-const liveIds = computed(() => new Set(liveRuns.value.map((r) => r.runId)))
+// a string, so frames that change nothing about which runs are live recompute nothing
+const liveKey = computed(() => liveRuns.value.map((r) => r.runId).join(','))
 
 interface Entry {
   key: string
@@ -35,21 +39,30 @@ interface Entry {
   answer?: string
 }
 
-const entries = computed<Entry[]>(() => {
-  const out: Entry[] = []
-  const byRun = new Map<Id, ChatTurn[]>()
+// Past turns only depend on the persisted turns and on which runs are live.
+const pastEntries = computed<Entry[]>(() => {
+  const live = new Set(liveKey.value ? liveKey.value.split(',') : [])
+  const byRun = new Map<Id, { user?: string; answer?: string }>()
   for (const t of turns.data.value ?? []) {
-    if (liveIds.value.has(t.run_id)) continue
-    byRun.set(t.run_id, [...(byRun.get(t.run_id) ?? []), t])
+    if (live.has(String(t.run_id))) continue
+    const e = byRun.get(t.run_id) ?? {}
+    if (t.role === 'user') e.user ??= t.content
+    else if (t.role === 'assistant') e.answer ??= t.content
+    byRun.set(t.run_id, e)
   }
-  for (const [runId, ts] of byRun) {
-    out.push({
-      key: `t-${runId}`,
-      blocks: [],
-      user: ts.find((t) => t.role === 'user')?.content,
-      answer: ts.find((t) => t.role === 'assistant')?.content,
-    })
-  }
+  return [...byRun].map(([runId, e]) => ({ key: `t-${runId}`, blocks: [], ...e }))
+})
+
+// One incremental builder per live run: a frame only rebuilds the stretch that changed.
+const builders = new Map<Id, ReturnType<typeof createLaneBlocks>>()
+function blocksOf(runId: Id, items: readonly Item[]): Block[] {
+  let build = builders.get(runId)
+  if (!build) builders.set(runId, (build = createLaneBlocks(true)))
+  return build(items)
+}
+
+const entries = computed<Entry[]>(() => {
+  const out = [...pastEntries.value]
   for (const r of liveRuns.value) {
     const items = r.lanes.flatMap((l) => l.items)
     const hasPrompt = items.some((i) => i.kind === 'message' && i.role === 'user')
@@ -57,7 +70,7 @@ const entries = computed<Entry[]>(() => {
       ? undefined
       : (sentText.value.get(r.runId) ??
         turns.data.value?.find((t) => t.run_id === r.runId && t.role === 'user')?.content)
-    out.push({ key: `r-${r.runId}`, blocks: laneBlocks(items, true), user: prompt })
+    out.push({ key: `r-${r.runId}`, blocks: blocksOf(r.runId, items), user: prompt })
   }
   return out
 })
@@ -131,13 +144,16 @@ function onKey(e: KeyboardEvent) {
     <div v-if="!bare" class="card-head"><h3>助手</h3></div>
     <div ref="box" class="chat-list" @scroll.passive="onScroll">
       <Loading v-if="!turns.loaded.value" />
-      <p v-else-if="turns.error.value" class="text-danger">加载对话失败：{{ turns.error.value }}</p>
+      <p v-else-if="turns.error.value" class="text-danger">
+        加载对话失败：{{ turns.error.value }}
+        <button type="button" class="btn-sm" @click="turns.refresh()">重试</button>
+      </p>
       <p v-else-if="!entries.length" class="text-muted chat-empty">告诉助手你想怎么整理</p>
       <div v-for="e in entries" :key="e.key" class="chat-turn">
         <div v-if="e.user" class="chat-user">
           <StreamMarkdown :source="e.user" />
         </div>
-        <TranscriptBlock v-for="b in e.blocks" :key="b.key" :block="b" />
+        <TranscriptBlock v-for="b in e.blocks" :key="b.key" :block="b" :scope="e.key" />
         <StreamMarkdown v-if="e.answer" :source="e.answer" />
         <p v-if="errorOf(e.key)" class="text-danger">{{ errorOf(e.key) }}</p>
       </div>
