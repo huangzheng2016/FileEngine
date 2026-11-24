@@ -4,13 +4,16 @@ package api
 
 import (
 	"context"
+	"mime"
+	"net/http"
 
-	"FileEngine/biz/errs"
 	"FileEngine/biz/handler/resp"
-
 	file "FileEngine/biz/model/api/file"
+	svc "FileEngine/biz/service/file"
+	"FileEngine/container"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
 // ListFiles .
@@ -20,7 +23,32 @@ func ListFiles(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	// An empty parent_path is a value (the scan root's children); presence is
+	// read from the query because the binder may leave the optional field nil.
+	parent := req.ParentPath
+	if v, ok := c.GetQuery("parent_path"); ok {
+		parent = &v
+	}
+	rows, total, err := container.Default.Files.List(ctx, svc.ListParams{
+		SessionID: sid, ParentPath: parent, FileType: req.FileType, Tagged: req.Tagged,
+		Categorized: req.Categorized, CategoryPath: req.CategoryPath, Search: req.Search,
+		NeedsReview: req.NeedsReview, Sensitive: req.Sensitive, Role: req.Role,
+		Page: req.Page, PageSize: req.PageSize,
+	})
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*file.FileEntry, len(rows))
+	for i := range rows {
+		items[i] = toFileEntry(&rows[i])
+	}
+	c.JSON(consts.StatusOK, &file.ListFilesResp{Items: items, Total: total, ReviewConfidence: reviewConfidence})
 }
 
 // GetFile .
@@ -30,7 +58,17 @@ func GetFile(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Files.Get(ctx, fid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &file.FileResp{Item: toFileEntry(row)})
 }
 
 // UpdateFile .
@@ -40,7 +78,17 @@ func UpdateFile(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	row, err := container.Default.Files.Update(ctx, fid, req.Description, req.NewPath)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, &file.FileResp{Item: toFileEntry(row)})
 }
 
 // GetFileTree .
@@ -50,7 +98,21 @@ func GetFileTree(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	sid, err := id(req.SessionID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	rows, err := container.Default.Files.Tree(ctx, sid, req.ParentPath)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	items := make([]*file.TreeNode, len(rows))
+	for i, r := range rows {
+		items[i] = toTreeNode(r)
+	}
+	c.JSON(consts.StatusOK, &file.GetFileTreeResp{Items: items})
 }
 
 // GetFileContent .
@@ -60,5 +122,24 @@ func GetFileContent(ctx context.Context, c *app.RequestContext) {
 	if !resp.Bind(c, &req) {
 		return
 	}
-	resp.Fail(ctx, c, errs.NotImplemented)
+	fid, err := id(req.ID)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	content, err := container.Default.Files.Open(ctx, fid)
+	if err != nil {
+		resp.Fail(ctx, c, err)
+		return
+	}
+	disposition := mime.FormatMediaType("inline", map[string]string{"filename": content.Name})
+	if disposition == "" {
+		disposition = "inline"
+	}
+	c.Response.Header.Set("Content-Disposition", disposition)
+	c.Response.Header.Set("Content-Type", "application/octet-stream")
+	c.Response.Header.Set("X-Content-Type-Options", "nosniff")
+	c.SetStatusCode(http.StatusOK)
+	// Hertz closes the stream (and with it the storage connection) once sent.
+	c.SetBodyStream(content, -1)
 }

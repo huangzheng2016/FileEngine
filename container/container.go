@@ -7,8 +7,15 @@ package container
 //go:generate go tool wire
 
 import (
+	"FileEngine/biz/dal/db/query"
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/category"
+	"FileEngine/biz/service/chat"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/file"
+	"FileEngine/biz/service/memory"
+	"FileEngine/biz/service/plan"
+	"FileEngine/biz/service/rule"
 	"FileEngine/biz/service/runner"
 	"FileEngine/internal/db"
 
@@ -24,7 +31,19 @@ type Container struct {
 	Runner *runner.Service
 	// Streams owns every open event stream; the app closes it first at shutdown.
 	Streams *eventfeed.Registry
+
+	// Query is the typed query layer over the writer handle.
+	Query *query.Query
+	// Resource services: files, categories, plan, rules, memory, chat.
+	Files      *file.Service
+	Categories *category.Service
+	Plans      *plan.Service
+	Rules      *rule.Service
+	Memory     *memory.Service
+	Chat       *chat.Service
 }
+
+func newQuery(gdb *gorm.DB) *query.Query { return query.Use(gdb) }
 
 var Default *Container
 

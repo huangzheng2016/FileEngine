@@ -8,8 +8,15 @@ package container
 
 import (
 	"FileEngine/biz/service/auth"
+	"FileEngine/biz/service/category"
+	"FileEngine/biz/service/chat"
 	"FileEngine/biz/service/eventfeed"
+	"FileEngine/biz/service/file"
+	"FileEngine/biz/service/memory"
+	"FileEngine/biz/service/plan"
+	"FileEngine/biz/service/rule"
 	"FileEngine/biz/service/runner"
+	"FileEngine/biz/service/sessionagent"
 	"FileEngine/internal/db"
 	"gorm.io/gorm"
 )
@@ -26,12 +33,27 @@ func build(gdb *gorm.DB, authOpts auth.Options) (*Container, error) {
 	}
 	runnerService := runner.NewService(repository)
 	registry := eventfeed.NewRegistry()
+	query := newQuery(gdb)
+	factory := sessionagent.NewFactory(query, repository)
+	fileService := file.NewService(query, repository, factory)
+	categoryService := category.NewService(query, repository)
+	planService := plan.NewService(query, repository, factory, runnerService)
+	ruleService := rule.NewService(repository, factory)
+	memoryService := memory.NewService(repository)
+	chatService := chat.NewService(query, factory, runnerService)
 	container := &Container{
-		DB:      gdb,
-		Repo:    repository,
-		Auth:    service,
-		Runner:  runnerService,
-		Streams: registry,
+		DB:         gdb,
+		Repo:       repository,
+		Auth:       service,
+		Runner:     runnerService,
+		Streams:    registry,
+		Query:      query,
+		Files:      fileService,
+		Categories: categoryService,
+		Plans:      planService,
+		Rules:      ruleService,
+		Memory:     memoryService,
+		Chat:       chatService,
 	}
 	return container, nil
 }
