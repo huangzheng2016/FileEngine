@@ -90,12 +90,24 @@ Low-confidence decisions wait in `needs_review` and are not executed until confi
 
 Every model request is built from most stable to most volatile, so provider prefix caches hit:
 
-1. tools — one fixed, ordered set per session and run kind
-2. system prompt — static text
-3. shared context — goal, plan, categories by name, memory, rules; byte-identical across a run's workers;
-   Claude cache breakpoint
-4. history — append-only; old tool results are cleared in place past the reduction threshold
-5. the unit or turn — listing, signals, notes from other workers
+1. tools — one fixed, ordered set per toolset kind, all tools always present: tagging has 12 (`list_entries`,
+   `read_file`, `view_image`, `decide`, `split_unit`, `describe`, `add_rule`, `apply_rules`, `run_script`,
+   `create_category`, `note`, `recall`); chat, survey and review add 7 (`update_category`, `delete_category`,
+   `update_rule`, `delete_rule`, `read_plan`, `write_plan`, `remember`). Session switches and the run kind gate
+   the handler, which answers `success:false`; they never change the list.
+2. system prompt — static text per run kind, no switch-dependent sections
+3. shared context — a snapshot taken once per tagging run (before the workers start) and once per chat epoch
+   (stored with the summary turn): goal, plan, categories by name, rules by name, memory ordered by rank,
+   scope, kind, key, id; never by usage or recency; Claude cache breakpoint
+4. history — append-only; old tool results are cleared in batches, never one round at a time
+5. the unit or turn — a `## 运行中的变化` delta since the snapshot (past ~1k tokens a tagging run re-snapshots),
+   then the task, listing, signals and notes from other workers. Chat stores the exact message it sent, so the
+   next turn's request starts with this turn's messages
+
+Every tool answers `{success, error?, hint?, ...}`: bad arguments, unknown tools, rejections and disabled
+switches are results the model can act on; only database and IO failures stop a run. Text derived from files
+(names, listings, signals, notes, script output) is sanitized and sits in `<data>` blocks; sensitive files are
+never read, including archive members.
 
 Runs record `cached_tokens` and `cache_write_tokens`; `cache_hit_rate` is exposed on runs.
 
