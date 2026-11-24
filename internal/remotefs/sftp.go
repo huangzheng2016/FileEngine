@@ -332,6 +332,8 @@ func (s *SFTPFS) MoveFile(_ context.Context, src, dst string) error {
 	defer s.conn.disarm()
 	if _, err := s.client.Lstat(dstFull); err == nil {
 		return existErr("sftp", "move", dst)
+	} else if !IsNotExist(err) {
+		return &OpError{Protocol: "sftp", Op: "stat", Path: dst, Err: err}
 	}
 	if err := s.client.Rename(srcFull, dstFull); err != nil {
 		return &OpError{Protocol: "sftp", Op: "move", Path: src, Err: err}

@@ -297,6 +297,8 @@ func (s *SMBFS) MoveFile(ctx context.Context, src, dst string) error {
 	share := s.share.WithContext(opCtx)
 	if _, err := share.Lstat(dstFull); err == nil {
 		return existErr("smb", "move", dst)
+	} else if !IsNotExist(err) {
+		return &OpError{Protocol: "smb", Op: "stat", Path: dst, Err: err}
 	}
 	// go-smb2 renames with ReplaceIfExists=0: the server refuses an
 	// existing target even if it appeared after the check above.

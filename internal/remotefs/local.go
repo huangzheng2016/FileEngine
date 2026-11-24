@@ -197,6 +197,8 @@ func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
 	// os.Rename silently replaces an existing file; refuse instead.
 	if _, err := os.Lstat(dstPath); err == nil {
 		return existErr("local", "move", dst)
+	} else if !IsNotExist(err) {
+		return &OpError{Protocol: "local", Op: "stat", Path: dst, Err: err}
 	}
 	if err := os.Rename(srcPath, dstPath); err != nil {
 		return &OpError{Protocol: "local", Op: "move", Path: src, Err: err}
