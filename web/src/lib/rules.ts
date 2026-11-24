@@ -58,13 +58,3 @@ export function targetError(t: string): string {
   if (unknown.length) return `无法识别 ${unknown.join('、')}`
   return ''
 }
-
-export function regexError(r: string): string {
-  if (!r) return ''
-  try {
-    new RegExp(r)
-    return ''
-  } catch {
-    return '不是有效的正则表达式'
-  }
-}

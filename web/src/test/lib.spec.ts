@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { PreviewItem } from '@/api/types'
 import { session } from './fixtures'
 import { contextError, effortError, effortOptions, fmtTokens, isContextPreset, parseTokens } from '@/lib/modelForm'
-import { crumbs, parentOf, sortItems } from '@/lib/paths'
+import { baseName, normalize, parentOf, pathCrumbs } from '@/lib/paths'
 import { describeMatch, splitExts, targetError } from '@/lib/rules'
 import { nextAction, stageOf } from '@/lib/sessionView'
 import { scopeExts } from '@/data/presets'
@@ -40,23 +39,16 @@ describe('model form', () => {
 
 describe('preview paths', () => {
   it('builds breadcrumbs for relative and rooted sides', () => {
-    expect(crumbs('照片/2023', '整理前')).toEqual([
+    expect(pathCrumbs('照片/2023', '整理前')).toEqual([
       { label: '整理前', path: '' },
       { label: '照片', path: '照片' },
       { label: '2023', path: '照片/2023' },
     ])
-    expect(crumbs('/照片/2023', '整理后', true).map((c) => c.path)).toEqual(['', '/照片', '/照片/2023'])
+    expect(pathCrumbs('/照片/2023', '整理后', true).map((c) => c.path)).toEqual(['', '/照片', '/照片/2023'])
     expect(parentOf('a/b/c')).toBe('a/b')
     expect(parentOf('a')).toBe('')
-  })
-
-  it('lists folders first', () => {
-    const items = [
-      { name: 'b.jpg', is_dir: false, status: 'moved' },
-      { name: 'z', is_dir: true, status: 'partial' },
-      { name: 'a', is_dir: true },
-    ] as PreviewItem[]
-    expect(sortItems(items).map((i) => i.name)).toEqual(['a', 'z', 'b.jpg'])
+    expect(baseName('a/b/c.jpg')).toBe('c.jpg')
+    expect(normalize('\\a//b/')).toBe('a/b')
   })
 })
 

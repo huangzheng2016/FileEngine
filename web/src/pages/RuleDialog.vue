@@ -10,7 +10,7 @@ import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
 import { createRule, updateRule, type RuleInput } from '@/api/rules'
 import type { PlanRule, Id } from '@/api/types'
-import { joinExts, regexError, splitExts, targetError } from '@/lib/rules'
+import { joinExts, splitExts, targetError } from '@/lib/rules'
 
 const props = defineProps<{ open: boolean; sessionId: Id; editing: PlanRule | null; position: number }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -32,8 +32,7 @@ const guard = useDirtyGuard(() => form)
 const v = useFormValidation(() => ({
   name: form.name.trim() ? '' : '请输入名称',
   target: targetError(form.target),
-  name_regex: regexError(form.name_regex),
-  max_size: form.max_size && form.min_size > form.max_size ? '最大值不能小于最小值' : '',
+  max_size: form.max_size && form.min_size > form.max_size ? '最大大小不能小于最小大小' : '',
 }))
 
 watch(
@@ -74,7 +73,7 @@ async function close() {
 async function submit() {
   if (saving.value) return
   if (!v.validate()) {
-    if (v.error('name_regex') || v.error('max_size')) more.value = true
+    if (v.error('max_size')) more.value = true
     return
   }
   saving.value = true
@@ -135,27 +134,19 @@ async function submit() {
           </label>
           <label class="field">
             <span class="field-label">文件名正则</span>
-            <input
-              v-model="form.name_regex"
-              name="name_regex"
-              class="mono"
-              placeholder="^IMG_\d+"
-              :aria-invalid="!!v.error('name_regex')"
-            />
-            <span v-if="v.error('name_regex')" class="field-error">{{ v.error('name_regex') }}</span>
-            <span v-else class="field-hint">留空不限</span>
+            <input v-model="form.name_regex" name="name_regex" class="mono" placeholder="^IMG_\d+" />
           </label>
           <div class="field">
-            <span class="field-label">最小</span>
-            <UnitInput v-model="form.min_size" kind="bytes" name="min_size" label="最小" />
+            <span class="field-label">最小大小</span>
+            <UnitInput v-model="form.min_size" kind="bytes" name="min_size" label="最小大小" />
           </div>
           <div class="field">
-            <span class="field-label">最大</span>
+            <span class="field-label">最大大小</span>
             <UnitInput
               v-model="form.max_size"
               kind="bytes"
               name="max_size"
-              label="最大"
+              label="最大大小"
               :invalid="!!v.error('max_size')"
             />
             <span v-if="v.error('max_size')" class="field-error">{{ v.error('max_size') }}</span>
