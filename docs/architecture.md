@@ -126,10 +126,27 @@ and only then deleted. Every step is journaled before it happens, so an interrup
 run can be reverted. `execute/check` runs the same validation without changes; `sample` executes the first N
 entries.
 
+Safety details that recovery relies on:
+
+- A copy op journals `dst_created` the moment the backend created the destination, before any data is written.
+  Recovery and failure cleanup delete a destination only for ops carrying that marker; a file at the target of
+  any other op is never touched. Before a resumed move deletes its source it re-stats the copy against the
+  journaled size and mtime and keeps both files when it is missing or different.
+- Only a cross-device or unsupported rename switches the rest of the run to copy. After any other rename error
+  the executor checks whether the rename took effect (source gone, destination present) before falling back.
+- "Absent" means a not-exist error; any other stat error is treated as unknown and never as permission to act.
+- A source whose delete fails keeps its verified op and is retried by the next recovery without blocking other
+  work. A finished op whose entry was never marked executed is reconciled by recovery.
+- Target paths reject control characters (FTP would read a line break as another command); all paths reject
+  backslashes.
+
 ## Storage backends
 
-All backends confine paths to `BasePath`. NFS and FTP serialize operations on one connection; SMB and SFTP
-multiplex. Zip archives need random access: native on local, SFTP and SMB, through an adapter on NFS, and a
+All backends confine paths to `BasePath`. NFS, FTP and SFTP serialize operations on one connection (NFS scans
+use a pool of extra connections; FTP copies read their source over a second, kept connection); SMB multiplexes.
+FTP logs in anonymously when no user is set, uses MLST when the server has it and a LIST of the parent
+otherwise. An unlistable directory is skipped by the scan and reported; a rescan keeps the rows below it.
+Zip archives need random access: native on local, SFTP and SMB, through an adapter on NFS, and a
 temporary download (≤ 32 MB) on FTP.
 
 ## Desktop

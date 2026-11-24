@@ -197,6 +197,8 @@ func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
 	// os.Rename silently replaces an existing file; refuse instead.
 	if _, err := os.Lstat(dstPath); err == nil {
 		return existErr("local", "move", dst)
+	} else if !IsNotExist(err) {
+		return &OpError{Protocol: "local", Op: "stat", Path: dst, Err: err}
 	}
 	if err := os.Rename(srcPath, dstPath); err != nil {
 		return &OpError{Protocol: "local", Op: "move", Path: src, Err: err}
@@ -204,7 +206,7 @@ func (l *LocalFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
+func (l *LocalFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcPath, err := l.resolve(src)
 	if err != nil {
 		return err
@@ -231,7 +233,15 @@ func (l *LocalFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return &OpError{Protocol: "local", Op: "create", Path: dst, Err: err}
 	}
-	n, err := io.Copy(dstFile, srcFile)
+	var n int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		n, err = io.Copy(dstFile, srcFile)
+	}
+	if err == nil {
+		// A move deletes the source right after this returns.
+		err = dstFile.Sync()
+	}
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
 	}

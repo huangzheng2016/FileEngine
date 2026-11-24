@@ -28,6 +28,9 @@ type Scanner struct {
 	progress   *Progress
 	pruneJunk  bool // config read once per scan
 	commits    int  // walk transactions committed by the last scan
+
+	skippedMu sync.Mutex
+	skipped   []string // directories the walk could not list (reset per scan)
 }
 
 // Workers update it concurrently, so every field is atomic.
@@ -92,6 +95,7 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	s.pruneJunk = cfg == nil || !cfg.Agent.JunkFilterDisabled
 
 	s.progress = &Progress{}
+	s.skipped = nil
 	s.progress.setPath(session.RootPath)
 	stopReport := s.startProgressReporter(session.ID)
 	defer stopReport()
@@ -139,7 +143,7 @@ func (s *Scanner) Scan(ctx context.Context, session *db.ScanSession) error {
 	session.Status = "scanned"
 	session.TotalFiles = session.ScannedCount
 	session.CurrentPath = ""
-	session.ErrorMessage = ""
+	session.ErrorMessage = s.skippedSummary()
 	if err := s.repo.UpdateSession(session); err != nil {
 		return err
 	}
@@ -330,8 +334,13 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, ind
 						return
 					}
 					log.Printf("warn: cannot list %s: %v", t.path, err)
-					fail(fmt.Errorf("list %s: %w", t.path, err))
-					return
+					if t.row == nil {
+						// Nothing is indexed without the root.
+						fail(fmt.Errorf("list %s: %w", t.path, err))
+						return
+					}
+					s.skipDir(t, index, w)
+					continue
 				}
 				parentPath := t.path
 				if t.path == rootPath {
@@ -393,10 +402,62 @@ func (s *Scanner) walk(ctx context.Context, rootPath string, sessionID uint, ind
 	return ctx.Err()
 }
 
+// skipDir records a directory that could not be listed. Its row keeps what a
+// previous scan knew (counts stay untouched, being unknown now); a new one is
+// inserted with zero counts so the folder is still visible.
+func (s *Scanner) skipDir(t dirTask, index scanIndex, w *scanWriter) {
+	s.skippedMu.Lock()
+	s.skipped = append(s.skipped, t.path)
+	s.skippedMu.Unlock()
+	if ex := index[t.row.OriginalPath]; ex != nil {
+		ex.seen.Store(true)
+		return
+	}
+	var batch writeBatch
+	index.emit(&batch, *t.row)
+	w.send(batch)
+}
+
+func (s *Scanner) skippedSummary() string {
+	s.skippedMu.Lock()
+	defer s.skippedMu.Unlock()
+	if len(s.skipped) == 0 {
+		return ""
+	}
+	names := append([]string(nil), s.skipped...)
+	sort.Strings(names)
+	shown := names
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	msg := fmt.Sprintf("有 %d 个文件夹无法读取，已跳过：%s", len(names), strings.Join(shown, "、"))
+	if len(names) > len(shown) {
+		msg += "等"
+	}
+	return msg
+}
+
+// underSkipped reports whether p is, or lies below, a directory the walk
+// could not list: its rows were not seen but must not be treated as gone.
+func underSkipped(p string, skipped map[string]bool) bool {
+	for q := p; q != "" && q != "." && q != "/"; q = path.Dir(q) {
+		if skipped[q] {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scanner) finishRescan(sessionID uint, index scanIndex) error {
+	s.skippedMu.Lock()
+	skipped := make(map[string]bool, len(s.skipped))
+	for _, d := range s.skipped {
+		skipped[d] = true
+	}
+	s.skippedMu.Unlock()
 	var gone []uint
-	for _, e := range index {
-		if !e.seen.Load() {
+	for p, e := range index {
+		if !e.seen.Load() && !underSkipped(p, skipped) {
 			gone = append(gone, e.id)
 		}
 	}

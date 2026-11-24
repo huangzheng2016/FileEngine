@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode"
 )
 
 // ValidateFSPath rejects anything that could escape the filesystem root
@@ -21,6 +22,11 @@ func ValidateFSPath(p string) error {
 	if strings.ContainsRune(p, 0) {
 		return errors.New("路径不能包含 NUL 字符")
 	}
+	// SMB servers and Windows read "\" as a separator that the "/" split
+	// below cannot see.
+	if strings.ContainsRune(p, '\\') {
+		return errors.New("路径不能包含反斜杠")
+	}
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." {
 			return fmt.Errorf("路径「%s」不能包含 ..（会越出存储根目录）", p)
@@ -28,6 +34,21 @@ func ValidateFSPath(p string) error {
 	}
 	if cleaned := path.Clean(p); cleaned == "/" || cleaned == "." {
 		return fmt.Errorf("路径「%s」没有指向具体的文件或目录", p)
+	}
+	return nil
+}
+
+// ValidateTargetPath is ValidateFSPath plus control characters, which no
+// backend can address and which FTP would read as extra commands. Sources are
+// not held to it: POSIX files with such names exist and must stay movable.
+func ValidateTargetPath(p string) error {
+	if err := ValidateFSPath(p); err != nil {
+		return err
+	}
+	for _, r := range p {
+		if unicode.IsControl(r) {
+			return errors.New("路径不能包含控制字符")
+		}
 	}
 	return nil
 }

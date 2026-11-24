@@ -84,6 +84,7 @@ type Executor struct {
 	dirs         map[string]bool // directories known to exist in this run
 	renameBroken bool            // in-place rename failed once (cross-device); go straight to copy
 	lastEmit     time.Time
+	notes        []string // recovery findings; merged into the run result
 }
 
 func New(repo *db.Repository, fs remotefs.RemoteFS) *Executor {
@@ -106,7 +107,7 @@ func validTarget(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("目标位置为空")
 	}
-	if err := pathutil.ValidateFSPath(p); err != nil {
+	if err := pathutil.ValidateTargetPath(p); err != nil {
 		return fmt.Errorf("目标位置无效：%w", err)
 	}
 	return nil
@@ -253,6 +254,7 @@ func (e *Executor) Execute(ctx context.Context, run *db.AgentRun, opts Options) 
 	if err := e.Recover(ctx, run.SessionID); err != nil {
 		return res, fmt.Errorf("恢复中断的执行失败：%w", err)
 	}
+	res.Notes = append(res.Notes, e.notes...)
 
 	entries, err := e.plan(ctx, opts, res)
 	if err != nil {
@@ -308,8 +310,12 @@ func (e *Executor) executeEntry(ctx context.Context, f *db.FileEntry, mode strin
 		return skip(IssueSourceChanged, changed)
 	}
 	resume := false
-	if _, err := e.fs.Stat(ctx, dst); err == nil {
-		if !(f.FileType == "directory" && e.owned(dst)) {
+	_, dstExists, err := e.stat(ctx, dst)
+	if err != nil {
+		return fmt.Errorf("无法确认目标位置是否存在：%w", err)
+	}
+	if dstExists {
+		if !(f.FileType == "directory" && e.owned(f.ID, dst)) {
 			return skip(IssueTargetExists, "目标位置已有同名文件或目录")
 		}
 		resume = true // our own partially executed directory
@@ -347,10 +353,11 @@ func staleReason(f *db.FileEntry, st *remotefs.FileInfo) string {
 	return ""
 }
 
-// A directory a previous, interrupted run already started filling.
-func (e *Executor) owned(dst string) bool {
+// A directory this entry's own earlier, interrupted run created and started
+// filling; a directory made for another entry or kept from a revert is not.
+func (e *Executor) owned(entryID uint, dst string) bool {
 	op, err := e.repo.FindDoneExecOp(e.sessionID, dst)
-	return err == nil && op != nil
+	return err == nil && op != nil && op.Kind == db.ExecKindMkdir && op.EntryID == entryID
 }
 
 func (e *Executor) listConcurrent(ctx context.Context, dirs []string) map[string][]remotefs.FileInfo {

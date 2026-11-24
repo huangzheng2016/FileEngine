@@ -12,12 +12,10 @@ import (
 // side effect and advanced after each verified step, so a crash leaves enough
 // to finish or roll back the op (see executor.Recover).
 const (
-	ExecPending  = "pending"  // about to act; dst may hold a partial copy
-	ExecCopied   = "copied"   // dst written, not yet verified
+	ExecPending  = "pending"  // about to act; dst may hold a partial copy (see DstCreated)
 	ExecVerified = "verified" // dst verified; for moves the source is still there
 	ExecDone     = "done"
 	ExecFailed   = "failed"
-	ExecSkipped  = "skipped"
 	ExecReverted = "reverted"
 )
 
@@ -32,17 +30,21 @@ const (
 type ExecOp struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	RunID      uint      `gorm:"index" json:"run_id"`
-	SessionID  uint      `gorm:"index:idx_execop_session_state,priority:1" json:"session_id"`
+	SessionID  uint      `gorm:"index:idx_execop_session_state,priority:1;index:idx_execop_session_dst,priority:1" json:"session_id"`
 	EntryID    uint      `gorm:"index" json:"entry_id"` // FileEntry whose decision produced the op (0 for none)
 	Kind       string    `gorm:"size:16" json:"kind"`
 	Src        string    `gorm:"size:1024" json:"src"`
-	Dst        string    `gorm:"size:1024" json:"dst"`
+	Dst        string    `gorm:"size:1024;index:idx_execop_session_dst,priority:2" json:"dst"`
 	IsDir      bool      `json:"is_dir"`
 	Size       int64     `json:"size"`     // source size when the op started
 	ModTime    time.Time `json:"mod_time"` // source mtime when the op started
 	DstSize    int64     `json:"dst_size"` // dst stat after verification (revert checks it is unchanged)
 	DstModTime time.Time `json:"dst_mod_time"`
-	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2" json:"state"`
+	// DstCreated is journaled once the backend created Dst for this op. Only
+	// then may recovery delete a half-written Dst; without it a file at Dst
+	// may belong to someone else.
+	DstCreated bool      `json:"dst_created"`
+	State      string    `gorm:"size:16;index:idx_execop_session_state,priority:2;index:idx_execop_session_dst,priority:3" json:"state"`
 	Error      string    `gorm:"type:text" json:"error"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -60,11 +62,22 @@ func (r *Repository) SetExecOpState(op *ExecOp, state, errMsg string) error {
 	})
 }
 
-func (r *Repository) SetExecOpDstStat(op *ExecOp, size int64, mtime time.Time) error {
-	op.DstSize, op.DstModTime = size, mtime
+func (r *Repository) SetExecOpCreated(op *ExecOp) error {
+	op.DstCreated = true
 	return WithRetry(func() error {
 		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
-			Updates(map[string]any{"dst_size": size, "dst_mod_time": mtime}).Error
+			Updates(map[string]any{"dst_created": true, "updated_at": time.Now()}).Error
+	})
+}
+
+// SetExecOpStateDst advances the state and records the destination stat in
+// one statement, so a crash never leaves a state without its stat.
+func (r *Repository) SetExecOpStateDst(op *ExecOp, state, errMsg string, size int64, mtime time.Time) error {
+	op.State, op.Error, op.DstSize, op.DstModTime = state, errMsg, size, mtime
+	return WithRetry(func() error {
+		return r.db.Model(&ExecOp{}).Where("id = ?", op.ID).
+			Updates(map[string]any{"state": state, "error": errMsg, "dst_size": size,
+				"dst_mod_time": mtime, "updated_at": time.Now()}).Error
 	})
 }
 
@@ -76,8 +89,19 @@ func (r *Repository) ListExecOps(runID uint) ([]ExecOp, error) {
 
 func (r *Repository) ListUnfinishedExecOps(sessionID uint) ([]ExecOp, error) {
 	var ops []ExecOp
-	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecCopied, ExecVerified}).
+	err := r.db.Where("session_id = ? AND state IN ?", sessionID, []string{ExecPending, ExecVerified}).
 		Order("id ASC").Find(&ops).Error
+	return ops, err
+}
+
+// Finished single-step ops whose entry was never marked executed (a crash
+// between the op's done state and MarkEntryExecuted).
+func (r *Repository) ListDoneOpsOfPlannedEntries(sessionID uint) ([]ExecOp, error) {
+	var ops []ExecOp
+	err := r.db.Joins("JOIN file_entries ON file_entries.id = exec_ops.entry_id").
+		Where("exec_ops.session_id = ? AND exec_ops.state = ? AND exec_ops.kind IN ? AND file_entries.executed = ?",
+			sessionID, ExecDone, []string{ExecKindRename, ExecKindCopy, ExecKindMove}, false).
+		Order("exec_ops.id ASC").Find(&ops).Error
 	return ops, err
 }
 

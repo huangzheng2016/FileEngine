@@ -28,6 +28,23 @@ func (e *Executor) Recover(ctx context.Context, sessionID uint) error {
 			return fmt.Errorf("op %d (%s %s -> %s): %w", ops[i].ID, ops[i].Kind, ops[i].Src, ops[i].Dst, err)
 		}
 	}
+	return e.reconcileFinished()
+}
+
+func (e *Executor) reconcileFinished() error {
+	done, err := e.repo.ListDoneOpsOfPlannedEntries(e.sessionID)
+	if err != nil {
+		return err
+	}
+	for i := range done {
+		mode := ModeMove
+		if done[i].Kind == db.ExecKindCopy {
+			mode = ModeCopy
+		}
+		if err := e.markIfEntryOp(&done[i], mode); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -35,38 +52,63 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 	const interrupted = "中断"
 	switch op.Kind {
 	case db.ExecKindRename:
-		_, srcOK := e.exists(ctx, op.Src)
-		_, dstOK := e.exists(ctx, op.Dst)
-		if !srcOK && dstOK {
-			if err := e.setState(op, db.ExecDone, ""); err != nil {
+		landed, err := e.renameLanded(ctx, op)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if landed {
+			ds, err := e.fs.Stat(ctx, op.Dst)
+			if err != nil {
+				return e.unsettled(ctx, op, err)
+			}
+			if err := e.repo.SetExecOpStateDst(op, db.ExecDone, "", ds.Size, ds.ModTime); err != nil {
 				return err
 			}
 			return e.markIfEntryOp(op, ModeMove)
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindMkdir:
-		if st, ok := e.exists(ctx, op.Dst); ok && st.IsDir {
+		st, ok, err := e.stat(ctx, op.Dst)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if ok && st.IsDir {
 			return e.setState(op, db.ExecDone, "")
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindRmdir:
-		if _, ok := e.exists(ctx, op.Src); !ok {
+		_, ok, err := e.stat(ctx, op.Src)
+		if err != nil {
+			return e.unsettled(ctx, op, err)
+		}
+		if !ok {
 			return e.setState(op, db.ExecDone, "")
 		}
 		return e.setState(op, db.ExecFailed, interrupted)
 	case db.ExecKindCopy, db.ExecKindMove:
 		if op.State == db.ExecPending {
-			if _, ok := e.exists(ctx, op.Dst); !ok {
+			_, ok, err := e.stat(ctx, op.Dst)
+			if err != nil {
+				return e.unsettled(ctx, op, err)
+			}
+			if !ok {
 				return e.setState(op, db.ExecFailed, interrupted)
 			}
-			// The dst did not exist when the op was journaled, so it is ours.
-			if err := e.setState(op, db.ExecCopied, ""); err != nil {
-				return err
+			if !op.DstCreated {
+				// Nothing proves the file at dst came from this op.
+				msg := "目标位置已有无法确认来源的文件，未删除也未覆盖"
+				e.failOp(op, msg)
+				e.notes = append(e.notes, "「"+op.Dst+"」"+msg)
+				return nil
 			}
 		}
 		if err := e.finishCopy(ctx, op); err != nil {
 			var se *skipError
-			if errors.As(err, &se) || op.State == db.ExecFailed {
+			var de *unfinishedError
+			switch {
+			case errors.As(err, &de):
+				return e.unsettled(ctx, op, de.Unwrap())
+			case errors.As(err, &se) || op.State == db.ExecFailed:
 				return nil
 			}
 			return err
@@ -78,6 +120,16 @@ func (e *Executor) recoverOp(ctx context.Context, op *db.ExecOp) error {
 		return e.markIfEntryOp(op, mode)
 	}
 	return e.setState(op, db.ExecFailed, interrupted)
+}
+
+// unsettled leaves an op in its journaled state because the filesystem could
+// not be read; it is retried by the next Recover and never blocks other work.
+func (e *Executor) unsettled(ctx context.Context, op *db.ExecOp, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	e.notes = append(e.notes, fmt.Sprintf("「%s」的执行记录暂时无法确认，稍后重试：%v", op.Src+" → "+op.Dst, err))
+	return nil
 }
 
 func (e *Executor) markIfEntryOp(op *db.ExecOp, mode string) error {
@@ -107,12 +159,23 @@ func dstUnchanged(st *remotefs.FileInfo, op *db.ExecOp) bool {
 // Each destination must be unchanged since the run wrote it; anything else is
 // skipped and reported. Reverting is idempotent: ops already undone are
 // recognized and settled.
-func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*Result, error) {
+func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (res *Result, err error) {
 	e.run, e.sessionID, e.dirs = run, run.SessionID, map[string]bool{}
-	res := &Result{}
+	res = &Result{}
 	if err := e.Recover(ctx, run.SessionID); err != nil {
 		return res, err
 	}
+	res.Notes = append(res.Notes, e.notes...)
+	touched := map[uint]bool{}
+	// Reverted ops never come back to a retry, so their entries are unmarked
+	// on every exit path, including a cancel.
+	defer func() {
+		for id := range touched {
+			if uerr := e.repo.UnmarkEntryExecuted(id); uerr != nil && err == nil {
+				err = uerr
+			}
+		}
+	}()
 	ops, err := e.repo.ListExecOps(target)
 	if err != nil {
 		return res, err
@@ -132,7 +195,6 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 	}
 	res.Total = len(todo)
 	e.emit(res, true)
-	touched := map[uint]bool{}
 	for i := range todo {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -155,11 +217,6 @@ func (e *Executor) Revert(ctx context.Context, run *db.AgentRun, target uint) (*
 		}
 		e.emit(res, false)
 	}
-	for id := range touched {
-		if err := e.repo.UnmarkEntryExecuted(id); err != nil {
-			return res, err
-		}
-	}
 	return res, e.removeCreatedDirs(ctx, mkdirs, res)
 }
 
@@ -179,7 +236,12 @@ func (e *Executor) removeCreatedDirs(ctx context.Context, mkdirs []db.ExecOp, re
 			return err
 		}
 		op := &mkdirs[i]
-		if st, ok := e.exists(ctx, op.Dst); ok {
+		st, ok, err := e.stat(ctx, op.Dst)
+		if err != nil {
+			res.Notes = append(res.Notes, "无法读取目录「"+op.Dst+"」，已保留")
+			continue
+		}
+		if ok {
 			if !st.IsDir {
 				res.Notes = append(res.Notes, "「"+op.Dst+"」已不是目录，已保留")
 				continue
@@ -218,8 +280,14 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 		return e.setState(op, db.ExecReverted, "")
 	}
 
-	dst, dstOK := e.exists(ctx, op.Dst)
-	_, srcOK := e.exists(ctx, op.Src)
+	dst, dstOK, err := e.stat(ctx, op.Dst)
+	if err != nil {
+		return err
+	}
+	src, srcOK, err := e.stat(ctx, op.Src)
+	if err != nil {
+		return err
+	}
 	if !dstOK {
 		if srcOK {
 			return e.setState(op, db.ExecReverted, "")
@@ -229,13 +297,13 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 	if !dstUnchanged(dst, op) {
 		return skip(IssueSourceChanged, "目标在执行后被修改，未撤销")
 	}
-	if op.Kind == db.ExecKindCopy && srcOK {
-		if src, _ := e.exists(ctx, op.Src); src != nil && src.Size == op.Size {
-			if err := e.fs.Delete(ctx, op.Dst); err != nil {
-				return err
-			}
-			return e.setState(op, db.ExecReverted, "")
+	// Reverting a copy only deletes the (unchanged) copy; the source is
+	// matched by size alone because it is never touched either way.
+	if op.Kind == db.ExecKindCopy && srcOK && src.Size == op.Size {
+		if err := e.fs.Delete(ctx, op.Dst); err != nil {
+			return err
 		}
+		return e.setState(op, db.ExecReverted, "")
 	}
 	if srcOK {
 		return skip(IssueTargetExists, "原位置已有同名文件，未撤销")
@@ -248,17 +316,13 @@ func (e *Executor) revertOp(ctx context.Context, op *db.ExecOp) error {
 		if op.IsDir || errors.Is(merr, os.ErrExist) {
 			return merr
 		}
-		if err := e.fs.CopyFile(ctx, op.Dst, op.Src); err != nil {
+		// Journaled as a move under the revert run, so a crash is recovered
+		// like a forward move.
+		back, err := e.journal(op.EntryID, db.ExecKindMove, op.Dst, op.Src, false, dst)
+		if err != nil {
 			return err
 		}
-		if _, err := e.verify(ctx, op.Dst, op.Src, dst.Size); err != nil {
-			e.fs.Delete(context.WithoutCancel(ctx), op.Src)
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := e.fs.Delete(ctx, op.Dst); err != nil {
+		if err := e.copyJournaled(ctx, back); err != nil {
 			return err
 		}
 	}

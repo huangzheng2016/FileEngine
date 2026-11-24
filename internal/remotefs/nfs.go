@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"FileEngine/internal/config"
 
@@ -44,6 +45,9 @@ type NFSFS struct {
 	poolMu     sync.Mutex // guards pool channel lifecycle (Close vs async replenish)
 	pool       chan scanConn
 	poolSize   atomic.Int32 // live pool connections (scan concurrency)
+	// Zero values mean the defaults; tests shorten them.
+	redialBackoff []time.Duration
+	poolRecheck   time.Duration
 }
 
 // An interface so tests can inject failing connections into the pool.
@@ -192,21 +196,62 @@ func (n *NFSFS) ensurePool() {
 // On failure the pool simply stays smaller; checked-out workers then
 // serialize on fewer connections.
 func (n *NFSFS) replenish() {
-	c, err := dialNFSScanConn(n.host, n.exportPath, n.auth)
-	if err != nil {
+	for attempt := 0; ; attempt++ {
+		c, err := dialNFSScanConn(n.host, n.exportPath, n.auth)
+		if err == nil {
+			// The fs may have been closed while the dial was in flight:
+			// never send on the closed pool channel.
+			if !n.putBack(c, true) {
+				c.Close()
+			}
+			return
+		}
 		log.Printf("warn: nfs scan pool re-dial: %v", err)
-		return
+		backoff := n.redialBackoff
+		if backoff == nil {
+			backoff = defaultRedialBackoff
+		}
+		if attempt >= len(backoff) {
+			return
+		}
+		time.Sleep(backoff[attempt])
 	}
-	// The fs may have been closed while the dial was in flight: never send
-	// on the closed pool channel.
+}
+
+// Delays between re-dial attempts after a pool connection was discarded (a
+// NAS rebooting takes longer than one attempt).
+var defaultRedialBackoff = []time.Duration{200 * time.Millisecond, time.Second, 5 * time.Second, 15 * time.Second}
+
+// How often a worker waiting for a pool connection re-checks that the pool
+// still has any.
+const defaultPoolRecheck = time.Second
+
+// putBack returns a connection to the pool, or adds a new one when grow is
+// set. It reports false when the pool is closed.
+func (n *NFSFS) putBack(c scanConn, grow bool) bool {
 	n.poolMu.Lock()
 	defer n.poolMu.Unlock()
 	if n.pool == nil {
-		c.Close()
-		return
+		return false
 	}
 	n.pool <- c
-	n.poolSize.Add(1)
+	if grow {
+		n.poolSize.Add(1)
+	}
+	return true
+}
+
+func (n *NFSFS) recheckEvery() time.Duration {
+	if n.poolRecheck > 0 {
+		return n.poolRecheck
+	}
+	return defaultPoolRecheck
+}
+
+func (n *NFSFS) currentPool() chan scanConn {
+	n.poolMu.Lock()
+	defer n.poolMu.Unlock()
+	return n.pool
 }
 
 // A timed-out operation may have left the single-stream connection desynced
@@ -268,12 +313,15 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 	}
 
 	n.ensurePool()
-	if n.poolSize.Load() > 0 {
-		// Block until a pool connection is free — falling back to the
-		// primary connection here would serialize the whole worker pool on
-		// its mutex and starve the agent/tool paths.
+	for n.poolSize.Load() > 0 {
+		// Wait for a pool connection — falling back to the primary
+		// connection here would serialize the whole worker pool on its
+		// mutex and starve the agent/tool paths. The wait is re-checked
+		// periodically: if every pool connection was discarded and could not
+		// be re-dialed, nothing will ever arrive and the primary connection
+		// is the only way forward.
 		select {
-		case c := <-n.pool:
+		case c := <-n.currentPool():
 			var entries []*nfsclient.EntryPlus
 			timedOut := false
 			if len(handle) > 0 {
@@ -290,8 +338,8 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 			}
 			if timedOut || IsTimeout(err) {
 				n.discard(c)
-			} else {
-				n.pool <- c
+			} else if !n.putBack(c, false) {
+				c.Close()
 			}
 			if err != nil {
 				return nil, &OpError{Protocol: "nfs", Op: "list", Path: p, Err: err}
@@ -299,6 +347,7 @@ func (n *NFSFS) ListByHandle(ctx context.Context, p string, handle []byte) ([]Fi
 			return entriesToFileInfo(entries, p), nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-time.After(n.recheckEvery()):
 		}
 	}
 
@@ -435,8 +484,12 @@ func (n *NFSFS) MoveFile(_ context.Context, src, dst string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	// NFS RENAME replaces an existing target; refuse instead.
+	// Any other lookup failure (stale handle, EACCES, a desynced stream) says
+	// nothing about dst, so it must not reach RENAME.
 	if _, _, err := n.target.Lookup(dstFull); err == nil {
 		return existErr("nfs", "move", dst)
+	} else if !IsNotExist(err) {
+		return &OpError{Protocol: "nfs", Op: "stat", Path: dst, Err: err}
 	}
 	if err := n.target.Rename(srcFull, dstFull); err != nil {
 		return &OpError{Protocol: "nfs", Op: "move", Path: src, Err: err}
@@ -444,7 +497,7 @@ func (n *NFSFS) MoveFile(_ context.Context, src, dst string) error {
 	return nil
 }
 
-func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
+func (n *NFSFS) CopyFile(ctx context.Context, src, dst string) error {
 	srcFull, err := n.resolve(src)
 	if err != nil {
 		return err
@@ -468,13 +521,18 @@ func (n *NFSFS) CopyFile(_ context.Context, src, dst string) error {
 	if err != nil {
 		return &OpError{Protocol: "nfs", Op: "open", Path: src, Err: err}
 	}
+	defer srcFile.Close()
 	// GUARDED create: an existing dst fails with os.ErrExist instead of
 	// being written over without truncation.
 	dstFile, err := n.target.CreateGuarded(dstFull, 0644)
 	if err != nil {
 		return &OpError{Protocol: "nfs", Op: "create", Path: dst, Err: err}
 	}
-	written, err := io.Copy(dstFile, srcFile)
+	var written int64
+	err = noticeCreated(ctx)
+	if err == nil {
+		written, err = io.Copy(dstFile, srcFile)
+	}
 	// Close issues COMMIT; its failure means the data may not be stable.
 	if cerr := dstFile.Close(); err == nil {
 		err = cerr
@@ -554,6 +612,7 @@ func (n *NFSFS) Close() error {
 			c.Close()
 		}
 		n.pool = nil
+		n.poolSize.Store(0)
 	}
 	n.poolMu.Unlock()
 	n.mu.Lock()
