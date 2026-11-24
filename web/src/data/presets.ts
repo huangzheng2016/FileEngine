@@ -108,8 +108,8 @@ export const TASK_PRESETS: TaskPreset[] = [
   },
   {
     id: 'downloads-cleanup',
-    name: '下载目录清理',
-    goal: '把下载目录里的文件按类型归位：安装包、压缩包、图片、视频、音频各放一类；项目文件夹整体保留。',
+    name: '下载文件夹清理',
+    goal: '把下载文件夹里的文件按类型归位：安装包、压缩包、图片、视频、音频各放一类；项目文件夹整体保留。',
     scope: { key: 'all', exts: [] },
     rules: [
       rule({ name: '安装包', exts: exts('installer'), target: '安装包/{name}' }),
@@ -130,7 +130,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'software-by-version',
     name: '软件安装包按名称和版本',
-    goal: '安装包按软件名归类，每个版本一个子目录（/软件/Python/3.12.1/）；看不出版本的直接放在软件目录下。',
+    goal: '安装包按软件名归类，每个版本一个子文件夹（/软件/Python/3.12.1/）；看不出版本的直接放在软件文件夹下。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.installer, ...SCOPE_EXTS.archive] },
     rules: [],
     categories: [{ name: '软件', path: '/软件', description: '按 软件/名称/版本 存放的安装包' }],
@@ -138,7 +138,7 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'code-projects',
     name: '代码项目归档',
-    goal: '代码项目整体归档，项目内部（含依赖和构建目录）不拆散；不属于任何项目的零散脚本单独放。',
+    goal: '代码项目整体归档，项目内部（含依赖和构建文件夹）不拆散；不属于任何项目的零散脚本单独放。',
     scope: { key: 'all', exts: [] },
     rules: [],
     categories: [
@@ -149,11 +149,11 @@ export const TASK_PRESETS: TaskPreset[] = [
   {
     id: 'tv-series',
     name: '影视剧集',
-    goal: '电影每部一个目录（/影视/电影/星际穿越 2014/），剧集按 剧名/季 整理（/影视/剧集/剧名/第1季/），字幕和海报跟随对应视频。',
+    goal: '电影每部一个文件夹（/影视/电影/星际穿越 2014/），剧集按 剧名/季 整理（/影视/剧集/剧名/第1季/），字幕和海报跟随对应视频。',
     scope: { key: 'custom', exts: [...SCOPE_EXTS.video, 'srt', 'ass', 'ssa', 'sub', 'nfo'] },
     rules: [],
     categories: [
-      { name: '电影', path: '/影视/电影', description: '电影，每部一个目录' },
+      { name: '电影', path: '/影视/电影', description: '电影，每部一个文件夹' },
       { name: '剧集', path: '/影视/剧集', description: '电视剧与番剧，按 剧名/季 存放' },
     ],
   },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import BaseDialog from '@/base/BaseDialog.vue'
 import Combobox, { type ComboOption } from '@/base/Combobox.vue'
 import Segmented from '@/base/Segmented.vue'
@@ -13,17 +13,17 @@ import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFormValidation } from '@/base/useFormValidation'
-import { importCategories } from '@/api/files'
-import { createRule } from '@/api/rules'
-import { createSession } from '@/api/sessions'
+import { linkFrom } from '@/base/backLink'
 import { listFilesystems, listModels, testFilesystem } from '@/api/settings'
 import { NO_ID, type Filesystem, type Id, type ModelProvider, type Session } from '@/api/types'
 import { SCOPE_OPTIONS, TASK_PRESETS, scopeExts, type ScopeKey, type TaskPreset } from '@/data/presets'
 import { joinExts, splitExts } from '@/lib/rules'
+import { createTask } from '@/lib/sessionCreate'
 import FolderPicker from './FolderPicker.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; created: [Session] }>()
+const route = useRoute()
 
 const empty = () => ({
   storage: null as ComboOption | null,
@@ -41,6 +41,7 @@ const empty = () => ({
   extract_metadata: true,
   detect_duplicates: false,
   exclude_category_dirs: false,
+  start_now: true,
   filter_mode: 'blacklist' as 'blacklist' | 'whitelist',
   filter_dirs: '',
 })
@@ -114,35 +115,33 @@ async function submit() {
   saving.value = true
   try {
     const exts = scopeExts({ key: form.scope, exts: splitExts(form.custom_exts) })
-    const fsId = form.storage!.value
-    const s = await createSession({
-      filesystem_id: fsId,
-      scan_path: form.scan_path.trim().replace(/^\/+|\/+$/g, ''),
-      goal: form.goal.trim(),
-      scope_exts: joinExts(exts),
-      model_provider_id: form.model,
-      bulk_model_provider_id: form.bulk_model,
-      allow_read_file: form.allow_read_file,
-      allow_auto_category: form.allow_auto_category,
-      allow_vision: form.allow_vision,
-      allow_script: form.allow_script,
-      extract_metadata: form.extract_metadata,
-      detect_duplicates: form.detect_duplicates,
-      exclude_category_dirs: form.exclude_category_dirs,
-      filter_mode: form.filter_mode,
-      filter_dirs: form.filter_dirs,
-      auto_tag: true,
-    })
-    const p = preset.value
-    if (p) {
-      try {
-        for (const [i, r] of p.rules.entries()) await createRule(s.id, { ...r, position: i })
-        if (p.categories.length) await importCategories(fsId, p.categories)
-      } catch (e) {
-        toast.error('任务已创建，模板规则未能全部新建', e)
-      }
-    }
-    toast.success('已创建')
+    const { session: s, failed } = await createTask(
+      {
+        filesystem_id: form.storage!.value,
+        scan_path: form.scan_path.trim().replace(/^\/+|\/+$/g, ''),
+        goal: form.goal.trim(),
+        scope_exts: joinExts(exts),
+        model_provider_id: form.model,
+        bulk_model_provider_id: form.bulk_model,
+        allow_read_file: form.allow_read_file,
+        allow_auto_category: form.allow_auto_category,
+        allow_vision: form.allow_vision,
+        allow_script: form.allow_script,
+        extract_metadata: form.extract_metadata,
+        detect_duplicates: form.detect_duplicates,
+        exclude_category_dirs: form.exclude_category_dirs,
+        filter_mode: form.filter_mode,
+        filter_dirs: form.filter_dirs,
+      },
+      preset.value,
+      form.start_now,
+    )
+    if (failed) {
+      toast.error(
+        failed.step === 'template' ? '任务已创建，模板没能全部用上' : '任务已创建，没能开始整理',
+        failed.cause,
+      )
+    } else toast.success(form.start_now ? '已创建，开始整理' : '已创建')
     guard.reset()
     emit('created', s)
     emit('close')
@@ -239,7 +238,7 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
           />
           <span v-if="v.error('storage')" class="field-error">{{ v.error('storage') }}</span>
           <span v-else-if="loaded && !storages.length" class="field-hint">
-            还没有存储，<RouterLink to="/settings/storage">新建存储</RouterLink>
+            还没有存储，<RouterLink :to="linkFrom('/settings/storage', route)">新建存储</RouterLink>
           </span>
         </div>
         <div class="field">
@@ -270,7 +269,6 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
             @open="openFolder"
           />
           <span v-if="browser.error" class="field-error">{{ browser.error }}</span>
-          <span v-else class="field-hint">点文件夹进入，进入的文件夹就是要整理的文件夹</span>
         </div>
         <label class="field span-2">
           <span class="field-label">整理要求</span>
@@ -303,10 +301,15 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
             :aria-invalid="!!v.error('custom_exts')"
           />
           <span v-if="v.error('custom_exts')" class="field-error">{{ v.error('custom_exts') }}</span>
-          <span v-else class="field-hint">范围外的文件保持不动</span>
         </label>
       </div>
-      <p v-if="blocked" class="field-hint">还没有模型，<RouterLink to="/settings/models">新建模型</RouterLink></p>
+      <div class="start-now">
+        <Switch v-model="form.start_now" label="创建后立即开始整理" />
+        <span>创建后立即开始整理</span>
+      </div>
+      <p v-if="blocked" class="field-hint">
+        还没有模型，<RouterLink :to="linkFrom('/settings/models', route)">新建模型</RouterLink>
+      </p>
 
       <details :open="advanced" @toggle="advanced = ($event.target as HTMLDetailsElement).open">
         <summary>高级选项</summary>
@@ -367,7 +370,7 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
     <template #footer>
       <button type="button" @click="close">取消</button>
       <button v-tip="blocked" type="submit" form="session-form" class="primary" :disabled="saving || !!blocked">
-        {{ saving ? '创建中' : '创建并整理' }}
+        {{ saving ? '创建中' : form.start_now ? '创建并开始' : '创建' }}
       </button>
     </template>
   </BaseDialog>
@@ -383,6 +386,12 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
   min-width: 0;
 }
 .advanced {
+  margin-top: var(--space-3);
+}
+.start-now {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-top: var(--space-3);
 }
 </style>

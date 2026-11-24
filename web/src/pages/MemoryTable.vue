@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import Icon from '@/base/Icon.vue'
 import StatusPill from '@/base/StatusPill.vue'
@@ -10,41 +10,21 @@ import { fmtRelative, fmtTime } from '@/base/time'
 import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
-import { useFetch } from '@/base/useFetch'
-import { deleteMemory, listMemory, updateMemory } from '@/api/memory'
+import { deleteMemory, updateMemory } from '@/api/memory'
 import type { MemoryItem, MemoryScope, Id } from '@/api/types'
 import MemoryFormDialog from './MemoryFormDialog.vue'
 
-const props = withDefaults(
-  defineProps<{
-    scope: MemoryScope
-    scopeId: Id
-    rev?: number
-    q?: string
-    emptyText?: string
-    editable?: boolean
-  }>(),
-  { rev: 0, q: '', emptyText: '暂无记忆', editable: true },
-)
-const emit = defineEmits<{ loaded: [count: number] }>()
+defineProps<{
+  items: MemoryItem[]
+  loading: boolean
+  error: string
+  scope: MemoryScope
+  scopeId: Id
+  filtered: boolean
+  emptyText: string
+}>()
+const emit = defineEmits<{ changed: []; retry: []; clear: [] }>()
 const confirm = useConfirm()
-
-const list = useFetch((signal) => listMemory(props.scope, props.scopeId, signal))
-watch(
-  () => [props.scope, props.scopeId, props.rev],
-  async () => {
-    await list.refresh()
-    emit('loaded', list.data.value?.length ?? 0)
-  },
-  { immediate: true },
-)
-
-const rows = computed(() => {
-  const q = props.q.trim().toLowerCase()
-  return (list.data.value ?? [])
-    .filter((m) => !q || `${m.content} ${m.path}`.toLowerCase().includes(q))
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned))
-})
 
 const formOpen = ref(false)
 const editing = ref<MemoryItem | null>(null)
@@ -52,13 +32,13 @@ function openForm(m: MemoryItem | null) {
   editing.value = m
   formOpen.value = true
 }
-defineExpose({ create: () => openForm(null), refresh: list.refresh })
+defineExpose({ create: () => openForm(null) })
 
 async function togglePin(m: MemoryItem) {
   try {
     await updateMemory(m.id, { pinned: !m.pinned })
     toast.success(m.pinned ? '已取消置顶' : '已置顶')
-    void list.refresh()
+    emit('changed')
   } catch (e) {
     toast.error('保存失败', e)
   }
@@ -70,7 +50,7 @@ async function remove(m: MemoryItem) {
   try {
     await deleteMemory(m.id)
     toast.success('已删除')
-    void list.refresh()
+    emit('changed')
   } catch (e) {
     toast.error('删除失败', e)
   }
@@ -96,24 +76,24 @@ const menuFor = (m: MemoryItem) => [
         <col />
         <col class="w-kind" />
         <col class="w-time" />
-        <col v-if="editable" />
+        <col />
       </colgroup>
       <thead>
         <tr>
           <th>内容</th>
           <th>类型</th>
           <th>更新时间</th>
-          <th v-if="editable" class="col-actions">操作</th>
+          <th class="col-actions">操作</th>
         </tr>
       </thead>
       <tbody>
         <tr
-          v-for="m in rows"
+          v-for="m in items"
           :key="m.id"
-          :class="{ clickable: editable }"
-          :tabindex="editable ? 0 : undefined"
-          @click="editable && openForm(m)"
-          @keydown.enter.self.prevent="editable && openForm(m)"
+          class="clickable"
+          tabindex="0"
+          @click="openForm(m)"
+          @keydown.enter.self.prevent="openForm(m)"
         >
           <td class="wrap">
             <span class="content">
@@ -124,18 +104,20 @@ const menuFor = (m: MemoryItem) => [
           </td>
           <td><StatusPill :value="m.kind" :map="MEMORY_KIND" /></td>
           <td v-tip="fmtTime(m.updated_at)">{{ fmtRelative(m.updated_at) }}</td>
-          <td v-if="editable" class="row-actions">
+          <td class="row-actions">
             <ActionMenu :items="menuFor(m)" />
           </td>
         </tr>
         <TableState
-          :colspan="editable ? 5 : 4"
-          :loading="list.loading.value && !list.data.value"
-          :error="list.error.value"
-          :empty="rows.length === 0"
-          :empty-text="q ? '没有符合条件的记忆' : emptyText"
-          @retry="list.refresh"
-        />
+          :colspan="5"
+          :loading="loading"
+          :error="error"
+          :empty="items.length === 0"
+          :empty-text="filtered ? '没有符合条件的记忆' : emptyText"
+          @retry="emit('retry')"
+        >
+          <button v-if="filtered" type="button" class="btn-sm" @click="emit('clear')">清除筛选</button>
+        </TableState>
       </tbody>
     </table>
   </div>
@@ -145,7 +127,7 @@ const menuFor = (m: MemoryItem) => [
     :scope="scope"
     :scope-id="scopeId"
     @close="formOpen = false"
-    @saved="list.refresh"
+    @saved="emit('changed')"
   />
 </template>
 

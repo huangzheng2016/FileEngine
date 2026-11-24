@@ -80,13 +80,13 @@ async function submit() {
           name="content"
           rows="3"
           maxlength="300"
-          placeholder="例如：目录用中文命名"
+          placeholder="例如：文件夹用中文命名"
           :aria-invalid="!!v.error('content')"
         />
         <span v-if="v.error('content')" class="field-error">{{ v.error('content') }}</span>
       </label>
       <label class="field">
-        <span class="field-label">限定目录</span>
+        <span class="field-label">限定文件夹</span>
         <input v-model="form.path" name="path" placeholder="/照片/2023" />
       </label>
     </form>

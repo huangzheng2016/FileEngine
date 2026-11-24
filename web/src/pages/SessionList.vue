@@ -116,15 +116,7 @@ const menuFor = (s: Session) => [
         <Segmented v-model="list.filters.status" :options="STATUS_OPTIONS" label="状态" />
       </template>
       <span class="spacer" />
-      <button
-        v-tip="setup ? '先新建存储和模型' : ''"
-        type="button"
-        class="primary"
-        :disabled="setup"
-        @click="creating = true"
-      >
-        <Icon name="plus" />新建
-      </button>
+      <button v-if="!setup" type="button" class="primary" @click="creating = true"><Icon name="plus" />新建</button>
     </div>
 
     <div class="table-wrap">
@@ -167,7 +159,7 @@ const menuFor = (s: Session) => [
             :loading="list.loading.value && !list.items.value.length"
             :error="list.error.value"
             :empty="list.items.value.length === 0"
-            :empty-text="filtered ? '没有符合条件的整理任务' : setup ? '三步开始整理' : '暂无整理任务'"
+            :empty-text="filtered ? '没有符合条件的整理任务' : setup ? '还差几步就能开始整理' : '暂无整理任务'"
             @retry="list.refresh"
           >
             <button v-if="filtered" type="button" class="btn-sm" @click="list.reset">清除筛选</button>
@@ -177,7 +169,6 @@ const menuFor = (s: Session) => [
                 <span v-else class="setup-num">1</span>
                 <span class="setup-text">
                   <strong>添加存储</strong>
-                  <span class="text-muted text-sm">要整理的文件在哪：NAS、服务器或本机文件夹</span>
                 </span>
                 <button
                   v-if="missing.storage"
@@ -194,7 +185,6 @@ const menuFor = (s: Session) => [
                 <span v-else class="setup-num">2</span>
                 <span class="setup-text">
                   <strong>添加模型</strong>
-                  <span class="text-muted text-sm">由哪个大模型来理解文件、给出整理方案</span>
                 </span>
                 <button
                   v-if="missing.model"
@@ -210,7 +200,6 @@ const menuFor = (s: Session) => [
                 <span class="setup-num">3</span>
                 <span class="setup-text">
                   <strong>新建整理任务</strong>
-                  <span class="text-muted text-sm">选好文件夹、说说想怎么整理，先出方案，确认后才会移动</span>
                 </span>
               </li>
             </ol>
