@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/vue-virtual": "^3.13.52",
+    "@wailsio/runtime": "3.0.0-beta.27",
     "axios": "^1.21.0",
     "echarts": "^6.1.0",
     "markdown-it": "^15.0.3",
