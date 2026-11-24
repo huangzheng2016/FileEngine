@@ -169,20 +169,59 @@ type countsKey struct {
 	id uint
 }
 
-var countsPending sync.Map
+type pendingCount struct {
+	timer *time.Timer
+	run   func()
+}
+
+var counts = struct {
+	mu      sync.Mutex
+	pending map[countsKey]*pendingCount
+	wg      sync.WaitGroup // one per armed timer, done when its refresh has run
+}{pending: make(map[countsKey]*pendingCount)}
 
 func (r *Repository) touchCounts(sessionID uint) {
 	k := countsKey{r.db, sessionID}
-	if _, loaded := countsPending.LoadOrStore(k, struct{}{}); loaded {
+	counts.mu.Lock()
+	defer counts.mu.Unlock()
+	if _, ok := counts.pending[k]; ok {
 		return
 	}
 	reader := r.Reader() // resolved here: the timer must not read the package globals
-	time.AfterFunc(countsDelay, func() {
-		countsPending.Delete(k)
+	run := func() {
 		if err := dal.WithRetry(func() error { return r.refreshCounts(reader, sessionID) }); err != nil {
 			log.Printf("refresh counts of session %d: %v", sessionID, err)
 		}
+	}
+	p := &pendingCount{run: run}
+	counts.wg.Add(1)
+	p.timer = time.AfterFunc(countsDelay, func() {
+		defer counts.wg.Done()
+		counts.mu.Lock()
+		delete(counts.pending, k)
+		counts.mu.Unlock()
+		run()
 	})
+	counts.pending[k] = p
+}
+
+// FlushCounts runs every scheduled counter refresh now and waits for the ones
+// already firing. Shutdown calls it before the database closes.
+func FlushCounts() {
+	counts.mu.Lock()
+	armed := make([]*pendingCount, 0, len(counts.pending))
+	for k, p := range counts.pending {
+		armed = append(armed, p)
+		delete(counts.pending, k)
+	}
+	counts.mu.Unlock()
+	for _, p := range armed {
+		if p.timer.Stop() {
+			p.run()
+			counts.wg.Done()
+		}
+	}
+	counts.wg.Wait()
 }
 
 type SessionProgress struct {

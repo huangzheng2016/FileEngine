@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"FileEngine/biz/dal/db/model"
 )
@@ -89,6 +90,29 @@ func TestScanWritesLeaveSettingsAndCountersAlone(t *testing.T) {
 	if got, _ = r.GetSession(s.ID); got.Status != "scanned" || got.ErrorMessage != "" {
 		t.Fatalf("late failure was applied: %+v", got)
 	}
+}
+
+// Shutdown must not leave a refresh timer that fires after the database closed.
+func TestFlushCountsRunsPendingRefreshesNow(t *testing.T) {
+	old := countsDelay
+	countsDelay = time.Hour
+	defer func() { countsDelay = old }()
+	r := setupScanProgressRepo(t)
+	s := &model.ScanSession{Status: "scanned"}
+	if err := r.CreateSession(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CreateFile(&model.FileEntry{ScanSessionID: s.ID, Name: "a", OriginalPath: "a", FileType: "file"}); err != nil {
+		t.Fatal(err)
+	}
+	r.touchCounts(s.ID)
+	FlushCounts()
+	got, err := r.GetSession(s.ID)
+	if err != nil || got.TotalFiles != 1 {
+		t.Fatalf("total_files after flush = %d (%v)", got.TotalFiles, err)
+	}
+	// nothing is left pending: a second flush is a no-op
+	FlushCounts()
 }
 
 func TestSetRunCountersAreStoredOnTheRun(t *testing.T) {

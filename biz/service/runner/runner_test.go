@@ -105,6 +105,47 @@ func TestStopAndShutdownCancelRuns(t *testing.T) {
 	waitStatus(t, repo, run.ID, db.RunStopped)
 }
 
+// The executor registers its own cancel and finishes its own row; Stop must let
+// it report the real outcome instead of finishing the row as stopped itself.
+func TestStopWaitsForRunsTheRunnerDoesNotOwn(t *testing.T) {
+	s, repo := newService(t)
+	sid := newSession(t, repo)
+	run, err := repo.CreateRun(sid, db.RunPhaseExecuting, "执行")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	db.RegisterRunCancel(run.ID, cancel)
+	go func() {
+		<-ctx.Done()
+		time.Sleep(100 * time.Millisecond) // finishing its current step
+		_ = repo.FinishRun(run, db.RunPartial, "执行结果", "", db.TokenCounts{})
+	}()
+	got, err := s.Stop(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.RunPartial || got.Summary != "执行结果" {
+		t.Fatalf("stop overwrote the executor's outcome: %+v", got)
+	}
+}
+
+func TestPanickingScanFailsTheSession(t *testing.T) {
+	s, repo := newService(t)
+	sess := &model.ScanSession{Status: "scanning"}
+	if err := repo.CreateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	s.StartScan(sess.ID, func(context.Context) { panic("scan boom") })
+	if !s.CancelScan(sess.ID) {
+		t.Fatal("a panicking scan must detach")
+	}
+	got, err := repo.GetSession(sess.ID)
+	if err != nil || got.Status != "error" || got.ErrorMessage == "" {
+		t.Fatalf("session after a scan panic = %+v (%v)", got, err)
+	}
+}
+
 func TestScanRegistryCancelAndShutdown(t *testing.T) {
 	s, _ := newService(t)
 	stopped := make(chan struct{})
