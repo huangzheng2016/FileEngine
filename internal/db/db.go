@@ -11,6 +11,9 @@ import (
 // Open initializes the database and sweeps what a previous process lifetime
 // left live: scans and runs still marked running.
 func Open(cfg config.DatabaseConfig) error {
+	// Scheduled counter refreshes emit through the package handle Init
+	// replaces; they finish against the handle they were scheduled for.
+	FlushCounts()
 	if err := dal.Init(cfg); err != nil {
 		return err
 	}

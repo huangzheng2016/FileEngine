@@ -7,29 +7,27 @@ import (
 	"testing"
 	"time"
 
+	dal "FileEngine/biz/dal/db"
 	"FileEngine/biz/dal/db/model"
+	"FileEngine/internal/config"
 	"FileEngine/internal/db"
 	"FileEngine/internal/remotefs"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
-// Backed by a temp file: the progress tests poll the session row while the
-// scan runs on another goroutine, and ":memory:" gives every pooled
-// connection its own private database.
+// The production SQLite setup (busy timeout, WAL, one writer connection):
+// the progress tests poll the session row while the scan writes on another
+// goroutine.
 func setupFileTestDB(t *testing.T) *db.Repository {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
-	})
+	gdb, err := dal.Open(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "test.db")})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.FileEntry{}, &model.ScanSession{}, &model.Category{}, &model.Filesystem{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	t.Cleanup(func() {
+		if s, err := gdb.DB(); err == nil {
+			_ = s.Close()
+		}
+	})
 	return db.NewRepository(gdb)
 }
 
@@ -106,10 +104,18 @@ func TestScanProgress_LiveRowUpdates(t *testing.T) {
 	sc := New(gfs, repo, "", nil)
 
 	done := make(chan error, 1)
-	go func() { done <- sc.Scan(context.Background(), session) }()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- sc.Scan(context.Background(), session)
+	}()
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(gfs.release) }) }
-	defer release()
+	// A failed assertion must not leave the scan running into the next test.
+	t.Cleanup(func() {
+		release()
+		<-finished
+	})
 
 	select {
 	case <-gfs.reached:
