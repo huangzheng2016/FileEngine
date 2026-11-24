@@ -12,7 +12,10 @@ are the source of truth. How the system fits together: `docs/architecture.md`; s
   and `handler/api/*_service.go` stubs are hz output (bodies hand-written), `handler/resp`, `errs`, `mw`
   (default-deny auth, limits), `service/<feature>` business logic. `container`: Wire-built services.
 - `internal/agent`: tagging pipeline, chat, survey, review, reflection, tools, Tengo scripts, prompts, memory.
-- `internal/db`: GORM models, repository, contract types (`contract.go`), runs and the event bus.
+- `biz/dal/db`: database handle (`Init`, dialect setup, `Migrate`), dialect helpers (`SubtreeCond`, `AtOrUnderCond`,
+  `CILikeCondition` ...), `Page`, `dbtest.New(t)`; `model` holds every GORM table struct (`model.All()`); `query` is
+  gorm/gen output from `cmd/generate` (`task gen:db`), never hand-edited.
+- `internal/db`: repository, contract types (`contract.go`), decide, runs and the event bus over the `biz/dal/db` models.
 - `internal/scanner`, `internal/executor`, `internal/remotefs`, `internal/model`, `internal/pathutil`,
   `internal/config`, `internal/logging`.
 - `web`: Vue 3 frontend on the danceinbox-style design system; `web/src/base` and `web/src/styles` are copied
