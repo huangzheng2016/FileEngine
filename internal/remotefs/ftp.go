@@ -98,6 +98,11 @@ func (f *FTPFS) dropConnLocked() {
 }
 
 func (f *FTPFS) resolve(p string) (string, error) {
+	// Paths are interpolated into control commands; a line break would inject
+	// another command.
+	if strings.ContainsAny(p, "\r\n\x00") {
+		return "", errors.New("路径不能包含换行或 NUL 字符")
+	}
 	var full string
 	if path.IsAbs(p) {
 		full = path.Clean(p)

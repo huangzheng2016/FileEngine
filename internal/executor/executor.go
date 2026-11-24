@@ -106,7 +106,7 @@ func validTarget(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("目标位置为空")
 	}
-	if err := pathutil.ValidateFSPath(p); err != nil {
+	if err := pathutil.ValidateTargetPath(p); err != nil {
 		return fmt.Errorf("目标位置无效：%w", err)
 	}
 	return nil
