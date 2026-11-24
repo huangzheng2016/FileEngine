@@ -133,8 +133,6 @@ export interface MemoryItem {
   path: string
   source: 'user' | 'agent' | 'correction' | 'reflection'
   pinned: boolean
-  hits: number
-  last_used_at: string | null
   created_at: string
   updated_at: string
 }

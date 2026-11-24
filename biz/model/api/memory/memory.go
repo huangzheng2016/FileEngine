@@ -22,13 +22,10 @@ type MemoryItem struct {
 	Content string `thrift:"content,6" form:"content" json:"content" query:"content"`
 	Path    string `thrift:"path,7" form:"path" json:"path" query:"path"`
 	// user | agent | correction | reflection
-	Source string `thrift:"source,8" form:"source" json:"source" query:"source"`
-	Pinned bool   `thrift:"pinned,9" form:"pinned" json:"pinned" query:"pinned"`
-	Hits   int32  `thrift:"hits,10" form:"hits" json:"hits" query:"hits"`
-	// unix seconds; 0 = never used
-	LastUsedAt int64 `thrift:"last_used_at,11" form:"last_used_at" json:"last_used_at" query:"last_used_at"`
-	CreatedAt  int64 `thrift:"created_at,12" form:"created_at" json:"created_at" query:"created_at"`
-	UpdatedAt  int64 `thrift:"updated_at,13" form:"updated_at" json:"updated_at" query:"updated_at"`
+	Source    string `thrift:"source,8" form:"source" json:"source" query:"source"`
+	Pinned    bool   `thrift:"pinned,9" form:"pinned" json:"pinned" query:"pinned"`
+	CreatedAt int64  `thrift:"created_at,10" form:"created_at" json:"created_at" query:"created_at"`
+	UpdatedAt int64  `thrift:"updated_at,11" form:"updated_at" json:"updated_at" query:"updated_at"`
 }
 
 func NewMemoryItem() *MemoryItem {
@@ -74,14 +71,6 @@ func (p *MemoryItem) GetPinned() (v bool) {
 	return p.Pinned
 }
 
-func (p *MemoryItem) GetHits() (v int32) {
-	return p.Hits
-}
-
-func (p *MemoryItem) GetLastUsedAt() (v int64) {
-	return p.LastUsedAt
-}
-
 func (p *MemoryItem) GetCreatedAt() (v int64) {
 	return p.CreatedAt
 }
@@ -100,10 +89,8 @@ var fieldIDToName_MemoryItem = map[int16]string{
 	7:  "path",
 	8:  "source",
 	9:  "pinned",
-	10: "hits",
-	11: "last_used_at",
-	12: "created_at",
-	13: "updated_at",
+	10: "created_at",
+	11: "updated_at",
 }
 
 func (p *MemoryItem) Read(iprot thrift.TProtocol) (err error) {
@@ -197,7 +184,7 @@ func (p *MemoryItem) Read(iprot thrift.TProtocol) (err error) {
 				goto SkipFieldError
 			}
 		case 10:
-			if fieldTypeId == thrift.I32 {
+			if fieldTypeId == thrift.I64 {
 				if err = p.ReadField10(iprot); err != nil {
 					goto ReadFieldError
 				}
@@ -207,22 +194,6 @@ func (p *MemoryItem) Read(iprot thrift.TProtocol) (err error) {
 		case 11:
 			if fieldTypeId == thrift.I64 {
 				if err = p.ReadField11(iprot); err != nil {
-					goto ReadFieldError
-				}
-			} else if err = iprot.Skip(fieldTypeId); err != nil {
-				goto SkipFieldError
-			}
-		case 12:
-			if fieldTypeId == thrift.I64 {
-				if err = p.ReadField12(iprot); err != nil {
-					goto ReadFieldError
-				}
-			} else if err = iprot.Skip(fieldTypeId); err != nil {
-				goto SkipFieldError
-			}
-		case 13:
-			if fieldTypeId == thrift.I64 {
-				if err = p.ReadField13(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -358,28 +329,6 @@ func (p *MemoryItem) ReadField9(iprot thrift.TProtocol) error {
 }
 func (p *MemoryItem) ReadField10(iprot thrift.TProtocol) error {
 
-	var _field int32
-	if v, err := iprot.ReadI32(); err != nil {
-		return err
-	} else {
-		_field = v
-	}
-	p.Hits = _field
-	return nil
-}
-func (p *MemoryItem) ReadField11(iprot thrift.TProtocol) error {
-
-	var _field int64
-	if v, err := iprot.ReadI64(); err != nil {
-		return err
-	} else {
-		_field = v
-	}
-	p.LastUsedAt = _field
-	return nil
-}
-func (p *MemoryItem) ReadField12(iprot thrift.TProtocol) error {
-
 	var _field int64
 	if v, err := iprot.ReadI64(); err != nil {
 		return err
@@ -389,7 +338,7 @@ func (p *MemoryItem) ReadField12(iprot thrift.TProtocol) error {
 	p.CreatedAt = _field
 	return nil
 }
-func (p *MemoryItem) ReadField13(iprot thrift.TProtocol) error {
+func (p *MemoryItem) ReadField11(iprot thrift.TProtocol) error {
 
 	var _field int64
 	if v, err := iprot.ReadI64(); err != nil {
@@ -449,14 +398,6 @@ func (p *MemoryItem) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField11(oprot); err != nil {
 			fieldId = 11
-			goto WriteFieldError
-		}
-		if err = p.writeField12(oprot); err != nil {
-			fieldId = 12
-			goto WriteFieldError
-		}
-		if err = p.writeField13(oprot); err != nil {
-			fieldId = 13
 			goto WriteFieldError
 		}
 	}
@@ -622,10 +563,10 @@ WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 9 end error: ", p), err)
 }
 func (p *MemoryItem) writeField10(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("hits", thrift.I32, 10); err != nil {
+	if err = oprot.WriteFieldBegin("created_at", thrift.I64, 10); err != nil {
 		goto WriteFieldBeginError
 	}
-	if err := oprot.WriteI32(p.Hits); err != nil {
+	if err := oprot.WriteI64(p.CreatedAt); err != nil {
 		return err
 	}
 	if err = oprot.WriteFieldEnd(); err != nil {
@@ -638,39 +579,7 @@ WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 10 end error: ", p), err)
 }
 func (p *MemoryItem) writeField11(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("last_used_at", thrift.I64, 11); err != nil {
-		goto WriteFieldBeginError
-	}
-	if err := oprot.WriteI64(p.LastUsedAt); err != nil {
-		return err
-	}
-	if err = oprot.WriteFieldEnd(); err != nil {
-		goto WriteFieldEndError
-	}
-	return nil
-WriteFieldBeginError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 11 begin error: ", p), err)
-WriteFieldEndError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 11 end error: ", p), err)
-}
-func (p *MemoryItem) writeField12(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("created_at", thrift.I64, 12); err != nil {
-		goto WriteFieldBeginError
-	}
-	if err := oprot.WriteI64(p.CreatedAt); err != nil {
-		return err
-	}
-	if err = oprot.WriteFieldEnd(); err != nil {
-		goto WriteFieldEndError
-	}
-	return nil
-WriteFieldBeginError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 12 begin error: ", p), err)
-WriteFieldEndError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 12 end error: ", p), err)
-}
-func (p *MemoryItem) writeField13(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("updated_at", thrift.I64, 13); err != nil {
+	if err = oprot.WriteFieldBegin("updated_at", thrift.I64, 11); err != nil {
 		goto WriteFieldBeginError
 	}
 	if err := oprot.WriteI64(p.UpdatedAt); err != nil {
@@ -681,9 +590,9 @@ func (p *MemoryItem) writeField13(oprot thrift.TProtocol) (err error) {
 	}
 	return nil
 WriteFieldBeginError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 13 begin error: ", p), err)
+	return thrift.PrependError(fmt.Sprintf("%T write field 11 begin error: ", p), err)
 WriteFieldEndError:
-	return thrift.PrependError(fmt.Sprintf("%T write field 13 end error: ", p), err)
+	return thrift.PrependError(fmt.Sprintf("%T write field 11 end error: ", p), err)
 }
 
 func (p *MemoryItem) String() string {

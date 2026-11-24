@@ -17,11 +17,8 @@ struct MemoryItem {
     // user | agent | correction | reflection
     8: string source
     9: bool pinned
-    10: i32 hits
-    // unix seconds; 0 = never used
-    11: i64 last_used_at
-    12: i64 created_at
-    13: i64 updated_at
+    10: i64 created_at
+    11: i64 updated_at
 }
 
 struct ListMemoryReq {
