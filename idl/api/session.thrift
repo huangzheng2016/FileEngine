@@ -97,9 +97,9 @@ struct CreateSessionReq {
     16: optional bool allow_script
     // created in the same transaction as the session, before the scan starts; at
     // most 200 each, any invalid entry rejects the whole request
-    17: list<SessionRuleDraft> rules
+    17: optional list<SessionRuleDraft> rules
     // categories of the session's storage (existing names are kept as they are)
-    18: list<category.CategoryTemplate> categories
+    18: optional list<category.CategoryTemplate> categories
 }
 
 struct SessionResp {

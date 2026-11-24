@@ -2581,9 +2581,9 @@ type CreateSessionReq struct {
 	AllowScript       *bool  `thrift:"allow_script,16,optional" form:"allow_script" json:"allow_script,omitempty" query:"allow_script"`
 	// created in the same transaction as the session, before the scan starts; at
 	// most 200 each, any invalid entry rejects the whole request
-	Rules []*SessionRuleDraft `thrift:"rules,17" form:"rules" json:"rules" query:"rules"`
+	Rules []*SessionRuleDraft `thrift:"rules,17,optional" form:"rules" json:"rules,omitempty" query:"rules"`
 	// categories of the session's storage (existing names are kept as they are)
-	Categories []*category.CategoryTemplate `thrift:"categories,18" form:"categories" json:"categories" query:"categories"`
+	Categories []*category.CategoryTemplate `thrift:"categories,18,optional" form:"categories" json:"categories,omitempty" query:"categories"`
 }
 
 func NewCreateSessionReq() *CreateSessionReq {
@@ -2677,11 +2677,21 @@ func (p *CreateSessionReq) GetAllowScript() (v bool) {
 	return *p.AllowScript
 }
 
+var CreateSessionReq_Rules_DEFAULT []*SessionRuleDraft
+
 func (p *CreateSessionReq) GetRules() (v []*SessionRuleDraft) {
+	if !p.IsSetRules() {
+		return CreateSessionReq_Rules_DEFAULT
+	}
 	return p.Rules
 }
 
+var CreateSessionReq_Categories_DEFAULT []*category.CategoryTemplate
+
 func (p *CreateSessionReq) GetCategories() (v []*category.CategoryTemplate) {
+	if !p.IsSetCategories() {
+		return CreateSessionReq_Categories_DEFAULT
+	}
 	return p.Categories
 }
 
@@ -2720,6 +2730,14 @@ func (p *CreateSessionReq) IsSetAllowAutoCategory() bool {
 
 func (p *CreateSessionReq) IsSetAllowScript() bool {
 	return p.AllowScript != nil
+}
+
+func (p *CreateSessionReq) IsSetRules() bool {
+	return p.Rules != nil
+}
+
+func (p *CreateSessionReq) IsSetCategories() bool {
+	return p.Categories != nil
 }
 
 func (p *CreateSessionReq) Read(iprot thrift.TProtocol) (err error) {
@@ -3497,22 +3515,24 @@ WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 16 end error: ", p), err)
 }
 func (p *CreateSessionReq) writeField17(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("rules", thrift.LIST, 17); err != nil {
-		goto WriteFieldBeginError
-	}
-	if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Rules)); err != nil {
-		return err
-	}
-	for _, v := range p.Rules {
-		if err := v.Write(oprot); err != nil {
+	if p.IsSetRules() {
+		if err = oprot.WriteFieldBegin("rules", thrift.LIST, 17); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Rules)); err != nil {
 			return err
 		}
-	}
-	if err := oprot.WriteListEnd(); err != nil {
-		return err
-	}
-	if err = oprot.WriteFieldEnd(); err != nil {
-		goto WriteFieldEndError
+		for _, v := range p.Rules {
+			if err := v.Write(oprot); err != nil {
+				return err
+			}
+		}
+		if err := oprot.WriteListEnd(); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
 	}
 	return nil
 WriteFieldBeginError:
@@ -3521,22 +3541,24 @@ WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 17 end error: ", p), err)
 }
 func (p *CreateSessionReq) writeField18(oprot thrift.TProtocol) (err error) {
-	if err = oprot.WriteFieldBegin("categories", thrift.LIST, 18); err != nil {
-		goto WriteFieldBeginError
-	}
-	if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Categories)); err != nil {
-		return err
-	}
-	for _, v := range p.Categories {
-		if err := v.Write(oprot); err != nil {
+	if p.IsSetCategories() {
+		if err = oprot.WriteFieldBegin("categories", thrift.LIST, 18); err != nil {
+			goto WriteFieldBeginError
+		}
+		if err := oprot.WriteListBegin(thrift.STRUCT, len(p.Categories)); err != nil {
 			return err
 		}
-	}
-	if err := oprot.WriteListEnd(); err != nil {
-		return err
-	}
-	if err = oprot.WriteFieldEnd(); err != nil {
-		goto WriteFieldEndError
+		for _, v := range p.Categories {
+			if err := v.Write(oprot); err != nil {
+				return err
+			}
+		}
+		if err := oprot.WriteListEnd(); err != nil {
+			return err
+		}
+		if err = oprot.WriteFieldEnd(); err != nil {
+			goto WriteFieldEndError
+		}
 	}
 	return nil
 WriteFieldBeginError:

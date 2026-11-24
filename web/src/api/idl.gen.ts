@@ -934,6 +934,12 @@ export interface Run {
   started_at: number
   // unix seconds; 0 while running
   ended_at: number
+  // executing and revert runs: the final counters, set when the run ends (0
+  // while running; the live values come from progress events)
+  exec_total: number
+  exec_success: number
+  exec_failed: number
+  exec_skipped: number
 }
 
 export interface StartTaggingReq {
@@ -1015,6 +1021,26 @@ export interface Session {
   latest_run?: RunRef
   // token totals over the session's runs; only present in GetSession
   tokens?: TokenCounts
+  // status scanned only: what the scan had to skip (for example unreadable
+  // folders); empty when nothing was skipped. error_message is set only
+  // when status is error or interrupted.
+  scan_warning: string
+}
+
+// A template rule created together with the session; same fields and meaning as
+// rule.CreateRuleReq without the session.
+export interface SessionRuleDraft {
+  name?: string
+  exts?: string
+  name_regex?: string
+  path_prefix?: string
+  file_type?: string
+  min_size?: number
+  max_size?: number
+  target?: string
+  role?: string
+  position?: number
+  source?: string
 }
 
 // Absent optional fields take the default of a new task (extraction and the
@@ -1039,6 +1065,11 @@ export interface CreateSessionReq {
   allow_read_file?: boolean
   allow_auto_category?: boolean
   allow_script?: boolean
+  // created in the same transaction as the session, before the scan starts; at
+  // most 200 each, any invalid entry rejects the whole request
+  rules?: SessionRuleDraft[]
+  // categories of the session's storage (existing names are kept as they are)
+  categories?: CategoryTemplate[]
 }
 
 export interface SessionResp {

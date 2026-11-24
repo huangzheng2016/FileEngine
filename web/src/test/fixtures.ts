@@ -13,6 +13,7 @@ export const session = (o: Partial<Session> = {}): Session => ({
   scanned_count: 0,
   current_path: '',
   error_message: '',
+  scan_warning: '',
   tagged_files: 0,
   planned_ops: 0,
   review_count: 0,
@@ -55,6 +56,10 @@ export const run = (o: Partial<Run> = {}): Run => ({
   total_tokens: 0,
   started_at: 1_793_000_000,
   ended_at: 0,
+  exec_total: 0,
+  exec_success: 0,
+  exec_failed: 0,
+  exec_skipped: 0,
   ...o,
 })
 
