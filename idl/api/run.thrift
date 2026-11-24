@@ -35,6 +35,12 @@ struct Run {
     17: i64 started_at
     // unix seconds; 0 while running
     18: i64 ended_at
+    // executing and revert runs: the final counters, set when the run ends (0
+    // while running; the live values come from progress events)
+    19: i32 exec_total
+    20: i32 exec_success
+    21: i32 exec_failed
+    22: i32 exec_skipped
 }
 
 struct StartTaggingReq {

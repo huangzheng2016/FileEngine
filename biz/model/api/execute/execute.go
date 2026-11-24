@@ -564,7 +564,7 @@ type Issue struct {
 	EntryID      int64  `thrift:"entry_id,1" json:"entry_id,string" form:"entry_id" query:"entry_id"`
 	OriginalPath string `thrift:"original_path,2" form:"original_path" json:"original_path" query:"original_path"`
 	NewPath      string `thrift:"new_path,3" form:"new_path" json:"new_path" query:"new_path"`
-	// invalid_target | into_self | nested | collision | target_exists
+	// invalid_target | into_self | collision | target_exists
 	// | source_changed | source_missing | failed
 	Code   string `thrift:"code,4" form:"code" json:"code" query:"code"`
 	Detail string `thrift:"detail,5" form:"detail" json:"detail" query:"detail"`
