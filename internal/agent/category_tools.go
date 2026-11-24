@@ -70,7 +70,7 @@ func (tb *ToolBuilder) createCategoryCore(ctx context.Context, input *CreateCate
 	}
 	// Category paths become new_path prefixes, so they follow the same root
 	// confinement as decisions.
-	if err := pathutil.ValidateFSPath(input.Path); err != nil || input.Path == "" {
+	if err := pathutil.ValidateTargetPath(input.Path); err != nil || input.Path == "" {
 		if err == nil {
 			err = errors.New("路径不能为空")
 		}
@@ -159,7 +159,7 @@ func (tb *ToolBuilder) updateCategory(ctx context.Context, input *UpdateCategory
 	// A changed category path cascades into planned targets, so it follows the
 	// same root confinement as decisions.
 	if input.NewPath != "" {
-		if err := pathutil.ValidateFSPath(input.NewPath); err != nil {
+		if err := pathutil.ValidateTargetPath(input.NewPath); err != nil {
 			return nil, rejectf("new_path 非法：%v", err)
 		}
 	}

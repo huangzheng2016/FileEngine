@@ -79,7 +79,7 @@ func (tb *ToolBuilder) newTargetChecker() (*targetChecker, error) {
 }
 
 func (c *targetChecker) check(newPath string) string {
-	if err := pathutil.ValidateFSPath(newPath); err != nil {
+	if err := pathutil.ValidateTargetPath(newPath); err != nil {
 		return fmt.Sprintf("new_path 不合法：%v", err)
 	}
 	np := db.NormalizeTargetPath(newPath)

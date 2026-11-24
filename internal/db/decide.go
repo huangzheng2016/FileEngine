@@ -46,7 +46,7 @@ func IsRejection(err error) bool {
 }
 
 // "" is allowed: it clears a target.
-func ValidateTargetPath(p string) error { return pathutil.ValidateFSPath(p) }
+func ValidateTargetPath(p string) error { return pathutil.ValidateTargetPath(p) }
 
 var decidedRoles = []string{RoleUnit, RoleFile, RoleSkip}
 
