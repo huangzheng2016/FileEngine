@@ -19,6 +19,22 @@ const resnapshotTokens = 1000
 
 const deltaHeading = "## 运行中的变化"
 
+// Each delta is the complete difference from the snapshot, so it replaces any
+// earlier one in the history.
+const deltaIntro = "以下是共享上下文生成之后的全部变化，以这一份为准，取代之前消息里的「运行中的变化」；与共享上下文冲突时以这里为准。"
+
+// deltaNone is sent when earlier messages carry a delta that no longer holds.
+const deltaNone = deltaHeading + "\n\n" + deltaIntro + "\n\n无变化：之前列出的变化已不再有效，以共享上下文为准。\n\n"
+
+// planText is the plan as the snapshot renders and stores it.
+func planText(p *db.SessionPlan) string {
+	content := strings.TrimSpace(p.Content)
+	if r := []rune(content); len(r) > planPromptMaxRunes {
+		content = string(r[:planPromptMaxRunes])
+	}
+	return content
+}
+
 type sharedSnapshot struct {
 	mu   sync.Mutex
 	gen  int
@@ -94,7 +110,7 @@ func RenderDelta(base, cur SharedContext, inlinePlan bool) string {
 	}
 
 	switch {
-	case hasPlan(cur) && (!hasPlan(base) || base.Plan.Content != cur.Plan.Content):
+	case hasPlan(cur) && (!hasPlan(base) || planText(base.Plan) != planText(cur.Plan)):
 		if inlinePlan {
 			content := strings.TrimSpace(cur.Plan.Content)
 			if r := []rune(content); len(r) > planPromptMaxRunes {
@@ -185,7 +201,7 @@ func RenderDelta(base, cur SharedContext, inlinePlan bool) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	return deltaHeading + "\n\n以下变化发生在共享上下文生成之后；与共享上下文冲突时以这里为准。\n\n" + strings.Join(lines, "\n") + "\n\n"
+	return deltaHeading + "\n\n" + deltaIntro + "\n\n" + strings.Join(lines, "\n") + "\n\n"
 }
 
 func sortedCategories(cats []db.Category) []db.Category {

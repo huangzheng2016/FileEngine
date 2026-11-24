@@ -167,7 +167,15 @@ func (a *Agent) chatEpochSnapshot(summary *db.ChatTurn) (SharedContext, error) {
 	if err != nil {
 		return c, err
 	}
-	raw, err := json.Marshal(c)
+	// Stored as the renderers see it: the plan is cut where the snapshot cuts
+	// it, which keeps the row well under a 64 KB text column.
+	stored := c
+	if c.Plan != nil {
+		p := *c.Plan
+		p.Content = planText(c.Plan)
+		stored.Plan = &p
+	}
+	raw, err := json.Marshal(stored)
 	if err != nil {
 		return c, err
 	}
@@ -287,12 +295,21 @@ func (a *Agent) RunChat(ctx context.Context, logger *Logger, content string, fil
 	}
 	// The message sent is stored verbatim: the next turn replays it, so its
 	// request starts with this request's messages.
-	sentText := RenderDelta(base, cur, false) + renderSelectedFiles(files) + content
-	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: chatRoleSent, Content: sentText, CoversThrough: user.ID}); err != nil {
-		return "", err
-	}
 	sent, err := a.sentMessages(turns)
 	if err != nil {
+		return "", err
+	}
+	delta := RenderDelta(base, cur, false)
+	if delta == "" {
+		for _, s := range sent {
+			if strings.Contains(s, deltaHeading) {
+				delta = deltaNone // an earlier message still lists changes that no longer hold
+				break
+			}
+		}
+	}
+	sentText := delta + renderSelectedFiles(files) + content
+	if err := a.repo.AddChatTurn(&db.ChatTurn{SessionID: a.sessionID, RunID: logger.RunID(), Role: chatRoleSent, Content: sentText, CoversThrough: user.ID}); err != nil {
 		return "", err
 	}
 	msgs := chatHistoryMessages(summary, turns, sent)

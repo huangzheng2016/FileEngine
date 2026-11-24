@@ -37,17 +37,16 @@ type wireReq struct {
 	messages []json.RawMessage
 }
 
-func parseWireReq(t *testing.T, raw []byte) wireReq {
-	t.Helper()
+func parseWireReq(t *testing.T, raw []byte) (wireReq, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {
-		t.Fatalf("request is not JSON: %v", err)
+		return wireReq{}, err
 	}
 	r := wireReq{raw: raw, tools: top["tools"], system: top["system"]}
 	if err := json.Unmarshal(top["messages"], &r.messages); err != nil {
-		t.Fatalf("messages: %v", err)
+		return wireReq{}, err
 	}
-	return r
+	return r, nil
 }
 
 type wireServer struct {
@@ -55,6 +54,7 @@ type wireServer struct {
 	srv     *httptest.Server
 	mu      sync.Mutex
 	reqs    []wireReq
+	bad     int // request bodies that were not valid JSON
 	respond func(r wireReq) wireReply
 }
 
@@ -62,8 +62,14 @@ func newWireServer(t *testing.T, respond func(r wireReq) wireReply) *wireServer 
 	ws := &wireServer{t: t, respond: respond}
 	ws.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		req := parseWireReq(t, body)
+		req, err := parseWireReq(t, body)
 		ws.mu.Lock()
+		if err != nil {
+			ws.bad++
+			ws.mu.Unlock()
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
 		ws.reqs = append(ws.reqs, req)
 		ws.mu.Unlock()
 		writeSSE(w, ws.respond(req))

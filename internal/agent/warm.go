@@ -30,6 +30,7 @@ func (g *warmGate) wait(ctx context.Context) {
 	case <-g.ch:
 	case <-ctx.Done():
 	case <-time.After(warmTimeout):
+		g.open() // later workers do not wait again
 	}
 }
 

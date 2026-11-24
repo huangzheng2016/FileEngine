@@ -99,13 +99,12 @@ Every model request is built from most stable to most volatile, so provider pref
 3. shared context — a snapshot taken once per tagging run (before the workers start) and once per chat epoch
    (stored with the summary turn): goal, plan, categories by name, rules by name, memory ordered by rank,
    scope, kind, key, id; never by usage or recency; Claude cache breakpoint
-4. history — append-only; old tool results are cleared in batches, never one round at a time
+4. history — append-only
 5. the unit or turn — a `## 运行中的变化` delta since the snapshot (past ~1k tokens a tagging run re-snapshots),
    then the task, listing, signals and notes from other workers. Chat stores the exact message it sent, so the
    next turn's request starts with this turn's messages
 
-Every tool answers `{success, error?, hint?, ...}`: bad arguments, unknown tools, rejections and disabled
-switches are results the model can act on; only database and IO failures stop a run. Text derived from files
+Every tool answers `{success, error?, hint?, ...}`: bad arguments, rejections and disabled switches are results the model can act on; only database and IO failures stop a run. Text derived from files
 (names, listings, signals, notes, script output) is sanitized and sits in `<data>` blocks; sensitive files are
 never read, including archive members.
 

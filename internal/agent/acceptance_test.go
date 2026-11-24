@@ -208,8 +208,7 @@ func TestWireBadCallsAreResultsAndTheUnitContinues(t *testing.T) {
 			wireCall{"t2", "read_file", `{"path":"no/such/file.txt"}`},
 			wireCall{"t3", "list_entries", `{"paths":["nope/x"]}`},
 			wireCall{"t4", "run_script", `{"script":"undefined_fn()"}`},
-			wireCall{"t5", "describe", `{"items":[{"path":"nope","description":"x"}]}`},
-		),
+			wireCall{"t5", "describe", `{"items":[{"path":"nope","description":"x"}]}`}),
 		text("完成"),
 	))
 	a, repo, _ := wireAgent(t, ws, nil)
@@ -242,7 +241,10 @@ func TestWireBadCallsAreResultsAndTheUnitContinues(t *testing.T) {
 // 6. Chat turn N+1 starts with turn N's request messages, however the plan,
 // categories or memory changed in between.
 func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
-	ws := newWireServer(t, byRound(text("好的")))
+	ws := newWireServer(t, byRound(
+		calls(wireCall{"t1", "recall", `{}`}),
+		text("好的"),
+	))
 	_, a, session := wireChatAgent(t, ws)
 	repo := a.repo
 	if err := repo.CreateCategory(&db.Category{FilesystemID: session.FilesystemID, Name: "照片", Path: "/照片"}); err != nil {
@@ -267,10 +269,12 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqs := ws.requests()
-	if len(reqs) != 2 {
-		t.Fatalf("one request per turn: %d", len(reqs))
+	// Turn 1 has a tool round (request 2); only its first request is the
+	// prefix of turn 2, because in-turn tool rounds are not stored.
+	if len(reqs) != 3 {
+		t.Fatalf("turn 1 has two requests, turn 2 one: %d", len(reqs))
 	}
-	r1, r2 := reqs[0], reqs[1]
+	r1, r2 := reqs[0], reqs[2]
 	if string(r1.tools) != string(r2.tools) || string(r1.system) != string(r2.system) {
 		t.Fatal("tools or system changed between turns")
 	}
@@ -282,7 +286,7 @@ func TestWireChatTurnExtendsThePreviousTurn(t *testing.T) {
 	if string(r2.messages[0]) != string(r1.messages[0]) {
 		t.Fatal("the shared snapshot is byte-identical across the epoch")
 	}
-	if len(r2.messages) != len(r1.messages)+2 {
+	if len(r2.messages) != len(r1.messages)+2 { // answer + new user message
 		t.Fatalf("turn 2 adds the answer and the new message: %d vs %d", len(r2.messages), len(r1.messages))
 	}
 	last := string(r2.messages[len(r2.messages)-1])
