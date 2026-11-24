@@ -158,3 +158,23 @@ func eventsOf(t *testing.T, r *Repository, sessionID uint) []model.SessionEvent 
 	}
 	return rows
 }
+
+// One session's emit lane (a persist waiting out SQLITE_BUSY retries) must not
+// stall another session's events.
+func TestSessionsEmitIndependently(t *testing.T) {
+	setupScanProgressRepo(t)
+	slow := laneOf(501)
+	slow.mu.Lock()
+	defer slow.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		Emit(502, 0, EvProgress, ProgressData{Total: 1})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("an emit of another session waited for a busy lane")
+	}
+}

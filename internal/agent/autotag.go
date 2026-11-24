@@ -395,10 +395,8 @@ func matchCategory(cats []model.Category, words []string) *model.Category {
 }
 
 func (a *AutoTagAgent) autoDecide(dir *model.FileEntry, sig DirSignals) (bool, error) {
-	var undecided int64
-	if err := a.repo.DB().Model(&model.FileEntry{}).
-		Where("scan_session_id = ? AND parent_path = ? AND role IN ?", a.sessionID, dir.OriginalPath, []string{db.RoleUndecided, db.RoleContainer}).
-		Count(&undecided).Error; err != nil {
+	undecided, err := a.repo.CountUndecidedChildren(a.sessionID, dir.OriginalPath)
+	if err != nil {
 		return false, err
 	}
 	if undecided == 0 {

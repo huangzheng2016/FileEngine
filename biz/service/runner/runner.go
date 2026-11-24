@@ -35,6 +35,8 @@ type Service struct {
 	mu    sync.Mutex
 	done  map[uint]chan struct{}
 	scans map[uint]*scanHandle
+	// cancel funcs of the live runs, including the executor's own
+	cancels map[uint]context.CancelFunc
 }
 
 // done closes when the goroutine has fully exited, all DB writes included.
@@ -50,7 +52,38 @@ func NewService(repo *db.Repository, q *query.Query) *Service {
 		stopWait: 30 * time.Second,
 		done:     make(map[uint]chan struct{}),
 		scans:    make(map[uint]*scanHandle),
+		cancels:  make(map[uint]context.CancelFunc),
 	}
+}
+
+// Track registers a live run's cancel func; the returned func removes it once
+// the run's goroutine is done. It implements executor.Tracker.
+func (s *Service) Track(runID uint, cancel context.CancelFunc) func() {
+	s.mu.Lock()
+	s.cancels[runID] = cancel
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		delete(s.cancels, runID)
+		s.mu.Unlock()
+	}
+}
+
+// cancelRun cancels a live run and reports whether there was one.
+func (s *Service) cancelRun(runID uint) bool {
+	s.mu.Lock()
+	cancel, ok := s.cancels[runID]
+	s.mu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+func (s *Service) liveRuns() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.cancels)
 }
 
 // Launch records a run and executes work on a detached context. A panic in work
@@ -61,7 +94,7 @@ func (s *Service) Launch(sessionID uint, phase, title string, work func(ctx cont
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	db.RegisterRunCancel(run.ID, cancel)
+	untrack := s.Track(run.ID, cancel)
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.done[run.ID] = done
@@ -70,6 +103,7 @@ func (s *Service) Launch(sessionID uint, phase, title string, work func(ctx cont
 	go func() {
 		defer func() {
 			cancel()
+			untrack()
 			s.mu.Lock()
 			delete(s.done, run.ID)
 			s.mu.Unlock()
@@ -115,7 +149,7 @@ func (s *Service) Stop(runID uint) (*model.AgentRun, error) {
 	if run.Status != db.RunRunning {
 		return run, nil
 	}
-	if db.CancelRun(runID) {
+	if s.cancelRun(runID) {
 		if !s.awaitEnd(runID) {
 			slog.Warn("stop run: still winding down", "run", runID, "after", s.stopWait)
 		}
@@ -169,7 +203,7 @@ func (s *Service) StopSession(sessionID uint) {
 		return
 	}
 	for _, r := range runs {
-		if db.CancelRun(r.ID) {
+		if s.cancelRun(r.ID) {
 			s.awaitEnd(r.ID)
 		}
 	}
@@ -229,8 +263,17 @@ func (s *Service) CancelScan(sessionID uint) bool {
 // Shutdown cancels every run and scan and waits for them until ctx ends. The
 // executor stops before its next step, never mid-delete.
 func (s *Service) Shutdown(ctx context.Context) error {
-	if n := db.CancelAllRuns(); n > 0 {
-		slog.Info("shutdown: cancelled runs", "count", n)
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.cancels))
+	for _, c := range s.cancels {
+		cancels = append(cancels, c)
+	}
+	s.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+	if len(cancels) > 0 {
+		slog.Info("shutdown: cancelled runs", "count", len(cancels))
 	}
 	s.mu.Lock()
 	scans := make([]*scanHandle, 0, len(s.scans))
@@ -247,7 +290,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		s.mu.Lock()
 		scanning := len(s.scans)
 		s.mu.Unlock()
-		if live := db.LiveRunCount(); live == 0 && scanning == 0 {
+		if live := s.liveRuns(); live == 0 && scanning == 0 {
 			// Last: runs and scans schedule counter refreshes, whose timers must
 			// not fire after the database closes.
 			db.FlushCounts()
@@ -256,7 +299,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		select {
 		case <-tick.C:
 		case <-ctx.Done():
-			return fmt.Errorf("%d run(s) and %d scan(s) did not finish: %w", db.LiveRunCount(), scanning, ctx.Err())
+			return fmt.Errorf("%d run(s) and %d scan(s) did not finish: %w", s.liveRuns(), scanning, ctx.Err())
 		}
 	}
 }

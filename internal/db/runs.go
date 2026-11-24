@@ -1,9 +1,7 @@
 package db
 
 import (
-	"context"
 	"errors"
-	"sync"
 	"time"
 
 	dal "FileEngine/biz/dal/db"
@@ -24,11 +22,6 @@ var (
 var EffectiveRevertStatuses = []string{RunRunning, RunDone, RunPartial}
 
 const RunInterruptedError = "服务重启，运行被中断"
-
-var runCancels = struct {
-	mu sync.Mutex
-	m  map[uint]context.CancelFunc
-}{m: make(map[uint]context.CancelFunc)}
 
 func (r *Repository) CreateRun(sessionID uint, phase, title string) (*model.AgentRun, error) {
 	run := &model.AgentRun{SessionID: sessionID, Phase: phase, Title: title}
@@ -89,7 +82,6 @@ func (r *Repository) FinishRun(run *model.AgentRun, status, summary, errMsg stri
 		matched = res.RowsAffected
 		return res.Error
 	})
-	UnregisterRunCancel(run.ID)
 	if err != nil || matched == 0 {
 		return err
 	}
@@ -110,28 +102,6 @@ func (r *Repository) SetRunCounters(runID uint, total, success, failed, skipped 
 			"exec_total": total, "exec_success": success, "exec_failed": failed, "exec_skipped": skipped,
 		}).Error
 	})
-}
-
-func RegisterRunCancel(runID uint, cancel context.CancelFunc) {
-	runCancels.mu.Lock()
-	runCancels.m[runID] = cancel
-	runCancels.mu.Unlock()
-}
-
-func UnregisterRunCancel(runID uint) {
-	runCancels.mu.Lock()
-	delete(runCancels.m, runID)
-	runCancels.mu.Unlock()
-}
-
-func CancelRun(runID uint) bool {
-	runCancels.mu.Lock()
-	cancel, ok := runCancels.m[runID]
-	runCancels.mu.Unlock()
-	if ok {
-		cancel()
-	}
-	return ok
 }
 
 // The event is persisted (its row id is the stream seq) and then broadcast;
@@ -158,4 +128,13 @@ func (r *Repository) RunningRuns(sessionID uint) ([]model.AgentRun, error) {
 	var runs []model.AgentRun
 	err := r.db.Where("session_id = ? AND status = ?", sessionID, RunRunning).Find(&runs).Error
 	return runs, err
+}
+
+// FindRun reads one run row.
+func (r *Repository) FindRun(id uint) (*model.AgentRun, error) {
+	var run model.AgentRun
+	if err := r.db.First(&run, id).Error; err != nil {
+		return nil, err
+	}
+	return &run, nil
 }

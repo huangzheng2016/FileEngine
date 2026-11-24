@@ -3,11 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-
-	"gorm.io/gorm"
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -136,8 +133,8 @@ func (a *Agent) sentMessages(turns []model.ChatTurn) (map[uint]string, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var rows []model.ChatTurn
-	if err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through IN ?", a.sessionID, chatRoleSent, ids).Find(&rows).Error; err != nil {
+	rows, err := a.repo.ChatTurnsCovering(a.sessionID, chatRoleSent, ids)
+	if err != nil {
 		return nil, err
 	}
 	for _, r := range rows {
@@ -154,15 +151,15 @@ func (a *Agent) chatEpochSnapshot(summary *model.ChatTurn) (SharedContext, error
 	if summary != nil {
 		epoch = summary.ID
 	}
-	var row model.ChatTurn
-	err := a.repo.DB().Where("session_id = ? AND role = ? AND covers_through = ?", a.sessionID, chatRoleSnapshot, epoch).Order("id DESC").Take(&row).Error
-	if err == nil {
+	row, err := a.repo.LatestChatTurnCovering(a.sessionID, chatRoleSnapshot, epoch)
+	if err != nil {
+		return SharedContext{}, err
+	}
+	if row != nil {
 		var c SharedContext
 		if json.Unmarshal([]byte(row.Content), &c) == nil {
 			return c, nil
 		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return SharedContext{}, err
 	}
 	c, err := LoadSharedContext(a.repo, a.session)
 	if err != nil {

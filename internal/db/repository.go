@@ -704,3 +704,21 @@ func (r *Repository) NextManualBatchIndex(sessionID uint) int {
 	}
 	return *minBatch - 1
 }
+
+// CountUndecidedChildren counts the direct children of dir that still need a
+// decision (undecided or container).
+func (r *Repository) CountUndecidedChildren(sessionID uint, dir string) (int64, error) {
+	var n int64
+	err := r.db.Model(&model.FileEntry{}).
+		Where("scan_session_id = ? AND parent_path = ? AND role IN ?", sessionID, dir, []string{RoleUndecided, RoleContainer}).
+		Count(&n).Error
+	return n, err
+}
+
+// PlannedEntriesAt returns the planned entries (operation and target set) whose
+// original path is one of paths.
+func (r *Repository) PlannedEntriesAt(sessionID uint, paths []string) ([]model.FileEntry, error) {
+	var rows []model.FileEntry
+	err := r.db.Where("scan_session_id = ? AND original_path IN ? AND operation != '' AND new_path != ''", sessionID, paths).Find(&rows).Error
+	return rows, err
+}

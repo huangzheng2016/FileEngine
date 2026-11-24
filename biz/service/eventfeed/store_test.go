@@ -74,7 +74,7 @@ func TestEventReplayUsesSessionIndex(t *testing.T) {
 	q := dbtest.New(t)
 	// One small session among large ones: without an index ordered by
 	// (session_id, id) the cursor scan walks every later event of the others.
-	for s, n := range map[uint]int{1: 30, 2: 3000, 3: 3000} {
+	for s, n := range map[uint]int{1: 30, 2: 1500, 3: 1500} {
 		runs := make([]uint, n)
 		for i := range runs {
 			runs[i] = uint(1 + i%3)

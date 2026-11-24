@@ -36,3 +36,22 @@ func (r *Repository) ChatHistory(sessionID, beforeID uint) (*model.ChatTurn, []m
 	}
 	return summary, turns, nil
 }
+
+// ChatTurnsCovering returns the session's turns of one role whose
+// covers_through is among covers.
+func (r *Repository) ChatTurnsCovering(sessionID uint, role string, covers []uint) ([]model.ChatTurn, error) {
+	var rows []model.ChatTurn
+	err := r.db.Where("session_id = ? AND role = ? AND covers_through IN ?", sessionID, role, covers).Find(&rows).Error
+	return rows, err
+}
+
+// LatestChatTurnCovering is the newest turn of one role with the given
+// covers_through, or nil.
+func (r *Repository) LatestChatTurnCovering(sessionID uint, role string, covers uint) (*model.ChatTurn, error) {
+	var rows []model.ChatTurn
+	err := r.db.Where("session_id = ? AND role = ? AND covers_through = ?", sessionID, role, covers).Order("id DESC").Limit(1).Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}

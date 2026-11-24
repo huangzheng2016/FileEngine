@@ -115,8 +115,9 @@ func TestStopWaitsForRunsTheRunnerDoesNotOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	db.RegisterRunCancel(run.ID, cancel)
+	untrack := s.Track(run.ID, cancel)
 	go func() {
+		defer untrack()
 		<-ctx.Done()
 		time.Sleep(100 * time.Millisecond) // finishing its current step
 		_ = repo.FinishRun(run, db.RunPartial, "执行结果", "", db.TokenCounts{})

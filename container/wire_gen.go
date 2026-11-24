@@ -54,7 +54,7 @@ func build(gdb *gorm.DB, rq *db.Reader, authOpts auth.Options) (*Container, erro
 	memoryService := memory.NewService(repository)
 	chatService := chat.NewService(query, rq, runService)
 	sessionService := session.NewService(query, rq, repository, runService)
-	executeService := execute.NewService(repository, runService)
+	executeService := execute.NewService(repository, runService, runnerService)
 	eventService := event.NewService(rq, runService)
 	container := &Container{
 		DB:          gdb,

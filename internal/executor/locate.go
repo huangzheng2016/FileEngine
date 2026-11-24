@@ -72,9 +72,8 @@ func decidingEntry(repo *db.Repository, sessionID uint, f *model.FileEntry) (*mo
 	if len(anc) == 0 {
 		return nil, nil
 	}
-	var rows []model.FileEntry
-	if err := repo.DB().Where("scan_session_id = ? AND original_path IN ? AND operation != '' AND new_path != ''", sessionID, anc).
-		Find(&rows).Error; err != nil {
+	rows, err := repo.PlannedEntriesAt(sessionID, anc)
+	if err != nil {
 		return nil, err
 	}
 	var best *model.FileEntry
