@@ -53,6 +53,44 @@ func TestConcurrentStartsOfOneSessionYieldOneRunningRun(t *testing.T) {
 	}
 }
 
+// The scanner writes session columns while the user edits settings; neither may
+// overwrite the other.
+func TestScanWritesLeaveSettingsAndCountersAlone(t *testing.T) {
+	r := setupScanProgressRepo(t)
+	s := &model.ScanSession{Status: "scanned", Goal: "旧目标"}
+	if err := r.CreateSession(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BeginScan(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	// edits made while the scan runs
+	if err := r.DB().Model(&model.ScanSession{}).Where("id = ?", s.ID).
+		Updates(map[string]any{"goal": "新目标", "tagged_files": 7}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := r.FinishScan(s.ID, 12, "有 1 个文件夹无法读取"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.GetSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Goal != "新目标" || got.TaggedFiles != 7 {
+		t.Fatalf("scan overwrote concurrent writes: goal=%q tagged=%d", got.Goal, got.TaggedFiles)
+	}
+	if got.Status != "scanned" || got.TotalFiles != 12 || got.ErrorMessage != "" || got.ScanWarning == "" {
+		t.Fatalf("finished session = %+v", got)
+	}
+	// a scan that already ended cannot be failed afterwards
+	if err := r.FailScan(s.ID, "late"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = r.GetSession(s.ID); got.Status != "scanned" || got.ErrorMessage != "" {
+		t.Fatalf("late failure was applied: %+v", got)
+	}
+}
+
 func TestSetRunCountersAreStoredOnTheRun(t *testing.T) {
 	r := setupScanProgressRepo(t)
 	run, err := r.CreateRun(32, RunPhaseExecuting, "执行")

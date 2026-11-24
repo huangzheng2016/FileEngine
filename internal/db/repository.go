@@ -50,8 +50,35 @@ func (r *Repository) ListSessionsByFilesystem(filesystemID uint) ([]model.ScanSe
 	return sessions, err
 }
 
-func (r *Repository) UpdateSession(s *model.ScanSession) error {
-	return r.db.Save(s).Error
+// BeginScan marks the session scanning and clears the previous scan's progress
+// and messages. Column-scoped: settings the user changes meanwhile are never
+// written back.
+func (r *Repository) BeginScan(id uint) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ?", id).Updates(map[string]any{
+			"status": "scanning", "scanned_count": 0, "current_path": "", "error_message": "", "scan_warning": "",
+		}).Error
+	})
+}
+
+// FinishScan completes a scan that is still scanning; a session whose scan was
+// replaced or failed meanwhile is left alone.
+func (r *Repository) FinishScan(id uint, scanned int, warning string) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+			"status": "scanned", "total_files": scanned, "scanned_count": scanned, "current_path": "",
+			"error_message": "", "scan_warning": warning,
+		}).Error
+	})
+}
+
+// FailScan records why a scan that is still scanning could not complete.
+func (r *Repository) FailScan(id uint, message string) error {
+	return dal.WithRetry(func() error {
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+			"status": "error", "error_message": message, "current_path": "",
+		}).Error
+	})
 }
 
 // Column-scoped: the scanner calls this every few seconds, and a full-row

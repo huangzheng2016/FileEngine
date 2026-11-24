@@ -90,7 +90,7 @@ func New(fs remotefs.RemoteFS, repo *db.Repository, filterMode string, filterDir
 // session stays "scanning" until they finish.
 func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	session.Status = "scanning"
-	if err := s.repo.UpdateSession(session); err != nil {
+	if err := s.repo.BeginScan(session.ID); err != nil {
 		return err
 	}
 	cfg := config.Get()
@@ -145,8 +145,9 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	session.Status = "scanned"
 	session.TotalFiles = session.ScannedCount
 	session.CurrentPath = ""
-	session.ErrorMessage = s.skippedSummary()
-	if err := s.repo.UpdateSession(session); err != nil {
+	session.ErrorMessage = ""
+	session.ScanWarning = s.skippedSummary()
+	if err := s.repo.FinishScan(session.ID, session.ScannedCount, session.ScanWarning); err != nil {
 		return err
 	}
 	if err := s.repo.RefreshSessionCounts(session.ID); err != nil {

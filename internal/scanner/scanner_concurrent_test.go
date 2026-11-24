@@ -297,8 +297,8 @@ func TestScanConcurrent_UnlistableDirIsSkippedNotFatal(t *testing.T) {
 	if session.Status != "scanned" {
 		t.Errorf("status = %s, want scanned", session.Status)
 	}
-	if !strings.Contains(session.ErrorMessage, "root/photos") {
-		t.Errorf("ErrorMessage = %q, want the skipped directory named", session.ErrorMessage)
+	if !strings.Contains(session.ScanWarning, "root/photos") {
+		t.Errorf("ScanWarning = %q, want the skipped directory named", session.ScanWarning)
 	}
 	want := []string{"root/.DS_Store", "root/docs", "root/docs/sub", "root/docs/sub/y.pdf", "root/docs/x.pdf", "root/photos", "root/root.txt"}
 	if strings.Join(paths, ",") != strings.Join(want, ",") {
