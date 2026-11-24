@@ -9,7 +9,7 @@ import { ENTRY_FLAG } from '@/base/labels'
 import { useFetch } from '@/base/useFetch'
 import { PREVIEW_LIMIT, previewTree } from '@/api/files'
 import { hasId, type Id, type PreviewItem } from '@/api/types'
-import { crumbs, sortItems } from '@/lib/paths'
+import { pathCrumbs } from '@/lib/paths'
 import { shownPath } from '@/lib/toolView'
 
 // settled: every planned move has been executed
@@ -29,9 +29,12 @@ watch(
   () => void list.refresh(),
   { immediate: true },
 )
-const items = computed(() => sortItems(list.data.value?.items ?? []))
+// the server lists folders first, then by name
+const items = computed(() => list.data.value?.items ?? [])
 const total = computed(() => list.data.value?.total ?? 0)
-const trail = computed(() => crumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'))
+const trail = computed(() =>
+  pathCrumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'),
+)
 
 const countText = (n?: number) => (n == null ? '—' : `${fmtNumber(n)} 个`)
 
@@ -125,7 +128,7 @@ function open(it: PreviewItem) {
       </table>
     </div>
     <p v-if="total > items.length" class="text-muted text-sm tabular">
-      共 {{ fmtNumber(total) }} 项，只列出前 {{ fmtNumber(PREVIEW_LIMIT) }} 项
+      共 {{ fmtNumber(total) }} 项，已显示前 {{ fmtNumber(PREVIEW_LIMIT) }} 项
     </p>
   </section>
 </template>

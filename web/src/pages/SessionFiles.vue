@@ -9,54 +9,53 @@ import Select from '@/base/Select.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
 import { fmtBytes, fmtLabel, fmtNumber } from '@/base/format'
-import { DATE_SOURCE, ENTRY_FLAG, ENTRY_ROLE } from '@/base/labels'
+import { DATE_SOURCE, ENTRY_FLAG, ENTRY_ROLE, EXEC_MODE, OP_STATE } from '@/base/labels'
 import { fmtDate } from '@/base/time'
 import { toast } from '@/base/toast'
+import { useConfirm } from '@/base/useConfirm'
 import { useFetch } from '@/base/useFetch'
-import { useRouteQuery } from '@/base/useRouteQuery'
+import { useList } from '@/base/useList'
 import { useSelection } from '@/base/useSelection'
 import { listCategories, listFiles, resetPlans } from '@/api/files'
 import { locateFile } from '@/api/sessions'
 import type { FileEntry, LocateItem, Session } from '@/api/types'
 import DirTree from '@/components/DirTree.vue'
 import { addChatFiles } from '@/lib/chatFiles'
-import { crumbs } from '@/lib/paths'
-import { landing } from '@/lib/toolView'
+import { pathCrumbs } from '@/lib/paths'
+import { landing, shownPath } from '@/lib/toolView'
 import CategoryDialog from './CategoryDialog.vue'
 import FilePreviewDialog from './FilePreviewDialog.vue'
 import TargetDialog from './TargetDialog.vue'
 
 const props = defineProps<{ session: Session }>()
 const emit = defineEmits<{ changed: [] }>()
+const confirm = useConfirm()
 
-const SIZE = 50
-const { query, set } = useRouteQuery({ dir: '', fq: '', cat: '', fp: 1 })
-const search = ref(query.value.fq)
-let timer: ReturnType<typeof setTimeout> | undefined
-watch(search, (q) => {
-  clearTimeout(timer)
-  timer = setTimeout(() => set({ fq: q.trim(), fp: 1 }), 300)
-})
-
-const files = useFetch((signal) =>
-  listFiles(
-    {
-      session_id: props.session.id,
-      parent_path: query.value.dir,
-      search: query.value.fq,
-      category_path: query.value.cat,
-      page: query.value.fp,
-      size: SIZE,
-    },
-    signal,
-  ),
+// The folder, search and category live in the URL beside the page, so a reload or a shared link lands on the
+// same listing. Searching looks through every folder.
+const list = useList(
+  (p, signal) =>
+    listFiles(
+      {
+        session_id: props.session.id,
+        parent_path: p.dir,
+        search: p.fq,
+        category_path: p.cat,
+        page: p.page,
+        size: p.size,
+      },
+      signal,
+    ),
+  { dir: '', fq: '', cat: '' },
+  { search: 'fq' },
 )
 watch(
-  () => [props.session.id, query.value.dir, query.value.fq, query.value.cat, query.value.fp],
-  () => void files.refresh(),
-  { immediate: true },
+  () => props.session.id,
+  () => void list.refresh(),
 )
-const rows = computed(() => files.data.value?.items ?? [])
+
+const rows = list.items
+const filtered = computed(() => !!(list.filters.fq || list.filters.cat))
 
 const categories = useFetch((signal) => listCategories(props.session.filesystem_id, signal), { immediate: true })
 const categoryOptions = computed(() => [
@@ -65,34 +64,32 @@ const categoryOptions = computed(() => [
 ])
 
 const dir = computed({
-  get: () => query.value.dir,
-  set: (d: string) => set({ dir: d, fp: 1, fq: '' }),
-})
-watch(
-  () => query.value.fq,
-  (q) => {
-    if (q !== search.value.trim()) search.value = q
+  get: () => list.filters.dir,
+  set: (d: string) => {
+    list.filters.dir = d
+    list.filters.fq = ''
   },
-)
+})
 
-const selection = useSelection(computed(() => rows.value.map((r) => ({ id: String(r.id) }))))
-const selectedRows = computed(() => rows.value.filter((r) => selection.has(String(r.id))))
+function clearFilters() {
+  list.filters.fq = ''
+  list.filters.cat = ''
+}
+
+const selection = useSelection(computed(() => rows.value.map((r) => ({ id: r.id }))))
+const selectedRows = computed(() => rows.value.filter((r) => selection.has(r.id)))
 
 function roleKey(f: FileEntry) {
   return f.role || 'pending'
 }
 
-function detailLine(f: FileEntry): string {
-  if (f.role === 'container') return ''
-  if (f.reason) return f.reason
-  if (f.role === 'member') return '随上级文件夹整体移动'
-  return ''
-}
+// A member's reason is its folder's; the role pill already says it moves with the folder.
+const detailLine = (f: FileEntry) => (f.role === 'container' || f.role === 'member' ? '' : f.reason)
 
 // mtime is a fallback every file has; only real capture dates are worth a line.
-const showDate = (f: FileEntry) => !!f.taken_at && f.date_source !== 'mtime'
+const showDate = (f: FileEntry) => !!f.taken_at && !!f.date_source && f.date_source !== 'mtime'
 
-const trail = computed(() => crumbs(query.value.dir))
+const trail = computed(() => pathCrumbs(list.filters.dir))
 
 function open(f: FileEntry) {
   if (f.file_type === 'directory') dir.value = f.original_path
@@ -101,28 +98,43 @@ function open(f: FileEntry) {
 
 const previewing = ref<FileEntry | null>(null)
 const categoriesOpen = ref(false)
+const editing = ref<FileEntry | null>(null)
 
-function askAssistant(list: FileEntry[]) {
+function askAssistant(rowsToAsk: FileEntry[]) {
   addChatFiles(
     props.session.id,
-    list.map((f) => ({ id: f.id, name: f.name })),
+    rowsToAsk.map((f) => ({ id: f.id, name: f.name })),
   )
-  toast.success(`已把 ${fmtNumber(list.length)} 项加入对话`)
+  toast.success(`已把 ${fmtNumber(rowsToAsk.length)} 项加入对话`)
   selection.clear()
 }
 
 const resetting = ref(false)
-async function reset(list: FileEntry[]) {
+async function reset(targets: FileEntry[]) {
   if (resetting.value) return
+  const decided = targets.filter((f) => f.role).length
+  if (!decided) {
+    toast.error('重新整理失败：所选项目还没有整理')
+    return
+  }
+  const ok = await confirm({
+    message:
+      targets.length === 1
+        ? `重新整理「${targets[0].name}」？它现有的去向会被清除。`
+        : `重新整理所选 ${fmtNumber(targets.length)} 项？它们现有的去向会被清除。`,
+    confirmText: '重新整理',
+    danger: true,
+  })
+  if (!ok) return
   resetting.value = true
   try {
     await resetPlans(
       props.session.id,
-      list.map((f) => f.id),
+      targets.map((f) => f.id),
     )
-    toast.success(list.length === 1 ? '已交给 AI 重新整理' : `已把 ${fmtNumber(list.length)} 项交给 AI 重新整理`)
+    toast.success(targets.length === 1 ? '已交给助手重新整理' : `已把 ${fmtNumber(targets.length)} 项交给助手重新整理`)
     selection.clear()
-    void files.refresh()
+    void list.refresh()
     emit('changed')
   } catch (e) {
     toast.error('重新整理失败', e)
@@ -148,15 +160,21 @@ const menuFor = (f: FileEntry) => [
   },
 ]
 
-const editing = ref<FileEntry | null>(null)
-
-const locate = reactive({ open: false, q: '', loading: false, done: false, items: [] as LocateItem[] })
+const locate = reactive({
+  open: false,
+  q: '',
+  asked: '',
+  loading: false,
+  done: false,
+  items: [] as LocateItem[],
+})
 async function runLocate() {
   const q = locate.q.trim()
-  if (!q) return
+  if (!q || locate.loading) return
   locate.loading = true
   try {
     locate.items = await locateFile(props.session.id, q)
+    locate.asked = q
     locate.done = true
   } catch (e) {
     toast.error('查找失败', e)
@@ -165,7 +183,14 @@ async function runLocate() {
   }
 }
 function openLocate() {
-  Object.assign(locate, { open: true, q: '', done: false, items: [] })
+  Object.assign(locate, { open: true, q: '', asked: '', done: false, items: [] })
+}
+
+function locateLine(r: LocateItem): string {
+  if (!r.new_path) return '保持原位'
+  const to = shownPath(r.new_path)
+  const via = r.decided_by && r.decided_by !== r.original_path ? `（跟着「${shownPath(r.decided_by)}」一起）` : ''
+  return r.executed ? `已${fmtLabel(EXEC_MODE, r.execute_mode)}到 ${to}${via}` : `新位置 ${to}${via}`
 }
 </script>
 
@@ -198,16 +223,20 @@ function openLocate() {
         <button type="button" class="ghost btn-sm" @click="selection.clear">取消选择</button>
       </div>
       <div v-else class="toolbar">
-        <input v-model="search" type="search" class="search" placeholder="搜索文件名" aria-label="搜索文件名" />
-        <Select
-          :model-value="query.cat"
-          :options="categoryOptions"
-          label="分类"
-          @update:model-value="set({ cat: $event, fp: 1 })"
+        <input
+          v-model="list.filters.fq"
+          type="search"
+          class="search"
+          placeholder="搜索全部文件"
+          aria-label="搜索全部文件"
         />
+        <Select v-model="list.filters.cat" :options="categoryOptions" label="分类" />
         <span class="spacer" />
+        <button type="button" class="btn-icon" aria-label="刷新" :disabled="list.loading.value" @click="list.refresh">
+          <Icon name="refresh-cw" />
+        </button>
         <button type="button" @click="openLocate"><Icon name="search" />文件去哪了</button>
-        <button type="button" @click="categoriesOpen = true">分类</button>
+        <button type="button" @click="categoriesOpen = true">管理分类</button>
       </div>
 
       <div class="table-wrap">
@@ -243,19 +272,19 @@ function openLocate() {
                 <input
                   type="checkbox"
                   :aria-label="`选择 ${f.name}`"
-                  :checked="selection.has(String(f.id))"
-                  @change="selection.toggle(String(f.id))"
+                  :checked="selection.has(f.id)"
+                  @change="selection.toggle(f.id)"
                 />
               </td>
               <td class="wrap">
                 <span class="name">
                   <Icon :name="f.file_type === 'directory' ? 'folder' : 'file'" :size="14" />
-                  <span class="truncate">{{ query.fq ? f.original_path : f.name }}</span>
+                  <span class="truncate">{{ list.filters.fq ? shownPath(f.original_path) : f.name }}</span>
                   <StatusPill v-if="f.sensitive" value="sensitive" :map="ENTRY_FLAG" />
                 </span>
                 <span v-if="detailLine(f)" class="cell-sub">{{ detailLine(f) }}</span>
                 <span v-if="showDate(f)" class="cell-sub">
-                  {{ fmtLabel(DATE_SOURCE, f.date_source || 'exif') }} {{ fmtDate(f.taken_at)
+                  {{ fmtLabel(DATE_SOURCE, f.date_source) }} {{ fmtDate(f.taken_at)
                   }}<template v-if="f.camera"> · {{ f.camera }}</template>
                 </span>
               </td>
@@ -266,7 +295,9 @@ function openLocate() {
                 </span>
                 <span v-if="f.new_path" class="cell-sub">{{ landing(f.original_path, f.new_path) }}</span>
               </td>
-              <td class="num hide-sm">{{ f.file_type === 'directory' ? '—' : fmtBytes(f.size) }}</td>
+              <td class="num hide-sm">
+                {{ f.file_type === 'directory' ? `${fmtNumber(f.child_count)} 项` : fmtBytes(f.size) }}
+              </td>
               <td class="row-actions">
                 <span>
                   <button type="button" class="ghost btn-sm" @click.stop="editing = f">改位置</button>
@@ -276,25 +307,23 @@ function openLocate() {
             </tr>
             <TableState
               :colspan="5"
-              :loading="files.loading.value && !rows.length"
-              :error="files.error.value"
+              :loading="list.loading.value && !rows.length"
+              :error="list.error.value"
               :empty="rows.length === 0"
-              :empty-text="query.fq || query.cat ? '没有符合条件的文件' : '这个文件夹是空的'"
-              @retry="files.refresh"
+              :empty-text="filtered ? '没有符合条件的文件' : '这个文件夹是空的'"
+              @retry="list.refresh"
             >
-              <button v-if="query.fq || query.cat" type="button" class="btn-sm" @click="set({ fq: '', cat: '' })">
-                清除筛选
-              </button>
+              <button v-if="filtered" type="button" class="btn-sm" @click="clearFilters">清除筛选</button>
             </TableState>
           </tbody>
         </table>
       </div>
       <Pagination
-        v-if="(files.data.value?.total ?? 0) > SIZE"
-        :total="files.data.value?.total ?? 0"
-        :page="query.fp"
-        :size="SIZE"
-        @update:page="set({ fp: $event })"
+        :total="list.total.value"
+        :page="list.page.value"
+        :size="list.size.value"
+        @update:page="list.setPage"
+        @update:size="list.setSize"
       />
     </section>
 
@@ -303,10 +332,10 @@ function openLocate() {
       :open="categoriesOpen"
       :filesystem-id="session.filesystem_id"
       @close="categoriesOpen = false"
-      @changed="(categories.refresh(), files.refresh())"
+      @changed="(categories.refresh(), list.refresh())"
     />
 
-    <TargetDialog :entry="editing" @close="editing = null" @saved="(files.refresh(), emit('changed'))" />
+    <TargetDialog :entry="editing" @close="editing = null" @saved="(list.refresh(), emit('changed'))" />
 
     <BaseDialog :open="locate.open" title="文件去哪了" width="640px" @close="locate.open = false">
       <form class="toolbar" @submit.prevent="runLocate">
@@ -318,21 +347,30 @@ function openLocate() {
           placeholder="原来的路径或文件名"
           aria-label="原来的路径或文件名"
         />
-        <button type="submit" class="primary" :disabled="locate.loading">查找</button>
+        <button type="submit" class="primary" :disabled="locate.loading">
+          {{ locate.loading ? '查找中' : '查找' }}
+        </button>
       </form>
       <Loading v-if="locate.loading" />
       <div v-else-if="locate.done" class="table-wrap">
         <table>
           <tbody>
             <tr v-for="r in locate.items" :key="r.entry_id">
-              <td>
-                <span class="truncate">{{ r.original_path }}</span>
-                <span class="cell-sub">
-                  {{ r.new_path ? `${r.executed ? '已移到' : '将移到'} ${r.new_path}` : '不移动' }}
-                </span>
+              <td class="wrap">
+                <span class="truncate">{{ shownPath(r.original_path) }}</span>
+                <span class="cell-sub">{{ locateLine(r) }}</span>
+              </td>
+              <td v-if="r.op_state" class="num">
+                <StatusPill :value="r.op_state" :map="OP_STATE" />
               </td>
             </tr>
-            <TableState :colspan="1" :loading="false" error="" :empty="!locate.items.length" empty-text="没有找到" />
+            <TableState
+              :colspan="2"
+              :loading="false"
+              error=""
+              :empty="!locate.items.length"
+              :empty-text="`没有找到「${locate.asked}」`"
+            />
           </tbody>
         </table>
       </div>
@@ -346,9 +384,6 @@ function openLocate() {
   grid-template-columns: 240px minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
-}
-.files-tree {
-  padding: var(--space-2);
 }
 .files-crumbs {
   display: none;

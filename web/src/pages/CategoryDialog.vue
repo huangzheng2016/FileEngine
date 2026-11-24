@@ -3,7 +3,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import ActionMenu from '@/base/ActionMenu.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
 import Icon from '@/base/Icon.vue'
-import Switch from '@/base/Switch.vue'
 import TableState from '@/base/TableState.vue'
 import { fmtNumber } from '@/base/format'
 import { toast } from '@/base/toast'
@@ -29,7 +28,7 @@ watch(
   },
 )
 
-const empty = () => ({ name: '', path: '', description: '', agent_editable: true })
+const empty = () => ({ name: '', path: '', description: '' })
 const form = reactive(empty())
 const editing = ref<Category | null>(null)
 const formOpen = ref(false)
@@ -44,10 +43,7 @@ const title = computed(() => (!formOpen.value ? '分类' : editing.value ? '编�
 
 function openForm(c: Category | null) {
   editing.value = c
-  Object.assign(
-    form,
-    c ? { name: c.name, path: c.path, description: c.description, agent_editable: c.agent_editable } : empty(),
-  )
+  Object.assign(form, c ? { name: c.name, path: c.path, description: c.description } : empty())
   formOpen.value = true
   v.reset()
   guard.reset()
@@ -70,7 +66,6 @@ async function save() {
     name: form.name.trim(),
     path: `/${form.path.trim().replace(/^\/+|\/+$/g, '')}`,
     description: form.description.trim(),
-    agent_editable: form.agent_editable,
   }
   try {
     if (editing.value) await updateCategory(editing.value.id, body)
@@ -89,7 +84,7 @@ async function save() {
 
 async function remove(c: Category) {
   const ok = await confirm({
-    message: `删除分类「${c.name}」？这个分类下的文件会交给 AI 重新整理。`,
+    message: `删除分类「${c.name}」？这个分类下的文件会交给助手重新整理。`,
     confirmText: '删除',
     danger: true,
   })
@@ -150,14 +145,12 @@ const presetMenu = computed(() =>
         <span class="field-label">放什么</span>
         <textarea v-model="form.description" name="description" rows="3" placeholder="照片与图片，按年月归档" />
       </label>
-      <div class="field">
-        <span class="field-label">允许助手修改</span>
-        <Switch v-model="form.agent_editable" label="允许助手修改" />
-      </div>
     </form>
     <template v-else>
       <div class="toolbar">
-        <button type="button" class="btn-sm" @click="openForm(null)"><Icon name="plus" :size="14" />新建</button>
+        <button type="button" class="btn-sm primary" @click="openForm(null)">
+          <Icon name="plus" :size="14" />新建
+        </button>
         <ActionMenu :items="presetMenu" :label="importing ? '导入中' : '从模板导入'" icon="download" />
       </div>
       <div class="table-wrap">
