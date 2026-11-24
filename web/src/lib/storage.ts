@@ -27,14 +27,14 @@ export const PROTOCOLS: Record<Protocol, ProtocolMeta> = {
   },
   nfs: {
     title: 'NFS',
-    desc: 'Linux 或 NAS 的 NFS 共享，需在 NAS 上允许本机 IP',
+    desc: 'Linux 或 NAS 的 NFS 共享',
     port: 2049,
     browseRoot: '',
     pathLabel: '导出路径',
   },
   ftp: {
     title: 'FTP',
-    desc: '只有 FTP 时使用；大于 32 MB 的 zip 看不到内容',
+    desc: '只有 FTP 时使用',
     port: 21,
     browseRoot: '/',
     pathLabel: '根文件夹',

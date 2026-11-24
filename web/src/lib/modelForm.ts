@@ -243,5 +243,24 @@ export function guessCaps(model: string, preset: ModelPreset): ModelCaps {
   return { context, vision: VISION.test(m), thinking: THINKING.test(m) }
 }
 
-// What the provider receives when 单次最多输出 is left empty.
-export const maxTokensDefault = (provider: ProviderKind) => (provider === 'claude' ? '8192' : '不限制，由服务商决定')
+export interface ModelOption {
+  value: string
+  label: string
+  hint?: string
+}
+
+const MODEL_OPTION_CAP = 200
+
+// Options for the model Combobox: the typed name first (any name the provider accepts can be entered,
+// also when it cannot list its models), then recommendations, then what the provider lists.
+export function modelOptions(query: string, preset: Pick<ModelPreset, 'models'>, listed: string[], loaded: boolean) {
+  const q = query.trim()
+  const recommended = preset.models.filter((m) => !loaded || listed.includes(m))
+  const all: ModelOption[] = [
+    ...recommended.map((m) => ({ value: m, label: m, hint: '推荐' })),
+    ...listed.filter((m) => !recommended.includes(m)).map((m) => ({ value: m, label: m })),
+  ]
+  const shown = q ? all.filter((o) => o.value.toLowerCase().includes(q.toLowerCase())) : all
+  const out = shown.slice(0, MODEL_OPTION_CAP)
+  return q && !all.some((o) => o.value === q) ? [{ value: q, label: q, hint: '使用这个名称' }, ...out] : out
+}

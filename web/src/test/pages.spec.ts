@@ -48,6 +48,16 @@ const buttonByText = (text: string) => {
     all.find((b) => b.textContent?.trim().includes(text))) as HTMLButtonElement
 }
 
+// a ChoiceGrid card: pick it by its title
+async function choose(title: string) {
+  const card = [...document.body.querySelectorAll('label.choice-card')].find((l) => l.textContent?.includes(title))
+  ;(card?.querySelector('input') as HTMLInputElement).click()
+  await flushPromises()
+}
+
+const rowByText = (text: string) =>
+  [...document.body.querySelectorAll('tr.clickable')].find((r) => r.textContent?.includes(text)) as HTMLElement
+
 async function typeInto(name: string, value: string) {
   const el = document.body.querySelector(`[name="${name}"]`) as HTMLInputElement
   el.value = value
@@ -124,6 +134,8 @@ describe('ModelFormDialog', () => {
       { provider: 'openai', base_url: 'https://api.example.com/v1', api_key: undefined, id: '3' },
       expect.anything(),
     )
+    ;(body.querySelector('input[role="combobox"]') as HTMLInputElement).click()
+    await flushPromises()
     expect(body.textContent).toContain('deepseek-chat')
     buttonByText('测试连接').click()
     await flushPromises()
@@ -137,7 +149,8 @@ describe('ModelFormDialog', () => {
     const { w } = await withRouter(ModelFormDialog, '/sessions', { open: false, editing: null })
     await w.setProps({ open: true } as never)
     await flushPromises()
-    buttonByText('DeepSeek').click()
+    await choose('DeepSeek')
+    buttonByText('下一步').click()
     await flushPromises()
     expect((document.body.querySelector('input[name="base_url"]') as HTMLInputElement).value).toBe(
       'https://api.deepseek.com/v1',
@@ -149,7 +162,7 @@ describe('ModelFormDialog', () => {
     buttonByText('下一步').click()
     await flushPromises()
     // the preset's first recommendation that the provider also lists
-    expect(document.body.textContent).toContain('已选 deepseek-flash')
+    expect((document.body.querySelector('input[role="combobox"]') as HTMLInputElement).value).toBe('deepseek-flash')
     expect(document.body.textContent).toContain('上下文 1M')
     buttonByText('测试并保存').click()
     await flushPromises()
@@ -172,7 +185,8 @@ describe('StorageFormDialog', () => {
     const { w } = await withRouter(StorageFormDialog, '/sessions', { open: false, editing: null })
     await w.setProps({ open: true } as never)
     await flushPromises()
-    buttonByText('NAS 共享').click()
+    await choose('NAS 共享')
+    buttonByText('下一步').click()
     await flushPromises()
     expect((document.body.querySelector('input[name="port"]') as HTMLInputElement).value).toBe('445')
     await typeInto('host', '192.168.1.10')
@@ -181,7 +195,7 @@ describe('StorageFormDialog', () => {
     buttonByText('连接').click()
     await flushPromises()
     // the share list comes first; open one
-    buttonByText('photos').click()
+    rowByText('photos').click()
     await flushPromises()
     expect(settings.testFilesystem).toHaveBeenLastCalledWith(
       expect.objectContaining({ protocol: 'smb', host: '192.168.1.10', base_path: 'photos', password: 'pw' }),
