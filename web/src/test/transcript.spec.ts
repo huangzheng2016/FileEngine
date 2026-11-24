@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@/api/types'
+import { event } from './fixtures'
 import { createEventBuffer } from '@/lib/eventBuffer'
 import {
   applyEvents,
@@ -12,7 +13,7 @@ import {
 } from '@/lib/transcript'
 
 let seq = 0
-const ev = (type: string, data: Record<string, unknown>, s = ++seq): SessionEvent => ({ seq: s, type, data })
+const ev = (kind: string, data: Record<string, unknown>, s = ++seq): SessionEvent => event(kind, data, s)
 
 describe('transcript reducer', () => {
   it('accumulates text and reasoning deltas by msg_id and lets message finalize them', () => {

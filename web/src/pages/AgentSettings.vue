@@ -11,7 +11,8 @@ import { useConfirm } from '@/base/useConfirm'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFetch } from '@/base/useFetch'
 import { useFormValidation } from '@/base/useFormValidation'
-import { getConfig, getPrompt, saveConfig, type AppConfig } from '@/api/settings'
+import { getConfig, getPrompt, saveConfig } from '@/api/settings'
+import type { AppConfig } from '@/api/types'
 import { categoryPresets } from '@/data/categoryPresets'
 
 const confirm = useConfirm()
@@ -68,19 +69,14 @@ async function save() {
   if (!snapshot.value || !v.validate() || saving.value) return
   saving.value = true
   try {
-    const cfg = snapshot.value
     const saved = await saveConfig({
-      ...cfg,
-      agent: {
-        ...cfg.agent,
-        concurrency: form.concurrency,
-        max_step: form.max_step,
-        max_retries: form.max_retries,
-        agent_timeout: form.agent_timeout,
-        max_file_read_size: form.max_file_read_size,
-        category_policy: form.category_policy.trim(),
-        system_prompt: form.prompt.trim() === defaultPrompt.value.trim() ? '' : form.prompt,
-      },
+      concurrency: form.concurrency,
+      max_step: form.max_step,
+      max_retries: form.max_retries,
+      agent_timeout: form.agent_timeout,
+      max_file_read_size: form.max_file_read_size,
+      category_policy: form.category_policy.trim(),
+      system_prompt: form.prompt.trim() === defaultPrompt.value.trim() ? '' : form.prompt,
     })
     apply(saved)
     toast.success('已保存')

@@ -11,7 +11,7 @@ import { useFetch } from '@/base/useFetch'
 import { useRouteQuery } from '@/base/useRouteQuery'
 import { updateFileTarget } from '@/api/files'
 import { revertRun } from '@/api/sessions'
-import type { AgentRun, PreviewItem, ScanSession } from '@/api/types'
+import { hasId, type PreviewItem, type Run, type Session } from '@/api/types'
 import RunActivity from '@/components/RunActivity.vue'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
 import { executable, flowRun, runningRun, stageOf } from '@/lib/sessionView'
@@ -23,7 +23,7 @@ import TargetDialog, { type TargetEntry } from './TargetDialog.vue'
 
 // The task at its current step: what is happening now, or what is waiting for
 // the person, with the before/after comparison once there is a result.
-const props = defineProps<{ session: ScanSession; runs: AgentRun[]; timeline: Timeline; hasDraft: boolean }>()
+const props = defineProps<{ session: Session; runs: Run[]; timeline: Timeline; hasDraft: boolean }>()
 const emit = defineEmits<{ changed: []; tag: []; goal: []; tab: [key: string] }>()
 const confirm = useConfirm()
 
@@ -108,10 +108,10 @@ function changed() {
 const editing = ref<TargetEntry | null>(null)
 const keeping = ref(false)
 function edit(it: PreviewItem) {
-  if (it.file_id) editing.value = { id: it.file_id, original_path: it.original_path ?? '', new_path: it.path }
+  if (hasId(it.file_id)) editing.value = { id: it.file_id, original_path: it.original_path ?? '', new_path: it.path }
 }
 async function keep(it: PreviewItem) {
-  if (!it.file_id || keeping.value) return
+  if (!hasId(it.file_id) || keeping.value) return
   keeping.value = true
   try {
     await updateFileTarget(it.file_id, '')
@@ -147,7 +147,7 @@ const hasResult = computed(() => props.session.planned_ops > 0)
     </Alert>
 
     <template v-else-if="liveRun">
-      <RunActivity :run="liveRun" :mode="running?.exec_mode" />
+      <RunActivity :run="liveRun" :mode="running?.exec_mode || undefined" />
     </template>
     <Loading v-else-if="running" />
 

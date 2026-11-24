@@ -16,9 +16,8 @@ import { useFormValidation } from '@/base/useFormValidation'
 import { usePageTitle } from '@/base/usePageTitle'
 import { usePolling } from '@/base/usePolling'
 import { useRouteQuery } from '@/base/useRouteQuery'
-import { download } from '@/api/http'
-import { approvePlan, getPlan, listRuns, stopRun } from '@/api/runs'
-import { deleteSession, getSession, plansExportUrl, rescanSession, startTagging, updateSession } from '@/api/sessions'
+import { approvePlan, exportPlanOps, getPlan, listRuns, stopRun } from '@/api/runs'
+import { deleteSession, getSession, rescanSession, startTagging, updateSession } from '@/api/sessions'
 import { listFilesystems } from '@/api/settings'
 import ChatPanel from '@/components/ChatPanel.vue'
 import {
@@ -43,7 +42,7 @@ const route = useRoute()
 const router = useRouter()
 const confirm = useConfirm()
 
-const id = computed(() => Number(route.params.id))
+const id = computed(() => String(route.params.id))
 const detail = useFetch((signal) => getSession(id.value, signal))
 const runs = useFetch((signal) => listRuns(id.value, signal))
 const plan = useFetch((signal) => getPlan(id.value, signal))
@@ -201,7 +200,7 @@ async function exportMoves() {
   if (exporting.value) return
   exporting.value = true
   try {
-    await download(plansExportUrl(id.value), `移动清单-${id.value}.csv`)
+    await exportPlanOps(id.value, `移动清单-${id.value}.csv`)
   } catch (e) {
     toast.error('导出失败', e)
   } finally {

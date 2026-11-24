@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { PreviewItem, ScanSession } from '@/api/types'
+import type { PreviewItem } from '@/api/types'
+import { session } from './fixtures'
 import { contextError, effortError, effortOptions, fmtTokens, isContextPreset, parseTokens } from '@/lib/modelForm'
 import { crumbs, parentOf, sortItems } from '@/lib/paths'
 import { describeMatch, splitExts, targetError } from '@/lib/rules'
@@ -93,7 +94,7 @@ describe('rules', () => {
 })
 
 describe('session next step', () => {
-  const base = { status: 'scanned', tagged_files: 0, planned_ops: 0, executed_ops: 0, review_count: 0 } as ScanSession
+  const base = session()
   it('offers exactly one next action for each state', () => {
     expect(nextAction({ ...base, status: 'scanning' }, undefined).kind).toBe('none')
     expect(nextAction({ ...base, status: 'error' }, undefined).kind).toBe('rescan')

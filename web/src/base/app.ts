@@ -1,7 +1,7 @@
 // PROJECT FILE: the only template file a project edits. Everything else in this
 // directory is copied verbatim and updated by re-copying from the skill.
 import { computed, ref } from 'vue'
-import { http } from '@/api/http'
+import { logout, me } from '@/api/auth'
 import { resetSignIn, router } from '@/router'
 import type { IconName } from './icons'
 import { toast } from './toast'
@@ -61,9 +61,8 @@ const desktop = ref<boolean | null>(null)
 function probeDesktop() {
   if (desktop.value !== null) return
   desktop.value = false
-  http
-    .get<{ desktop?: boolean }>('/auth/me', { skipAuthRedirect: true })
-    .then((r) => (desktop.value = r.data.desktop === true))
+  me()
+    .then((r) => (desktop.value = r.desktop === true))
     .catch(() => {})
 }
 
@@ -74,7 +73,7 @@ export function useShellUser() {
     canSee: (item: NavItem) => !!item,
     logout: async () => {
       try {
-        await http.post('/auth/logout', undefined, { skipAuthRedirect: true })
+        await logout()
       } catch (e) {
         toast.error('退出失败', e)
         return

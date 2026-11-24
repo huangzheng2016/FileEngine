@@ -6,20 +6,20 @@ import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useFetch } from '@/base/useFetch'
 import { listChat, sendChat } from '@/api/runs'
-import type { ChatTurn } from '@/api/types'
+import type { ChatTurn, Id } from '@/api/types'
 import { chatFiles, clearChatFiles, removeChatFile } from '@/lib/chatFiles'
 import { laneBlocks, type Block, type Timeline } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import TranscriptBlock from './TranscriptBlock.vue'
 
 // bare: rendered inside the 助手 tab, which already names it.
-const props = defineProps<{ sessionId: number; timeline: Timeline; busyReason: string; bare?: boolean }>()
-const emit = defineEmits<{ sent: [runId: number] }>()
+const props = defineProps<{ sessionId: Id; timeline: Timeline; busyReason: string; bare?: boolean }>()
+const emit = defineEmits<{ sent: [runId: Id] }>()
 
 const turns = useFetch((signal) => listChat(props.sessionId, signal), { immediate: true })
 const draft = ref('')
 const sending = ref(false)
-const sentText = ref(new Map<number, string>())
+const sentText = ref(new Map<Id, string>())
 const files = computed(() => chatFiles(props.sessionId))
 
 const liveRuns = computed(() =>
@@ -37,7 +37,7 @@ interface Entry {
 
 const entries = computed<Entry[]>(() => {
   const out: Entry[] = []
-  const byRun = new Map<number, ChatTurn[]>()
+  const byRun = new Map<Id, ChatTurn[]>()
   for (const t of turns.data.value ?? []) {
     if (liveIds.value.has(t.run_id)) continue
     byRun.set(t.run_id, [...(byRun.get(t.run_id) ?? []), t])

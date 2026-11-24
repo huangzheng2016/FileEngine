@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
-import { authed } from '@/api/http'
+import { authed } from '@/api/auth'
 
 declare module 'vue-router' {
   interface RouteMeta {

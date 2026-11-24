@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ExecMode, Id } from '@/api/types'
 import { computed, reactive, ref, watch } from 'vue'
 import Alert from '@/base/Alert.vue'
 import BaseDialog from '@/base/BaseDialog.vue'
@@ -11,12 +12,12 @@ import { vTip } from '@/base/tooltip'
 import { toast } from '@/base/toast'
 import { useFetch } from '@/base/useFetch'
 import { useFormValidation } from '@/base/useFormValidation'
-import { checkExecute, startExecute, type ExecMode } from '@/api/sessions'
+import { checkExecute, startExecute } from '@/api/sessions'
 
 // pending: moves that will run (entries awaiting review excluded); review: those awaiting review;
 // resume: an earlier execute already ran, so the rest goes in one go.
-const props = defineProps<{ open: boolean; sessionId: number; pending: number; review: number; resume: boolean }>()
-const emit = defineEmits<{ close: []; started: [runId: number]; review: [] }>()
+const props = defineProps<{ open: boolean; sessionId: Id; pending: number; review: number; resume: boolean }>()
+const emit = defineEmits<{ close: []; started: [runId: Id]; review: [] }>()
 
 const form = reactive({ scope: 'sample' as 'sample' | 'all', sample: 20, mode: 'copy' as ExecMode })
 const starting = ref(false)

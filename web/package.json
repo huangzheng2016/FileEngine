@@ -8,6 +8,7 @@
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0 && node scripts/lint-ui.mjs",
     "format": "prettier --write .",
+    "gen:idl": "node scripts/idl-types.ts",
     "check": "prettier --check . && eslint . --max-warnings 0 && node scripts/lint-ui.mjs && vitest run && vue-tsc -b"
   },
   "dependencies": {

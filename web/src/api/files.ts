@@ -1,106 +1,125 @@
-import { http } from './http'
-import type { Category, FileEntry, PreviewItem, TreeNode } from './types'
+import { fetchBlob, get, list, post } from './http'
+import type { Category, CategoryTemplate, FileEntry, Id, PreviewItem, PreviewSide, TreeNode } from './types'
 
 export interface FileQuery {
-  session_id: number
+  session_id: Id
+  // present and empty = the children of the scan root; absent = no folder filter
   parent_path?: string
   search?: string
   category_path?: string
-  tagged?: '' | 'true' | 'false'
   needs_review?: boolean
   page: number
   size: number
 }
 
 export async function listFiles(q: FileQuery, signal?: AbortSignal) {
-  const { data } = await http.get<{ files: FileEntry[] | null; total: number }>('/files', {
-    params: {
+  const r = await get<{ items: FileEntry[] | null; total: number }>(
+    '/api/file/list',
+    {
       session_id: q.session_id,
       parent_path: q.search ? undefined : q.parent_path,
       search: q.search || undefined,
       category_path: q.category_path || undefined,
-      tagged: q.tagged || undefined,
       needs_review: q.needs_review || undefined,
       page: q.page,
       page_size: q.size,
     },
     signal,
-  })
-  return { items: data.files ?? [], total: data.total }
+  )
+  return { items: list(r.items), total: r.total }
 }
 
-export async function getFileTree(sessionId: number, parentPath: string, signal?: AbortSignal) {
-  const { data } = await http.get<TreeNode[] | null>('/files/tree', {
-    params: { session_id: sessionId, parent_path: parentPath },
+export async function getFile(id: Id, signal?: AbortSignal) {
+  const r = await get<{ item: FileEntry }>('/api/file/get', { id }, signal)
+  return r.item
+}
+
+export async function getFileTree(sessionId: Id, parentPath: string, signal?: AbortSignal) {
+  const r = await get<{ items: TreeNode[] | null }>(
+    '/api/file/tree',
+    { session_id: sessionId, parent_path: parentPath },
     signal,
-  })
-  return data ?? []
+  )
+  return list(r.items)
 }
 
-export async function updateFileTarget(id: number, newPath: string) {
-  const { data } = await http.patch<FileEntry>(`/files/${id}`, { new_path: newPath })
-  return data
+// Absent fields stay unchanged; new_path is a user decision on the entry.
+export async function updateFile(id: Id, patch: { description?: string; new_path?: string }) {
+  const r = await post<{ item: FileEntry }>('/api/file/update', { ...patch, id })
+  return r.item
 }
 
-export async function fileContent(id: number, signal?: AbortSignal) {
-  const { data } = await http.get<Blob>(`/files/${id}/content`, { responseType: 'blob', signal })
-  return data
+export const updateFileTarget = (id: Id, newPath: string) => updateFile(id, { new_path: newPath })
+
+export async function fileContent(id: Id, signal?: AbortSignal) {
+  return (await fetchBlob('GET', '/api/file/content', { query: { id }, signal })).blob
 }
 
-export async function resetPlans(sessionId: number, fileIds: number[]) {
-  const { data } = await http.post<{ reset: number }>(`/sessions/${sessionId}/plans/reset`, { file_ids: fileIds })
-  return data.reset
+export async function resetPlans(sessionId: Id, fileIds: Id[]) {
+  const r = await post<{ reset: number }>('/api/plan/ops_reset', { session_id: sessionId, file_ids: fileIds })
+  return r.reset
 }
 
 export const PREVIEW_LIMIT = 500
 
 export async function previewTree(
-  sessionId: number,
-  side: 'before' | 'after',
+  sessionId: Id,
+  side: PreviewSide,
   path: string,
   signal?: AbortSignal,
 ): Promise<{ items: PreviewItem[]; total: number }> {
-  const { data } = await http.get<{ items: PreviewItem[] | null; total: number }>(
-    `/sessions/${sessionId}/preview/tree`,
-    { params: { side, path, offset: 0, limit: PREVIEW_LIMIT }, signal },
+  const r = await get<{ items: PreviewItem[] | null; total: number }>(
+    '/api/plan/preview',
+    { session_id: sessionId, side, path, offset: 0, limit: PREVIEW_LIMIT },
+    signal,
   )
-  const items = data.items ?? []
-  return { items, total: data.total ?? items.length }
+  const items = list(r.items)
+  return { items, total: r.total ?? items.length }
 }
 
-export async function listCategories(filesystemId: number, signal?: AbortSignal) {
-  const { data } = await http.get<Category[] | null>('/categories', { params: { filesystem_id: filesystemId }, signal })
-  return data ?? []
+export async function listCategories(filesystemId: Id, signal?: AbortSignal) {
+  const r = await get<{ items: Category[] | null }>('/api/category/list', { filesystem_id: filesystemId }, signal)
+  return list(r.items)
 }
 
 export interface CategoryInput {
-  filesystem_id: number
+  filesystem_id: Id
   name: string
   path: string
+  structure?: string
   description: string
-  agent_editable: boolean
 }
 
 export async function createCategory(body: CategoryInput) {
-  const { data } = await http.post<Category>('/categories', body)
-  return data
+  const r = await post<{ item: Category }>('/api/category/create', { ...body, id: '0' })
+  return r.item
 }
 
-export async function updateCategory(id: number, body: CategoryInput) {
-  const { data } = await http.put<Category>(`/categories/${id}`, body)
-  return data
+export async function updateCategory(id: Id, body: CategoryInput) {
+  const r = await post<{ item: Category }>('/api/category/update', { ...body, id })
+  return r.item
 }
 
-export async function deleteCategory(id: number) {
-  await http.delete(`/categories/${id}`)
+export async function deleteCategory(id: Id) {
+  await post<void>('/api/category/delete', { id })
 }
 
-export async function importCategories(
-  filesystemId: number,
-  items: { name: string; path: string; description: string }[],
+export async function exportCategories(filesystemId: Id, signal?: AbortSignal) {
+  const r = await get<{ items: CategoryTemplate[] | null }>(
+    '/api/category/export',
+    { filesystem_id: filesystemId },
+    signal,
+  )
+  return list(r.items)
+}
+
+export function importCategories(
+  filesystemId: Id,
+  items: (Pick<CategoryTemplate, 'name' | 'path'> & Partial<CategoryTemplate>)[],
 ) {
-  const { data } = await http.post<{ created: number; skipped: number }>('/categories/import', items, {
-    params: { filesystem_id: filesystemId },
+  const full = items.map((c) => ({ structure: '', description: '', ...c }))
+  return post<{ created: number; skipped: number }>('/api/category/import', {
+    filesystem_id: filesystemId,
+    items: full,
   })
-  return data
 }

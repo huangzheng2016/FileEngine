@@ -12,10 +12,10 @@ import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFetch } from '@/base/useFetch'
 import { useFormValidation } from '@/base/useFormValidation'
 import { createCategory, deleteCategory, importCategories, listCategories, updateCategory } from '@/api/files'
-import type { Category } from '@/api/types'
+import type { Category, Id } from '@/api/types'
 import { categoryPresets, type CategoryPreset } from '@/data/categoryPresets'
 
-const props = defineProps<{ open: boolean; filesystemId: number }>()
+const props = defineProps<{ open: boolean; filesystemId: Id }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 const confirm = useConfirm()
 

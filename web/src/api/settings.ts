@@ -1,5 +1,15 @@
-import { http } from './http'
-import type { Filesystem, ModelProvider, Protocol } from './types'
+import { download, get, list, post } from './http'
+import type {
+  AgentConfigPatch,
+  AppConfig,
+  Filesystem,
+  Id,
+  ModelProvider,
+  ProbeDir,
+  PromptInfo,
+  Protocol,
+  ProviderKind,
+} from './types'
 
 export interface FilesystemConn {
   protocol: Protocol
@@ -23,42 +33,51 @@ export interface FilesystemInput extends FilesystemConn {
 export interface ProbeResult {
   success: boolean
   // plain sentence with the next step; detail is the raw error
-  error?: string
-  detail?: string
-  host_key?: string
-  host_key_changed?: boolean
+  error: string
+  detail: string
+  host_key: string
+  host_key_changed: boolean
   // folders at base_path; path is the base_path value that opens one
-  dirs: { name: string; path: string }[]
+  dirs: ProbeDir[]
 }
 
 export async function listFilesystems(signal?: AbortSignal) {
-  const { data } = await http.get<Filesystem[] | null>('/filesystems', { signal })
-  return data ?? []
+  const r = await get<{ items: Filesystem[] | null }>('/api/filesystem/list', undefined, signal)
+  return list(r.items)
+}
+
+export async function getFilesystem(id: Id, signal?: AbortSignal) {
+  const r = await get<{ item: Filesystem }>('/api/filesystem/get', { id }, signal)
+  return r.item
 }
 
 export async function createFilesystem(body: FilesystemInput) {
-  const { data } = await http.post<Filesystem>('/filesystems', body)
-  return data
+  const r = await post<{ item: Filesystem }>('/api/filesystem/create', { ...body, id: '0' })
+  return r.item
 }
 
-export async function updateFilesystem(id: number, body: FilesystemInput) {
-  const { data } = await http.put<Filesystem>(`/filesystems/${id}`, body)
-  return data
+export async function updateFilesystem(id: Id, body: FilesystemInput) {
+  const r = await post<{ item: Filesystem }>('/api/filesystem/update', { ...body, id })
+  return r.item
 }
 
-export async function deleteFilesystem(id: number) {
-  await http.delete(`/filesystems/${id}`)
+export async function deleteFilesystem(id: Id) {
+  await post<void>('/api/filesystem/delete', { id })
 }
 
 // Tests the connection and lists the folders at base_path.
-export async function testFilesystem(body: FilesystemConn & { id?: number }, signal?: AbortSignal) {
-  const { data } = await http.post<ProbeResult>('/filesystems/test', body, { signal })
-  return { ...data, dirs: data.dirs ?? [] }
+export async function testFilesystem(body: FilesystemConn & { id?: Id }, signal?: AbortSignal) {
+  const r = await post<ProbeResult & { dirs: ProbeDir[] | null }>(
+    '/api/filesystem/test',
+    { ...body, id: body.id ?? '0' },
+    signal,
+  )
+  return { ...r, dirs: list(r.dirs) }
 }
 
 export interface ModelInput {
   name: string
-  provider: ModelProvider['provider']
+  provider: ProviderKind
   // sent only when the user typed a new one
   api_key?: string
   model: string
@@ -72,83 +91,71 @@ export interface ModelInput {
 }
 
 export async function listModels(signal?: AbortSignal) {
-  const { data } = await http.get<ModelProvider[] | null>('/models', { signal })
-  return data ?? []
+  const r = await get<{ items: ModelProvider[] | null }>('/api/model/list', undefined, signal)
+  return list(r.items)
+}
+
+export async function getModel(id: Id, signal?: AbortSignal) {
+  const r = await get<{ item: ModelProvider }>('/api/model/get', { id }, signal)
+  return r.item
 }
 
 export async function createModel(body: ModelInput) {
-  const { data } = await http.post<ModelProvider>('/models', body)
-  return data
+  const r = await post<{ item: ModelProvider }>('/api/model/create', { ...body, id: '0' })
+  return r.item
 }
 
-export async function updateModel(id: number, body: ModelInput) {
-  const { data } = await http.put<ModelProvider>(`/models/${id}`, body)
-  return data
+export async function updateModel(id: Id, body: ModelInput) {
+  const r = await post<{ item: ModelProvider }>('/api/model/update', { ...body, id })
+  return r.item
 }
 
-export async function deleteModel(id: number) {
-  await http.delete(`/models/${id}`)
+export async function deleteModel(id: Id) {
+  await post<void>('/api/model/delete', { id })
 }
 
-export async function testModel(body: ModelInput & { id?: number }) {
-  const { data } = await http.post<{ success: boolean; reply?: string; error?: string; detail?: string }>(
-    '/models/test',
-    body,
-  )
-  return data
+export function testModel(body: ModelInput & { id?: Id }) {
+  return post<{ success: boolean; reply: string; error: string; detail: string }>('/api/model/test', {
+    ...body,
+    id: body.id ?? '0',
+  })
 }
 
 export interface CatalogInput {
-  provider: ModelProvider['provider']
+  provider: ProviderKind
   base_url: string
   api_key?: string
-  id?: number
+  id?: Id
 }
 
 // The models the provider says this key can use.
 export async function listProviderModels(body: CatalogInput, signal?: AbortSignal) {
-  const { data } = await http.post<{ success: boolean; models: string[]; error?: string; detail?: string }>(
-    '/models/catalog',
-    body,
-    { signal },
-  )
-  return { ...data, models: data.models ?? [] }
-}
-
-export interface AgentConfig {
-  concurrency: number
-  max_step: number
-  max_retries: number
-  rate_limit_max_retries: number
-  max_file_read_size: number
-  agent_timeout: number
-  script_timeout: number
-  category_policy: string
-  system_prompt: string
-  [key: string]: unknown
-}
-
-export interface AppConfig {
-  server: Record<string, unknown>
-  database: Record<string, unknown>
-  agent: AgentConfig
-  // read-only; agent.category_policy equal to it means not customized
-  default_category_policy?: string
-}
-
-export async function getConfig(signal?: AbortSignal) {
-  const { data } = await http.get<AppConfig>('/config', { signal })
-  return data
-}
-
-export async function saveConfig(cfg: AppConfig) {
-  const { data } = await http.put<AppConfig>('/config', cfg)
-  return data
-}
-
-export async function getPrompt(signal?: AbortSignal) {
-  const { data } = await http.get<{ prompt: string; default_prompt: string; is_custom: boolean }>('/prompt', {
+  const r = await post<{ success: boolean; models: string[] | null; error: string; detail: string }>(
+    '/api/model/catalog',
+    { ...body, id: body.id ?? '0' },
     signal,
-  })
-  return data
+  )
+  return { ...r, models: list(r.models) }
+}
+
+export function getConfig(signal?: AbortSignal) {
+  return get<AppConfig>('/api/config/get', undefined, signal)
+}
+
+// A patch: fields left out stay unchanged.
+export function saveConfig(agent: AgentConfigPatch) {
+  return post<AppConfig>('/api/config/update', { agent })
+}
+
+export function getPrompt(signal?: AbortSignal) {
+  return get<PromptInfo>('/api/config/prompt', undefined, signal)
+}
+
+// A prompt equal to the default resets to it.
+export function savePrompt(prompt: string) {
+  return post<PromptInfo>('/api/config/prompt_update', { prompt })
+}
+
+export function backupDatabase(filename: string) {
+  return download('/api/admin/backup', { method: 'POST', filename })
 }

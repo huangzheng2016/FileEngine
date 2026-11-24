@@ -4,9 +4,9 @@ import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
 import { errorMessage } from '@/base/errors'
 import { getFileTree } from '@/api/files'
-import type { TreeNode } from '@/api/types'
+import type { TreeNode, Id } from '@/api/types'
 
-const props = defineProps<{ sessionId: number }>()
+const props = defineProps<{ sessionId: Id }>()
 const model = defineModel<string>({ required: true })
 
 const children = ref(new Map<string, TreeNode[]>())

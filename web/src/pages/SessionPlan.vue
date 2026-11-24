@@ -17,16 +17,15 @@ import { vTip } from '@/base/tooltip'
 import { useConfirm } from '@/base/useConfirm'
 import { useDirtyGuard } from '@/base/useDirtyGuard'
 import { useFetch } from '@/base/useFetch'
-import { isConflict, toSec } from '@/api/http'
+import { isConflict } from '@/api/http'
 import { applyRulesSummary, deleteRule, listRules, previewRules, updateRule } from '@/api/rules'
 import { approvePlan, draftPlan, getPlan, savePlan } from '@/api/runs'
-import type { AxiosError } from 'axios'
-import type { PlanRule, RulePreview, SessionPlan } from '@/api/types'
+import type { PlanRule, RuleApplyStat, SessionPlan, Id } from '@/api/types'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
 import { describeMatch } from '@/lib/rules'
 import RuleDialog from './RuleDialog.vue'
 
-const props = defineProps<{ sessionId: number; rev: number; busyReason: string }>()
+const props = defineProps<{ sessionId: Id; rev: number; busyReason: string }>()
 const emit = defineEmits<{ started: [] }>()
 const confirm = useConfirm()
 
@@ -69,8 +68,7 @@ async function save(base = p.value?.version ?? 0) {
     toast.success('已保存')
   } catch (e) {
     if (isConflict(e)) {
-      const latest = (e as AxiosError<{ plan?: SessionPlan }>).response?.data?.plan
-      conflict.value = latest ?? (await getPlan(props.sessionId).catch(() => null))
+      conflict.value = await getPlan(props.sessionId).catch(() => null)
     } else toast.error('保存失败', e)
   } finally {
     saving.value = false
@@ -207,10 +205,10 @@ const ruleMenu = (r: PlanRule, i: number) => [
   { label: '删除', icon: 'trash-2' as const, danger: true, onSelect: () => void removeRule(r) },
 ]
 
-const preview = ref<RulePreview[] | null>(null)
+const preview = ref<RuleApplyStat[] | null>(null)
 const previewing = ref(false)
 const applying = ref(false)
-const previewOf = (id: number) => preview.value?.find((x) => x.rule_id === id)
+const previewOf = (id: Id) => preview.value?.find((x) => x.rule_id === id)
 
 async function estimate() {
   if (previewing.value) return
@@ -250,9 +248,7 @@ async function apply() {
       <div class="card-head">
         <div>
           <h3>方案</h3>
-          <p v-if="exists && p" class="card-desc">
-            版本 {{ p.version }} · 更新于 {{ fmtRelative(toSec(p.updated_at)) }}
-          </p>
+          <p v-if="exists && p" class="card-desc">版本 {{ p.version }} · 更新于 {{ fmtRelative(p.updated_at) }}</p>
         </div>
         <StatusPill v-if="exists && p" :value="p.status" :map="PLAN_STATUS" />
         <template v-if="editing">
