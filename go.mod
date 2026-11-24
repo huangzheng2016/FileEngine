@@ -146,3 +146,5 @@ require (
 )
 
 replace github.com/vmware/go-nfs-client => ./third_party/go-nfs-client
+
+replace github.com/cloudwego/eino-ext/components/model/claude => ./third_party/eino-claude
