@@ -81,6 +81,7 @@ function apply(cfg: AppConfig, def = defaultPrompt.value) {
   })
   v.reset()
   guard.reset()
+  loaded = draft()
 }
 
 const saving = ref(false)
@@ -97,11 +98,21 @@ const draft = () => ({
   system_prompt: form.prompt.trim() === defaultPrompt.value.trim() ? '' : form.prompt,
 })
 
+// The values the form was loaded with: a save sends only what the user changed, so overwriting after
+// a conflict keeps the other person's edits to every other field.
+let loaded: ReturnType<typeof draft> | null = null
+const changes = () => {
+  const d = draft()
+  return Object.fromEntries(
+    Object.entries(d).filter(([k, val]) => !loaded || loaded[k as keyof typeof d] !== val),
+  ) as Partial<ReturnType<typeof draft>>
+}
+
 async function save(base = snapshot.value?.version ?? 0) {
   if (!snapshot.value || !v.validate() || saving.value) return
   saving.value = true
   try {
-    apply(await saveConfig(draft(), base))
+    apply(await saveConfig(changes(), base))
     conflict.value = null
     toast.success('已保存')
   } catch (e) {
