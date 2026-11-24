@@ -17,9 +17,9 @@ const (
 )
 
 // runtimeRequestGuard keeps documents other than the app itself from reaching the Wails runtime
-// endpoints. FileEngine's own UI lives on the loopback origin (see loopback.go), so nothing legitimate
-// is served from the Wails origin; on Windows, WebView2 intercepts http://wails.localhost requests
-// from any page in the webview, which makes this guard the only barrier for those endpoints. The runtime handler performs no
+// endpoints. The app's own UI is served from the Wails origin too, so the guard cannot rely on
+// the origin alone; on Windows, WebView2 intercepts http://wails.localhost requests from any page
+// in the webview, which makes this guard the only barrier for those endpoints. The runtime handler performs no
 // origin check and also accepts calls from the query string, so anything that can issue a request
 // to the app origin could otherwise invoke every IPC command.
 //

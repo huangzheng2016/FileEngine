@@ -7,8 +7,10 @@ are the source of truth. How the system fits together: `docs/architecture.md`; s
 ## Project Map
 
 - `main.go`, `internal/app`: server entry and lifecycle. `cmd/fileengine-desktop`: Wails v3 desktop (in-process
-  server on loopback).
-- `internal/api`: Gin handlers, one file per resource; auth, limits and run launching live here.
+  backend, no listener; the window talks to it through Wails bindings).
+- `idl`: Thrift IDL, the only route table (`/api/<feature>/<action>`). `biz`: Hertz backend: `model`, `router`
+  and `handler/api/*_service.go` stubs are hz output (bodies hand-written), `handler/resp`, `errs`, `mw`
+  (default-deny auth, limits), `service/<feature>` business logic. `container`: Wire-built services.
 - `internal/agent`: tagging pipeline, chat, survey, review, reflection, tools, Tengo scripts, prompts, memory.
 - `internal/db`: GORM models, repository, contract types (`contract.go`), runs and the event bus.
 - `internal/scanner`, `internal/executor`, `internal/remotefs`, `internal/model`, `internal/pathutil`,
@@ -17,7 +19,8 @@ are the source of truth. How the system fits together: `docs/architecture.md`; s
   verbatim from the skill (only `app.ts`, `labels.ts`, `icons.ts` are project-owned).
 - `third_party/go-nfs-client`: vendored NFS client. `deploy`: Docker test environment. `scripts`: build checks.
 
-Toolchain: Go 1.27 (pinned toolchain), Node 24, npm, Wails v3 CLI pinned in `Taskfile.yml`. SQLite is pure Go;
+Toolchain: Go 1.27 (pinned toolchain), Node 24, npm, Wails v3 CLI, hz and thriftgo pinned in `Taskfile.yml`
+(`task gen` regenerates; `task gen:check` fails on stale generated code). SQLite is pure Go;
 the server builds with `CGO_ENABLED=0`; Linux desktop builds need GTK 4 and WebKitGTK 6.
 
 ## Working Rules
