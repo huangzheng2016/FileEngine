@@ -32,7 +32,9 @@ watch(
 // the server lists folders first, then by name
 const items = computed(() => list.data.value?.items ?? [])
 const total = computed(() => list.data.value?.total ?? 0)
-const trail = computed(() => pathCrumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'))
+const trail = computed(() =>
+  pathCrumbs(props.path, props.side === 'before' ? '整理前' : '整理后', props.side === 'after'),
+)
 
 const countText = (n?: number) => (n == null ? '—' : `${fmtNumber(n)} 个`)
 

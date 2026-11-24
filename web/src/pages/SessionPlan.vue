@@ -9,6 +9,8 @@ import Loading from '@/base/Loading.vue'
 import MarkdownEditor from '@/base/MarkdownEditor.vue'
 import StatusPill from '@/base/StatusPill.vue'
 import TableState from '@/base/TableState.vue'
+import Alert from '@/base/Alert.vue'
+import { copyText } from '@/base/clipboard'
 import { fmtNumber } from '@/base/format'
 import { PLAN_STATUS } from '@/base/labels'
 import { fmtRelative } from '@/base/time'
@@ -23,6 +25,7 @@ import { approvePlan, draftPlan, getPlan, savePlan } from '@/api/runs'
 import type { PlanRule, RuleApplyStat, SessionPlan, Id } from '@/api/types'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
 import { describeMatch } from '@/lib/rules'
+import { shownPath } from '@/lib/toolView'
 import RuleDialog from './RuleDialog.vue'
 
 const props = defineProps<{ sessionId: Id; rev: number; busyReason: string }>()
@@ -35,18 +38,33 @@ const draftText = ref('')
 const saving = ref(false)
 const guard = useDirtyGuard(() => (editing.value ? draftText.value : ''), { route: true })
 
-watch(
-  () => props.rev,
-  () => {
-    if (!editing.value) void plan.refresh()
-  },
-)
-
 const p = computed(() => plan.data.value)
 const exists = computed(() => !!p.value && p.value.version > 0)
 
+// A newer version found while the person is editing. Their text stays; the plan on screen is not replaced.
+const latest = ref<SessionPlan | null>(null)
+const diffOpen = ref(false)
+
+async function checkLatest() {
+  try {
+    const next = await getPlan(props.sessionId)
+    if (next.version > (p.value?.version ?? 0)) latest.value = next
+  } catch {
+    // the next save reports a stale version on its own
+  }
+}
+
+watch(
+  () => props.rev,
+  () => {
+    if (editing.value) void checkLatest()
+    else void plan.refresh()
+  },
+)
+
 function edit() {
   draftText.value = p.value?.content ?? ''
+  latest.value = null
   editing.value = true
   guard.reset()
 }
@@ -54,9 +72,8 @@ function edit() {
 async function cancelEdit() {
   if (draftText.value !== (p.value?.content ?? '') && !(await guard.confirmDiscard())) return
   editing.value = false
+  latest.value = null
 }
-
-const conflict = ref<SessionPlan | null>(null)
 
 async function save(base = p.value?.version ?? 0) {
   if (saving.value) return
@@ -64,22 +81,39 @@ async function save(base = p.value?.version ?? 0) {
   try {
     plan.data.value = await savePlan(props.sessionId, draftText.value, base)
     editing.value = false
-    conflict.value = null
+    latest.value = null
+    diffOpen.value = false
     toast.success('已保存')
   } catch (e) {
-    if (isConflict(e)) {
-      conflict.value = await getPlan(props.sessionId).catch(() => null)
-    } else toast.error('保存失败', e)
+    if (!isConflict(e)) {
+      toast.error('保存失败', e)
+    } else {
+      try {
+        latest.value = await getPlan(props.sessionId)
+        diffOpen.value = true
+      } catch (e2) {
+        toast.error('方案已被更新，读取最新版本失败', e2)
+      }
+    }
   } finally {
     saving.value = false
   }
 }
 
-function discardMine() {
-  if (!conflict.value) return
-  plan.data.value = conflict.value
-  draftText.value = conflict.value.content
-  conflict.value = null
+async function useLatest() {
+  const next = latest.value
+  if (!next) return
+  const ok = await confirm({
+    message: '放弃你的修改并载入最新方案？你的修改将不再保留。',
+    confirmText: '放弃我的修改',
+    danger: true,
+  })
+  if (!ok) return
+  plan.data.value = next
+  draftText.value = next.content
+  guard.reset()
+  latest.value = null
+  diffOpen.value = false
   toast.success('已载入最新方案')
 }
 
@@ -96,6 +130,11 @@ const generateBlocked = computed(() => props.busyReason || (generating.value ? '
 
 async function generate() {
   if (generateBlocked.value) return
+  if (
+    exists.value &&
+    !(await confirm({ message: '重新生成方案？助手会写出新的版本，当前方案不再是最新。', confirmText: '重新生成' }))
+  )
+    return
   generating.value = true
   try {
     await draftPlan(props.sessionId, '')
@@ -147,18 +186,28 @@ function openRule(r: PlanRule | null) {
 const nextPosition = computed(() => items.value.reduce((m, r) => Math.max(m, r.position), 0) + 1)
 
 const moving = ref(false)
+// Positions are rewritten one by one in the new order; a failure puts the ones already written back.
 async function move(r: PlanRule, dir: -1 | 1) {
   const i = items.value.indexOf(r)
-  const other = items.value[i + dir]
-  if (!other || moving.value) return
+  if (i + dir < 0 || i + dir >= items.value.length || moving.value) return
   moving.value = true
+  const order = items.value.slice()
+  order.splice(i + dir, 0, order.splice(i, 1)[0])
+  const written: PlanRule[] = []
   try {
-    await Promise.all([updateRule(r.id, { position: other.position }), updateRule(other.id, { position: r.position })])
-    await rules.refresh()
+    for (const [n, rule] of order.entries()) {
+      if (rule.position === n + 1) continue
+      await updateRule(rule.id, { position: n + 1 })
+      written.push(rule)
+    }
+    toast.success('已调整顺序')
+    preview.value = null
   } catch (e) {
+    for (const rule of written) await updateRule(rule.id, { position: rule.position }).catch(() => undefined)
     toast.error('调整顺序失败', e)
   } finally {
     moving.value = false
+    void rules.refresh()
   }
 }
 
@@ -181,6 +230,7 @@ async function removeRule(r: PlanRule) {
   try {
     await deleteRule(r.id)
     toast.success('已删除')
+    preview.value = null
     void rules.refresh()
   } catch (e) {
     toast.error('删除失败', e)
@@ -253,39 +303,47 @@ async function apply() {
         <StatusPill v-if="exists && p" :value="p.status" :map="PLAN_STATUS" />
         <template v-if="editing">
           <button type="button" class="btn-sm" @click="cancelEdit">取消</button>
-          <button type="button" class="btn-sm" :disabled="saving" @click="save()">
+          <button type="button" class="btn-sm primary" :disabled="saving" @click="save()">
             {{ saving ? '保存中' : '保存' }}
           </button>
         </template>
         <template v-else-if="exists">
           <button type="button" class="btn-sm" @click="edit"><Icon name="pencil" :size="14" />编辑</button>
-          <button v-if="p?.status === 'draft'" type="button" class="btn-sm" :disabled="working" @click="approve">
+          <button
+            v-if="p?.status === 'draft'"
+            type="button"
+            class="btn-sm primary"
+            :disabled="working"
+            @click="approve"
+          >
             {{ working ? '批准中' : '批准' }}
           </button>
           <ActionMenu :items="planMenu" />
         </template>
       </div>
+      <Alert v-if="editing && latest" tone="warning">
+        方案已更新到版本 {{ latest.version }}。
+        <template #action>
+          <button type="button" class="btn-sm" @click="diffOpen = true">查看差异</button>
+        </template>
+      </Alert>
       <Loading v-if="!plan.loaded.value" />
-      <p v-else-if="plan.error.value" class="text-danger">加载失败：{{ plan.error.value }}</p>
+      <div v-else-if="plan.error.value && !p" class="plan-error">
+        <p class="text-danger">加载失败：{{ plan.error.value }}</p>
+        <button type="button" class="btn-sm" @click="plan.refresh">重试</button>
+      </div>
       <MarkdownEditor v-else-if="editing" v-model="draftText" :rows="20" name="plan" />
       <StreamMarkdown v-else-if="exists && p" :source="p.content" />
-      <EmptyState
-        v-else
-        icon="list"
-        title="还没有方案"
-        hint="可以先让 AI 看一遍文件，写出整理思路；你改好后，整理时会照着做"
-      >
-        <button v-tip="generateBlocked" type="button" :disabled="!!generateBlocked" @click="generate">
+      <EmptyState v-else icon="list" title="还没有方案">
+        <button v-tip="generateBlocked" type="button" class="primary" :disabled="!!generateBlocked" @click="generate">
           {{ generating ? '生成中' : '生成方案' }}
         </button>
       </EmptyState>
     </section>
 
-    <section class="rules">
-      <div class="toolbar">
+    <section class="card">
+      <div class="card-head">
         <h3>规则</h3>
-        <span class="spacer" />
-        <button type="button" class="btn-sm" @click="openRule(null)"><Icon name="plus" :size="14" />新建</button>
         <button v-if="items.length" type="button" class="btn-sm" :disabled="previewing" @click="estimate">
           {{ previewing ? '预估中' : '预估命中' }}
         </button>
@@ -298,6 +356,9 @@ async function apply() {
           @click="apply"
         >
           {{ applying ? '应用中' : '应用规则' }}
+        </button>
+        <button type="button" class="btn-sm primary" @click="openRule(null)">
+          <Icon name="plus" :size="14" />新建
         </button>
       </div>
       <div class="table-wrap">
@@ -328,7 +389,7 @@ async function apply() {
               <tr v-if="previewOf(r.id)?.samples.length">
                 <td colspan="5" class="wrap">
                   <span v-for="(x, n) in previewOf(r.id)!.samples" :key="n" class="cell-sub mono">
-                    {{ x.original_path }} → {{ x.new_path }}
+                    {{ shownPath(x.original_path) }} → {{ shownPath(x.new_path) }}
                   </span>
                 </td>
               </tr>
@@ -338,7 +399,7 @@ async function apply() {
               :loading="!rules.loaded.value"
               :error="rules.error.value"
               :empty="items.length === 0"
-              empty-text="暂无规则。规则能一次决定一类文件的去向，例如所有照片按年份放"
+              empty-text="暂无规则"
               @retry="rules.refresh"
             />
           </tbody>
@@ -346,11 +407,11 @@ async function apply() {
       </div>
     </section>
 
-    <BaseDialog :open="!!conflict" title="方案已被更新" width="720px" @close="conflict = null">
-      <template v-if="conflict">
-        <p>方案在你编辑时更新到了版本 {{ conflict.version }}。下面是它与你的修改的不同之处。</p>
+    <BaseDialog :open="diffOpen && !!latest" title="方案已被更新" width="720px" @close="diffOpen = false">
+      <template v-if="latest">
+        <p>方案在你编辑时更新到了版本 {{ latest.version }}。下面是它与你的修改的不同之处。</p>
         <DiffView
-          :before="{ content: conflict.content }"
+          :before="{ content: latest.content }"
           :after="{ content: draftText }"
           :labels="{ content: '方案' }"
           before-label="最新版本"
@@ -358,9 +419,10 @@ async function apply() {
         />
       </template>
       <template #footer>
-        <button type="button" @click="conflict = null">继续编辑</button>
-        <button type="button" @click="discardMine">放弃我的修改</button>
-        <button type="button" class="primary" :disabled="saving" @click="save(conflict!.version)">
+        <button type="button" @click="copyText(draftText)">复制我的修改</button>
+        <button type="button" @click="diffOpen = false">继续编辑</button>
+        <button type="button" @click="useLatest">放弃我的修改</button>
+        <button type="button" class="primary" :disabled="saving" @click="save(latest!.version)">
           {{ saving ? '保存中' : '用我的修改覆盖' }}
         </button>
       </template>
@@ -378,9 +440,9 @@ async function apply() {
 </template>
 
 <style scoped>
-.rules {
+.plan-error {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-3);
 }
 </style>
