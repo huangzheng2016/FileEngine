@@ -33,8 +33,9 @@ func NewChatModelFromProvider(ctx context.Context, p *db.ModelProvider) (model.C
 	}
 }
 
-// Use it on the shared-context message that precedes per-unit data; system,
-// tools and the rolling last message get breakpoints automatically.
+// Use it on the shared-context message that precedes per-unit data. The last
+// tool, the system prompt and the last message of every request get theirs
+// automatically (see claudeModel), which makes four, the API limit.
 func MarkCacheBreakpoint(msg *schema.Message) *schema.Message {
 	return claude.SetMessageBreakpoint(msg)
 }
@@ -65,7 +66,9 @@ func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 	// The hint-capturing transport surfaces error status codes and Retry-After
 	// headers, which the eino/go-openai error types drop. The client is shared by
 	// all workers; hints travel per request context, so they never mix.
-	cfg.HTTPClient = &http.Client{Transport: newHintCaptureTransport(nil)}
+	hints := newHintCaptureTransport(nil)
+	hints.injectCacheKey = p.Provider == "openai"
+	cfg.HTTPClient = &http.Client{Transport: hints}
 	cfg.Temperature = temperature(p)
 	if p.MaxTokens > 0 {
 		maxTokens := p.MaxTokens
@@ -78,7 +81,11 @@ func openAIConfig(p *db.ModelProvider, baseURL string) *openai.ChatModelConfig {
 }
 
 func newClaudeModel(ctx context.Context, p *db.ModelProvider) (model.ChatModel, error) {
-	return claude.NewChatModel(ctx, claudeConfig(p))
+	m, err := claude.NewChatModel(ctx, claudeConfig(p))
+	if err != nil {
+		return nil, err
+	}
+	return &claudeModel{inner: m}, nil
 }
 
 var claudeThinkingBudgets = map[string]int{"low": 2048, "medium": 8192, "high": 16384}
@@ -87,10 +94,6 @@ const (
 	claudeMinBudget    = 1024 // API minimum budget_tokens
 	claudeMaxBudget    = 32768
 	claudeAnswerTokens = 4096 // output room kept above the thinking budget
-	// The Messages API requires max_tokens; used when the provider leaves it 0.
-	claudeDefaultMaxTokens = 8192
-	// adaptive thinking shares max_tokens with the answer
-	claudeAdaptiveMaxTokens = 32000
 )
 
 // The budget is capped below maxTokens, and maxTokens is raised when it
@@ -112,43 +115,63 @@ func claudeThinking(effort string, maxTokens int) (budget, newMaxTokens int) {
 	return budget, maxTokens
 }
 
+// claudeDefaultMaxTokens is the largest output the model accepts by default,
+// used when the provider leaves max_tokens at 0. Every request is streamed,
+// so a large ceiling cannot hit HTTP timeouts, and it costs nothing unless
+// the model uses it.
+func claudeDefaultMaxTokens(name string) int {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.HasPrefix(n, "claude-3-opus"), strings.HasPrefix(n, "claude-3-haiku"), strings.HasPrefix(n, "claude-instant"):
+		return 4096
+	case strings.HasPrefix(n, "claude-3-5"), strings.HasPrefix(n, "claude-3-sonnet"):
+		return 8192
+	case strings.HasPrefix(n, "claude-opus-4-0"), strings.HasPrefix(n, "claude-opus-4-1"), n == "claude-opus-4":
+		return 32000
+	}
+	return 64000
+}
+
+// Thinking and effort come from the provider alone, so every request of a
+// run carries identical values.
 func claudeConfig(p *db.ModelProvider) *claude.Config {
 	cfg := &claude.Config{
 		APIKey:    p.APIKey,
 		Model:     p.Model,
 		MaxTokens: p.MaxTokens,
-		// Prompt caching: cache breakpoints on system, tools and the last
-		// message of each turn, so ReAct rounds re-read the shared prefix.
+		// Breakpoints on tools and system; the shared context and the last
+		// message are marked by claudeModel.
 		AutoCacheControl: &claude.CacheControl{},
+		// The app is the only retry layer.
+		HTTPClient: &http.Client{Transport: newHintCaptureTransport(nil).withoutSDKRetries()},
+	}
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = claudeDefaultMaxTokens(p.Model)
 	}
 	if p.BaseURL != "" {
 		baseURL := p.BaseURL
 		cfg.BaseURL = &baseURL
 	}
 	if !claudeLegacyModel(p.Model) {
-		// Current models choose their own thinking depth and reject sampling parameters.
-		if cfg.MaxTokens <= 0 {
-			cfg.MaxTokens = claudeAdaptiveMaxTokens
-		}
+		// Current models choose their own thinking depth and reject sampling
+		// parameters. Effort is the only depth control on models that cannot
+		// switch thinking off, so it does not depend on the thinking toggle.
 		if p.ThinkingEnabled {
 			thinking := anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
 			cfg.ThinkingConfig = &thinking
-			if effort := claudeEffort(p.ReasoningEffort); effort != "" {
-				cfg.AdditionalRequestFields = map[string]any{"output_config": map[string]any{"effort": effort}}
-			}
+		}
+		if effort := claudeEffort(p.ReasoningEffort); effort != "" {
+			cfg.AdditionalRequestFields = map[string]any{"output_config": map[string]any{"effort": effort}}
 		}
 		return cfg
 	}
 	if p.ThinkingEnabled {
 		// Extended thinking only accepts the default temperature, so none is sent.
-		budget, maxTokens := claudeThinking(p.ReasoningEffort, p.MaxTokens)
+		budget, maxTokens := claudeThinking(p.ReasoningEffort, cfg.MaxTokens)
 		cfg.MaxTokens = maxTokens
 		thinking := anthropic.ThinkingConfigParamOfEnabled(int64(budget))
 		cfg.ThinkingConfig = &thinking
 		return cfg
-	}
-	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = claudeDefaultMaxTokens
 	}
 	cfg.Temperature = temperature(p)
 	return cfg

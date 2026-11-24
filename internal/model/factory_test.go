@@ -60,7 +60,7 @@ func TestClaudeThinkingParams(t *testing.T) {
 		{"", 64000, 32768, 64000},
 		{"high", 8192, 4096, 8192}, // capped below max_tokens
 		{"low", 2000, 1024, 5120},  // max_tokens raised to fit the minimum budget
-		{"medium", 0, 8192, 12288}, // unset max_tokens derived from the budget
+		{"medium", 0, 8192, 32000}, // unset max_tokens: the model default
 	}
 	for _, c := range cases {
 		cfg := claudeConfig(&db.ModelProvider{Model: "claude-opus-4-1-20250805", MaxTokens: c.maxTokens, ThinkingEnabled: true, ReasoningEffort: c.effort})
@@ -83,7 +83,7 @@ func TestZeroTemperatureMeansModelDefault(t *testing.T) {
 	if cfg := openAIConfig(&db.ModelProvider{Model: "m"}, ""); cfg.Temperature != nil {
 		t.Fatalf("openai temperature 0 must not be sent: %v", *cfg.Temperature)
 	}
-	if cfg := claudeConfig(&db.ModelProvider{Model: "claude-3-7-sonnet-latest"}); cfg.Temperature != nil || cfg.MaxTokens != claudeDefaultMaxTokens {
+	if cfg := claudeConfig(&db.ModelProvider{Model: "claude-3-7-sonnet-latest"}); cfg.Temperature != nil || cfg.MaxTokens != 64000 {
 		t.Fatalf("claude defaults: temperature=%v max_tokens=%d", cfg.Temperature, cfg.MaxTokens)
 	}
 	if cfg := openAIConfig(&db.ModelProvider{Model: "m", Temperature: 0.4}, ""); cfg.Temperature == nil || *cfg.Temperature != float32(0.4) {
@@ -107,7 +107,7 @@ func TestClaudeAdaptiveThinking(t *testing.T) {
 	if cfg.ThinkingConfig == nil || cfg.ThinkingConfig.OfAdaptive == nil || cfg.ThinkingConfig.OfEnabled != nil {
 		t.Fatalf("thinking: %+v", cfg.ThinkingConfig)
 	}
-	if cfg.Temperature != nil || cfg.MaxTokens != claudeAdaptiveMaxTokens {
+	if cfg.Temperature != nil || cfg.MaxTokens != 64000 {
 		t.Fatalf("temperature=%v max_tokens=%d", cfg.Temperature, cfg.MaxTokens)
 	}
 	if got := cfg.AdditionalRequestFields["output_config"].(map[string]any)["effort"]; got != "max" {
