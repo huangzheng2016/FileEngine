@@ -58,6 +58,11 @@ func (m mediaInfo) cols() map[string]any {
 // metadata so the next scan retries it, and a storage that keeps timing out
 // ends the pass early with a note.
 func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
+	total, err := s.repo.CountMediaCandidates(sessionID)
+	if err != nil {
+		return err
+	}
+	s.setPhase(sessionID, db.ScanPhaseMetadata, total)
 	jobs := make(chan db.MediaCandidate, 64)
 	pass, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -75,6 +80,7 @@ func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 				}
 				s.progress.setPath(c.OriginalPath)
 				info, err := s.mediaMeta(pass, c)
+				s.progress.addDone(1)
 				guard.observe(err)
 				if pass.Err() != nil || remotefs.IsTimeout(err) {
 					continue
@@ -95,6 +101,8 @@ func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 		for _, r := range rows {
 			if ext := extOf(r.Name); imageExts[ext] || videoExts[ext] {
 				jobs <- r
+			} else {
+				s.progress.addDone(1)
 			}
 		}
 		if len(rows) < 5000 {

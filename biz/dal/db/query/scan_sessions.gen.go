@@ -35,6 +35,9 @@ func newScanSession(db *gorm.DB, opts ...gen.DOOption) scanSession {
 	_scanSession.TotalFiles = field.NewInt(tableName, "total_files")
 	_scanSession.ScannedCount = field.NewInt(tableName, "scanned_count")
 	_scanSession.CurrentPath = field.NewString(tableName, "current_path")
+	_scanSession.ScanPhase = field.NewString(tableName, "scan_phase")
+	_scanSession.PhaseDone = field.NewInt64(tableName, "phase_done")
+	_scanSession.PhaseTotal = field.NewInt64(tableName, "phase_total")
 	_scanSession.ErrorMessage = field.NewString(tableName, "error_message")
 	_scanSession.ScanWarning = field.NewString(tableName, "scan_warning")
 	_scanSession.TaggedFiles = field.NewInt(tableName, "tagged_files")
@@ -76,6 +79,9 @@ type scanSession struct {
 	TotalFiles          field.Int
 	ScannedCount        field.Int
 	CurrentPath         field.String
+	ScanPhase           field.String
+	PhaseDone           field.Int64
+	PhaseTotal          field.Int64
 	ErrorMessage        field.String
 	ScanWarning         field.String
 	TaggedFiles         field.Int
@@ -123,6 +129,9 @@ func (s *scanSession) updateTableName(table string) *scanSession {
 	s.TotalFiles = field.NewInt(table, "total_files")
 	s.ScannedCount = field.NewInt(table, "scanned_count")
 	s.CurrentPath = field.NewString(table, "current_path")
+	s.ScanPhase = field.NewString(table, "scan_phase")
+	s.PhaseDone = field.NewInt64(table, "phase_done")
+	s.PhaseTotal = field.NewInt64(table, "phase_total")
 	s.ErrorMessage = field.NewString(table, "error_message")
 	s.ScanWarning = field.NewString(table, "scan_warning")
 	s.TaggedFiles = field.NewInt(table, "tagged_files")
@@ -171,7 +180,7 @@ func (s *scanSession) GetFieldByName(fieldName string) (field.OrderExpr, bool) {
 }
 
 func (s *scanSession) fillFieldMap() {
-	s.fieldMap = make(map[string]field.Expr, 31)
+	s.fieldMap = make(map[string]field.Expr, 34)
 	s.fieldMap["id"] = s.ID
 	s.fieldMap["filesystem_id"] = s.FilesystemID
 	s.fieldMap["scan_path"] = s.ScanPath
@@ -181,6 +190,9 @@ func (s *scanSession) fillFieldMap() {
 	s.fieldMap["total_files"] = s.TotalFiles
 	s.fieldMap["scanned_count"] = s.ScannedCount
 	s.fieldMap["current_path"] = s.CurrentPath
+	s.fieldMap["scan_phase"] = s.ScanPhase
+	s.fieldMap["phase_done"] = s.PhaseDone
+	s.fieldMap["phase_total"] = s.PhaseTotal
 	s.fieldMap["error_message"] = s.ErrorMessage
 	s.fieldMap["scan_warning"] = s.ScanWarning
 	s.fieldMap["tagged_files"] = s.TaggedFiles

@@ -37,14 +37,29 @@ func (r *Repository) GetSession(id uint) (*model.ScanSession, error) {
 	return &s, err
 }
 
+// Scan phases reported on ScanSession.ScanPhase while a scan runs.
+const (
+	ScanPhaseWalk       = "walk"
+	ScanPhaseMetadata   = "metadata"
+	ScanPhaseDuplicates = "duplicates"
+	ScanPhaseFinishing  = "finishing"
+)
+
+// noPhase adds the cleared phase columns to a session update that ends or
+// restarts a scan.
+func noPhase(cols map[string]any) map[string]any {
+	cols["scan_phase"], cols["phase_done"], cols["phase_total"] = "", 0, 0
+	return cols
+}
+
 // BeginScan marks the session scanning and clears the previous scan's progress
 // and messages. Column-scoped: settings the user changes meanwhile are never
 // written back.
 func (r *Repository) BeginScan(id uint) error {
 	return dal.WithRetry(func() error {
-		return r.db.Model(&model.ScanSession{}).Where("id = ?", id).Updates(map[string]any{
+		return r.db.Model(&model.ScanSession{}).Where("id = ?", id).Updates(noPhase(map[string]any{
 			"status": "scanning", "scanned_count": 0, "current_path": "", "error_message": "", "scan_warning": "",
-		}).Error
+		})).Error
 	})
 }
 
@@ -52,27 +67,37 @@ func (r *Repository) BeginScan(id uint) error {
 // replaced or failed meanwhile is left alone.
 func (r *Repository) FinishScan(id uint, scanned int, warning string) error {
 	return dal.WithRetry(func() error {
-		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(noPhase(map[string]any{
 			"status": "scanned", "total_files": scanned, "scanned_count": scanned, "current_path": "",
 			"error_message": "", "scan_warning": warning,
-		}).Error
+		})).Error
 	})
 }
 
 // FailScan records why a scan that is still scanning could not complete.
 func (r *Repository) FailScan(id uint, message string) error {
 	return dal.WithRetry(func() error {
-		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(map[string]any{
+		return r.db.Model(&model.ScanSession{}).Where("id = ? AND status = ?", id, "scanning").Updates(noPhase(map[string]any{
 			"status": "error", "error_message": message, "current_path": "",
-		}).Error
+		})).Error
 	})
+}
+
+type ScanProgress struct {
+	Scanned     int
+	CurrentPath string
+	Phase       string
+	Done, Total int64
 }
 
 // Column-scoped: the scanner calls this every few seconds, and a full-row
 // Save would race the API layer's own session writes.
-func (r *Repository) UpdateScanProgress(sessionID uint, scanned int, currentPath string) error {
+func (r *Repository) UpdateScanProgress(sessionID uint, p ScanProgress) error {
 	return r.db.Model(&model.ScanSession{}).Where("id = ?", sessionID).
-		Updates(map[string]interface{}{"scanned_count": scanned, "current_path": currentPath}).Error
+		Updates(map[string]any{
+			"scanned_count": p.Scanned, "current_path": p.CurrentPath,
+			"scan_phase": p.Phase, "phase_done": p.Done, "phase_total": p.Total,
+		}).Error
 }
 
 const ScanInterruptedMessage = "scan interrupted by server restart"
@@ -80,11 +105,11 @@ const ScanInterruptedMessage = "scan interrupted by server restart"
 // The walk lives in memory, so a scan whose process died can never finish.
 func (r *Repository) MarkInterruptedScans() (int64, error) {
 	res := r.db.Model(&model.ScanSession{}).Where("status = ?", "scanning").
-		Updates(map[string]interface{}{
+		Updates(noPhase(map[string]any{
 			"status":        "interrupted",
 			"error_message": ScanInterruptedMessage,
 			"current_path":  "",
-		})
+		}))
 	return res.RowsAffected, res.Error
 }
 

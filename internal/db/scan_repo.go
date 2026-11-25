@@ -142,6 +142,15 @@ type MediaCandidate struct {
 	ModTime      time.Time
 }
 
+// CountMediaCandidates counts the rows MediaCandidatesAfter will page through.
+func (r *Repository) CountMediaCandidates(sessionID uint) (int64, error) {
+	var n int64
+	err := r.Reader().Model(&model.FileEntry{}).
+		Where("scan_session_id = ? AND file_type = ? AND date_source = ?", sessionID, "file", "").
+		Count(&n).Error
+	return n, err
+}
+
 func (r *Repository) MediaCandidatesAfter(sessionID, cursor uint, limit int) ([]MediaCandidate, error) {
 	var rows []MediaCandidate
 	err := r.Reader().Model(&model.FileEntry{}).

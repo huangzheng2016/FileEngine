@@ -32,13 +32,20 @@ var (
 
 // Each group's original is the oldest file (then shortest path, path, id).
 // Full hashes of unchanged files are reused; unreadable files are skipped,
-// never fatal.
+// never fatal. Progress counts candidate bytes: a file's size is done once
+// its bucket is, full reads advance it as they go.
 func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled bool) error {
-	if err := s.repo.ResetDuplicates(sessionID, !enabled); err != nil {
+	if !enabled {
+		s.setPhase(sessionID, db.ScanPhaseFinishing, 0)
+		return s.repo.ResetDuplicates(sessionID, true)
+	}
+	total, err := s.repo.DuplicateCandidateBytes(sessionID)
+	if err != nil {
 		return err
 	}
-	if !enabled {
-		return nil
+	s.setPhase(sessionID, db.ScanPhaseDuplicates, total)
+	if err := s.repo.ResetDuplicates(sessionID, false); err != nil {
+		return err
 	}
 	pass, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -123,8 +130,14 @@ func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, pool
 			need = append(need, i)
 		}
 	}
+	read := make([]int64, len(rows)) // bytes already counted as done, per row
+	defer func() {
+		for i, r := range rows {
+			s.progress.addDone(r.Size - read[i])
+		}
+	}()
 	full := func(idx []int) {
-		hashes := pool.hashAll(ctx, rows, idx, true)
+		hashes := pool.hashAll(ctx, rows, idx, read)
 		for _, i := range idx {
 			if h := hashes[i]; h != "" {
 				rows[i].Hash = h
@@ -139,7 +152,7 @@ func (s *Scanner) dedupeBucket(ctx context.Context, rows []db.DupCandidate, pool
 		// a partial pass would save nothing.
 		full(need)
 	default:
-		partial := pool.hashAll(ctx, rows, need, false)
+		partial := pool.hashAll(ctx, rows, need, nil)
 		byPartial := map[string][]int{}
 		for _, i := range need {
 			if h := partial[i]; h != "" {
@@ -269,6 +282,7 @@ type hashJob struct {
 	row  db.DupCandidate
 	full bool
 	out  *string
+	read *int64 // full hashes: bytes read so far
 	wg   *sync.WaitGroup
 }
 
@@ -290,7 +304,10 @@ func (p *hashPool) work() {
 			var h string
 			var err error
 			if j.full {
-				h, err = p.s.fullHash(j.ctx, j.row, buf)
+				h, err = p.s.fullHash(j.ctx, j.row, buf, func(n int) {
+					p.s.progress.addDone(int64(n))
+					*j.read += int64(n)
+				})
 			} else {
 				h, err = p.s.partialHash(j.ctx, j.row, buf[:partialChunk])
 			}
@@ -308,13 +325,17 @@ func (p *hashPool) work() {
 }
 
 // hashAll returns the hashes indexed like rows; "" where a file could not be
-// read.
-func (p *hashPool) hashAll(ctx context.Context, rows []db.DupCandidate, idx []int, full bool) []string {
+// read. With read it hashes whole files and adds each one's bytes read to it.
+func (p *hashPool) hashAll(ctx context.Context, rows []db.DupCandidate, idx []int, read []int64) []string {
 	out := make([]string, len(rows))
 	var wg sync.WaitGroup
 	for _, i := range idx {
 		wg.Add(1)
-		p.jobs <- hashJob{ctx: ctx, row: rows[i], full: full, out: &out[i], wg: &wg}
+		j := hashJob{ctx: ctx, row: rows[i], out: &out[i], wg: &wg}
+		if read != nil {
+			j.full, j.read = true, &read[i]
+		}
+		p.jobs <- j
 	}
 	wg.Wait()
 	return out
@@ -350,14 +371,14 @@ func (s *Scanner) partialHash(ctx context.Context, r db.DupCandidate, buf []byte
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func (s *Scanner) fullHash(ctx context.Context, r db.DupCandidate, buf []byte) (string, error) {
+func (s *Scanner) fullHash(ctx context.Context, r db.DupCandidate, buf []byte, onRead func(int)) (string, error) {
 	rc, err := s.fs.ReadFile(ctx, r.OriginalPath)
 	if err != nil {
 		return "", err
 	}
 	defer rc.Close()
 	h := sha256.New()
-	n, err := io.CopyBuffer(h, ctxReader{ctx: ctx, r: rc}, buf)
+	n, err := io.CopyBuffer(h, ctxReader{ctx: ctx, r: rc, onRead: onRead}, buf)
 	if err != nil {
 		return "", err
 	}
@@ -369,13 +390,18 @@ func (s *Scanner) fullHash(ctx context.Context, r db.DupCandidate, buf []byte) (
 
 // Also hides any WriterTo of the file, so io.CopyBuffer uses its buffer.
 type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
+	ctx    context.Context
+	r      io.Reader
+	onRead func(int)
 }
 
 func (c ctxReader) Read(p []byte) (int, error) {
 	if err := c.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return c.r.Read(p)
+	n, err := c.r.Read(p)
+	if n > 0 && c.onRead != nil {
+		c.onRead(n)
+	}
+	return n, err
 }

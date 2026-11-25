@@ -111,6 +111,11 @@ type ScanSession struct {
 	TotalFiles   int    `json:"total_files"`
 	ScannedCount int    `json:"scanned_count"`
 	CurrentPath  string `gorm:"size:1024" json:"current_path"`
+	// What a running scan is doing ("" otherwise); done and total are rows
+	// (metadata) or bytes (duplicates), total 0 when not measurable.
+	ScanPhase  string `gorm:"size:16" json:"scan_phase"`
+	PhaseDone  int64  `json:"phase_done"`
+	PhaseTotal int64  `json:"phase_total"`
 	// Kept out of Status so the enum stays short and the full message survives.
 	ErrorMessage string `gorm:"type:text" json:"error_message"`
 	// Set on a successfully scanned session: what the walk had to skip.
