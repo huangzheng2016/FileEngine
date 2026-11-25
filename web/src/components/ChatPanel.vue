@@ -5,9 +5,10 @@ import Loading from '@/base/Loading.vue'
 import { toast } from '@/base/toast'
 import { vTip } from '@/base/tooltip'
 import { useFetch } from '@/base/useFetch'
-import { listChat, sendChat } from '@/api/runs'
+import { listChat, sendChat, stopRun } from '@/api/runs'
 import type { Id } from '@/api/types'
 import { chatFiles, clearChatFiles, removeChatFile } from '@/lib/chatFiles'
+import { toolLabel } from '@/lib/toolView'
 import { createLaneBlocks, type Block, type Item, type Timeline } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import TranscriptBlock from './TranscriptBlock.vue'
@@ -107,11 +108,54 @@ watch(
   () => void turns.refresh(),
 )
 
-const blocked = computed(() => props.busyReason || '')
+// The live turn and, in words, what it is doing: the running tool, else thinking or writing.
+const current = computed(() => liveRuns.value.find((r) => !r.done))
+const status = computed(() => {
+  const r = current.value
+  if (!r) return ''
+  const items = r.lanes.flatMap((l) => l.items)
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]
+    if (it.kind === 'tool') return it.status === 'running' ? `正在${toolLabel(it.name)}` : '正在思考'
+    if (it.kind === 'message' && it.role === 'assistant') return it.streaming && it.text ? '正在回复' : '正在思考'
+  }
+  return '正在思考'
+})
+const stopping = ref(false)
+async function stop() {
+  const r = current.value
+  if (!r || stopping.value) return
+  stopping.value = true
+  try {
+    await stopRun(r.runId)
+  } catch (e) {
+    toast.error('停止失败', e)
+  } finally {
+    stopping.value = false
+  }
+}
+
+// a chat turn of its own is not a reason to block the box: it shows the stop button instead
+const blocked = computed(() => (current.value ? '' : props.busyReason || ''))
+
+const SUGGESTIONS = [
+  '截图都放到 /图片/截图',
+  '照片按 年/月 归档，保留原文件夹名',
+  '还有哪些文件没有归类？',
+  '解释一下现在的整理方案',
+]
+const input = ref<HTMLTextAreaElement | null>(null)
+function suggest(text: string) {
+  draft.value = text
+  input.value?.focus()
+}
+function retry(text: string | undefined) {
+  if (text) suggest(text)
+}
 
 async function send() {
   const text = draft.value.trim()
-  if (!text || sending.value || blocked.value) return
+  if (!text || sending.value || blocked.value || current.value) return
   sending.value = true
   try {
     const runId = await sendChat(
@@ -141,26 +185,46 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <section class="chat card" :class="{ docked: !bare }" aria-label="助手">
-    <div v-if="!bare" class="card-head"><h3>助手</h3></div>
+    <div v-if="!bare" class="card-head">
+      <h3 class="with-icon"><Icon name="message-square" :size="16" />助手</h3>
+    </div>
     <div ref="box" class="chat-list" @scroll.passive="onScroll">
       <Loading v-if="!turns.loaded.value" />
       <p v-else-if="turns.error.value" class="text-danger">
         加载对话失败：{{ turns.error.value }}
         <button type="button" class="btn-sm" @click="turns.refresh()">重试</button>
       </p>
-      <p v-else-if="!entries.length" class="text-muted chat-empty">告诉助手你想怎么整理</p>
+      <div v-else-if="!entries.length" class="chat-empty">
+        <span class="chat-empty-icon"><Icon name="message-square" :size="20" /></span>
+        <p class="chat-empty-title">告诉助手你想怎么整理</p>
+        <p class="text-sm text-muted">它会调整目标路径、分类、方案和规则，不会移动文件；执行前你都能复查。</p>
+        <div class="chat-suggest">
+          <button v-for="t in SUGGESTIONS" :key="t" type="button" class="chat-suggest-item" @click="suggest(t)">
+            {{ t }}
+          </button>
+        </div>
+      </div>
       <div v-for="e in entries" :key="e.key" class="chat-turn">
         <div v-if="e.user" class="chat-user">
           <StreamMarkdown :source="e.user" />
         </div>
-        <TranscriptBlock v-for="b in e.blocks" :key="b.key" :block="b" :scope="e.key" />
-        <StreamMarkdown v-if="e.answer" :source="e.answer" />
-        <p v-if="errorOf(e.key)" class="text-danger">{{ errorOf(e.key) }}</p>
+        <div class="chat-reply">
+          <TranscriptBlock v-for="b in e.blocks" :key="b.key" :block="b" :scope="e.key" />
+          <StreamMarkdown v-if="e.answer" :source="e.answer" />
+        </div>
+        <div v-if="errorOf(e.key)" class="chat-error text-sm" role="alert">
+          <Icon name="alert-triangle" :size="14" />
+          <span class="chat-error-text">{{ errorOf(e.key) }}</span>
+          <button v-if="e.user" type="button" class="btn-sm" @click="retry(e.user)">重新编辑</button>
+        </div>
       </div>
     </div>
     <button v-if="!following" type="button" class="btn-sm chat-jump" @click="toBottom">
       <Icon name="arrow-down" :size="14" />跳到最新
     </button>
+    <p v-if="status" class="chat-status text-sm" role="status" aria-live="polite">
+      <Loading inline label="" :delay="0" />{{ stopping ? '正在停止' : status }}
+    </p>
     <form class="chat-form" @submit.prevent="send">
       <div v-if="files.length" class="chat-files">
         <span v-for="f in files" :key="f.id" class="filter-chip">
@@ -171,17 +235,39 @@ function onKey(e: KeyboardEvent) {
         </span>
       </div>
       <textarea
+        ref="input"
         v-model="draft"
         rows="3"
         name="message"
+        class="chat-input"
         aria-label="发给助手的消息"
-        placeholder="例如：截图都放到 图片/截图"
+        :placeholder="files.length ? '对选中的文件说点什么，例如：都放到 /文档/合同' : '例如：截图都放到 /图片/截图'"
         @keydown="onKey"
       />
-      <div class="form-actions">
+      <div class="chat-actions">
+        <span class="chat-hint">Enter 发送，Shift + Enter 换行</span>
         <span class="spacer" />
-        <button v-tip="blocked" type="submit" class="primary btn-sm" :disabled="sending || !!blocked || !draft.trim()">
-          <Icon name="send" :size="14" />{{ sending ? '发送中' : '发送' }}
+        <button
+          v-if="current"
+          v-tip="'停止这次回复'"
+          type="button"
+          class="danger btn-sm btn-icon"
+          aria-label="停止"
+          :disabled="stopping"
+          @click="stop"
+        >
+          <Icon name="square" :size="14" />
+        </button>
+        <button
+          v-else
+          v-tip="blocked || '发送'"
+          type="submit"
+          class="primary btn-sm btn-icon"
+          aria-label="发送"
+          :disabled="sending || !!blocked || !draft.trim()"
+        >
+          <Loading v-if="sending" inline label="" :delay="0" />
+          <Icon v-else name="send" :size="14" />
         </button>
       </div>
     </form>
@@ -216,7 +302,42 @@ function onKey(e: KeyboardEvent) {
   overflow-y: auto;
 }
 .chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
   margin: auto 0;
+  padding: var(--space-4) var(--space-2);
+  text-align: center;
+}
+.chat-empty p {
+  margin: 0;
+}
+.chat-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
+}
+.chat-empty-title {
+  font-weight: 500;
+}
+.chat-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.chat-suggest-item {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border-radius: 999px;
 }
 .chat-turn {
   display: flex;
@@ -229,7 +350,31 @@ function onKey(e: KeyboardEvent) {
   max-width: 85%;
   padding: var(--space-2) var(--space-3);
   background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-md);
+  overflow-wrap: anywhere;
+}
+.chat-reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.chat-reply:empty {
+  display: none;
+}
+.chat-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--danger);
+  background: var(--danger-soft);
   border-radius: var(--radius-md);
+}
+.chat-error-text {
+  flex: 1;
+  min-width: 0;
 }
 .chat-jump {
   position: absolute;
@@ -238,10 +383,47 @@ function onKey(e: KeyboardEvent) {
   transform: translateX(-50%);
   box-shadow: var(--shadow-float);
 }
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-secondary);
+}
 .chat-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.chat-form:focus-within {
+  border-color: var(--accent);
+}
+.chat-input {
+  min-height: 56px;
+  max-height: 160px;
+  padding: 0 var(--space-1);
+  resize: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.chat-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.chat-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 .chat-files {
   display: flex;

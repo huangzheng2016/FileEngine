@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@/api/types'
 import { event } from './fixtures'
 import { createEventBuffer } from '@/lib/eventBuffer'
+import { toolLabel } from '@/lib/toolView'
 import {
   applyEvents,
   emptyTimeline,
   laneBlocks,
+  stepActivity,
   stepSummary,
   type MessageItem,
   type StepGroup,
@@ -111,8 +113,22 @@ describe('lane blocks', () => {
     ])
     const blocks = laneBlocks(t.runs[6].lanes[0].items, true)
     expect(blocks.map((b) => b.kind)).toEqual(['prompt', 'steps', 'answer'])
-    expect(stepSummary(blocks[1] as StepGroup)).toBe('思考 1 段 · 工具 1 次')
+    expect(stepSummary(blocks[1] as StepGroup, toolLabel)).toBe('思考 1 段 · 查看文件')
     expect((blocks[2] as { item: MessageItem }).item.text).toBe('已完成整理方案。')
+  })
+
+  it('names the most frequent actions and what a live group is doing', () => {
+    seq = 450
+    const t = applyEvents(emptyTimeline(), [
+      ev('tool_call', { run_id: 8, call_id: 'a', name: 'list_entries' }),
+      ev('tool_result', { run_id: 8, call_id: 'a', ok: true }),
+      ev('tool_call', { run_id: 8, call_id: 'b', name: 'list_entries' }),
+      ev('tool_result', { run_id: 8, call_id: 'b', ok: true }),
+      ev('tool_call', { run_id: 8, call_id: 'c', name: 'decide' }),
+    ])
+    const [g] = laneBlocks(t.runs[8].lanes[0].items, false) as StepGroup[]
+    expect(stepSummary(g, toolLabel)).toBe('查看文件 2 次 · 做出决定')
+    expect(stepActivity(g)).toEqual({ tool: 'decide' })
   })
 
   it('marks a group with a failed tool so it opens itself', () => {

@@ -486,11 +486,26 @@ export function createLaneBlocks(showUserPrompts: boolean) {
   }
 }
 
-export function stepSummary(g: StepGroup): string {
+// In plain words what the group did, most frequent action first: 思考 1 段 · 查看文件 3 次 · 做出决定.
+export function stepSummary(g: StepGroup, label: (tool: string) => string = (n) => n): string {
   const parts: string[] = []
   if (g.thoughts) parts.push(`思考 ${g.thoughts} 段`)
-  if (g.tools) parts.push(`工具 ${g.tools} 次`)
+  const counts = new Map<string, number>()
+  for (const it of g.items) if (it.kind === 'tool') counts.set(label(it.name), (counts.get(label(it.name)) ?? 0) + 1)
+  const ranked = [...counts].sort((a, b) => b[1] - a[1])
+  for (const [name, n] of ranked.slice(0, 3)) parts.push(n > 1 ? `${name} ${n} 次` : name)
+  if (ranked.length > 3) parts.push(`等 ${g.tools} 次操作`)
   return parts.join(' · ') || '过程'
+}
+
+// What a live group is doing right now: the running tool, else the thinking still arriving.
+export function stepActivity(g: StepGroup): { tool?: string; reasoning?: string } | null {
+  for (let i = g.items.length - 1; i >= 0; i--) {
+    const it = g.items[i]
+    if (it.kind === 'tool' && it.status === 'running') return { tool: it.name }
+    if (it.kind === 'message' && it.streaming) return { reasoning: it.reasoning }
+  }
+  return null
 }
 
 export const isLive = (r: RunView | undefined) => !!r && !r.done

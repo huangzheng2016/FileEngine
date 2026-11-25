@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
 import { fmtNumber } from '@/base/format'
-import { stepSummary, type Block } from '@/lib/transcript'
+import { toolLabel } from '@/lib/toolView'
+import { stepActivity, stepSummary, type Block } from '@/lib/transcript'
 import StreamMarkdown from './StreamMarkdown.vue'
 import ToolCard from './ToolCard.vue'
 import { useOpenState } from './openState'
@@ -14,6 +15,9 @@ const state = useOpenState()
 const stateKey = computed(() => `${props.scope ?? ''}b:${props.block.key}`)
 const open = computed(() => state.get(stateKey.value) ?? (props.block.kind === 'steps' && props.block.failed))
 const toggle = () => state.set(stateKey.value, !open.value)
+const activity = computed(() => (props.block.kind === 'steps' ? stepActivity(props.block) : null))
+// the newest lines of thinking still arriving, shown while the group is folded
+const preview = computed(() => activity.value?.reasoning?.trim().split('\n').slice(-4).join('\n') ?? '')
 </script>
 
 <template>
@@ -46,9 +50,13 @@ const toggle = () => state.set(stateKey.value, !open.value)
   <div v-else class="steps">
     <button type="button" class="ghost btn-sm steps-head" :aria-expanded="open" @click="toggle">
       <Icon name="chevron-right" :size="14" class="chev" />
-      {{ stepSummary(block) }}
+      {{ stepSummary(block, toolLabel) }}
       <Icon v-if="block.failed" name="x-circle" :size="14" class="text-danger" />
+      <span v-if="activity" class="steps-live">
+        <Loading inline label="" :delay="0" />{{ activity.tool ? `正在${toolLabel(activity.tool)}` : '正在思考' }}
+      </span>
     </button>
+    <p v-if="!open && preview" class="steps-preview text-sm" aria-hidden="true">{{ preview }}</p>
     <div v-if="open" class="steps-body">
       <template v-for="it in block.items" :key="it.kind === 'tool' ? it.key : it.id">
         <ToolCard v-if="it.kind === 'tool'" :tool="it" :scope="scope" />
@@ -108,6 +116,26 @@ const toggle = () => state.set(stateKey.value, !open.value)
   gap: 4px;
   color: var(--text-muted);
   font-weight: 400;
+}
+.steps-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--space-1);
+  color: var(--text-secondary);
+}
+.steps-preview {
+  max-height: 5.6em;
+  margin: 0;
+  padding-left: var(--space-3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
+  mask-image: linear-gradient(to bottom, transparent, var(--text-primary) 1.6em);
 }
 .chev {
   transition: transform var(--dur-fast) var(--ease);
