@@ -53,10 +53,6 @@ describe('model presets', () => {
     expect(guessCaps('llama3.1:8b', preset('ollama')).context).toBe(32_000)
     expect(guessCaps('something-new', preset('custom')).context).toBe(128_000)
   })
-
-  it('does not send a temperature to Claude by default', () => {
-    expect(preset('claude').temperature).toBe(0)
-  })
 })
 
 describe('input attributes', () => {

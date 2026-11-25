@@ -94,7 +94,6 @@ export interface ModelPreset {
   models: string[]
   // context for models this table does not know
   context: number
-  temperature: number
 }
 
 // Defaults follow what each provider documents; anything listed by the
@@ -110,7 +109,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'],
     context: 1_000_000,
-    temperature: 0.3,
   },
   {
     id: 'dashscope',
@@ -122,7 +120,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['qwen-plus', 'qwen-max', 'qwen-vl-max'],
     context: 128_000,
-    temperature: 0.3,
   },
   {
     id: 'moonshot',
@@ -134,7 +131,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['kimi-k3'],
     context: 1_000_000,
-    temperature: 0.3,
   },
   {
     id: 'zhipu',
@@ -146,7 +142,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['glm-4.7-flash'],
     context: 200_000,
-    temperature: 0.3,
   },
   {
     id: 'openai',
@@ -158,7 +153,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['gpt-5', 'gpt-5-mini'],
     context: 400_000,
-    temperature: 0.3,
   },
   {
     id: 'claude',
@@ -170,8 +164,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: true,
     models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'],
     context: 1_000_000,
-    // current Claude models reject a temperature; 0 sends none
-    temperature: 0,
   },
   {
     id: 'ollama',
@@ -183,7 +175,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: false,
     models: ['qwen2.5:7b'],
     context: 32_000,
-    temperature: 0.3,
   },
   {
     id: 'custom',
@@ -195,7 +186,6 @@ export const MODEL_PRESETS: ModelPreset[] = [
     keyRequired: false,
     models: [],
     context: 128_000,
-    temperature: 0.3,
   },
 ]
 

@@ -58,9 +58,9 @@ describe('useModelForm', () => {
     return m
   }
 
-  it('starts on the first preset with its address and temperature', () => {
+  it('starts on the first preset with its address and sends no temperature', () => {
     const m = fresh()
-    expect(m.form).toMatchObject({ preset: 'deepseek', base_url: 'https://api.deepseek.com/v1', temperature: 0.3 })
+    expect(m.form).toMatchObject({ preset: 'deepseek', base_url: 'https://api.deepseek.com/v1', temperature: 0 })
   })
 
   it('applies a preset only when it changes and forgets the model chosen for the old one', () => {

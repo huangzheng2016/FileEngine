@@ -172,7 +172,7 @@ describe('ModelFormDialog', () => {
         name: 'deepseek-flash',
         model: 'deepseek-flash',
         api_key: 'sk-test',
-        temperature: 0.3,
+        temperature: 0,
       }),
     )
     w.unmount()

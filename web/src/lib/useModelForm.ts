@@ -31,7 +31,8 @@ const emptyForm = () => ({
   model: '',
   base_url: '',
   api_key: '',
-  temperature: 0.3,
+  // 0 = not sent, the model's own default applies
+  temperature: 0,
   // '' = not sent, the model's own default applies
   max_tokens: '' as number | '',
   context: DEFAULT_CONTEXT as number | 'custom',
@@ -234,7 +235,6 @@ export function useModelForm(editing: () => ModelProvider | null) {
     form.preset = p.id
     form.provider = p.provider
     form.base_url = p.baseUrl
-    form.temperature = p.temperature
     form.model = ''
     Object.assign(catalog, { models: [], loaded: false, error: '', detail: '' })
   }
