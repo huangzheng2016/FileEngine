@@ -27,6 +27,7 @@ func TestSQLitePragmas(t *testing.T) {
 		{"synchronous", "1"},
 		{"foreign_keys", "1"},
 		{"cache_size", "-65536"},
+		{"analysis_limit", "1000"},
 	}
 	for _, c := range cases {
 		var got string

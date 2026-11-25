@@ -128,12 +128,15 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 
 // busy_timeout runs first so the remaining pragmas already wait on a locked
 // database; _txlock=immediate makes BEGIN take the write lock up front.
+// analysis_limit keeps the PRAGMA optimize after a scan of millions of rows
+// to a sampled ANALYZE instead of a full one.
 func sqliteDSN(path string) string {
 	return path + "?_pragma=busy_timeout(30000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=cache_size(-65536)" +
 		"&_pragma=foreign_keys(1)" +
+		"&_pragma=analysis_limit(1000)" +
 		"&_txlock=immediate"
 }
 
