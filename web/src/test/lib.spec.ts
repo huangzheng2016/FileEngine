@@ -3,7 +3,7 @@ import { session } from './fixtures'
 import { contextError, effortError, effortOptions, fmtTokens, isContextPreset, parseTokens } from '@/lib/modelForm'
 import { baseName, normalize, parentOf, pathCrumbs } from '@/lib/paths'
 import { describeMatch, splitExts, targetError } from '@/lib/rules'
-import { nextAction, stageOf } from '@/lib/sessionView'
+import { nextAction, scanPhaseView, stageOf } from '@/lib/sessionView'
 import { scopeExts } from '@/data/presets'
 
 describe('model form', () => {
@@ -110,5 +110,31 @@ describe('session next step', () => {
     expect(stageOf(planned, { phase: 'revert' })).toBe('executing')
     expect(stageOf(planned, undefined)).toBe('planned')
     expect(stageOf({ ...planned, executed_ops: 30 }, undefined)).toBe('done')
+  })
+})
+
+describe('scan phase', () => {
+  const scanning = session({ status: 'scanning' })
+  it('names the running pass and measures it when it has a total', () => {
+    expect(scanPhaseView(scanning)).toEqual({ title: '正在扫描文件' })
+    expect(scanPhaseView({ ...scanning, scan_phase: 'walk' })).toEqual({ title: '遍历文件夹' })
+    expect(scanPhaseView({ ...scanning, scan_phase: 'finishing' })).toEqual({ title: '收尾' })
+    expect(scanPhaseView({ ...scanning, scan_phase: 'metadata', phase_done: 1200, phase_total: 5000 })).toEqual({
+      title: '读取拍摄信息',
+      progress: { value: 1200, max: 5000, text: '1,200 / 5,000 个' },
+    })
+    const dup = scanPhaseView({
+      ...scanning,
+      scan_phase: 'duplicates',
+      phase_done: 3 * 2 ** 30,
+      phase_total: 12 * 2 ** 30,
+    })
+    expect(dup.title).toBe('查找重复文件')
+    expect(dup.progress).toEqual({ value: 3 * 2 ** 30, max: 12 * 2 ** 30, text: '3.0 GB / 最多 12 GB' })
+  })
+
+  it('never shows more done than the total', () => {
+    const v = scanPhaseView({ ...scanning, scan_phase: 'duplicates', phase_done: 2048, phase_total: 1024 })
+    expect(v.progress?.value).toBe(1024)
   })
 })

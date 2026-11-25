@@ -284,6 +284,13 @@ type Session struct {
 	// folders); empty when nothing was skipped. error_message is set only
 	// when status is error or interrupted.
 	ScanWarning string `thrift:"scan_warning,33" form:"scan_warning" json:"scan_warning" query:"scan_warning"`
+	// status scanning only: walk | metadata | duplicates | finishing; empty
+	// otherwise
+	ScanPhase string `thrift:"scan_phase,34" form:"scan_phase" json:"scan_phase" query:"scan_phase"`
+	// progress of scan_phase: files (metadata) or bytes (duplicates, where
+	// phase_total is the most that may be read); phase_total 0 = unmeasured
+	PhaseDone  int64 `thrift:"phase_done,35" form:"phase_done" json:"phase_done" query:"phase_done"`
+	PhaseTotal int64 `thrift:"phase_total,36" form:"phase_total" json:"phase_total" query:"phase_total"`
 }
 
 func NewSession() *Session {
@@ -435,6 +442,18 @@ func (p *Session) GetScanWarning() (v string) {
 	return p.ScanWarning
 }
 
+func (p *Session) GetScanPhase() (v string) {
+	return p.ScanPhase
+}
+
+func (p *Session) GetPhaseDone() (v int64) {
+	return p.PhaseDone
+}
+
+func (p *Session) GetPhaseTotal() (v int64) {
+	return p.PhaseTotal
+}
+
 var fieldIDToName_Session = map[int16]string{
 	1:  "id",
 	2:  "filesystem_id",
@@ -469,6 +488,9 @@ var fieldIDToName_Session = map[int16]string{
 	31: "latest_run",
 	32: "tokens",
 	33: "scan_warning",
+	34: "scan_phase",
+	35: "phase_done",
+	36: "phase_total",
 }
 
 func (p *Session) IsSetLatestRun() bool {
@@ -756,6 +778,30 @@ func (p *Session) Read(iprot thrift.TProtocol) (err error) {
 		case 33:
 			if fieldTypeId == thrift.STRING {
 				if err = p.ReadField33(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 34:
+			if fieldTypeId == thrift.STRING {
+				if err = p.ReadField34(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 35:
+			if fieldTypeId == thrift.I64 {
+				if err = p.ReadField35(iprot); err != nil {
+					goto ReadFieldError
+				}
+			} else if err = iprot.Skip(fieldTypeId); err != nil {
+				goto SkipFieldError
+			}
+		case 36:
+			if fieldTypeId == thrift.I64 {
+				if err = p.ReadField36(iprot); err != nil {
 					goto ReadFieldError
 				}
 			} else if err = iprot.Skip(fieldTypeId); err != nil {
@@ -1147,6 +1193,39 @@ func (p *Session) ReadField33(iprot thrift.TProtocol) error {
 	p.ScanWarning = _field
 	return nil
 }
+func (p *Session) ReadField34(iprot thrift.TProtocol) error {
+
+	var _field string
+	if v, err := iprot.ReadString(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.ScanPhase = _field
+	return nil
+}
+func (p *Session) ReadField35(iprot thrift.TProtocol) error {
+
+	var _field int64
+	if v, err := iprot.ReadI64(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.PhaseDone = _field
+	return nil
+}
+func (p *Session) ReadField36(iprot thrift.TProtocol) error {
+
+	var _field int64
+	if v, err := iprot.ReadI64(); err != nil {
+		return err
+	} else {
+		_field = v
+	}
+	p.PhaseTotal = _field
+	return nil
+}
 
 func (p *Session) Write(oprot thrift.TProtocol) (err error) {
 	var fieldId int16
@@ -1284,6 +1363,18 @@ func (p *Session) Write(oprot thrift.TProtocol) (err error) {
 		}
 		if err = p.writeField33(oprot); err != nil {
 			fieldId = 33
+			goto WriteFieldError
+		}
+		if err = p.writeField34(oprot); err != nil {
+			fieldId = 34
+			goto WriteFieldError
+		}
+		if err = p.writeField35(oprot); err != nil {
+			fieldId = 35
+			goto WriteFieldError
+		}
+		if err = p.writeField36(oprot); err != nil {
+			fieldId = 36
 			goto WriteFieldError
 		}
 	}
@@ -1835,6 +1926,54 @@ WriteFieldBeginError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 33 begin error: ", p), err)
 WriteFieldEndError:
 	return thrift.PrependError(fmt.Sprintf("%T write field 33 end error: ", p), err)
+}
+func (p *Session) writeField34(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("scan_phase", thrift.STRING, 34); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteString(p.ScanPhase); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 34 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 34 end error: ", p), err)
+}
+func (p *Session) writeField35(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("phase_done", thrift.I64, 35); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI64(p.PhaseDone); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 35 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 35 end error: ", p), err)
+}
+func (p *Session) writeField36(oprot thrift.TProtocol) (err error) {
+	if err = oprot.WriteFieldBegin("phase_total", thrift.I64, 36); err != nil {
+		goto WriteFieldBeginError
+	}
+	if err := oprot.WriteI64(p.PhaseTotal); err != nil {
+		return err
+	}
+	if err = oprot.WriteFieldEnd(); err != nil {
+		goto WriteFieldEndError
+	}
+	return nil
+WriteFieldBeginError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 36 begin error: ", p), err)
+WriteFieldEndError:
+	return thrift.PrependError(fmt.Sprintf("%T write field 36 end error: ", p), err)
 }
 
 func (p *Session) String() string {

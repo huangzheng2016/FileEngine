@@ -18,7 +18,7 @@ func All() []any {
 
 type FileEntry struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
-	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1;index:idx_session_newkey,priority:1;index:idx_session_role,priority:1" json:"scan_session_id"`
+	ScanSessionID uint       `gorm:"uniqueIndex:idx_uniq_session_path,priority:1;index:idx_session_hash,priority:1;index:idx_session_type_tagged_depth,priority:1;index:idx_session_parent,priority:1;index:idx_session_op_exec,priority:1;index:idx_session_newpath,priority:1;index:idx_session_newkey,priority:1;index:idx_session_role,priority:1;index:idx_session_type_size,priority:1" json:"scan_session_id"`
 	OriginalPath  string     `gorm:"uniqueIndex:idx_uniq_session_path,priority:2;size:1024" json:"original_path"`
 	NewPath       string     `gorm:"size:1024;index:idx_session_newpath,priority:2" json:"new_path"` // always "/"-rooted when set
 	NewPathKey    string     `gorm:"size:1024;index:idx_session_newkey,priority:2" json:"-"`         // CollisionKey(NewPath), "" without a target; written with new_path
@@ -32,10 +32,10 @@ type FileEntry struct {
 	ExecutedAt    *time.Time `json:"executed_at"`
 	ExecuteMode   string     `gorm:"size:16" json:"execute_mode"` // "copy" / "move"
 	Name          string     `gorm:"size:512;index:idx_session_parent,priority:4" json:"name"`
-	Size          int64      `json:"size"`
+	Size          int64      `gorm:"index:idx_session_type_size,priority:3" json:"size"`
 	ModTime       time.Time  `json:"mod_time"`
 	Permissions   string     `gorm:"size:16" json:"permissions"`
-	FileType      string     `gorm:"size:16;index:idx_session_type_tagged_depth,priority:2;index:idx_session_parent,priority:3" json:"file_type"` // "file" / "directory" / "symlink"
+	FileType      string     `gorm:"size:16;index:idx_session_type_tagged_depth,priority:2;index:idx_session_parent,priority:3;index:idx_session_type_size,priority:2" json:"file_type"` // "file" / "directory" / "symlink"
 	Description   string     `gorm:"type:text" json:"description"`
 	Tagged        bool       `gorm:"default:false;index:idx_session_type_tagged_depth,priority:3" json:"tagged"`
 	ParentPath    string     `gorm:"size:1024;index:idx_session_parent,priority:2" json:"parent_path"`
@@ -111,6 +111,11 @@ type ScanSession struct {
 	TotalFiles   int    `json:"total_files"`
 	ScannedCount int    `json:"scanned_count"`
 	CurrentPath  string `gorm:"size:1024" json:"current_path"`
+	// What a running scan is doing ("" otherwise); done and total are rows
+	// (metadata) or bytes (duplicates), total 0 when not measurable.
+	ScanPhase  string `gorm:"size:16" json:"scan_phase"`
+	PhaseDone  int64  `json:"phase_done"`
+	PhaseTotal int64  `json:"phase_total"`
 	// Kept out of Status so the enum stays short and the full message survives.
 	ErrorMessage string `gorm:"type:text" json:"error_message"`
 	// Set on a successfully scanned session: what the walk had to skip.

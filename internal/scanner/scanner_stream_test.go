@@ -295,3 +295,43 @@ func TestScanDuplicates_LocalFS(t *testing.T) {
 		t.Errorf("after disabling: dup=%v role=%q hash=%q", f.DuplicateOf, f.Role, f.Hash)
 	}
 }
+
+// Buckets that span stream pages stay whole, and decisions written in many
+// small batches still cover every copy.
+func TestScanDuplicates_BucketsAcrossPages(t *testing.T) {
+	prevPage, prevBatch := dupPage, decideBatchSize
+	dupPage, decideBatchSize = 3, 2
+	defer func() { dupPage, decideBatchSize = prevPage, prevBatch }()
+
+	dirPath := t.TempDir()
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for size := 1; size <= 4; size++ {
+		body := bytes.Repeat([]byte{byte('a' + size)}, size)
+		for i := range size + 1 {
+			writeFile(t, dirPath, fmt.Sprintf("s%d/f%d.bin", size, i), body, old.Add(time.Duration(i)*time.Hour))
+		}
+	}
+	writeFile(t, dirPath, "lonely.bin", bytes.Repeat([]byte("z"), 9), old)
+	fs, err := remotefs.NewLocalFS(dirPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := setupFileTestDB(t)
+	_, session := scanSession(t, repo, fs, ".", func(s *model.ScanSession) { s.DetectDuplicates = true })
+
+	for size := 1; size <= 4; size++ {
+		orig := entry(t, repo, session.ID, fmt.Sprintf("s%d/f0.bin", size))
+		if orig.DuplicateOf != nil || orig.Role != db.RoleUndecided {
+			t.Errorf("s%d original: dup=%v role=%q", size, orig.DuplicateOf, orig.Role)
+		}
+		for i := 1; i <= size; i++ {
+			f := entry(t, repo, session.ID, fmt.Sprintf("s%d/f%d.bin", size, i))
+			if f.DuplicateOf == nil || *f.DuplicateOf != orig.ID || f.Role != db.RoleDuplicate {
+				t.Errorf("s%d/f%d: dup=%v role=%q, want duplicate of %d", size, i, f.DuplicateOf, f.Role, orig.ID)
+			}
+		}
+	}
+	if f := entry(t, repo, session.ID, "lonely.bin"); f.Hash != "" || f.DuplicateOf != nil {
+		t.Errorf("lonely.bin: hash=%q dup=%v, a unique size is never read", f.Hash, f.DuplicateOf)
+	}
+}

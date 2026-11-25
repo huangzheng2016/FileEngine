@@ -4,6 +4,7 @@ import Alert from '@/base/Alert.vue'
 import EmptyState from '@/base/EmptyState.vue'
 import Icon from '@/base/Icon.vue'
 import Loading from '@/base/Loading.vue'
+import ProgressBar from '@/base/ProgressBar.vue'
 import { fmtBytes, fmtLabel, fmtNumber } from '@/base/format'
 import { EXEC_MODE } from '@/base/labels'
 import { toast } from '@/base/toast'
@@ -12,7 +13,7 @@ import { updateFileTarget } from '@/api/files'
 import { hasId, type PreviewItem, type Run, type Session } from '@/api/types'
 import RunActivity from '@/components/RunActivity.vue'
 import StreamMarkdown from '@/components/StreamMarkdown.vue'
-import { executable, flowRun, runningRun, stageOf } from '@/lib/sessionView'
+import { executable, flowRun, runningRun, scanPhaseView, stageOf } from '@/lib/sessionView'
 import type { Timeline } from '@/lib/transcript'
 import { useRevert } from '@/lib/useRevert'
 import PreviewPane from './PreviewPane.vue'
@@ -32,6 +33,7 @@ const pending = computed(() => executable(props.session))
 const waiting = computed(() => props.session.planned_ops - props.session.executed_ops)
 const undecided = computed(() => Math.max(0, props.session.total_files - props.session.tagged_files))
 const scanWarning = computed(() => props.session.scan_warning)
+const scanPhase = computed(() => scanPhaseView(props.session))
 
 // The latest execution that still has an effect, with its final counters.
 const lastExec = computed(() => {
@@ -103,15 +105,22 @@ const hasResult = computed(() => props.session.planned_ops > 0)
 
 <template>
   <div class="page">
-    <Alert v-if="scanWarning" tone="warning" title="部分文件夹没有扫描">{{ scanWarning }}</Alert>
+    <Alert v-if="scanWarning" tone="warning" title="扫描结果不完整">{{ scanWarning }}</Alert>
 
     <section v-if="stage === 'scanning'" class="card" aria-label="扫描">
       <div class="card-head">
         <div>
-          <h3 class="with-icon"><Loading inline label="" :delay="0" />正在扫描文件</h3>
+          <h3 class="with-icon"><Loading inline label="" :delay="0" />{{ scanPhase.title }}</h3>
           <p class="card-desc tabular">已找到 {{ fmtNumber(session.scanned_count) }} 个</p>
         </div>
       </div>
+      <ProgressBar
+        v-if="scanPhase.progress"
+        :value="scanPhase.progress.value"
+        :max="scanPhase.progress.max"
+        :label="scanPhase.progress.text"
+        >{{ scanPhase.progress.text }}</ProgressBar
+      >
       <p v-if="session.current_path" class="text-sm text-muted truncate">{{ session.current_path }}</p>
     </section>
 

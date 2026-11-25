@@ -320,7 +320,7 @@ const blocked = computed(() => (loaded.value && !models.value.length ? '先新�
           <div class="field">
             <span class="field-label">查找重复文件</span>
             <Switch v-model="form.detect_duplicates" label="查找重复文件" />
-            <span class="field-hint">扫描会变慢</span>
+            <span class="field-hint">会读取大小相同的文件并逐个比对内容；文件多或在网络共享上可能需要数小时。</span>
           </div>
           <div class="field">
             <span class="field-label">跳过已有的分类文件夹</span>

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -176,9 +177,18 @@ func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	opCtx, cancel := smbOpCtx(ctx)
+	// A directory with hundreds of thousands of entries takes many
+	// QUERY_DIRECTORY round trips; the deadline slides per page so only a
+	// stalled listing times out.
+	opCtx, touch, cancel := slidingCtx(ctx, opTimeout())
 	defer cancel()
-	entries, err := s.share.WithContext(opCtx).ReadDir(fullPath)
+	dir, err := s.share.WithContext(opCtx).Open(fullPath)
+	if err != nil {
+		return nil, &OpError{Protocol: "smb", Op: "list", Path: p, Err: err}
+	}
+	defer dir.Close()
+	touch()
+	entries, err := readDirPaged(dir, touch)
 	if err != nil {
 		return nil, &OpError{Protocol: "smb", Op: "list", Path: p, Err: err}
 	}
@@ -199,6 +209,30 @@ func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 		})
 	}
 	return result, nil
+}
+
+const smbDirPage = 1024
+
+type dirReader interface {
+	Readdir(n int) ([]os.FileInfo, error)
+}
+
+// readDirPaged lists a whole directory, sorted by name like Share.ReadDir.
+func readDirPaged(d dirReader, touch func()) ([]os.FileInfo, error) {
+	var all []os.FileInfo
+	for {
+		page, err := d.Readdir(smbDirPage)
+		all = append(all, page...)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		touch()
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Name() < all[j].Name() })
+	return all, nil
 }
 
 // go-smb2 multiplexes concurrent requests over one TCP stream, so no
@@ -256,8 +290,17 @@ func (s *SMBFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
 	return &smbReadCloser{f: f, touch: touch, cancel: cancel, path: p}, nil
 }
 
+// smbFile is the part of *smb2.File a read stream uses.
+type smbFile interface {
+	io.ReadCloser
+	io.ReaderAt
+	io.Seeker
+}
+
+// Forwarding ReadAt and Seek lets callers read a file's tail (partial hashes,
+// MP4 indexes at the end) without streaming the whole file.
 type smbReadCloser struct {
-	f      io.ReadCloser
+	f      smbFile
 	touch  func()
 	cancel context.CancelFunc
 	path   string
@@ -268,10 +311,30 @@ func (r *smbReadCloser) Read(p []byte) (int, error) {
 	if n > 0 {
 		r.touch()
 	}
-	if err != nil && err != io.EOF {
-		err = &OpError{Protocol: "smb", Op: "read", Path: r.path, Err: err}
+	return n, r.wrap("read", err)
+}
+
+func (r *smbReadCloser) ReadAt(p []byte, off int64) (int, error) {
+	n, err := r.f.ReadAt(p, off)
+	if n > 0 {
+		r.touch()
 	}
-	return n, err
+	return n, r.wrap("read", err)
+}
+
+func (r *smbReadCloser) Seek(offset int64, whence int) (int64, error) {
+	ret, err := r.f.Seek(offset, whence)
+	if err == nil {
+		r.touch()
+	}
+	return ret, r.wrap("seek", err)
+}
+
+func (r *smbReadCloser) wrap(op string, err error) error {
+	if err != nil && err != io.EOF {
+		return &OpError{Protocol: "smb", Op: op, Path: r.path, Err: err}
+	}
+	return err
 }
 
 func (r *smbReadCloser) Close() error {

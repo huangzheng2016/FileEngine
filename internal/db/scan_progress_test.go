@@ -25,7 +25,8 @@ func TestUpdateScanProgress(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	if err := r.UpdateScanProgress(session.ID, 1234, "photos/raw"); err != nil {
+	if err := r.UpdateScanProgress(session.ID, ScanProgress{Scanned: 1234, CurrentPath: "photos/raw",
+		Phase: ScanPhaseDuplicates, Done: 5 << 30, Total: 9 << 30}); err != nil {
 		t.Fatalf("UpdateScanProgress: %v", err)
 	}
 
@@ -36,16 +37,53 @@ func TestUpdateScanProgress(t *testing.T) {
 	if got.ScannedCount != 1234 || got.CurrentPath != "photos/raw" {
 		t.Errorf("progress = (%d, %q), want (1234, photos/raw)", got.ScannedCount, got.CurrentPath)
 	}
+	if got.ScanPhase != ScanPhaseDuplicates || got.PhaseDone != 5<<30 || got.PhaseTotal != 9<<30 {
+		t.Errorf("phase = %q %d/%d, want duplicates %d/%d", got.ScanPhase, got.PhaseDone, got.PhaseTotal, 5<<30, 9<<30)
+	}
 	if got.Status != "scanning" || got.TotalFiles != 7 {
 		t.Errorf("unrelated columns clobbered: status=%s total_files=%d", got.Status, got.TotalFiles)
 	}
 
-	if err := r.UpdateScanProgress(session.ID, 2000, ""); err != nil {
+	if err := r.UpdateScanProgress(session.ID, ScanProgress{Scanned: 2000}); err != nil {
 		t.Fatalf("UpdateScanProgress clear: %v", err)
 	}
 	got, _ = r.GetSession(session.ID)
-	if got.ScannedCount != 2000 || got.CurrentPath != "" {
-		t.Errorf("after clear: progress = (%d, %q), want (2000, \"\")", got.ScannedCount, got.CurrentPath)
+	if got.ScannedCount != 2000 || got.CurrentPath != "" || got.ScanPhase != "" || got.PhaseDone != 0 || got.PhaseTotal != 0 {
+		t.Errorf("after clear: progress = (%d, %q, %q %d/%d), want (2000, \"\", none)",
+			got.ScannedCount, got.CurrentPath, got.ScanPhase, got.PhaseDone, got.PhaseTotal)
+	}
+}
+
+// Every write that starts, ends or abandons a scan clears its phase.
+func TestScanLifecycleClearsPhase(t *testing.T) {
+	r := setupScanProgressRepo(t)
+	running := ScanProgress{Phase: ScanPhaseMetadata, Done: 3, Total: 10}
+	for name, end := range map[string]func(id uint) error{
+		"begin":  r.BeginScan,
+		"finish": func(id uint) error { return r.FinishScan(id, 1, "") },
+		"fail":   func(id uint) error { return r.FailScan(id, "boom") },
+		"interrupt": func(uint) error {
+			_, err := r.MarkInterruptedScans()
+			return err
+		},
+	} {
+		s := &model.ScanSession{FilesystemID: 1, Status: "scanning"}
+		if err := r.DB().Create(s).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := r.UpdateScanProgress(s.ID, running); err != nil {
+			t.Fatal(err)
+		}
+		if err := end(s.ID); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got, err := r.GetSession(s.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ScanPhase != "" || got.PhaseDone != 0 || got.PhaseTotal != 0 {
+			t.Errorf("%s: phase = %q %d/%d, want cleared", name, got.ScanPhase, got.PhaseDone, got.PhaseTotal)
+		}
 	}
 }
 

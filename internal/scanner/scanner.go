@@ -32,6 +32,9 @@ type Scanner struct {
 
 	skippedMu sync.Mutex
 	skipped   []string // directories the walk could not list (reset per scan)
+	notes     []string // post passes that stopped early (reset per scan)
+
+	reportMu sync.Mutex // one progress snapshot is written at a time
 }
 
 // Workers update it concurrently, so every field is atomic.
@@ -39,6 +42,15 @@ type Progress struct {
 	entries int64        // entries kept by the walk so far
 	dirs    int64        // directories listed
 	path    atomic.Value // string: directory (or file, in post passes) being processed
+	phase   atomic.Pointer[phaseState]
+}
+
+// A phase and its counters swap as one, so a snapshot never pairs a new
+// phase with the previous one's totals.
+type phaseState struct {
+	name  string
+	total int64
+	done  atomic.Int64
 }
 
 func (p *Progress) addEntries(n int64)  { atomic.AddInt64(&p.entries, n) }
@@ -51,6 +63,39 @@ func (p *Progress) CurrentPath() string {
 		return v.(string)
 	}
 	return ""
+}
+
+func (p *Progress) addDone(n int64) {
+	if ph := p.phase.Load(); ph != nil && n > 0 {
+		ph.done.Add(n)
+	}
+}
+
+// Phase is the running phase, its done count and its total.
+func (p *Progress) Phase() (string, int64, int64) {
+	ph := p.phase.Load()
+	if ph == nil {
+		return "", 0, 0
+	}
+	return ph.name, ph.done.Load(), ph.total
+}
+
+// setPhase starts a phase and writes it at once: a pass can run for hours
+// before the next report would otherwise show it.
+func (s *Scanner) setPhase(sessionID uint, name string, total int64) {
+	s.progress.phase.Store(&phaseState{name: name, total: total})
+	s.report(sessionID)
+}
+
+func (s *Scanner) report(sessionID uint) {
+	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
+	phase, done, total := s.progress.Phase()
+	p := db.ScanProgress{Scanned: int(s.progress.Entries()), CurrentPath: s.progress.CurrentPath(),
+		Phase: phase, Done: done, Total: total}
+	if err := dal.WithRetry(func() error { return s.repo.UpdateScanProgress(sessionID, p) }); err != nil {
+		log.Printf("warn: scan progress update failed: %v", err)
+	}
 }
 
 // A var so tests can shrink it.
@@ -100,9 +145,11 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	}
 	s.progress = &Progress{}
 	s.skipped = nil
+	s.notes = nil
 	s.progress.setPath(session.RootPath)
 	stopReport := s.startProgressReporter(session.ID)
 	defer stopReport()
+	s.setPhase(session.ID, db.ScanPhaseWalk, 0)
 
 	index, err := s.loadIndex(session.ID)
 	if err != nil {
@@ -139,6 +186,7 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	if err := s.detectDuplicates(ctx, session.ID, session.DetectDuplicates); err != nil {
 		return fmt.Errorf("duplicates: %w", err)
 	}
+	s.setPhase(session.ID, db.ScanPhaseFinishing, 0)
 	if err := s.repo.Optimize(); err != nil {
 		log.Printf("warn: scan session %d: PRAGMA optimize: %v", session.ID, err)
 	}
@@ -148,7 +196,7 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	session.TotalFiles = session.ScannedCount
 	session.CurrentPath = ""
 	session.ErrorMessage = ""
-	session.ScanWarning = s.skippedSummary()
+	session.ScanWarning = s.warning()
 	if err := s.repo.FinishScan(session.ID, session.ScannedCount, session.ScanWarning); err != nil {
 		return err
 	}
@@ -176,11 +224,7 @@ func (s *Scanner) startProgressReporter(sessionID uint) func() {
 			case <-stop:
 				return
 			case <-ticker.C:
-				if err := dal.WithRetry(func() error {
-					return s.repo.UpdateScanProgress(sessionID, int(s.progress.Entries()), s.progress.CurrentPath())
-				}); err != nil {
-					log.Printf("warn: scan progress update failed: %v", err)
-				}
+				s.report(sessionID)
 			}
 		}
 	}()
@@ -189,12 +233,10 @@ func (s *Scanner) startProgressReporter(sessionID uint) func() {
 		once.Do(func() {
 			close(stop)
 			wg.Wait()
+			// Also the stop path: a cancelled or failed scan leaves no phase.
 			s.progress.setPath("")
-			if err := dal.WithRetry(func() error {
-				return s.repo.UpdateScanProgress(sessionID, int(s.progress.Entries()), "")
-			}); err != nil {
-				log.Printf("warn: scan progress final update failed: %v", err)
-			}
+			s.progress.phase.Store(nil)
+			s.report(sessionID)
 		})
 	}
 }
@@ -423,12 +465,18 @@ func (s *Scanner) skipDir(t dirTask, index scanIndex, w *scanWriter) {
 	w.send(batch)
 }
 
-func (s *Scanner) skippedSummary() string {
+func (s *Scanner) warning() string {
 	s.skippedMu.Lock()
 	defer s.skippedMu.Unlock()
-	if len(s.skipped) == 0 {
-		return ""
+	var parts []string
+	if len(s.skipped) > 0 {
+		parts = append(parts, s.skippedSummary())
 	}
+	return strings.Join(append(parts, s.notes...), "；")
+}
+
+// Called with skippedMu held.
+func (s *Scanner) skippedSummary() string {
 	names := append([]string(nil), s.skipped...)
 	sort.Strings(names)
 	shown := names

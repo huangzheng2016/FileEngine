@@ -142,6 +142,15 @@ type MediaCandidate struct {
 	ModTime      time.Time
 }
 
+// CountMediaCandidates counts the rows MediaCandidatesAfter will page through.
+func (r *Repository) CountMediaCandidates(sessionID uint) (int64, error) {
+	var n int64
+	err := r.Reader().Model(&model.FileEntry{}).
+		Where("scan_session_id = ? AND file_type = ? AND date_source = ?", sessionID, "file", "").
+		Count(&n).Error
+	return n, err
+}
+
 func (r *Repository) MediaCandidatesAfter(sessionID, cursor uint, limit int) ([]MediaCandidate, error) {
 	var rows []MediaCandidate
 	err := r.Reader().Model(&model.FileEntry{}).
@@ -160,22 +169,40 @@ type DupCandidate struct {
 	Role         string
 }
 
-func (r *Repository) DuplicateSizeBuckets(sessionID uint) ([]int64, error) {
-	var sizes []int64
+// sharedSize keeps files whose size another file of the session shares; the
+// probe and the outer scan both run on idx_session_type_size.
+const sharedSize = "EXISTS (SELECT 1 FROM file_entries f2 WHERE f2.scan_session_id = file_entries.scan_session_id" +
+	" AND f2.file_type = file_entries.file_type AND f2.size = file_entries.size AND f2.id <> file_entries.id)"
+
+// DuplicateCandidateBytes is the total size of the files that share their
+// size with another file: the most the duplicate pass can read in full.
+func (r *Repository) DuplicateCandidateBytes(sessionID uint) (int64, error) {
+	var total int64
 	err := r.Reader().Model(&model.FileEntry{}).
+		Select("COALESCE(SUM(size), 0)").
 		Where("scan_session_id = ? AND file_type = ? AND size > 0", sessionID, "file").
-		Group("size").Having("COUNT(*) > 1").Order("size").
-		Pluck("size", &sizes).Error
-	return sizes, err
+		Where(sharedSize).Scan(&total).Error
+	return total, err
 }
 
-func (r *Repository) FilesOfSize(sessionID uint, size int64) ([]DupCandidate, error) {
+// FilesBySizeAfter pages the files that share their size with another file in
+// (size, id) order, after the cursor (afterSize, afterID); (0, 0) starts.
+func (r *Repository) FilesBySizeAfter(sessionID uint, afterSize int64, afterID uint, limit int) ([]DupCandidate, error) {
 	var rows []DupCandidate
-	err := r.Reader().Model(&model.FileEntry{}).
-		Select("id, original_path, size, mod_time, hash, role").
-		Where("scan_session_id = ? AND file_type = ? AND size = ?", sessionID, "file", size).
-		Order("id").Scan(&rows).Error
+	err := filesBySize(r.Reader(), sessionID, afterSize, afterID, limit).Scan(&rows).Error
 	return rows, err
+}
+
+// Empty files are excluded through the cursor itself, so the index range has
+// a single lower bound and starts at the cursor.
+func filesBySize(tx *gorm.DB, sessionID uint, afterSize int64, afterID uint, limit int) *gorm.DB {
+	afterSize = max(afterSize, 1)
+	return tx.Model(&model.FileEntry{}).
+		Select("id, original_path, size, mod_time, hash, role").
+		Where("scan_session_id = ? AND file_type = ?", sessionID, "file").
+		Where("size >= ? AND (size > ? OR id > ?)", afterSize, afterSize, afterID).
+		Where(sharedSize).
+		Order("size, id").Limit(limit)
 }
 
 func (r *Repository) ResetDuplicates(sessionID uint, clearHashes bool) error {
