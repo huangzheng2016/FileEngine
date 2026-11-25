@@ -44,7 +44,8 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	defer cancel()
 	w := newWriter(s.repo, cancel)
 
-	pool := s.newHashPool()
+	guard := &timeoutGuard{abort: cancel}
+	pool := s.newHashPool(guard)
 	dec := s.newDecider(sessionID, cancel)
 	var groups, buckets atomic.Int64
 	// Bounds the buckets held in memory while their hashes are pending.
@@ -91,9 +92,12 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	}
 	coord.Wait()
 	pool.close()
-	decErr := dec.close(pass.Err() == nil)
-	if err := w.close(); err != nil {
-		return err
+	// The pass context also ends on a timeout abort, whose finished buckets
+	// still count; only a stopped scan or a failed write drops the rest.
+	writeErr := w.close()
+	decErr := dec.close(writeErr == nil && readErr == nil && ctx.Err() == nil)
+	if writeErr != nil {
+		return writeErr
 	}
 	if decErr != nil {
 		return decErr
@@ -103,6 +107,9 @@ func (s *Scanner) detectDuplicates(ctx context.Context, sessionID uint, enabled 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if guard.tripped.Load() {
+		s.addNote("存储连接多次超时，已停止查找重复文件，结果不完整")
 	}
 	log.Printf("scan session %d: %d duplicate groups across %d size buckets", sessionID, groups.Load(), buckets.Load())
 	return nil
@@ -251,9 +258,10 @@ func (d *decider) close(final bool) error {
 // hashPool reads files for every bucket on one set of workers, so the
 // backend's read concurrency is used even when most buckets hold two files.
 type hashPool struct {
-	s    *Scanner
-	jobs chan hashJob
-	wg   sync.WaitGroup
+	s     *Scanner
+	guard *timeoutGuard
+	jobs  chan hashJob
+	wg    sync.WaitGroup
 }
 
 type hashJob struct {
@@ -264,8 +272,8 @@ type hashJob struct {
 	wg   *sync.WaitGroup
 }
 
-func (s *Scanner) newHashPool() *hashPool {
-	p := &hashPool{s: s, jobs: make(chan hashJob)}
+func (s *Scanner) newHashPool(guard *timeoutGuard) *hashPool {
+	p := &hashPool{s: s, guard: guard, jobs: make(chan hashJob)}
 	for range s.readConcurrency() {
 		p.wg.Add(1)
 		go p.work()
@@ -286,6 +294,7 @@ func (p *hashPool) work() {
 			} else {
 				h, err = p.s.partialHash(j.ctx, j.row, buf[:partialChunk])
 			}
+			p.guard.observe(err)
 			if err != nil {
 				if j.ctx.Err() == nil {
 					log.Printf("warn: duplicates: hash %s: %v", j.row.OriginalPath, err)

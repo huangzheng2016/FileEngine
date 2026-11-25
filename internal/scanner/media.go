@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"FileEngine/internal/db"
+	"FileEngine/internal/remotefs"
 
 	"github.com/rwcarlsen/goexif/exif"
 )
@@ -53,12 +54,15 @@ func (m mediaInfo) cols() map[string]any {
 }
 
 // Per-file read or parse failures fall back to the file name or mtime; only
-// cancellation and DB errors fail the scan.
+// cancellation and DB errors fail the scan. A file that timed out keeps no
+// metadata so the next scan retries it, and a storage that keeps timing out
+// ends the pass early with a note.
 func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 	jobs := make(chan db.MediaCandidate, 64)
 	pass, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w := newWriter(s.repo, cancel)
+	guard := &timeoutGuard{abort: cancel}
 
 	var wg sync.WaitGroup
 	for range s.readConcurrency() {
@@ -70,7 +74,11 @@ func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 					continue
 				}
 				s.progress.setPath(c.OriginalPath)
-				info := s.mediaMeta(pass, c)
+				info, err := s.mediaMeta(pass, c)
+				guard.observe(err)
+				if pass.Err() != nil || remotefs.IsTimeout(err) {
+					continue
+				}
 				w.send(writeBatch{updates: []db.EntryUpdate{{ID: c.ID, Cols: info.cols()}}})
 			}
 		}()
@@ -102,22 +110,40 @@ func (s *Scanner) extractMetadata(ctx context.Context, sessionID uint) error {
 	if readErr != nil {
 		return readErr
 	}
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if guard.tripped.Load() {
+		s.addNote("存储连接多次超时，已停止读取拍摄信息，结果不完整")
+	}
+	return nil
 }
 
-func (s *Scanner) mediaMeta(ctx context.Context, c db.MediaCandidate) mediaInfo {
+// The error is the storage's (open or read), for timeout accounting; the
+// info falls back to the file name or mtime whatever it is.
+func (s *Scanner) mediaMeta(ctx context.Context, c db.MediaCandidate) (mediaInfo, error) {
 	ext := extOf(c.Name)
 	var info mediaInfo
-	if rc, err := s.fs.ReadFile(ctx, c.OriginalPath); err != nil {
-		log.Printf("warn: metadata: open %s: %v", c.OriginalPath, err)
+	rc, ioErr := s.fs.ReadFile(ctx, c.OriginalPath)
+	if ioErr != nil {
+		log.Printf("warn: metadata: open %s: %v", c.OriginalPath, ioErr)
 	} else {
 		buf := make([]byte, headerBytes)
-		n, _ := io.ReadFull(rc, buf)
+		n, err := io.ReadFull(rc, buf)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			ioErr = err
+		}
 		buf = buf[:n]
 		if imageExts[ext] {
 			info = parseImageMeta(buf)
+		} else if r := randomAccess(rc); r != nil {
+			ra := &errReaderAt{ra: r}
+			info = parseVideoMeta(buf, c.Size, ra)
+			if ioErr == nil {
+				ioErr = ra.err
+			}
 		} else {
-			info = parseVideoMeta(buf, c.Size, randomAccess(rc))
+			info = parseVideoMeta(buf, c.Size, nil)
 		}
 		rc.Close()
 	}
@@ -129,7 +155,21 @@ func (s *Scanner) mediaMeta(ctx context.Context, c db.MediaCandidate) mediaInfo 
 			info.takenAt, info.source = &mt, DateSourceMtime
 		}
 	}
-	return info
+	return info, ioErr
+}
+
+// errReaderAt keeps the first read error a parser would otherwise drop.
+type errReaderAt struct {
+	ra  io.ReaderAt
+	err error
+}
+
+func (e *errReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := e.ra.ReadAt(p, off)
+	if err != nil && err != io.EOF && e.err == nil {
+		e.err = err
+	}
+	return n, err
 }
 
 func randomAccess(rc io.ReadCloser) io.ReaderAt {

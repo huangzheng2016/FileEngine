@@ -32,6 +32,7 @@ type Scanner struct {
 
 	skippedMu sync.Mutex
 	skipped   []string // directories the walk could not list (reset per scan)
+	notes     []string // post passes that stopped early (reset per scan)
 }
 
 // Workers update it concurrently, so every field is atomic.
@@ -100,6 +101,7 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	}
 	s.progress = &Progress{}
 	s.skipped = nil
+	s.notes = nil
 	s.progress.setPath(session.RootPath)
 	stopReport := s.startProgressReporter(session.ID)
 	defer stopReport()
@@ -148,7 +150,7 @@ func (s *Scanner) Scan(ctx context.Context, session *model.ScanSession) error {
 	session.TotalFiles = session.ScannedCount
 	session.CurrentPath = ""
 	session.ErrorMessage = ""
-	session.ScanWarning = s.skippedSummary()
+	session.ScanWarning = s.warning()
 	if err := s.repo.FinishScan(session.ID, session.ScannedCount, session.ScanWarning); err != nil {
 		return err
 	}
@@ -423,12 +425,18 @@ func (s *Scanner) skipDir(t dirTask, index scanIndex, w *scanWriter) {
 	w.send(batch)
 }
 
-func (s *Scanner) skippedSummary() string {
+func (s *Scanner) warning() string {
 	s.skippedMu.Lock()
 	defer s.skippedMu.Unlock()
-	if len(s.skipped) == 0 {
-		return ""
+	var parts []string
+	if len(s.skipped) > 0 {
+		parts = append(parts, s.skippedSummary())
 	}
+	return strings.Join(append(parts, s.notes...), "；")
+}
+
+// Called with skippedMu held.
+func (s *Scanner) skippedSummary() string {
 	names := append([]string(nil), s.skipped...)
 	sort.Strings(names)
 	shown := names
