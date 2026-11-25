@@ -39,13 +39,17 @@ export function useSessionDetail(id: Ref<Id>) {
     onSession: () => void detail.refresh(),
   })
 
-  // The stream is the source of freshness; polling only covers the time it is down.
+  // The stream is the source of freshness; polling covers the time it is down, and a scan, whose progress is
+  // written to the session row without an event.
   usePolling(
     async () => {
       await Promise.all([detail.refresh(), runs.refresh()])
       if (detail.error.value) throw new Error(detail.error.value)
     },
-    { interval: 3000, enabled: () => !!session.value && !stream.connected.value },
+    {
+      interval: 3000,
+      enabled: () => !!session.value && (!stream.connected.value || session.value.status === 'scanning'),
+    },
   )
 
   const running = computed(() => runningRun(runs.data.value ?? []))

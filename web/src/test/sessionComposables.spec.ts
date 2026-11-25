@@ -103,7 +103,7 @@ describe('useSessionDetail', () => {
     scope.stop()
   })
 
-  it('polls only while the stream is down', async () => {
+  it('polls while the stream is down or a scan runs', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const down = await mount()
     const before = api.getSession.mock.calls.length
@@ -117,6 +117,14 @@ describe('useSessionDetail', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     expect(api.getSession.mock.calls.length).toBe(n)
     up.scope.stop()
+
+    // scan progress lands on the session row without an event
+    api.getSession.mockResolvedValue(session({ status: 'scanning' }))
+    const scanning = await mount()
+    const m = api.getSession.mock.calls.length
+    await vi.advanceTimersByTimeAsync(3500)
+    expect(api.getSession.mock.calls.length).toBeGreaterThan(m)
+    scanning.scope.stop()
     await nextTick()
   })
 })
