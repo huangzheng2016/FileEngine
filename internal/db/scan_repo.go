@@ -193,10 +193,13 @@ func (r *Repository) FilesBySizeAfter(sessionID uint, afterSize int64, afterID u
 	return rows, err
 }
 
+// Empty files are excluded through the cursor itself, so the index range has
+// a single lower bound and starts at the cursor.
 func filesBySize(tx *gorm.DB, sessionID uint, afterSize int64, afterID uint, limit int) *gorm.DB {
+	afterSize = max(afterSize, 1)
 	return tx.Model(&model.FileEntry{}).
 		Select("id, original_path, size, mod_time, hash, role").
-		Where("scan_session_id = ? AND file_type = ? AND size > 0", sessionID, "file").
+		Where("scan_session_id = ? AND file_type = ?", sessionID, "file").
 		Where("size >= ? AND (size > ? OR id > ?)", afterSize, afterSize, afterID).
 		Where(sharedSize).
 		Order("size, id").Limit(limit)
