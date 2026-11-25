@@ -64,8 +64,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // slidingCtx derives a context that is canceled once timeout passes without
 // a touch: a per-operation deadline that slides with IO progress, for
 // libraries that fix a request context for a file's whole lifetime (go-smb2).
+// An idle expiry reports context.DeadlineExceeded, so it reads as a timeout
+// (IsTimeout, go-smb2's ContextError) rather than a cancellation.
 func slidingCtx(parent context.Context, timeout time.Duration) (context.Context, func(), context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+	inner, cancel := context.WithCancel(parent)
+	ctx := &idleCtx{Context: inner}
 	var last atomic.Int64
 	last.Store(time.Now().UnixNano())
 	touch := func() { last.Store(time.Now().UnixNano()) }
@@ -78,10 +81,13 @@ func slidingCtx(parent context.Context, timeout time.Duration) (context.Context,
 		defer t.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-inner.Done():
 				return
 			case <-t.C:
 				if time.Since(time.Unix(0, last.Load())) > timeout {
+					if parent.Err() == nil {
+						ctx.idle.Store(true)
+					}
 					cancel()
 					return
 				}
@@ -89,6 +95,19 @@ func slidingCtx(parent context.Context, timeout time.Duration) (context.Context,
 		}
 	}()
 	return ctx, touch, cancel
+}
+
+type idleCtx struct {
+	context.Context
+	idle atomic.Bool
+}
+
+func (c *idleCtx) Err() error {
+	err := c.Context.Err()
+	if err != nil && c.idle.Load() {
+		return context.DeadlineExceeded
+	}
+	return err
 }
 
 type touchWriter struct {

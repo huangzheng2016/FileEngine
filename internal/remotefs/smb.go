@@ -256,8 +256,17 @@ func (s *SMBFS) ReadFile(ctx context.Context, p string) (io.ReadCloser, error) {
 	return &smbReadCloser{f: f, touch: touch, cancel: cancel, path: p}, nil
 }
 
+// smbFile is the part of *smb2.File a read stream uses.
+type smbFile interface {
+	io.ReadCloser
+	io.ReaderAt
+	io.Seeker
+}
+
+// Forwarding ReadAt and Seek lets callers read a file's tail (partial hashes,
+// MP4 indexes at the end) without streaming the whole file.
 type smbReadCloser struct {
-	f      io.ReadCloser
+	f      smbFile
 	touch  func()
 	cancel context.CancelFunc
 	path   string
@@ -268,10 +277,30 @@ func (r *smbReadCloser) Read(p []byte) (int, error) {
 	if n > 0 {
 		r.touch()
 	}
-	if err != nil && err != io.EOF {
-		err = &OpError{Protocol: "smb", Op: "read", Path: r.path, Err: err}
+	return n, r.wrap("read", err)
+}
+
+func (r *smbReadCloser) ReadAt(p []byte, off int64) (int, error) {
+	n, err := r.f.ReadAt(p, off)
+	if n > 0 {
+		r.touch()
 	}
-	return n, err
+	return n, r.wrap("read", err)
+}
+
+func (r *smbReadCloser) Seek(offset int64, whence int) (int64, error) {
+	ret, err := r.f.Seek(offset, whence)
+	if err == nil {
+		r.touch()
+	}
+	return ret, r.wrap("seek", err)
+}
+
+func (r *smbReadCloser) wrap(op string, err error) error {
+	if err != nil && err != io.EOF {
+		return &OpError{Protocol: "smb", Op: op, Path: r.path, Err: err}
+	}
+	return err
 }
 
 func (r *smbReadCloser) Close() error {
