@@ -2,8 +2,11 @@ package remotefs
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -76,6 +79,65 @@ func TestSMBReadCloserStallIsTimeout(t *testing.T) {
 	stop()
 	if _, err := rc.Read(make([]byte, 4)); err == nil || IsTimeout(err) {
 		t.Fatalf("cancelled Read: err = %v, want a non-timeout error", err)
+	}
+}
+
+type fakeInfo struct {
+	os.FileInfo
+	name string
+}
+
+func (f fakeInfo) Name() string { return f.name }
+
+// pagedDir hands out a listing the way go-smb2's Readdir(n) does: full pages,
+// a short last page with a nil error, then io.EOF.
+type pagedDir struct {
+	names []string
+	calls int
+	fail  error // returned instead of the second page
+}
+
+func (d *pagedDir) Readdir(n int) ([]os.FileInfo, error) {
+	d.calls++
+	if d.fail != nil && d.calls == 2 {
+		return nil, d.fail
+	}
+	if len(d.names) == 0 {
+		return nil, io.EOF
+	}
+	k := min(n, len(d.names))
+	page := make([]os.FileInfo, k)
+	for i, name := range d.names[:k] {
+		page[i] = fakeInfo{name: name}
+	}
+	d.names = d.names[k:]
+	return page, nil
+}
+
+func TestReadDirPaged(t *testing.T) {
+	var names []string
+	for i := range 2*smbDirPage + 5 {
+		names = append(names, fmt.Sprintf("f%05d", 3*smbDirPage-i))
+	}
+	d := &pagedDir{names: names}
+	touches := 0
+	got, err := readDirPaged(d, func() { touches++ })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(names) {
+		t.Fatalf("listed %d entries, want %d", len(got), len(names))
+	}
+	if !sort.SliceIsSorted(got, func(i, j int) bool { return got[i].Name() < got[j].Name() }) {
+		t.Error("listing not sorted by name")
+	}
+	if touches != 3 {
+		t.Errorf("deadline touched %d times, want once per page (3)", touches)
+	}
+
+	boom := errors.New("boom")
+	if _, err := readDirPaged(&pagedDir{names: names, fail: boom}, func() {}); !errors.Is(err, boom) {
+		t.Errorf("err = %v, want the page error", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -176,9 +177,18 @@ func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	opCtx, cancel := smbOpCtx(ctx)
+	// A directory with hundreds of thousands of entries takes many
+	// QUERY_DIRECTORY round trips; the deadline slides per page so only a
+	// stalled listing times out.
+	opCtx, touch, cancel := slidingCtx(ctx, opTimeout())
 	defer cancel()
-	entries, err := s.share.WithContext(opCtx).ReadDir(fullPath)
+	dir, err := s.share.WithContext(opCtx).Open(fullPath)
+	if err != nil {
+		return nil, &OpError{Protocol: "smb", Op: "list", Path: p, Err: err}
+	}
+	defer dir.Close()
+	touch()
+	entries, err := readDirPaged(dir, touch)
 	if err != nil {
 		return nil, &OpError{Protocol: "smb", Op: "list", Path: p, Err: err}
 	}
@@ -199,6 +209,30 @@ func (s *SMBFS) List(ctx context.Context, p string) ([]FileInfo, error) {
 		})
 	}
 	return result, nil
+}
+
+const smbDirPage = 1024
+
+type dirReader interface {
+	Readdir(n int) ([]os.FileInfo, error)
+}
+
+// readDirPaged lists a whole directory, sorted by name like Share.ReadDir.
+func readDirPaged(d dirReader, touch func()) ([]os.FileInfo, error) {
+	var all []os.FileInfo
+	for {
+		page, err := d.Readdir(smbDirPage)
+		all = append(all, page...)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		touch()
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Name() < all[j].Name() })
+	return all, nil
 }
 
 // go-smb2 multiplexes concurrent requests over one TCP stream, so no
