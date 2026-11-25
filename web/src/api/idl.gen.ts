@@ -1057,6 +1057,13 @@ export interface Session {
   // folders); empty when nothing was skipped. error_message is set only
   // when status is error or interrupted.
   scan_warning: string
+  // status scanning only: walk | metadata | duplicates | finishing; empty
+  // otherwise
+  scan_phase: string
+  // progress of scan_phase: files (metadata) or bytes (duplicates, where
+  // phase_total is the most that may be read); phase_total 0 = unmeasured
+  phase_done: number
+  phase_total: number
 }
 
 // A template rule created together with the session; same fields and meaning as

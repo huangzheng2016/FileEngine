@@ -108,6 +108,39 @@ describe('SessionList', () => {
   })
 })
 
+describe('SessionOverview', () => {
+  it('shows the running scan phase with its progress and the files found so far', async () => {
+    const { default: SessionOverview } = await import('@/pages/SessionOverview.vue')
+    const { emptyTimeline } = await import('@/lib/transcript')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/:p(.*)*', component: { render: () => null } }],
+    })
+    await router.push('/sessions/7')
+    const s = session({
+      status: 'scanning',
+      scanned_count: 3_700_000,
+      scan_phase: 'duplicates',
+      phase_done: 2 * 2 ** 30,
+      phase_total: 8 * 2 ** 30,
+    })
+    const w = mount(SessionOverview, {
+      props: { session: s, runs: [], timeline: emptyTimeline(), hasDraft: false },
+      global: { plugins: [router] },
+    })
+    await flushPromises()
+    expect(w.text()).toContain('查找重复文件')
+    expect(w.text()).toContain('已找到 3,700,000 个')
+    expect(w.text()).toContain('2.0 GB / 最多 8.0 GB')
+    expect(w.find('[role="progressbar"]').exists()).toBe(true)
+
+    await w.setProps({ session: { ...s, scan_phase: 'walk', phase_done: 0, phase_total: 0 } })
+    expect(w.text()).toContain('遍历文件夹')
+    expect(w.find('[role="progressbar"]').exists()).toBe(false)
+    w.unmount()
+  })
+})
+
 describe('ModelFormDialog', () => {
   it('edits on one page, lists provider models and shows the test reply', async () => {
     const { default: ModelFormDialog } = await import('@/pages/ModelFormDialog.vue')

@@ -15,7 +15,8 @@ func toSession(v *sessionsvc.View) *session.Session {
 	out := &session.Session{
 		ID: int64(s.ID), FilesystemID: int64(s.FilesystemID), ScanPath: s.ScanPath, RootPath: s.RootPath, Protocol: s.Protocol,
 		Status: s.Status, TotalFiles: int32(s.TotalFiles), ScannedCount: int32(s.ScannedCount), CurrentPath: s.CurrentPath,
-		ErrorMessage: s.ErrorMessage, ScanWarning: s.ScanWarning, TaggedFiles: int32(s.TaggedFiles), PlannedOps: int32(s.PlannedOps),
+		ErrorMessage: s.ErrorMessage, ScanWarning: s.ScanWarning, ScanPhase: s.ScanPhase, PhaseDone: s.PhaseDone,
+		PhaseTotal: s.PhaseTotal, TaggedFiles: int32(s.TaggedFiles), PlannedOps: int32(s.PlannedOps),
 		ReviewCount: int32(s.ReviewCount), ExecutedOps: int32(s.ExecutedOps), TotalSize: s.TotalSize,
 		AllowReadFile: s.AllowReadFile, AllowAutoCategory: s.AllowAutoCategory, AllowVision: s.AllowVision,
 		AllowScript: s.AllowScript, ExtractMetadata: s.ExtractMetadata, DetectDuplicates: s.DetectDuplicates,

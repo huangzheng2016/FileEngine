@@ -24,6 +24,14 @@ export const SESSION_STAGE = {
   done: { text: '已完成', tone: 'success' },
 } satisfies LabelMap
 
+// What a running scan is doing, session.scan_phase.
+export const SCAN_PHASE = {
+  walk: { text: '遍历文件夹', tone: 'accent' },
+  metadata: { text: '读取拍摄信息', tone: 'accent' },
+  duplicates: { text: '查找重复文件', tone: 'accent' },
+  finishing: { text: '收尾', tone: 'accent' },
+} satisfies LabelMap
+
 export const RUN_STATUS = {
   running: { text: '运行中', tone: 'accent' },
   done: { text: '完成', tone: 'success' },

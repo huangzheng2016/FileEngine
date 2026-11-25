@@ -1,5 +1,6 @@
 import type { Run, Session } from '@/api/types'
-import { fmtNumber } from '@/base/format'
+import { fmtBytes, fmtLabel, fmtNumber } from '@/base/format'
+import { SCAN_PHASE } from '@/base/labels'
 
 export function sessionPath(s: Pick<Session, 'scan_path'>): string {
   const p = s.scan_path.replace(/^\/+|\/+$/g, '')
@@ -31,6 +32,25 @@ export function nextAction(s: Session, running: Pick<Run, 'phase'> | undefined, 
   if (n > 0) return { kind: 'execute', label: s.executed_ops > 0 ? `执行其余 ${fmtNumber(n)} 项` : '执行' }
   if (s.review_count > 0) return { kind: 'review', label: '去确认' }
   return { kind: 'none', label: '' }
+}
+
+export interface ScanPhaseView {
+  title: string
+  // Present when the phase has a measurable total.
+  progress?: { value: number; max: number; text: string }
+}
+
+// The scanning card: the running phase and, for passes that can be measured, how far it is.
+// Duplicate totals are an upper bound: files told apart by a partial hash are never read whole.
+export function scanPhaseView(s: Pick<Session, 'scan_phase' | 'phase_done' | 'phase_total'>): ScanPhaseView {
+  const title = s.scan_phase ? fmtLabel(SCAN_PHASE, s.scan_phase) : '正在扫描文件'
+  if (s.phase_total <= 0) return { title }
+  const value = Math.min(s.phase_done, s.phase_total)
+  const text =
+    s.scan_phase === 'duplicates'
+      ? `${fmtBytes(value)} / 最多 ${fmtBytes(s.phase_total)}`
+      : `${fmtNumber(value)} / ${fmtNumber(s.phase_total)} 个`
+  return { title, progress: { value, max: s.phase_total, text } }
 }
 
 export const runningRun = (runs: readonly Run[]) => runs.find((r) => r.status === 'running')

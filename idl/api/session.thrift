@@ -55,6 +55,13 @@ struct Session {
     // folders); empty when nothing was skipped. error_message is set only
     // when status is error or interrupted.
     33: string scan_warning
+    // status scanning only: walk | metadata | duplicates | finishing; empty
+    // otherwise
+    34: string scan_phase
+    // progress of scan_phase: files (metadata) or bytes (duplicates, where
+    // phase_total is the most that may be read); phase_total 0 = unmeasured
+    35: i64 phase_done
+    36: i64 phase_total
 }
 
 // A template rule created together with the session; same fields and meaning as
