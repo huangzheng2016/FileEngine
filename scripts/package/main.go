@@ -228,7 +228,17 @@ func dmg(t target) (string, error) {
 	chip := map[string]string{"arm64": "apple-silicon", "amd64": "intel"}[t.arch]
 	file := filepath.Join(t.out, fmt.Sprintf("FileEngine-%s-macos-%s.dmg", display(t.version), chip))
 	_ = os.Remove(file)
-	if err := run("hdiutil", "create", "-volname", "FileEngine", "-srcfolder", work, "-ov", "-format", "UDZO", file); err != nil {
+	// hdiutil create fails transiently with "Resource busy" on CI runners while a previous image detaches.
+	for attempt := 1; attempt <= 4; attempt++ {
+		if err = run("hdiutil", "create", "-volname", "FileEngine", "-srcfolder", work, "-ov", "-format", "UDZO", file); err == nil {
+			break
+		}
+		if attempt < 4 {
+			fmt.Fprintf(os.Stderr, "package: hdiutil create attempt %d failed, retrying\n", attempt)
+			time.Sleep(time.Duration(attempt) * 5 * time.Second)
+		}
+	}
+	if err != nil {
 		return "", err
 	}
 	return file, run("hdiutil", "verify", file)
